@@ -24,7 +24,10 @@ The legitimate demand behind the idea — visible, greppable, third-party-editab
 files — is a property of what the user can see, not of what the kernel commits.
 The model is a git repository: the working tree is the open, editable
 projection; `.git` holds the transactional truth; external edits are reconciled
-in as new history.
+in as new history. See [`../prior-art.md`](../prior-art.md) for the systems
+this pattern is drawn from (Obsidian's disposable cache, Jujutsu's
+working-copy snapshots, Fossil's rebuildable tables, Logseq's dual-truth
+failure).
 
 ## Proposed decision
 

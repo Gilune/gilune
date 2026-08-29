@@ -47,6 +47,8 @@ should be read as Gilune.
 8. [`decisions/`](decisions/) contains Architecture Decision Records (ADRs).
 9. [`spikes/README.md`](spikes/README.md) defines the prototypes that must pass
    before the proposed stack is adopted.
+10. [`prior-art.md`](prior-art.md) maps existing systems to the mechanisms
+    worth adopting from each; spikes cite and verify it.
 
 ## Status vocabulary
 
