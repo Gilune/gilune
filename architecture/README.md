@@ -22,8 +22,11 @@ The project is named **Gilune**.
 The project was previously called *Linoema* (from *Linum*, the flax genus, and
 Greek *noēma*, that which is thought — “threads of thought”: captures preserved
 as they occurred, then connected and woven into an enduring body of memory).
-This package predates the rename; any remaining reference to Linoema in source
-material should be read as Gilune.
+Before Linoema, the working title was the **Memory Project**, which the product
+principles in [`sources/README.md`](../sources/README.md) still carry and from
+which the `memory`/`org.memory` contract namespaces derive. This package
+predates the rename; references to either earlier name in source material
+should be read as Gilune.
 
 ## How to read this package
 
