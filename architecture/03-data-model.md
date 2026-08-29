@@ -207,9 +207,12 @@ that their provenance target was deleted, unless the user also deletes them.
 
 ## Export contract
 
-The baseline export contains:
+The baseline export is a copy of the vault projection (ADR 0007) taken with the
+store quiescent, plus an integrity manifest. Together they contain:
 
-- a documented JSON representation of every user-owned envelope and revision;
+- a documented representation of every user-owned envelope and revision —
+  Markdown with front matter for the human-readable layer, with the manifest
+  carrying anything that layer cannot;
 - relationships and provenance;
 - original blobs in documented standard formats;
 - type and schema identifiers, even if the plugin is unavailable;

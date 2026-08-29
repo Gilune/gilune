@@ -94,6 +94,10 @@ All output IDs derive from documented idempotency inputs. The fake processors
 are deterministic so recovery failures are easy to distinguish from provider
 variation.
 
+The committed capture, transcript, and proposal are projected into a Markdown
+vault with front matter (ADR 0007), and the export command copies the vault
+plus its integrity manifest.
+
 ### Termination matrix
 
 Terminate or power-fail the process:
@@ -106,6 +110,7 @@ Terminate or power-fail the process:
 - while a job lease is active;
 - after external work but before output commit;
 - during output/provenance commit;
+- during vault projection writes and external-edit reconciliation;
 - during migration and database checkpoint.
 
 Run each point repeatedly with duplicate, delayed, and reordered job delivery.
@@ -119,6 +124,10 @@ Run each point repeatedly with duplicate, delayed, and reordered job delivery.
 - Reprocessing produces the same logical outputs and no duplicate user-visible
   objects.
 - Capture and export continue while processors are disabled or quarantined.
+- Deleting the Markdown projection and rebuilding it produces an equivalent
+  vault.
+- External edit, rename, delete, and malformed front-matter cases reconcile
+  without losing kernel history.
 - Integrity failures are visible and do not trigger destructive “repair.”
 
 ### Required artefacts
@@ -126,7 +135,8 @@ Run each point repeatedly with duplicate, delayed, and reordered job delivery.
 - crash-state transition diagram;
 - property/fault tests for every termination point;
 - initial physical schema and migration fixture;
-- export example and integrity manifest;
+- vault layout and front-matter format draft;
+- export example (a vault copy) and integrity manifest;
 - decision on canonical JSON versus an immediate CBOR spike.
 
 ## S3 — Plugin contract, sandbox, and lifecycle

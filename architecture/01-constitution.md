@@ -110,3 +110,11 @@ to reconstruct meaning. Export cannot be an aspirational end-of-project feature.
 Public API versions, schema versions, plugin versions, processing versions, and
 sync protocol versions are distinct. Upgrade and downgrade consequences are
 explicit. Migrations are transactional, restartable, and tested with older data.
+
+## 13. Openness is a goal, not a concession
+
+Interoperability with third-party tools is supported use, not tolerated misuse.
+User-owned data lives in documented, versioned formats that other software can
+read without this project's code, and no feature may depend on the stored form
+being opaque. Leaving the product must never require more than copying the
+user's own data.

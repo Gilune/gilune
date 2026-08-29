@@ -16,6 +16,7 @@ schemas, sync protocol, and processing logic.
 | Processing version | Processor owner | Idempotency and provenance of outputs |
 | Sync protocol | Kernel implementations | Operation encoding and exchange rules |
 | Export format | Project | Portable archive structure |
+| Vault format | Project | On-disk Markdown/front-matter layout (ADR 0007) |
 
 Changing one dimension does not automatically change the others.
 

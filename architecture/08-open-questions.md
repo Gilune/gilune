@@ -17,6 +17,7 @@ An answer should become either a contract change or an ADR.
 | How are origin-device jobs failed over without duplicate user-visible artifacts? | S4 partition and lease cases | Processing/sync contract update |
 | What is the minimum operation frontier representation that remains compact? | S4 two/three-device history and compaction results | Sync encoding ADR |
 | Which metadata remains visible to the hosted relay? | S4 prototype and threat model | Encryption/key ADR |
+| Can vault reconciliation ingest external edits, renames, deletions, and malformed front matter without losing kernel history? | S2 extended vault cases | Accept or supersede ADR 0007 |
 
 ## Must answer before hosted sync is public
 

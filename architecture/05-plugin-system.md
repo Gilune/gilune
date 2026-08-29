@@ -27,7 +27,9 @@ schemas.
 ### Index and projection plugins
 
 Build disposable, rebuildable views such as full-text indexes, embeddings, or
-domain-optimised projections from committed objects.
+domain-optimised projections from committed objects. The first-party Markdown
+vault projection (ADR 0007) is the flagship member of this class and the basis
+of the export contract.
 
 ## Manifest
 

@@ -72,6 +72,7 @@ should be read as Gilune.
 | Bundled mobile plugins; installable sandboxed desktop plugins | Proposed | Plugin and policy spike |
 | Operation-based sync with an opaque encrypted relay | Proposed | Sync spike |
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
+| Markdown vault projection; the vault is the export | Proposed | Capture/recovery spike |
 
 ## What is intentionally not selected yet
 
