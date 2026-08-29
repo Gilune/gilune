@@ -14,7 +14,9 @@ technologies can be rejected without weakening the product principles.
 | [0007](0007-markdown-vault-projection.md) | Markdown vault projection over the kernel store; the vault is the export | Proposed |
 | [0008](0008-headless-sync-agent-and-lan-first-sync.md) | Headless desktop sync agent and LAN-first device sync | Proposed |
 
-An ADR marked Proposed becomes Accepted only when its named spike passes. If the
-spike fails, record a new ADR that supersedes it; do not edit away the reason the
-original choice was considered.
+A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
+Accepted for v0 ahead of its spike when the decision is forced by principle or
+platform policy (0004, 0006); its spike then validates the implementation, not
+the need for the decision. If a spike fails, record a new ADR that supersedes
+the old one; do not edit away the reason the original choice was considered.
 

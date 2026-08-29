@@ -25,6 +25,17 @@ Each spike produces:
 S1 and the contract-only portion of S3 may overlap. S4 should reuse the data and
 operation model proved by S2, not invent a parallel representation.
 
+## Initial targets
+
+Proposed starting budgets, to be adjusted with evidence at each spike kickoff
+rather than left as “acceptable to the team”:
+
+- capture commit (stop of input → durably committed and recoverable): under
+  200 ms on a mid-range Android device;
+- cold start to capture-ready: under 1.5 s on the same device;
+- kernel contribution to release package size: under 15 MB per ABI;
+- LAN sync of 100 small operations between two idle devices: under 5 s.
+
 ## S1 — Kernel boundary and cross-platform build
 
 ### Decisions tested

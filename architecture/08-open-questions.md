@@ -20,6 +20,8 @@ An answer should become either a contract change or an ADR.
 | Can vault reconciliation ingest external edits, renames, deletions, and malformed front matter without losing kernel history? | S2 extended vault cases | Accept or supersede ADR 0007 |
 | Do LAN discovery and pairing hold up on real home networks (AP isolation, sleep, firewalls) and within Android background limits? | S4 no-relay scenarios on physical devices | Accept or supersede ADR 0008 |
 | Where does device-local state live so file-syncing a vault is safe by default (marked directory inside .gilune/ versus outside the vault), and are operations exported as immutable vault files? | S2 vault layout draft; shared-folder transport prototype | ADR 0007/0008 amendment |
+| What consent and disclosure gate a provider plugin sending capture content off-device, and is local-only the default? | Capability-grant UX draft and product decision | Constitution or capability-contract amendment |
+| Does the application emit telemetry or crash reports at all, and under what consent? | Product decision | ADR or constitution amendment |
 
 ## Must answer before hosted sync is public
 

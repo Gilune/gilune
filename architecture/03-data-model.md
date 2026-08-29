@@ -58,9 +58,12 @@ unknown. Understanding the payload is not required for storage, export, or
 tombstoning.
 
 The initial interoperable payload representation should be canonical JSON with
-JSON Schema. Canonical CBOR remains an optimisation candidate after the API and
-export semantics are proved; storage-specific SQLite JSONB is not an interchange
-format.
+JSON Schema. “Canonical” must mean a pinned canonicalisation scheme — RFC 8785
+(JCS) is the default candidate — because integrity digests and idempotency keys
+hash payloads and must agree across languages and devices; the encoding ADR
+fixes the choice. Canonical CBOR remains an optimisation candidate after the
+API and export semantics are proved; storage-specific SQLite JSONB is not an
+interchange format.
 
 ## Revisions and concurrent heads
 

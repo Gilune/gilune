@@ -71,7 +71,8 @@ should be read as Gilune.
 | Rust portable kernel | Proposed | Kernel integration spike |
 | SQLite plus transactional blob storage | Proposed | Capture/recovery spike |
 | WIT contracts and WebAssembly component plugins | Proposed | Plugin spike |
-| Bundled mobile plugins; installable sandboxed desktop plugins | Proposed | Plugin and policy spike |
+| Bundled mobile plugin execution | Accepted for v0 | Plugin and policy spikes |
+| Installable sandboxed desktop/server components | Proposed | Plugin spike |
 | Operation-based sync with an opaque encrypted relay | Proposed | Sync spike |
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
 | Markdown vault projection; the vault is the export | Proposed | Capture/recovery spike |

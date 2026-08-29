@@ -74,6 +74,9 @@ The default processing idempotency key is derived from:
 input revision set + plugin ID + processor ID + processor/config version
 ```
 
+The input revision set is canonically ordered (sorted by revision ID) before
+hashing so the key is stable regardless of delivery order.
+
 The kernel records the completed processing run and output IDs against this key
 in the same transaction that commits the outputs. A repeated delivery therefore
 returns the prior result or safely completes the same logical work.

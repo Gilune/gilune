@@ -183,6 +183,13 @@ Schema names are permanent and publisher-namespaced. Ownership transfer requires
 a signed migration agreement and an explicit ADR or user-approved installation
 plan.
 
+The `memory` namespace is deliberately project-neutral and permanent: it
+predates two product renames (Memory Project → Linoema → Gilune), and permanent
+names must not chase product branding. Kernel- and platform-produced contracts
+live under `memory.*` (for example `memory:objects`, `memory.kernel/…`,
+`memory.capture/…`); plugin-owned types and events live under their publisher's
+namespace, such as `org.memory.*` for first-party plugins.
+
 ## Supply-chain rules
 
 - Packages and manifests are content-addressed and signed.
