@@ -60,6 +60,11 @@ standard commands, cards, queries, forms, badges, and navigation destinations.
 
 - Mobile users may need an app release to receive new executable plugin logic.
 - “Available plugin” depends on platform and distribution profile.
+- The open-Android fallback now has a precondition: Google's Android
+  developer verification (piloting from late 2026, expanding globally
+  through 2027) requires verified-developer registration for installs on
+  certified devices even outside Play. See the dated policy matrix in
+  `../../spikes/s5-distribution-policy/README.md`.
 - Plugin manifests distinguish logical compatibility from installability.
 - The shell owns accessibility, themes, navigation, permission prompts, and safe
   rendering.
