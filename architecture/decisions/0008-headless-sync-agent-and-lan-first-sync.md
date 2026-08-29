@@ -29,6 +29,11 @@ which transport ships first and in what packaging.
   device-identity model, encrypted transport, exchanging the operation
   envelopes defined by ADR 0005. Operation semantics are identical across
   transports.
+- A **shared-folder transport** is a planned second transport: the same
+  operation envelopes and blob chunks written as immutable files into a
+  folder replicated by any third-party store the user already trusts —
+  Dropbox, Syncthing, a network drive. Idempotent application already
+  tolerates the duplication, delay, and reordering such carriers introduce.
 - The hosted or self-hosted relay remains a later, optional transport for
   off-network sync. Nothing in v0 requires a server to exist.
 - The desktop agent is an always-available listener; battery-powered devices
@@ -48,12 +53,17 @@ which transport ships first and in what packaging.
 Rejected: forces UI adoption where the user only wants their data present,
 and contradicts the openness rule.
 
-### Replicating the vault with third-party file sync
+### Third-party file sync as the replication mechanism
 
-Rejected as a replication mechanism: file-level sync is last-write-wins over
-mutable files, cannot carry operation history, and risks copying a live
-kernel store — the failure ADR 0005 exists to prevent. Copying a closed vault
-remains the supported backup and migration path.
+Layered rather than rejected. As a carrier of immutable operation files (the
+shared-folder transport above), third-party stores are a planned, fully
+supported mechanism. Raw file sync of the Markdown layer alone is tolerated
+and ingested as external edits, but it is degraded content sharing rather
+than sync, because it carries no operation history and is last-write-wins
+over mutable files. Page-level replication of the live device-local database
+is the only excluded case (constitution rule 8): syncing an open SQLite
+database and WAL corrupts it, so the vault layout keeps device-local state
+separated, marked, and rebuildable.
 
 ### Relay-first sync
 

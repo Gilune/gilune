@@ -87,10 +87,16 @@ have nothing to open.
   stored once in the vault and referenced, or duplicated, is measured in S2.
 - A closed vault directory is a complete cold backup, satisfying the rule that
   database and blob backups form one logical snapshot.
-- Live replication of a vault by third-party file sync (Syncthing, Dropbox) is
-  unsupported and must be documented honestly; Gilune sync (ADR 0005/0008) is
-  the supported replication mechanism. Copying a closed vault remains a fully
-  supported backup and migration path.
+- Third-party file sync of vault content is tolerated by design: the
+  reconciler treats sync artifacts such as conflicted-copy files and partially
+  arrived edits as ordinary external changes, never destructively. The one
+  thing that must never be replicated live is the device-local database and
+  staging state, per constitution rule 8: file-syncing an open SQLite
+  database and WAL is a corruption vector. The vault layout must separate and
+  clearly mark device-local state so excluding it is automatic rather than
+  user discipline, and that state must be rebuildable. Copying a closed vault
+  remains a fully supported backup and migration path, and shared-folder
+  stores are additionally a planned sync transport (ADR 0008).
 - Front-matter tampering, partial writes by other tools, and reconciliation
   during capture become adversarial test cases.
 - The export contract in the data model and the S2 artefact list change

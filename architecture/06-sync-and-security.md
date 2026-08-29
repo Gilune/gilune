@@ -54,7 +54,8 @@ kernel and covered by cross-implementation test vectors.
 A transport can be HTTP polling, WebSocket, peer-to-peer, removable storage, or
 another mechanism without changing operation semantics. The first supported
 transport is LAN peer-to-peer between paired devices, optionally through a
-headless desktop sync agent (ADR 0008); a relay is optional and later.
+headless desktop sync agent (ADR 0008). A shared-folder transport over
+third-party file stores and a hosted relay are planned, optional successors.
 
 ## Conflict policy
 
