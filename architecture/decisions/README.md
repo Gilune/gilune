@@ -12,6 +12,7 @@ technologies can be rejected without weakening the product principles.
 | [0005](0005-operation-based-sync.md) | Kernel-owned operation sync with an opaque encrypted relay | Proposed |
 | [0006](0006-mobile-plugin-and-ui-profile.md) | Bundled mobile execution and declarative third-party UI | Accepted for v0 |
 | [0007](0007-markdown-vault-projection.md) | Markdown vault projection over the kernel store; the vault is the export | Proposed |
+| [0008](0008-headless-sync-agent-and-lan-first-sync.md) | Headless desktop sync agent and LAN-first device sync | Proposed |
 
 An ADR marked Proposed becomes Accepted only when its named spike passes. If the
 spike fails, record a new ADR that supersedes it; do not edit away the reason the

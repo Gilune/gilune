@@ -52,7 +52,9 @@ kernel and covered by cross-implementation test vectors.
    deletion eligibility.
 
 A transport can be HTTP polling, WebSocket, peer-to-peer, removable storage, or
-another mechanism without changing operation semantics.
+another mechanism without changing operation semantics. The first supported
+transport is LAN peer-to-peer between paired devices, optionally through a
+headless desktop sync agent (ADR 0008); a relay is optional and later.
 
 ## Conflict policy
 
@@ -142,7 +144,8 @@ Blob garbage collection considers:
 
 ## Server responsibilities
 
-The minimum hosted relay owns:
+A relay is an optional transport, not a v0 requirement (ADR 0008). When one is
+offered, the minimum hosted relay owns:
 
 - account authentication and rate limiting;
 - device enrollment/revocation metadata;

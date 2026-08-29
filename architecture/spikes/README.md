@@ -41,7 +41,8 @@ from a platform background worker.
 
 The boundary includes representative records, optional values, typed errors,
 async work, cancellation, streaming, and callback/event delivery. It does not
-include domain UI beyond a diagnostic screen.
+include domain UI beyond a diagnostic screen. The same kernel also runs in a
+headless host on Windows to validate the sync-agent profile (ADR 0008).
 
 ### Faults to inject
 
@@ -207,11 +208,15 @@ can store and return authenticated ciphertext operations and chunked blobs but
 cannot decode object payloads.
 
 Use protocol test vectors independent of SQLite. One replica lacks the sample
-plugin and must still preserve, forward, and export its objects.
+plugin and must still preserve, forward, and export its objects. One replica
+runs as the headless sync-agent profile, and the LAN peer-to-peer scenarios
+run with the relay absent (ADR 0008).
 
 ### Scenario matrix
 
 - offline source creation on two devices;
+- LAN discovery, pairing, refusal of an unpaired device, and convergence with
+  no relay present;
 - concurrent edits to the same artifact;
 - deterministic domain merge and no-plugin conflict preservation;
 - duplicate, missing, replayed, corrupted, and reordered operations;

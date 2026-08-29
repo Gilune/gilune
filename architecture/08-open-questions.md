@@ -18,6 +18,7 @@ An answer should become either a contract change or an ADR.
 | What is the minimum operation frontier representation that remains compact? | S4 two/three-device history and compaction results | Sync encoding ADR |
 | Which metadata remains visible to the hosted relay? | S4 prototype and threat model | Encryption/key ADR |
 | Can vault reconciliation ingest external edits, renames, deletions, and malformed front matter without losing kernel history? | S2 extended vault cases | Accept or supersede ADR 0007 |
+| Do LAN discovery and pairing hold up on real home networks (AP isolation, sleep, firewalls) and within Android background limits? | S4 no-relay scenarios on physical devices | Accept or supersede ADR 0008 |
 
 ## Must answer before hosted sync is public
 

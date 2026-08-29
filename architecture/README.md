@@ -73,6 +73,7 @@ should be read as Gilune.
 | Operation-based sync with an opaque encrypted relay | Proposed | Sync spike |
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
 | Markdown vault projection; the vault is the export | Proposed | Capture/recovery spike |
+| Headless sync agent with LAN-first device sync | Proposed | Kernel and sync spikes |
 
 ## What is intentionally not selected yet
 
