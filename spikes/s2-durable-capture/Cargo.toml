@@ -1,0 +1,23 @@
+[package]
+name = "spike-s2"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Spike S2: durable capture, events, recovery, and vault projection (disposable evidence prototype)"
+
+[dependencies]
+anyhow = "1"
+hex = "0.4"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+uuid = { version = "1", features = ["v7"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.dev]
+# keep rebuilds during the fault matrix quick
+debug = 1
