@@ -60,6 +60,19 @@ gilune:
 5. Export = quiescent vault copy + `manifest.json` (path, sha256, bytes per
    file; schema versions; alert count). `.gilune/local/` never travels.
 
+## Rendering is a type-owner contribution
+
+How a type looks as Markdown — its folder, body rendering, and how an
+edited body maps back into its payload — is contributed by the type's
+OWNER (in the real system, by its plugin; in the spike, by the sample
+renderers in `processors.rs`). The vault projection itself knows only its
+own types (mirrored sources, tombstone proposals) and a generic
+preservable fallback (`Objects/<type-slug>-<id12>.md`, raw payload). A
+type with no registered edit mapping cannot be edited through the vault:
+such edits are preserved on disk and quarantined for review, because no
+owner can interpret them. Tombstone proposals live in the vault plugin's
+own namespace (`org.memory.vault/tombstone-proposal`).
+
 ## Open for the next draft
 
 - Human-readable timestamps alongside epoch ms.
@@ -69,3 +82,5 @@ gilune:
   question) and the exact device-local exclusion marker.
 - Folder organisation policy (by date? by thread?) — display-level, layered
   on this format.
+- The renderer-contribution contract (declarative template versus code) —
+  an ADR 0007 amendment once S3 fixes the plugin contract shape.

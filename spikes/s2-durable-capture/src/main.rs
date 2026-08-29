@@ -3,7 +3,7 @@
 //! recovery, which is exactly what the fault harness does.
 
 use anyhow::{bail, Context, Result};
-use spike_s2::{capture, export, jobs, vault, Kernel};
+use spike_s2::{capture, export, jobs, processors, vault, Kernel};
 use std::path::PathBuf;
 
 fn usage() -> ! {
@@ -17,6 +17,8 @@ fn usage() -> ! {
            reconcile\n\
            redeliver-latest <event-type>\n\
            retry-quarantined\n\
+           disable-processors | enable-processors\n\
+           dev-add-object <type-id> <payload-json>\n\
            export <dest>\n\
            verify-export <dest>\n\
            status\n\
@@ -48,8 +50,27 @@ fn main() -> Result<()> {
 
     match cmd {
         "init" => {
-            jobs::seed_subscriptions(&k)?;
+            processors::seed_subscriptions(&k)?;
             println!("initialised device={}", k.device_id);
+        }
+        "disable-processors" => {
+            let n = jobs::set_subscriptions_enabled(&k, false)?;
+            println!("disabled {n} subscription(s)");
+        }
+        "enable-processors" => {
+            let n = jobs::set_subscriptions_enabled(&k, true)?;
+            println!("enabled {n} subscription(s)");
+        }
+        "dev-add-object" => {
+            // Test hook: create an object of an arbitrary (possibly unknown)
+            // type, standing in for data that arrived from a device that has
+            // a plugin this device lacks.
+            let type_id = rest.get(1).cloned().unwrap_or_else(|| usage());
+            let payload = rest.get(2).cloned().unwrap_or_else(|| usage());
+            let value: serde_json::Value =
+                serde_json::from_str(&payload).context("payload must be JSON")?;
+            let object_id = dev_add_object(&mut k, &type_id, &value)?;
+            println!("added {object_id}");
         }
         "capture" => {
             let (bytes, media_type) = parse_capture_args(&rest[1..])?;
@@ -148,6 +169,40 @@ fn parse_capture_args(args: &[String]) -> Result<(Vec<u8>, String)> {
     }
 }
 
+fn dev_add_object(k: &mut Kernel, type_id: &str, payload: &serde_json::Value) -> Result<String> {
+    use spike_s2::{ids, store};
+    let now = Kernel::now_ms();
+    let device = k.device_id.clone();
+    let object_id = ids::new_id();
+    let revision_id = ids::new_id();
+    let tx = k.conn.transaction()?;
+    {
+        let op_id = ids::new_id();
+        let seq = store::next_device_seq(&tx, &device)?;
+        tx.execute(
+            "INSERT INTO operations (operation_id, device_id, device_seq, kind, target_id, committed_at)
+             VALUES (?1, ?2, ?3, 'object-created', ?4, ?5)",
+            rusqlite::params![op_id, device, seq, object_id, now],
+        )?;
+        tx.execute(
+            "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)
+             VALUES (?1, ?2, 1, 'artifact', ?3, ?4, ?5)",
+            rusqlite::params![object_id, type_id, device, op_id, now],
+        )?;
+        tx.execute(
+            "INSERT INTO revisions (revision_id, object_id, based_on_json, payload_json, created_operation, created_at)
+             VALUES (?1, ?2, '[]', ?3, ?4, ?5)",
+            rusqlite::params![revision_id, object_id, payload.to_string(), op_id, now],
+        )?;
+        tx.execute(
+            "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
+            rusqlite::params![object_id, revision_id],
+        )?;
+    }
+    tx.commit()?;
+    Ok(object_id)
+}
+
 fn count(k: &Kernel, sql: &str) -> Result<i64> {
     Ok(k.conn.query_row(sql, [], |r| r.get(0))?)
 }
@@ -176,7 +231,7 @@ fn print_status(k: &Kernel) -> Result<()> {
         "tombstone_proposals={}",
         count(
             k,
-            "SELECT COUNT(*) FROM objects WHERE type_id='org.memory.review/tombstone-proposal'"
+            "SELECT COUNT(*) FROM objects WHERE type_id='org.memory.vault/tombstone-proposal'"
         )?
     );
     println!("events={}", count(k, "SELECT COUNT(*) FROM events")?);

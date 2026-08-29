@@ -11,6 +11,7 @@ pub mod crashpoints;
 pub mod export;
 pub mod ids;
 pub mod jobs;
+pub mod processors;
 pub mod store;
 pub mod vault;
 

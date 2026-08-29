@@ -18,6 +18,29 @@ binary as a subprocess, aborts it at named crash points
 invariants. Every CLI command reopens the kernel and runs the startup
 recovery checks, so each restart after a kill exercises recovery.
 
+## Where the sample domain lives — and what it does and does not prove
+
+Tasks and transcription are DOMAIN features: plugins in the real system.
+S2 uses them only as the spec's designated sample domain, to drive a
+two-hop causal chain (source-ready → transcript → task proposal) through
+crashes and duplicate delivery. Everything domain-flavoured is quarantined
+in `src/processors.rs`, which simulates two bundled plugins: handlers see a
+deliberately narrow `ProcessorCtx` shaped like a scoped `objects.read`
+grant (read a referenced source's bytes, read an input revision's payload)
+— never a database connection; subscriptions are declared there as a
+manifest would; and vault rendering for those types is contributed from
+there as `TypeRenderer` entries. The kernel modules (`store`, `capture`,
+`jobs`, `vault`, `export`) name no domain type; the projection falls back
+to a generic preservable form for unregistered types, and an external edit
+to an unregistered type quarantines because no owner can interpret it.
+(The CLI's `status`/`verify` diagnostics do name sample types — that is
+the harness observing the domain, not the kernel depending on it.)
+
+What this deliberately does NOT prove: the plugin boundary itself.
+Capability grant/denial, manifests, sandboxing, cross-language contracts,
+and upgrade/uninstall are Spike S3's acceptance gate. `ProcessorCtx` shows
+where that boundary will sit; it does not enforce it.
+
 Pipeline: `capture` stages bytes, commits envelope + blob metadata +
 operation + event + subscription jobs in one SQLite transaction, then
 promotes the blob into the vault by atomic rename. `work` claims durable
@@ -71,6 +94,12 @@ cargo run -- --vault /tmp/v project
   independent tree; device-local state does not travel; opening the export
   as a fresh vault is safe (files become flagged import candidates, nothing
   is lost or crashed).
+- **Domain/kernel boundary at S2 fidelity** — with every subscription
+  disabled (the stand-in for disabled plugins), capture, projection, and
+  export still work and no jobs are created; re-enabling backfills jobs for
+  events committed while disabled, and work completes them. An object of an
+  unknown type projects in generic form, exports, survives, and rejects
+  external edits into quarantine (constitution rules 1, 6, 9).
 
 ## Honest gaps (not yet evidence)
 

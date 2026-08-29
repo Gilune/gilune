@@ -5,12 +5,15 @@
 //! never by filename, so renames are metadata changes.
 
 use crate::crashpoints::crashpoint;
-use crate::{capture, fsync_dir, ids, jobs, store, Kernel};
+use crate::{capture, fsync_dir, ids, jobs, processors, store, Kernel};
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
-pub const TOMBSTONE_PROPOSAL_TYPE: &str = "org.memory.review/tombstone-proposal";
+/// The reconciler is conceptually the vault plugin, so its proposal type
+/// lives in the vault plugin's namespace — not the kernel's, and not some
+/// unrelated domain's.
+pub const TOMBSTONE_PROPOSAL_TYPE: &str = "org.memory.vault/tombstone-proposal";
 
 struct Projectable {
     object_id: String,
@@ -58,20 +61,26 @@ fn load_projectables(k: &Kernel) -> Result<Vec<Projectable>> {
     Ok(out)
 }
 
+/// Path and body rendering: the vault plugin owns its own types (sources it
+/// mirrors for capture, its tombstone proposals); everything else comes from
+/// a type OWNER's registered renderer (processors::SAMPLE_RENDERERS stands in
+/// for plugin contributions), with a generic preservable fallback for types
+/// nothing has registered.
 fn md_rel_path(p: &Projectable) -> String {
     // Trailing chars of the ID: UUIDv7 leads with a timestamp, so leading
     // chars collide for objects created close together.
     let id8 = &p.object_id[p.object_id.len() - 12..];
     match p.type_id.as_str() {
         capture::SOURCE_TYPE => format!("Captures/capture-{id8}.md"),
-        jobs::TRANSCRIPT_TYPE => format!("Transcripts/transcript-{id8}.md"),
-        jobs::TASK_TYPE => format!("Tasks/task-{id8}.md"),
         TOMBSTONE_PROPOSAL_TYPE => format!("Proposals/tombstone-proposal-{id8}.md"),
-        other => {
-            // Unknown types stay preservable: generic location keyed by ID.
-            let slug = other.replace(['/', ':'], "-");
-            format!("Objects/{slug}-{id8}.md")
-        }
+        other => match processors::renderer_for(other) {
+            Some(r) => format!("{}-{id8}.md", r.path_prefix),
+            None => {
+                // Unknown types stay preservable: generic location keyed by ID.
+                let slug = other.replace(['/', ':'], "-");
+                format!("Objects/{slug}-{id8}.md")
+            }
+        },
     }
 }
 
@@ -95,13 +104,14 @@ fn render_body(k: &Kernel, p: &Projectable, payload: &serde_json::Value) -> Resu
                 format!("![[{file}]]")
             }
         }
-        jobs::TRANSCRIPT_TYPE => payload["text"].as_str().unwrap_or_default().to_string(),
-        jobs::TASK_TYPE => format!("- [ ] {}", payload["title"].as_str().unwrap_or_default()),
         TOMBSTONE_PROPOSAL_TYPE => format!(
             "Proposed deletion of `{}` (its vault file was removed externally). Accept or restore.",
             payload["target"].as_str().unwrap_or_default()
         ),
-        _ => payload.to_string(),
+        other => match processors::renderer_for(other) {
+            Some(r) => (r.render)(payload),
+            None => payload.to_string(),
+        },
     })
 }
 
@@ -375,8 +385,25 @@ pub fn reconcile(k: &mut Kernel) -> Result<ReconcileReport> {
                         quarantine(k, &f.rel_path, "external-edit-to-source")?;
                         report.quarantined += 1;
                     } else {
-                        ingest_external_edit(k, &object_id, &f.body, &file_sha, &f.rel_path)?;
-                        report.external_edits += 1;
+                        // Only a type OWNER can map an edited body back into
+                        // its payload; without one, preserve and flag.
+                        let type_id: String = k.conn.query_row(
+                            "SELECT type_id FROM objects WHERE object_id = ?1",
+                            [&object_id],
+                            |r| r.get(0),
+                        )?;
+                        match processors::renderer_for(&type_id).and_then(|r| r.apply_edit) {
+                            Some(apply) => {
+                                ingest_external_edit(
+                                    k, &object_id, &f.body, &file_sha, &f.rel_path, apply,
+                                )?;
+                                report.external_edits += 1;
+                            }
+                            None => {
+                                quarantine(k, &f.rel_path, "unowned-type-edit")?;
+                                report.quarantined += 1;
+                            }
+                        }
                     }
                     crashpoint("reconcile.during");
                 }
@@ -413,27 +440,22 @@ fn ingest_external_edit(
     body: &str,
     file_sha: &str,
     rel_path: &str,
+    apply_edit: fn(&mut serde_json::Value, &str),
 ) -> Result<()> {
     let now = Kernel::now_ms();
     let device = k.device_id.clone();
     let tx = k.conn.transaction()?;
     {
-        let (based_on, old_payload, type_id): (String, String, String) = tx.query_row(
-            "SELECT v.projected_revision, r.payload_json, o.type_id
+        let (based_on, old_payload): (String, String) = tx.query_row(
+            "SELECT v.projected_revision, r.payload_json
              FROM vault_state v
              JOIN revisions r ON r.revision_id = v.projected_revision
-             JOIN objects o ON o.object_id = v.object_id
              WHERE v.object_id = ?1",
             [object_id],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )?;
         let mut payload: serde_json::Value = serde_json::from_str(&old_payload)?;
-        if type_id == jobs::TASK_TYPE {
-            let title = body.trim().trim_start_matches("- [ ]").trim().to_string();
-            payload["title"] = serde_json::json!(title);
-        } else {
-            payload["text"] = serde_json::json!(body.trim_end());
-        }
+        apply_edit(&mut payload, body);
         let revision_id = ids::new_id();
         let op_id = ids::new_id();
         let seq = store::next_device_seq(&tx, &device)?;

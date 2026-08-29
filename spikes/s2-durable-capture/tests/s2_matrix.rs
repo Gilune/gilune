@@ -490,6 +490,77 @@ fn renamed_file_is_tracked_by_id_not_path() {
     h.verify_ok();
 }
 
+// ------------------------------------------------- domain/kernel boundary
+
+#[test]
+fn disabled_processors_capture_project_export_then_reenable_backfills() {
+    // The S2-fidelity version of the "processors disabled" requirement and
+    // of a plugin disable/re-enable lifecycle: with every subscription
+    // disabled, capture, projection, and export still work and no jobs are
+    // created; re-enabling lets startup recovery backfill jobs for the
+    // events committed while disabled, and work completes them.
+    let h = Harness::new();
+    h.ok(&["disable-processors"]);
+    h.ok(&["capture", "--text", "TODO: process me later"]);
+    let s = h.status();
+    assert_eq!(s["sources"], 1);
+    assert_eq!(s["pending_jobs"], 0, "disabled subscriptions get no jobs");
+    assert_eq!(s["transcripts"], 0);
+
+    h.ok(&["project"]);
+    let dest = tempfile::tempdir().unwrap();
+    let dest_str = dest.path().to_string_lossy().to_string();
+    h.ok(&["export", &dest_str]);
+    h.ok(&["verify-export", &dest_str]);
+
+    h.ok(&["enable-processors"]);
+    h.ok(&["work"]); // opening the kernel backfills jobs, then work claims
+    let s2 = h.status();
+    assert_eq!(s2["transcripts"], 1, "backfilled job produced the transcript");
+    assert_eq!(s2["tasks"], 1);
+    h.verify_ok();
+}
+
+#[test]
+fn unknown_type_objects_are_preserved_projected_and_not_editable() {
+    // Constitution rule 9 at vault fidelity: an object whose type no
+    // installed renderer understands still projects (generic form), exports,
+    // and survives; an external edit to it is quarantined because no owner
+    // can map the body back into the payload.
+    let h = Harness::new();
+    h.ok(&[
+        "dev-add-object",
+        "com.example.widgets/widget",
+        r#"{"colour":"blue","size":3}"#,
+    ]);
+    h.ok(&["project"]);
+    let unknown = h
+        .md_files()
+        .into_iter()
+        .find(|p| p.to_string_lossy().contains("Objects/"))
+        .expect("unknown type projected under Objects/");
+    let content = std::fs::read_to_string(&unknown).unwrap();
+    assert!(content.contains("com.example.widgets/widget"));
+    assert!(content.contains("blue"), "payload preserved: {content}");
+
+    let dest = tempfile::tempdir().unwrap();
+    let dest_str = dest.path().to_string_lossy().to_string();
+    h.ok(&["export", &dest_str]);
+    h.ok(&["verify-export", &dest_str]);
+
+    std::fs::write(&unknown, content.clone() + "\nuser edit\n").unwrap();
+    let out = h.ok(&["reconcile"]);
+    assert!(
+        out.contains("edits=0") && out.contains("quarantined=1"),
+        "unowned edit must quarantine, not ingest: {out}"
+    );
+    // The user's edited file is preserved on disk, and kernel state is intact.
+    assert!(std::fs::read_to_string(&unknown)
+        .unwrap()
+        .contains("user edit"));
+    h.verify_ok();
+}
+
 #[test]
 fn export_copy_restores_on_another_machine() {
     let h = Harness::new();

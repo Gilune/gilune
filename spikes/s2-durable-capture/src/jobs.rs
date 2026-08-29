@@ -1,38 +1,38 @@
-//! Events, subscriptions, durable jobs, and the two deterministic fake
-//! processors (transcription, task proposal). At-least-once delivery with
-//! leases; idempotent output commit keyed exactly as 04-processing-model.md
-//! specifies (sorted input revision set + plugin + processor + version).
+//! Events, subscriptions, and durable jobs — the KERNEL half of processing.
+//! At-least-once delivery with leases; idempotent output commit keyed exactly
+//! as 04-processing-model.md specifies (sorted input revision set + plugin +
+//! processor + version). This module knows no domain types: what a handler
+//! does lives in `processors.rs` (the plugin stand-in) behind a narrow
+//! read-only context.
 
 use crate::crashpoints::{crashpoint, handler_should_fail};
-use crate::{capture, ids, store, Kernel};
+use crate::{ids, processors, store, Kernel};
 use anyhow::{anyhow, Result};
 use rusqlite::Transaction;
 
-pub const TRANSCRIPT_TYPE: &str = "org.memory.transcription/transcript";
-pub const TRANSCRIPT_READY: &str = "org.memory.transcription/transcript-ready";
-pub const TASK_TYPE: &str = "org.memory.tasks/task";
-pub const TASK_PROPOSED: &str = "org.memory.tasks/task-proposed";
-
-pub const HANDLER_TRANSCRIBE: &str = "fake-transcribe";
-pub const HANDLER_TASK: &str = "fake-task";
 const PROCESSOR_VERSION: &str = "1";
 
 const MAX_ATTEMPTS: i64 = 5;
 const LEASE_MS: i64 = 30_000;
 
-/// Register the two spike subscriptions (idempotent).
-pub fn seed_subscriptions(k: &Kernel) -> Result<()> {
+/// Kernel-side registration primitive. Which subscriptions exist is declared
+/// by the domain side (processors::seed_subscriptions), as a manifest would.
+pub fn register_subscription(k: &Kernel, id: &str, event_type: &str, handler: &str) -> Result<()> {
     k.conn.execute(
         "INSERT OR IGNORE INTO subscriptions (subscription_id, event_type, handler)
-         VALUES ('sub-transcribe', ?1, ?2)",
-        rusqlite::params![capture::SOURCE_READY, HANDLER_TRANSCRIBE],
-    )?;
-    k.conn.execute(
-        "INSERT OR IGNORE INTO subscriptions (subscription_id, event_type, handler)
-         VALUES ('sub-task', ?1, ?2)",
-        rusqlite::params![TRANSCRIPT_READY, HANDLER_TASK],
+         VALUES (?1, ?2, ?3)",
+        rusqlite::params![id, event_type, handler],
     )?;
     Ok(())
+}
+
+/// Disable/enable all subscriptions: the S2-fidelity version of disabling
+/// the domain plugins. Disabled subscriptions get no jobs for new events;
+/// re-enabling lets startup recovery backfill jobs for committed events.
+pub fn set_subscriptions_enabled(k: &Kernel, enabled: bool) -> Result<usize> {
+    Ok(k
+        .conn
+        .execute("UPDATE subscriptions SET enabled = ?1", [enabled as i64])?)
 }
 
 /// Emit an event and create its subscription jobs inside the caller's
@@ -193,8 +193,8 @@ fn claim_next(k: &mut Kernel) -> Result<Option<(String, String, String)>> {
     Ok(row)
 }
 
-/// What a handler produced: a derived object with a text payload plus the
-/// event to emit for it, or nothing (no output warranted).
+/// What a handler produced: the domain half (a proposed output) plus the
+/// causal metadata the kernel attaches, or nothing (no output warranted).
 pub struct HandlerOutcome {
     pub idempotency_key: String,
     pub input_revisions: Vec<String>,
@@ -202,15 +202,13 @@ pub struct HandlerOutcome {
 }
 
 pub struct PlannedOutput {
-    pub type_id: &'static str,
-    pub class: &'static str,
-    pub event_type: &'static str,
-    pub payload: serde_json::Value,
+    pub proposed: processors::ProposedOutput,
     pub causation_event: String,
     pub correlation: String,
 }
 
-/// External work happens OUTSIDE any database transaction.
+/// External work happens OUTSIDE any database transaction, and the handler
+/// sees only the narrow ProcessorCtx — never the kernel connection.
 fn run_handler(k: &Kernel, event_id: &str, handler: &str) -> Result<HandlerOutcome> {
     if handler_should_fail(handler) {
         return Err(anyhow!("injected failure for {handler}"));
@@ -231,50 +229,14 @@ fn run_handler(k: &Kernel, event_id: &str, handler: &str) -> Result<HandlerOutco
         PROCESSOR_VERSION
     );
 
-    let output = match handler {
-        HANDLER_TRANSCRIBE => {
-            let (bytes, media_type) = capture::read_source_bytes(k, &subject_object)?;
-            let text = if media_type.starts_with("text/") {
-                String::from_utf8_lossy(&bytes).to_string()
-            } else {
-                format!(
-                    "(untranscribable {} bytes, sha {})",
-                    bytes.len(),
-                    &ids::sha256_hex(&bytes)[..12]
-                )
-            };
-            Some(PlannedOutput {
-                type_id: TRANSCRIPT_TYPE,
-                class: "artifact",
-                event_type: TRANSCRIPT_READY,
-                payload: serde_json::json!({ "text": text }),
-                causation_event: event_id.to_string(),
-                correlation,
-            })
-        }
-        HANDLER_TASK => {
-            let payload: String = k.conn.query_row(
-                "SELECT payload_json FROM revisions WHERE revision_id = ?1",
-                [&subject_revision],
-                |r| r.get(0),
-            )?;
-            let v: serde_json::Value = serde_json::from_str(&payload)?;
-            let text = v["text"].as_str().unwrap_or_default();
-            let todo_line = text
-                .lines()
-                .find(|l| l.to_ascii_lowercase().contains("todo"))
-                .map(|l| l.trim().to_string());
-            todo_line.map(|title| PlannedOutput {
-                type_id: TASK_TYPE,
-                class: "proposal",
-                event_type: TASK_PROPOSED,
-                payload: serde_json::json!({ "title": title, "status": "proposed" }),
-                causation_event: event_id.to_string(),
-                correlation,
-            })
-        }
-        other => return Err(anyhow!("unknown handler {other}")),
-    };
+    let ctx = processors::ProcessorCtx::new(k);
+    let output = processors::dispatch(&ctx, handler, &subject_object, &subject_revision)?.map(
+        |proposed| PlannedOutput {
+            proposed,
+            causation_event: event_id.to_string(),
+            correlation: correlation.clone(),
+        },
+    );
     crashpoint("job.after_work");
     Ok(HandlerOutcome {
         idempotency_key,
@@ -320,12 +282,12 @@ fn commit_outputs(k: &mut Kernel, job_id: &str, handler: &str, o: HandlerOutcome
                     tx.execute(
                         "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)
                          VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)",
-                        rusqlite::params![object_id, out.type_id, out.class, device, op_id, now],
+                        rusqlite::params![object_id, out.proposed.type_id, out.proposed.class, device, op_id, now],
                     )?;
                     tx.execute(
                         "INSERT INTO revisions (revision_id, object_id, based_on_json, payload_json, created_operation, created_at)
                          VALUES (?1, ?2, '[]', ?3, ?4, ?5)",
-                        rusqlite::params![revision_id, object_id, out.payload.to_string(), op_id, now],
+                        rusqlite::params![revision_id, object_id, out.proposed.payload.to_string(), op_id, now],
                     )?;
                     tx.execute(
                         "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
@@ -345,7 +307,7 @@ fn commit_outputs(k: &mut Kernel, job_id: &str, handler: &str, o: HandlerOutcome
                     emit_event_in_tx(
                         &tx,
                         &event_id,
-                        out.event_type,
+                        out.proposed.event_type,
                         "org.memory.spike",
                         &object_id,
                         &revision_id,
