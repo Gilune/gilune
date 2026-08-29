@@ -1,4 +1,4 @@
-# Linoema Architecture Package
+# Gilune Architecture Package
 
 Status: **Draft v0 for validation**  
 Last updated: 2026-08-29
@@ -15,18 +15,15 @@ be read as making the Windows client secondary.
 
 ## The name
 
-**Linoema** (pronounced *lin-oh-EE-ma*) is a coined name combining two roots:
+The project is named **Gilune**.
 
-- *Linum*, the botanical genus of flax. Flax has delicate blue flowers and
-  provides the fibre spun and woven into linen, giving the name its imagery of
-  strands, threads, and connections.
-- *Noema*, from Greek *noēma* (νόημα): that which is thought, or the content or
-  object of a thought.
+> **TODO**: record the derivation and intended meaning of the name Gilune.
 
-The intended meaning is **threads of thought**: individual captures preserved
-as they occurred, then connected and woven into an enduring body of memory.
-Linoema is not itself an existing Greek or Latin word; the meaning is a deliberate
-blend created for the project.
+The project was previously called *Linoema* (from *Linum*, the flax genus, and
+Greek *noēma*, that which is thought — “threads of thought”: captures preserved
+as they occurred, then connected and woven into an enduring body of memory).
+This package predates the rename; any remaining reference to Linoema in source
+material should be read as Gilune.
 
 ## How to read this package
 
