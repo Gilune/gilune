@@ -1,0 +1,36 @@
+package gilune:processor@0.1.0;
+
+/// Spike S3 contract: the processor half of the plugin boundary, formalising
+/// the ProcessorCtx seam from Spike S2 as a WIT world. Deliberately minimal —
+/// enough shape (records, results, options, lists, strings) to expose where
+/// WIT bindings leak or become awkward, per ADR 0003's acceptance gate.
+
+interface types {
+    /// A processor's proposed output: the domain half of a job result. The
+    /// host kernel supplies identity, provenance, causation, and commit.
+    record proposed-output {
+        type-id: string,
+        class: string,
+        event-type: string,
+        payload-json: string,
+    }
+}
+
+/// The shape of a scoped `objects.read` grant. Every call is validated by
+/// the host against the installed grant; denial is an ordinary error the
+/// plugin must tolerate, never a trap.
+interface host-objects {
+    read-source-bytes: func(object-id: string) -> result<tuple<list<u8>, string>, string>;
+    read-payload: func(revision-id: string) -> result<string, string>;
+}
+
+interface handler {
+    use types.{proposed-output};
+    handle: func(name: string, subject-object: string, subject-revision: string)
+        -> result<option<proposed-output>, string>;
+}
+
+world processor {
+    import host-objects;
+    export handler;
+}

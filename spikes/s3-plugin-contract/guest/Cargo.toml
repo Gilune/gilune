@@ -1,0 +1,18 @@
+[package]
+name = "spike-s3-guest"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Spike S3 sample processor as a WebAssembly component (compiled for wasm32-wasip2)"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.61"
+serde_json = "1"
+sha2 = "0.10"
+hex = "0.4"
+
+[profile.release]
+opt-level = "s"
