@@ -37,6 +37,9 @@ pub fn set_subscriptions_enabled(k: &Kernel, enabled: bool) -> Result<usize> {
 
 /// Emit an event and create its subscription jobs inside the caller's
 /// transaction — an event cannot exist without its jobs and vice versa.
+/// All spike subscriptions run under the `origin-device` policy: an event
+/// whose origin is another device gets no local jobs, which is what stops
+/// every replica independently transcribing the same capture.
 #[allow(clippy::too_many_arguments)]
 pub fn emit_event_in_tx(
     tx: &Transaction,
@@ -47,13 +50,15 @@ pub fn emit_event_in_tx(
     subject_revision: &str,
     causation: Option<&str>,
     correlation: &str,
+    origin_device: &str,
+    local_device: &str,
     now: i64,
 ) -> Result<()> {
     tx.execute(
         "INSERT INTO events (event_id, event_type, schema_version, transaction_id, producer,
                              subject_object_id, subject_revision_id, causation_event_id,
-                             correlation_id, committed_at)
-         VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                             correlation_id, origin_device, committed_at)
+         VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         rusqlite::params![
             event_id,
             event_type,
@@ -63,10 +68,11 @@ pub fn emit_event_in_tx(
             subject_revision,
             causation,
             correlation,
+            origin_device,
             now
         ],
     )?;
-    create_jobs_for_event_in_tx(tx, event_id, event_type, now)?;
+    create_jobs_for_event_in_tx(tx, event_id, event_type, origin_device, local_device, now)?;
     Ok(())
 }
 
@@ -74,8 +80,14 @@ fn create_jobs_for_event_in_tx(
     tx: &Transaction,
     event_id: &str,
     event_type: &str,
+    origin_device: &str,
+    local_device: &str,
     now: i64,
 ) -> Result<()> {
+    if origin_device != local_device {
+        // origin-device execution policy (04-processing-model.md).
+        return Ok(());
+    }
     let mut stmt = tx.prepare(
         "SELECT subscription_id, handler FROM subscriptions WHERE enabled = 1 AND event_type = ?1",
     )?;
@@ -94,19 +106,22 @@ fn create_jobs_for_event_in_tx(
 
 /// Recovery: any committed event must have jobs for currently enabled
 /// subscriptions (covers a crash between historic schema changes or a
-/// subscription enabled after the event committed).
+/// subscription enabled after the event committed). The origin-device
+/// policy applies here too, or recovery on a replica would recreate work
+/// that belongs to the originating device.
 pub fn ensure_jobs_for_committed_events(k: &mut Kernel) -> Result<()> {
     let now = Kernel::now_ms();
+    let local = k.device_id.clone();
     let tx = k.conn.transaction()?;
     {
         let mut stmt = tx.prepare(
-            "SELECT e.event_id, e.event_type FROM events e",
+            "SELECT e.event_id, e.event_type, e.origin_device FROM events e",
         )?;
-        let events: Vec<(String, String)> = stmt
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        let events: Vec<(String, String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
             .collect::<std::result::Result<_, _>>()?;
-        for (event_id, event_type) in events {
-            create_jobs_for_event_in_tx(&tx, &event_id, &event_type, now)?;
+        for (event_id, event_type, origin) in events {
+            create_jobs_for_event_in_tx(&tx, &event_id, &event_type, &origin, &local, now)?;
         }
     }
     tx.commit()?;
@@ -272,13 +287,16 @@ fn commit_outputs(k: &mut Kernel, job_id: &str, handler: &str, o: HandlerOutcome
                 if let Some(out) = &o.output {
                     let object_id = ids::deterministic_id("object", &o.idempotency_key);
                     let revision_id = ids::deterministic_id("revision", &o.idempotency_key);
-                    let op_id = ids::new_id();
-                    let seq = store::next_device_seq(&tx, &device)?;
-                    tx.execute(
-                        "INSERT INTO operations (operation_id, device_id, device_seq, kind, target_id, committed_at)
-                         VALUES (?1, ?2, ?3, 'object-created', ?4, ?5)",
-                        rusqlite::params![op_id, device, seq, object_id, now],
-                    )?;
+                    let op_payload = serde_json::json!({
+                        "object": { "object_id": &object_id, "type_id": out.proposed.type_id,
+                                    "schema_version": 1, "class": out.proposed.class,
+                                    "display_created_at": now },
+                        "revision": { "revision_id": &revision_id, "based_on": [],
+                                      "payload": &out.proposed.payload },
+                        "event_type": out.proposed.event_type,
+                    });
+                    let op_id =
+                        store::record_operation(&tx, &device, "object-created", &object_id, &op_payload, now)?;
                     tx.execute(
                         "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)
                          VALUES (?1, ?2, 1, ?3, ?4, ?5, ?6)",
@@ -313,6 +331,8 @@ fn commit_outputs(k: &mut Kernel, job_id: &str, handler: &str, o: HandlerOutcome
                         &revision_id,
                         Some(out.causation_event.as_str()),
                         &out.correlation,
+                        &device,
+                        &device,
                         now,
                     )?;
                     output_ids.push(object_id);

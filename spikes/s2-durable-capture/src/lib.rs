@@ -13,6 +13,7 @@ pub mod ids;
 pub mod jobs;
 pub mod processors;
 pub mod store;
+pub mod sync;
 pub mod vault;
 
 use anyhow::Result;
@@ -63,7 +64,11 @@ impl Kernel {
     pub fn recover(&mut self) -> Result<()> {
         capture::recover_blobs(self)?;
         jobs::expire_stale_leases(self)?;
-        jobs::ensure_jobs_for_committed_events(self)?;
+        // The job backfill reads v2 columns; on a database deliberately held
+        // at v1 (GILUNE_SCHEMA_TARGET test hook) it must wait for migration.
+        if store::schema_version(&self.conn) >= 2 {
+            jobs::ensure_jobs_for_committed_events(self)?;
+        }
         Ok(())
     }
 

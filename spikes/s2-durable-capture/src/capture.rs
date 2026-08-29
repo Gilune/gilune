@@ -64,23 +64,29 @@ pub fn capture(k: &mut Kernel, bytes: &[u8], media_type: &str) -> Result<Capture
     let device = k.device_id.clone();
     let tx = k.conn.transaction()?;
     {
-        let op_id = ids::new_id();
-        let seq = store::next_device_seq(&tx, &device)?;
-        tx.execute(
-            "INSERT INTO operations (operation_id, device_id, device_seq, kind, target_id, committed_at)
-             VALUES (?1, ?2, ?3, 'object-created', ?4, ?5)",
-            rusqlite::params![op_id, device, seq, object_id, now],
-        )?;
-        tx.execute(
-            "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)
-             VALUES (?1, ?2, 1, 'source', ?3, ?4, ?5)",
-            rusqlite::params![object_id, SOURCE_TYPE, device, op_id, now],
-        )?;
         let payload = serde_json::json!({
             "media_type": media_type,
             "byte_len": bytes.len(),
             "sha256": sha,
         });
+        let op_payload = serde_json::json!({
+            "object": { "object_id": &object_id, "type_id": SOURCE_TYPE,
+                        "schema_version": 1, "class": "source",
+                        "display_created_at": now },
+            "revision": { "revision_id": &revision_id, "based_on": [],
+                          "payload": &payload },
+            "blob": { "blob_id": &blob_id, "media_type": media_type,
+                      "byte_len": bytes.len(), "sha256": &sha,
+                      "rel_path": &rel_path },
+            "event_type": SOURCE_READY,
+        });
+        let op_id =
+            store::record_operation(&tx, &device, "object-created", &object_id, &op_payload, now)?;
+        tx.execute(
+            "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)
+             VALUES (?1, ?2, 1, 'source', ?3, ?4, ?5)",
+            rusqlite::params![object_id, SOURCE_TYPE, device, op_id, now],
+        )?;
         tx.execute(
             "INSERT INTO revisions (revision_id, object_id, based_on_json, payload_json, created_operation, created_at)
              VALUES (?1, ?2, '[]', ?3, ?4, ?5)",
@@ -110,6 +116,8 @@ pub fn capture(k: &mut Kernel, bytes: &[u8], media_type: &str) -> Result<Capture
             &revision_id,
             None,
             &correlation,
+            &device,
+            &device,
             now,
         )?;
         crashpoint("commit.inside");
@@ -155,9 +163,12 @@ fn promote_blob(k: &mut Kernel, blob_id: &str) -> Result<()> {
 pub fn recover_blobs(k: &mut Kernel) -> Result<()> {
     // Committed-but-unpromoted blobs: finish the promotion if the bytes
     // exist in either place; otherwise raise a visible integrity alert.
+    // stage_id 'remote' marks blobs whose bytes arrive via sync; their
+    // completion belongs to the pull path, not local staging recovery.
     let pending: Vec<(String, String, String)> = {
         let mut stmt = k.conn.prepare(
-            "SELECT blob_id, rel_path, stage_id FROM blobs WHERE state = 'committed'",
+            "SELECT blob_id, rel_path, stage_id FROM blobs
+             WHERE state = 'committed' AND stage_id != 'remote'",
         )?;
         let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
         rows.collect::<std::result::Result<_, _>>()?

@@ -9,6 +9,11 @@ Disposable evidence prototype (see `architecture/spikes/README.md`, S2) for:
 - ADR 0004 — transactional events and at-least-once durable jobs;
 - ADR 0007 — Markdown vault projection with bidirectional reconciliation.
 
+Schema v2 made operations self-describing (syncable), so this crate also
+hosts the Spike S4 convergence harness (`src/sync.rs`, `tests/s4_sync.rs`)
+per the plan's instruction that S4 reuse the S2 model — see
+[`../s4-sync/README.md`](../s4-sync/README.md) for that evidence.
+
 ## What it is
 
 A single Rust crate: a miniature kernel core (`src/`) driven by a CLI
@@ -107,7 +112,9 @@ cargo run -- --vault /tmp/v project
   filesystem API, and no fsync-reordering fault injection. A follow-up
   should add an I/O interposition layer or run on a fault-injecting
   filesystem before ADR 0002 is accepted.
-- No migration crash point yet (single schema version).
+- Migration is now covered (v1→v2, crash mid-step, against a fixture built
+  by the real v1 binary), but only one migration exists; a materialised
+  payload-rewriting migration remains untested.
 - Single process; no concurrent writers or cross-process lease contention.
 - Linux only; the acceptance gate needs Android and Windows runs (S1 owns
   the platform boundary).

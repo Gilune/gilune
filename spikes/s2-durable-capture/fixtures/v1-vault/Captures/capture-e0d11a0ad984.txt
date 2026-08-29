@@ -1,0 +1,2 @@
+Fixture note from schema v1.
+TODO: survive the migration

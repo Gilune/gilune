@@ -87,7 +87,11 @@ fn md_rel_path(p: &Projectable) -> String {
 fn render_body(k: &Kernel, p: &Projectable, payload: &serde_json::Value) -> Result<String> {
     Ok(match p.type_id.as_str() {
         capture::SOURCE_TYPE => {
-            let (bytes, media_type) = capture::read_source_bytes(k, &p.object_id)?;
+            // A synced envelope can arrive before its bytes finish
+            // transferring; the projection must not fail on it.
+            let Ok((bytes, media_type)) = capture::read_source_bytes(k, &p.object_id) else {
+                return Ok("(original bytes pending sync)".to_string());
+            };
             if media_type.starts_with("text/") {
                 String::from_utf8_lossy(&bytes).to_string()
             } else {
@@ -202,6 +206,28 @@ pub fn project(k: &mut Kernel) -> Result<usize> {
         )?;
         written += 1;
         crashpoint("vault.during_projection");
+    }
+
+    // Tombstoned objects leave the vault (deletion phase 2: cease use).
+    // Kernel history keeps the tombstone; only the projection is removed.
+    let dead: Vec<(String, String)> = {
+        let mut stmt = k.conn.prepare(
+            "SELECT v.object_id, v.rel_path FROM vault_state v
+             JOIN objects o ON o.object_id = v.object_id
+             WHERE o.tombstone_json IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        rows.collect::<std::result::Result<_, _>>()?
+    };
+    for (object_id, rel_path) in dead {
+        let path = k.vault.join(&rel_path);
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        k.conn.execute(
+            "DELETE FROM vault_state WHERE object_id = ?1",
+            [&object_id],
+        )?;
     }
     Ok(written)
 }
@@ -457,13 +483,15 @@ fn ingest_external_edit(
         let mut payload: serde_json::Value = serde_json::from_str(&old_payload)?;
         apply_edit(&mut payload, body);
         let revision_id = ids::new_id();
-        let op_id = ids::new_id();
-        let seq = store::next_device_seq(&tx, &device)?;
-        tx.execute(
-            "INSERT INTO operations (operation_id, device_id, device_seq, kind, target_id, committed_at)
-             VALUES (?1, ?2, ?3, 'object-revised', ?4, ?5)",
-            rusqlite::params![op_id, device, seq, object_id, now],
-        )?;
+        let op_payload = serde_json::json!({
+            "object_id": object_id,
+            "revision": { "revision_id": &revision_id, "based_on": [&based_on],
+                          "payload": &payload },
+            "supersedes": [&based_on],
+            "event_type": "memory.kernel/object-revised",
+        });
+        let op_id =
+            store::record_operation(&tx, &device, "object-revised", object_id, &op_payload, now)?;
         tx.execute(
             "INSERT INTO revisions (revision_id, object_id, based_on_json, payload_json, created_operation, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -496,6 +524,8 @@ fn ingest_external_edit(
             &revision_id,
             None,
             &event_id,
+            &device,
+            &device,
             now,
         )?;
         tx.execute(
@@ -521,12 +551,20 @@ fn propose_tombstone(k: &mut Kernel, target_object: &str) -> Result<()> {
             |r| r.get(0),
         )?;
         if exists == 0 {
-            let op_id = ids::new_id();
-            let seq = store::next_device_seq(&tx, &device)?;
-            tx.execute(
-                "INSERT INTO operations (operation_id, device_id, device_seq, kind, target_id, committed_at)
-                 VALUES (?1, ?2, ?3, 'object-created', ?4, ?5)",
-                rusqlite::params![op_id, device, seq, proposal_id, now],
+            let op_payload = serde_json::json!({
+                "object": { "object_id": &proposal_id, "type_id": TOMBSTONE_PROPOSAL_TYPE,
+                            "schema_version": 1, "class": "proposal",
+                            "display_created_at": now },
+                "revision": { "revision_id": &revision_id, "based_on": [],
+                              "payload": { "target": target_object } },
+            });
+            let op_id = store::record_operation(
+                &tx,
+                &device,
+                "object-created",
+                &proposal_id,
+                &op_payload,
+                now,
             )?;
             tx.execute(
                 "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)

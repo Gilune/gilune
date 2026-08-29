@@ -19,6 +19,8 @@ fn usage() -> ! {
            retry-quarantined\n\
            disable-processors | enable-processors\n\
            dev-add-object <type-id> <payload-json>\n\
+           dev-tombstone <object-id>\n\
+           sync-push <relay-dir> | sync-pull <relay-dir>\n\
            export <dest>\n\
            verify-export <dest>\n\
            status\n\
@@ -62,15 +64,30 @@ fn main() -> Result<()> {
             println!("enabled {n} subscription(s)");
         }
         "dev-add-object" => {
-            // Test hook: create an object of an arbitrary (possibly unknown)
-            // type, standing in for data that arrived from a device that has
-            // a plugin this device lacks.
             let type_id = rest.get(1).cloned().unwrap_or_else(|| usage());
             let payload = rest.get(2).cloned().unwrap_or_else(|| usage());
             let value: serde_json::Value =
                 serde_json::from_str(&payload).context("payload must be JSON")?;
-            let object_id = dev_add_object(&mut k, &type_id, &value)?;
+            let object_id = spike_s2::store::dev_add_object(&mut k, &type_id, &value)?;
             println!("added {object_id}");
+        }
+        "dev-tombstone" => {
+            let object_id = rest.get(1).cloned().unwrap_or_else(|| usage());
+            spike_s2::store::tombstone_object(&mut k, &object_id)?;
+            println!("tombstoned {object_id}");
+        }
+        "sync-push" => {
+            let relay = rest.get(1).map(PathBuf::from).unwrap_or_else(|| usage());
+            let r = spike_s2::sync::push(&mut k, &relay)?;
+            println!("pushed ops={} blobs={}", r.ops_written, r.blobs_written);
+        }
+        "sync-pull" => {
+            let relay = rest.get(1).map(PathBuf::from).unwrap_or_else(|| usage());
+            let r = spike_s2::sync::pull(&mut k, &relay)?;
+            println!(
+                "applied={} blobs_completed={} pending_blobs={} gaps={} corrupt={}",
+                r.ops_applied, r.blobs_completed, r.pending_blobs, r.gaps, r.corrupt
+            );
         }
         "capture" => {
             let (bytes, media_type) = parse_capture_args(&rest[1..])?;
@@ -169,40 +186,6 @@ fn parse_capture_args(args: &[String]) -> Result<(Vec<u8>, String)> {
     }
 }
 
-fn dev_add_object(k: &mut Kernel, type_id: &str, payload: &serde_json::Value) -> Result<String> {
-    use spike_s2::{ids, store};
-    let now = Kernel::now_ms();
-    let device = k.device_id.clone();
-    let object_id = ids::new_id();
-    let revision_id = ids::new_id();
-    let tx = k.conn.transaction()?;
-    {
-        let op_id = ids::new_id();
-        let seq = store::next_device_seq(&tx, &device)?;
-        tx.execute(
-            "INSERT INTO operations (operation_id, device_id, device_seq, kind, target_id, committed_at)
-             VALUES (?1, ?2, ?3, 'object-created', ?4, ?5)",
-            rusqlite::params![op_id, device, seq, object_id, now],
-        )?;
-        tx.execute(
-            "INSERT INTO objects (object_id, type_id, schema_version, class, origin_device, created_operation, display_created_at)
-             VALUES (?1, ?2, 1, 'artifact', ?3, ?4, ?5)",
-            rusqlite::params![object_id, type_id, device, op_id, now],
-        )?;
-        tx.execute(
-            "INSERT INTO revisions (revision_id, object_id, based_on_json, payload_json, created_operation, created_at)
-             VALUES (?1, ?2, '[]', ?3, ?4, ?5)",
-            rusqlite::params![revision_id, object_id, payload.to_string(), op_id, now],
-        )?;
-        tx.execute(
-            "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
-            rusqlite::params![object_id, revision_id],
-        )?;
-    }
-    tx.commit()?;
-    Ok(object_id)
-}
-
 fn count(k: &Kernel, sql: &str) -> Result<i64> {
     Ok(k.conn.query_row(sql, [], |r| r.get(0))?)
 }
@@ -263,86 +246,6 @@ fn print_status(k: &Kernel) -> Result<()> {
     Ok(())
 }
 
-/// Internal invariants the harness asserts after every recovery:
-/// nothing reported saved may be unrecoverable, and operational state must
-/// be self-consistent.
 fn verify(k: &Kernel) -> Result<Vec<String>> {
-    let mut problems = Vec::new();
-
-    // Every ready blob's bytes exist and hash correctly.
-    for (blob_id, rel, sha) in capture::blob_paths(k)? {
-        let path = k.vault.join(&rel);
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                if spike_s2::ids::sha256_hex(&bytes) != sha {
-                    problems.push(format!("blob {blob_id} content hash mismatch"));
-                }
-            }
-            Err(_) => problems.push(format!("blob {blob_id} file missing ({})", rel.display())),
-        }
-    }
-
-    // No blob may remain unpromoted after recovery unless an alert says why.
-    let committed: i64 = count(k, "SELECT COUNT(*) FROM blobs WHERE state='committed'")?;
-    let missing_alerts: i64 = count(
-        k,
-        "SELECT COUNT(*) FROM integrity_alerts WHERE kind='missing-blob-bytes'",
-    )?;
-    if committed > missing_alerts {
-        problems.push(format!(
-            "{committed} unpromoted blobs but only {missing_alerts} alerts"
-        ));
-    }
-
-    // Every event has a job per enabled matching subscription.
-    let missing_jobs: i64 = count(
-        k,
-        "SELECT COUNT(*) FROM events e JOIN subscriptions s
-             ON s.enabled = 1 AND s.event_type = e.event_type
-         WHERE NOT EXISTS (SELECT 1 FROM jobs j
-                           WHERE j.event_id = e.event_id
-                             AND j.subscription_id = s.subscription_id)",
-    )?;
-    if missing_jobs > 0 {
-        problems.push(format!("{missing_jobs} committed events lack jobs"));
-    }
-
-    // Completed jobs reference an existing processing run.
-    let dangling: i64 = count(
-        k,
-        "SELECT COUNT(*) FROM jobs j WHERE j.status='completed'
-           AND (j.processing_run_id IS NULL
-                OR NOT EXISTS (SELECT 1 FROM processing_runs r
-                               WHERE r.run_id = j.processing_run_id))",
-    )?;
-    if dangling > 0 {
-        problems.push(format!("{dangling} completed jobs without runs"));
-    }
-
-    // Idempotency: at most one transcript per source head.
-    let dup_transcripts: i64 = count(
-        k,
-        "SELECT COALESCE(MAX(cnt), 0) FROM (
-             SELECT COUNT(*) AS cnt FROM provenance p
-             JOIN objects o ON o.object_id = p.artifact_object_id
-             WHERE o.type_id = 'org.memory.transcription/transcript'
-             GROUP BY p.inputs_json)",
-    )?;
-    if dup_transcripts > 1 {
-        problems.push(format!(
-            "duplicate transcripts for one input set (max {dup_transcripts})"
-        ));
-    }
-
-    // Heads exist for every live object.
-    let headless: i64 = count(
-        k,
-        "SELECT COUNT(*) FROM objects o WHERE o.tombstone_json IS NULL
-           AND NOT EXISTS (SELECT 1 FROM heads h WHERE h.object_id = o.object_id)",
-    )?;
-    if headless > 0 {
-        problems.push(format!("{headless} live objects without heads"));
-    }
-
-    Ok(problems)
+    spike_s2::store::verify_invariants(k)
 }

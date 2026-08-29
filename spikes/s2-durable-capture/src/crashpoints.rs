@@ -16,6 +16,9 @@ pub const ALL: &[&str] = &[
     "output.commit.inside",  // inside the output transaction, before COMMIT
     "vault.during_projection", // some projection files written, not all
     "reconcile.during",      // mid-way through ingesting external edits
+    "migration.during",      // inside a schema migration step, before commit
+    "sync.during_push",      // some operations published, not all
+    "sync.during_pull",      // some remote operations applied, not all
 ];
 
 pub fn crashpoint(name: &str) {
