@@ -80,8 +80,8 @@ cd ../s2-durable-capture && cargo test --test s4_sync
 - **No device enrollment/revocation**: device identity is just the stored
   ID; authentication is the filesystem.
 - **In-process replicas**: convergence semantics are exercised across
-  simulated restarts (every step reopens the kernel), but not across real
-  processes or machines, and there are no crash-during-push/pull matrix
-  runs yet (crash points exist; tests pending).
+  simulated restarts (every step reopens the kernel) plus subprocess
+  crash-during-push/pull runs (idempotent retry proven), but not across
+  real machines or concurrent processes.
 - **LAN transport**: the ADR 0008 first transport (discovery, pairing) is
   untouched; this spike proves the semantics and the shared-folder carrier.

@@ -551,6 +551,39 @@ fn v1_database_upgrades_on_reopen() {
     h.verify_ok();
 }
 
+// ------------------------------------------------------------ sync crashes
+
+#[test]
+fn sync_push_and_pull_survive_crashes() {
+    let a = Harness::new();
+    let b = Harness::new();
+    let relay = tempfile::tempdir().unwrap();
+    let relay_str = relay.path().to_string_lossy().to_string();
+    a.ok(&["capture", "--text", "TODO: first sync"]);
+    a.ok(&["capture", "--text", "second, quiet"]);
+
+    // Crash mid-push: write-once op files make the retry idempotent.
+    let out = a.run(&["sync-push", &relay_str], Some("sync.during_push"));
+    assert!(!out.status.success(), "push should have aborted");
+    let done = a.ok(&["sync-push", &relay_str]);
+    assert!(done.contains("pushed ops="), "got: {done}");
+    let ops_dir = relay.path().join("ops");
+    let device_dir = std::fs::read_dir(&ops_dir).unwrap().next().unwrap().unwrap();
+    let files = std::fs::read_dir(device_dir.path()).unwrap().count();
+    assert_eq!(files, 2, "exactly one file per operation, no duplicates");
+
+    // Crash mid-pull: the operation-ID guard and per-op frontier make the
+    // retry continue exactly where it stopped, applying nothing twice.
+    let out = b.run(&["sync-pull", &relay_str], Some("sync.during_pull"));
+    assert!(!out.status.success(), "pull should have aborted");
+    b.ok(&["sync-pull", &relay_str]);
+    let s = b.status();
+    assert_eq!(s["sources"], 2, "both captures present exactly once");
+    let again = b.ok(&["sync-pull", &relay_str]);
+    assert!(again.contains("applied=0"), "no re-application: {again}");
+    b.verify_ok();
+}
+
 // ------------------------------------------------- domain/kernel boundary
 
 #[test]
