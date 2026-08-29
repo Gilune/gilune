@@ -77,6 +77,7 @@ should be read as Gilune.
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
 | Markdown vault projection; the vault is the export | Proposed | Capture/recovery spike |
 | Headless sync agent with LAN-first device sync | Proposed | Kernel and sync spikes |
+| Split licensing: permissive contracts, MPL core, AGPL server | Proposed | Owner ratification |
 
 ## What is intentionally not selected yet
 
