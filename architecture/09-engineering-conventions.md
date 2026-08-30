@@ -1,6 +1,6 @@
 # Engineering Conventions
 
-Status: **Draft — owner review pending** (proposed 2026-08-30)
+Status: **Accepted** (owner ratification 2026-08-30)
 
 The constitution says what the system must guarantee; the contracts say
 where the boundaries are; the ADRs say which technologies. This document

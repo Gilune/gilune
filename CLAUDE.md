@@ -31,9 +31,14 @@ namespaces are deliberately project-neutral and must not chase the name.
 
 ## Layout
 
-- `architecture/` — constitution, contracts (01–08), ADRs 0001–0009, spike
-  plan, prior-art survey.
+- `architecture/` — constitution, contracts (01–08), engineering
+  conventions (09), ADRs 0001–0010, spike plan, prior-art survey.
 - `sources/` — product principles (the "why").
+- `spikes/s1-kernel-boundary/` — Compose ↔ UniFFI ↔ Rust boundary spike:
+  diagnostic kernel (`kernel/`, cargo test), Compose shell for desktop +
+  Android (`shell/`, `gradlew :composeApp:desktopTest` and
+  `:composeApp:connectedDebugAndroidTest`); bindings are generated per
+  target from that target's own binary (see its README).
 - `spikes/s2-durable-capture/` — Rust kernel-core spike: durable capture,
   events/jobs, Markdown vault projection and reconciliation, schema
   migration, plus the sync module and S4 harness. `cargo test` runs the
@@ -67,10 +72,11 @@ the owner acquires a device**. ADR 0009 (MIT OR Apache-2.0) and ADR 0010
 gates promises) are ratified. **Next: application-level engineering — see
 `architecture/09-engineering-conventions.md` and the vertical slice.**
 
-## Next steps on a Windows machine
+## Next steps
 
-1. ~~Toolchain + run the existing suites on Windows~~ — done 2026-08-30;
-   both suites green (see spike README evidence sections).
+1. **The vertical slice**: first application code under
+   `architecture/09-engineering-conventions.md` — capture → kernel →
+   vault → sync end to end, per the exit gate in `architecture/README.md`.
 2. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.
@@ -85,6 +91,8 @@ gates promises) are ratified. **Next: application-level engineering — see
 
 ## Conventions
 
+- Application code follows `architecture/09-engineering-conventions.md`
+  (Accepted 2026-08-30).
 - Docs use British spelling and the existing terse, contract-like style.
 - Commit messages: imperative subject; body says what changed and why;
   spike commits summarise the evidence they add.

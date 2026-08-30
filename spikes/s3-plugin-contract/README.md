@@ -79,7 +79,9 @@ from the measured windows on every platform.
 ## Honest gaps (not yet evidence)
 
 - No bundled-Android side yet: parity is proved against S2's native Rust
-  processors on Linux, not a Compose/Android build (S1 scaffold first).
+  processors, not a Compose/Android build. The S1 scaffold this was
+  waiting on now exists (`spikes/s1-kernel-boundary/`), so this is S3's
+  next outstanding half.
 - Sync calls only: async jobs, streaming blob reads, and callback delivery
   through WIT remain untested — the hardest open question for ADR 0003.
 - No manifest/signature pipeline, no upgrade/quiesce/uninstall lifecycle,

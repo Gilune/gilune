@@ -1,8 +1,12 @@
 # Spike S4 — Offline Sync, Conflicts, and Relay
 
-Status: **In progress** — convergence semantics green on Linux over a
-shared-folder relay; encryption, causal frontiers beyond per-device
-sequences, compaction, and device lifecycle remain.
+Status: **In progress** — convergence semantics green on Linux and
+Windows over a shared-folder relay (Windows 2026-08-30: all 10 scenarios
+in six consecutive runs, no flakes, after the S2 portability fixes —
+`fsync_file` for pre-rename flushes and `/`-normalised rel-paths in
+push/pull, which directly touched `src/sync.rs`); encryption, causal
+frontiers beyond per-device sequences, compaction, and device lifecycle
+remain.
 
 Evidence prototype for ADR 0005 (operation-based sync) and the transport
 shape of ADR 0008. As the spike plan requires, it **reuses the S2 data and

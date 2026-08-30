@@ -32,6 +32,10 @@ mini apps: <https://developer.apple.com/app-store/review/guidelines/>.
   needs drive deliberate slot additions.
 - Non-store/open Android distributions may later enable broader plugin execution
   as a clearly separate build profile without changing stored data contracts.
+- ADR 0010 (2026-08-30) sets the post-v0 direction for *store* builds:
+  downloadable plugins via the sandboxed runtime under the stores'
+  VM/interpreter provisions, gated on a test submission. This decision's
+  bundled-only stance remains v0.
 
 ## Alternatives considered
 

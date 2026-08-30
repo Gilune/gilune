@@ -17,7 +17,8 @@ yet.
 - Product principles: [`sources/README.md`](sources/README.md)
 - Architecture package: [`architecture/README.md`](architecture/README.md)
   — constitution → contracts → ADRs → spike plan
-- Evidence so far: [`spikes/`](spikes/) — durable capture and vault
+- Evidence so far: [`spikes/`](spikes/) — the Compose ↔ Rust kernel
+  boundary on Windows and Android (S1), durable capture and vault
   projection (S2), plugin contract and sandbox (S3), sync convergence
   (S4), distribution policy (S5). Each spike README states its evidence
   and its honest gaps.

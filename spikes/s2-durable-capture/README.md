@@ -1,7 +1,8 @@
 # Spike S2 — Durable Capture, Events, Recovery, and Vault Projection
 
 Status: **In progress** — core fault matrix green on Linux and Windows;
-Android still outstanding (S1 owns the platform boundary).
+an Android run of this suite is deferred with the physical device
+(S1 closed provisionally 2026-08-30 with device work assumed).
 
 Disposable evidence prototype (see `architecture/spikes/README.md`, S2) for:
 
@@ -147,8 +148,8 @@ does not travel" only held per-platform until rel-paths were made portable.
   by the real v1 binary), but only one migration exists; a materialised
   payload-rewriting migration remains untested.
 - Single process; no concurrent writers or cross-process lease contention.
-- Linux and Windows only; the acceptance gate still needs an Android run
-  (S1 owns the platform boundary).
+- Linux and Windows only; an Android run of this suite is deferred with
+  the physical device (the S1 boundary itself is proven on the emulator).
 - Timestamps in front matter are epoch milliseconds; the human-readable
   format is a vault-format decision, not settled here.
 - Blob bytes stored once (in-vault); the copy-versus-reference measurement

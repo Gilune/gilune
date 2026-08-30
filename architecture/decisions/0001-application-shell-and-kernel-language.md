@@ -26,7 +26,7 @@ background work, notifications, accessibility, and secure key storage.
 The difficult trade-off is between sharing the invariant-heavy kernel and
 keeping Android and Windows integration, packaging, and debugging simple.
 
-## Proposed decision
+## Decision
 
 - Build the application shell and shared UI in Kotlin Multiplatform with Compose
   Multiplatform.

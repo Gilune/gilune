@@ -19,6 +19,10 @@ technologies can be rejected without weakening the product principles.
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or
 platform policy (0004, 0006); its spike then validates the implementation, not
-the need for the decision. If a spike fails, record a new ADR that supersedes
-the old one; do not edit away the reason the original choice was considered.
+the need for the decision. Product decisions with no spike are accepted by
+owner ratification (0009, 0010). An owner may also accept provisionally on
+partial spike evidence with the assumed remainder recorded in the ADR (0001:
+device budgets assumed until hardware exists). If a spike fails, record a new
+ADR that supersedes the old one; do not edit away the reason the original
+choice was considered.
 
