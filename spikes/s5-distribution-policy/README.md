@@ -13,7 +13,7 @@ was checked. Re-verify before any release decision.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | Bundled native code (kernel, first-party plugins) | ✓ reviewed with app | ✓¹ | ✓ reviewed with app | ✓ | ✓ | ✓ signed+notarized | ✓ |
 | Downloaded native code (dex/JAR/.so/dylib) | ✗ explicit² | ✓¹ | ✗ explicit³ | ✗ if it changes described functionality⁴ | ✓ (own responsibility) | ✓ if signed; unsigned may be blocked⁵ | ✓ |
-| Downloaded WebAssembly components | ✗ treat as executable; interpreter carve-out is arguable, unproven² | ✓¹ | ✗ under 2.5.2; 4.7 “plug-ins” avenue unproven³ | Conditional: allowed if within described functionality⁴ | ✓ | ✓ (host is signed; components are data to the OS) | ✓ |
+| Downloaded WebAssembly components | Arguable-favourable²: VM/interpreter carve-out fits a capability-mediated runtime textually; no wasm precedent either way — see [research note](downloaded-plugins-research.md) | ✓¹ | Arguable-favourable³: DPLA 3.3.1(B) engine-agnostic since 2017, 4.7 names “plug-ins”, a-Shell/Wasmic/Delta precedents; catalogue duties (4.7.1–4.7.5) bind — see [research note](downloaded-plugins-research.md) | Conditional: allowed if within described functionality⁴ | ✓ | ✓ (host is signed; components are data to the OS) | ✓ |
 | Interpreted scripts at runtime (JS/Lua/…) | Carve-out only via VM/interpreter with indirect API access; must not enable policy violations² | ✓¹ | HTML5/JS mini-apps and plug-ins permitted under 4.7 conditions³ | Conditional⁴ | ✓ | ✓ | ✓ |
 | Schemas, settings, declarative workflows/UI (data the reviewed host interprets) | ✓ (data, not code)² | ✓ | ✓ (host stays within reviewed behaviour)³ | ✓ | ✓ | ✓ | ✓ |
 | Model files (weights) | ✓ (data) | ✓ | ✓ (data) | ✓ | ✓ | ✓ | ✓ |
@@ -109,7 +109,11 @@ was checked. Re-verify before any release decision.
   migrations, exports, recovery) — needs the project owner; agenda should
   follow `06-sync-and-security.md` § Required threat-model follow-up.
 - A decision on whether to seek Google Play's interpreted-code carve-out
-  or Apple's 4.7 route for any post-v0 remote extension — currently: do
-  not plan on either.
+  or Apple's 4.7 route for any post-v0 remote extension. The
+  [downloaded-plugins research note](downloaded-plugins-research.md)
+  (2026-08-30) upgrades both from "do not plan on either" to
+  textually-defensible-but-unprecedented; the v0 stance (bundled only)
+  is unchanged, and any promise still requires a minimal test submission
+  to each store first.
 - Re-verification of all sources at each release gate (store rules moved
   twice in the twelve months before this draft).

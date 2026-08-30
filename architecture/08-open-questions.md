@@ -39,6 +39,14 @@ These require an external security review before production deployment.
 
 ## Must answer before third-party plugin installation is public
 
+- Which store execution path do mobile builds take for downloadable
+  plugins — bundled-only forever, a JS-in-system-engine tier, or the
+  sandboxed-wasm interpreter argument? Research (2026-08-30, see
+  `spikes/s5-distribution-policy/downloaded-plugins-research.md`) finds
+  both stores' texts defensible for a capability-mediated interpreter and
+  documents precedents, but no store has ruled on downloaded wasm; the
+  answer needs a test submission and becomes an ADR superseding the
+  bundled-only clause of ADR 0006.
 - Which publisher identities, signing roots, and transparency mechanism are used?
 - What static and dynamic checks run before publication/installation?
 - Which capability grants require per-use confirmation?
