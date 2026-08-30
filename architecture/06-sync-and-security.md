@@ -170,8 +170,11 @@ decrypted blob bytes.
 
 ## Required threat-model follow-up
 
-Before public hosted sync or third-party plugin installation, perform a formal
-threat-model review covering:
+The workshop was held 2026-08-30; decisions, dispositions, and threat
+owners are recorded in
+[`../spikes/s5-distribution-policy/threat-model.md`](../spikes/s5-distribution-policy/threat-model.md).
+The formal external review remains required before public hosted sync.
+The workshop covered:
 
 - malicious plugin and compromised publisher;
 - compromised relay and metadata correlation;

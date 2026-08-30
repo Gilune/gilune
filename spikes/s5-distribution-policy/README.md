@@ -1,8 +1,10 @@
 # Spike S5 — Distribution Policy Matrix
 
-Status: **Draft** — policy matrix researched against live sources on
-2026-08-29; the threat-model workshop half of S5 is pending with the
-project owner.
+Status: **Complete** — policy matrix researched against live sources on
+2026-08-29 (downloaded-plugins research added 2026-08-30); the
+threat-model workshop was held 2026-08-30 — decisions, dispositions,
+and threat owners in [`threat-model.md`](threat-model.md). Re-verify
+sources at each release gate.
 
 Store rules change; every claim below carries its source and the date it
 was checked. Re-verify before any release decision.
@@ -105,9 +107,8 @@ was checked. Re-verify before any release decision.
 
 ## Still owed for S5
 
-- The threat-model workshop (malicious plugin/publisher/device/relay,
-  migrations, exports, recovery) — needs the project owner; agenda should
-  follow `06-sync-and-security.md` § Required threat-model follow-up.
+- ~~The threat-model workshop~~ — held 2026-08-30, see
+  [`threat-model.md`](threat-model.md).
 - ~~A decision on whether to seek the stores' interpreted-code routes for
   post-v0 remote extensions~~ — decided 2026-08-30 by
   [ADR 0010](../../architecture/decisions/0010-downloadable-plugins-on-store-builds.md)

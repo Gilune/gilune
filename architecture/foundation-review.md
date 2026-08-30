@@ -100,8 +100,13 @@ these; ADR 0006/0010 cross-references were already recorded.
   S3 lifecycle remainder (0003).
 - **Pre-store-downloadable-plugins**: ADR 0010's minimal test submission
   per store, with policy sources re-verified.
-- **Threat-model workshop** (S5's second half, owner + an hour): assigns
-  owners to the highest-risk threats; gates public launch, not the slice.
+- ~~Threat-model workshop~~ — held 2026-08-30
+  (`spikes/s5-distribution-policy/threat-model.md`): four owner decisions
+  (local-only AI default; shared-folder ships plaintext-disclosed with
+  the hosted relay E2EE by contract; additive-auto/destructive-asks
+  migrations; plaintext vault at rest) and named owners for the three
+  highest-risk threads. S5 is complete; the external security review
+  before hosted sync remains gated.
 - **Pre-1.0 hardening**: I/O-interposition fault injection, a second
   migration shape, JVM-host Windows symbolication (module+offset or
   minidumps), format documentation.

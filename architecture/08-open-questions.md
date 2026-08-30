@@ -20,7 +20,7 @@ An answer should become either a contract change or an ADR.
 | Can vault reconciliation ingest external edits, renames, deletions, and malformed front matter without losing kernel history? | S2 extended vault cases | Accept or supersede ADR 0007 |
 | Do LAN discovery and pairing hold up on real home networks (AP isolation, sleep, firewalls) and within Android background limits? | S4 no-relay scenarios on physical devices | Accept or supersede ADR 0008 |
 | Where does device-local state live so file-syncing a vault is safe by default (marked directory inside .gilune/ versus outside the vault), and are operations exported as immutable vault files? | S2 vault layout draft; shared-folder transport prototype | ADR 0007/0008 amendment |
-| What consent and disclosure gate a provider plugin sending capture content off-device, and is local-only the default? | Capability-grant UX draft and product decision | Constitution or capability-contract amendment |
+| ~~What consent and disclosure gate a provider plugin sending capture content off-device, and is local-only the default?~~ | Answered 2026-08-30 (threat-model workshop): local-only IS the default; off-device requires explicit per-provider consent with plain disclosure | `05-plugin-system.md` § Provider plugins |
 | Does the application emit telemetry or crash reports at all, and under what consent? | Product decision | ADR or constitution amendment |
 
 ## Must answer before hosted sync is public
@@ -44,8 +44,10 @@ These require an external security review before production deployment.
 - Which capability grants require per-use confirmation?
 - How are network destination patterns reviewed and displayed?
 - What are the default CPU, memory, output, recursion, and storage quotas?
-- Can a plugin migrate user data automatically, or must some migrations require
-  explicit approval?
+- ~~Can a plugin migrate user data automatically?~~ Answered 2026-08-30
+  (threat-model workshop): additive migrations run automatically;
+  destructive/lossy require explicit approval plus a retained recovery
+  copy — `07-compatibility.md` § Migration execution.
 - How are vulnerability revocation and offline installation reconciled?
 - What recovery copy is retained after a plugin upgrade, and for how long?
 - Which desktop native integrations justify the trusted bridge profile?

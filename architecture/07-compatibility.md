@@ -81,9 +81,12 @@ affected data. Each materialised step is:
 - safe when another device still runs the prior schema reader;
 - tested against stored fixtures from every supported source version.
 
-Irreversible migrations require an export/recovery checkpoint and explicit
-release policy. A failed migration leaves the old plugin version disabled or
-restored; it never leaves half-written current heads hidden from the user.
+Additive, non-lossy migrations run automatically (transactional,
+restartable, fixture-tested). Destructive or lossy migrations additionally
+require **explicit user approval** and retain a recovery copy until the
+user discards it (threat-model workshop, 2026-08-30). A failed migration
+leaves the old plugin version disabled or restored; it never leaves
+half-written current heads hidden from the user.
 
 ## Plugin upgrade
 

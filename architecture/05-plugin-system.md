@@ -17,6 +17,13 @@ tasks, people, threads, and decisions.
 Implement replaceable capabilities such as transcription, language models,
 embeddings, routing, blob transport, and sync transport.
 
+Capture content leaving the device is consent-gated: **local-only is the
+default** (threat-model workshop, 2026-08-30). A provider that sends
+capture content off-device requires explicit per-provider consent with
+plain disclosure of what is sent and to whom; nothing leaves the vault
+silently. The first-party v0 transcription provider runs locally (on the
+capturing device or a paired coordinator), never in the cloud.
+
 ### Platform adapters
 
 Trusted application components that implement narrow OS capabilities such as

@@ -92,9 +92,9 @@ gates promises) are ratified. **Next: application-level engineering — see
    `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\
    adb.exe` fights the SDK's adb server — kill both, start the SDK's.
 4. **Owner decisions still open**: fill the Gilune name TODO in
-   `architecture/README.md`; schedule the S5 threat-model workshop.
-   (ADR 0009 was ratified 2026-08-30: MIT OR Apache-2.0 repository-wide,
-   DCO; root LICENSE-MIT + LICENSE-APACHE are in place.)
+   `architecture/README.md`. (ADR 0009 ratified and the S5 threat-model
+   workshop held 2026-08-30 — see
+   `spikes/s5-distribution-policy/threat-model.md`.)
 
 ## Conventions
 
