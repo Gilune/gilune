@@ -1,0 +1,14 @@
+[package]
+name = "gilune-kernel"
+description = "The portable Gilune kernel: storage, capture, events, operations — the invariant bearer (architecture/02-kernel-contract.md)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rusqlite.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,8 +1,9 @@
 # Foundation Acceptance Review
 
-Status: **§1 dispositions ratified by the owner (2026-08-30) and
-executed — 0002 and 0007 are Accepted for v0. §5 go/no-go is the one
-open item.** (prepared 2026-08-30)
+Status: **Closed — §1 dispositions and §5 GO both ratified by the owner
+(2026-08-30).** The foundation is accepted; the first production
+vertical slice is authorised at the scope in §5. This document is now a
+record; changes to its conclusions go through new ADRs.
 
 The spike plan requires a single review against the constitution after all
 spikes, producing: final disposition of every Proposed ADR, revised

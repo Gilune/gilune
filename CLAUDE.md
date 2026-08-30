@@ -74,16 +74,24 @@ gates promises) are ratified. **Next: application-level engineering — see
 
 ## Next steps
 
-1. **The foundation acceptance review sitting** (owner):
-   `architecture/foundation-review.md` is prepared — ratify the ADR
-   dispositions (§1) and the go/no-go (§5); the S5 threat-model workshop
-   feeds its gates and needs the same sitting or its own hour.
-2. **The vertical slice** (on "go"): first application code under
-   `architecture/09-engineering-conventions.md` — capture → kernel →
-   vault → LAN peer-to-peer sync between paired devices, end to end on
-   Windows and Android (owner scope decision 2026-08-30; pairing,
-   device keys, and encrypted transport are in scope — relay/E2EE stays
-   gated; see review §5).
+1. **The vertical slice** (GO ratified 2026-08-30, review closed).
+   Production code lives in `kernel/` (Rust workspace), `contracts/`
+   (public contracts), and `app/` (Compose Multiplatform, from M3);
+   spikes stay disposable reference. Milestones:
+   - **M1 kernel core** — store, capture commit, events/jobs,
+     operations; the S2 invariants rebuilt as product code with
+     crash-matrix tests in the spike style.
+   - **M2 vault** — projection + bidirectional reconciliation
+     (ADR 0007 semantics).
+   - **M3 boundary + shells** — UniFFI boundary (per-target bindings),
+     Compose desktop and Android apps, real microphone capture.
+   - **M4 transcription** — bundled first-party provider plugin over
+     the public contract, local-only (workshop decision 1), desktop as
+     coordinator for phone captures.
+   - **M5 LAN sync** — discovery, short-code pairing, device keys,
+     encrypted transport, op exchange; acceptance = the S4-extended
+     scenarios (pair, refuse unpaired, revoke, rejoin). Threat-model
+     rules apply (re-enrollment on restore, per-device quotas).
 3. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.

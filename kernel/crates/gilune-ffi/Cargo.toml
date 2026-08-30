@@ -1,0 +1,20 @@
+[package]
+name = "gilune-ffi"
+description = "The UniFFI boundary: narrow, versioned bindings over gilune-kernel. Bindings are generated per target from that target's own binary (07-compatibility)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "gilune_ffi"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[dependencies]
+gilune-kernel = { path = "../gilune-kernel" }
+thiserror.workspace = true
+uniffi = { version = "0.29", features = ["cli"] }

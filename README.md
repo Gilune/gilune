@@ -11,8 +11,10 @@ contracts. Devices sync by exchanging immutable operations: LAN-first, any
 dumb file store as a carrier, servers optional and self-hostable. AI may
 interpret your memory; it must never own it.
 
-**Status: pre-product.** Architecture and validation spikes; no application
-yet.
+**Status: vertical slice in progress.** The spike programme is complete
+and the foundation accepted (2026-08-30, `architecture/foundation-review.md`);
+production code is growing in [`kernel/`](kernel/) and
+[`contracts/`](contracts/), with the application shell to follow.
 
 - Product principles: [`sources/README.md`](sources/README.md)
 - Architecture package: [`architecture/README.md`](architecture/README.md)
