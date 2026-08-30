@@ -82,6 +82,15 @@ class BoundaryTest {
         assertTrue("boundary diagnostic" in (e.message ?: ""), "panic message should cross: ${e.message}")
         kernel.putRecord("still alive", null)
         assertEquals(1uL, kernel.recordCount())
+
+        // Symbolication: the panic hook's report must cross the boundary.
+        // Symbol quality differs per platform; the printed report is the
+        // evidence the README assesses.
+        val report = uniffi.spike_s1_kernel.lastPanicReport()
+        assertNotNull(report)
+        assertTrue("deliberate spike-s1 panic" in report, "report should carry the message")
+        assertTrue("backtrace:" in report, "report should carry a backtrace section")
+        println("PANIC REPORT (truncated):\n" + report.take(1200))
     }
 
     @Test

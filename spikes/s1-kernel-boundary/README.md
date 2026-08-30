@@ -138,22 +138,43 @@ the same shared Kotlin through the same UniFFI surface.
   emulator — indicative of nothing but itself). Every figure needs
   re-measuring on mid-range hardware, release build.
 
+## Evidence: symbolication, packaging, ARM64 (2026-08-30)
+
+- **Crash reports cross the boundary.** A panic hook captures message +
+  `Backtrace::force_capture` into `last_panic_report()`, asserted from
+  Kotlin in the shared suite on both platforms. Panic **site**
+  (file:line + message) always crosses via the exception as well.
+- **Symbol quality is host-dependent, and the surprise is inverted**:
+  - pure-Rust host on Windows: full symbols with file:line;
+  - **JVM host on Windows: frames captured, zero symbols resolved**
+    (dbghelp inside the JVM process — the one genuine diagnostics gap);
+  - Android/ART host: full symbol names from the release `.so`'s ELF
+    symtab (`<spike_s1_kernel::Kernel>::trigger_panic` and the uniffi
+    frames, no file:line).
+- **Desktop is packaged.** `createReleaseDistributable` (ProGuard off)
+  produces a self-contained app image of **122.4 MiB**, of which the
+  kernel dll + pdb are 4.1 MiB (~3%; dll alone 2.14 MiB) shipped via
+  Compose app resources; the packaged exe was launched and opened the
+  kernel from its own resources dir in 231 ms (cold JVM + first JNA
+  load). JVM + Compose runtime, not the kernel, is the size story.
+- **ARM64 builds through the same pipeline**: `aarch64-linux-android`
+  release `.so` 2.96 MiB; the dual-ABI debug APK (x86_64 + arm64-v8a)
+  is 31.08 MiB and passes the instrumented suite on the x86_64 emulator.
+
 ## Honest gaps (not yet evidence)
 
 - **No physical device.** The capture-commit and cold-start budgets are
   defined on mid-range hardware; emulator numbers above are explicitly
   out of scope for them, and the ADR 0001 gate names physical hardware.
-  ARM64 (`aarch64-linux-android`) has a rustup target installed but no
-  end-to-end build/run — the emulator path only proves x86_64.
-- Panic **message** crosses; a Rust **backtrace** does not by default.
-  Symbolication quality (panic hook, `RUST_BACKTRACE`, dump tooling) is
-  unassessed and is an explicit gate item.
+  The ARM64 `.so` builds and packages but has **never executed**.
+- JVM-host Windows backtraces resolve no symbols, and unresolved frames
+  print without addresses, so offline symbolication from the report
+  alone is impossible. Before ADR 0001 acceptance the crash path needs
+  module+offset output (backtrace crate) or minidump tooling.
 - Peak memory during streaming asserted by construction (chunk-sized
   buffers), not measured.
-- Desktop is not packaged: the dylib loads from the cargo target dir. The
-  jpackage/MSIX packaging cost and the release package-size contribution
-  of JVM + Compose are unmeasured. (Android does package the .so; only a
-  debug APK has been measured.)
+- Only the app-image format is measured: MSI needs WiX (untested), and
+  ProGuard is disabled, so minified size is unknown.
 - No deliberate bindings-skew test — though the checksum finding shows
   the runtime check works: mismatched bindings fail closed at first
   touch, loudly, on every call path.

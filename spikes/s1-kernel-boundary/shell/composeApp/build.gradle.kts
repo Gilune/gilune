@@ -89,12 +89,24 @@ android {
 compose.desktop {
     application {
         mainClass = "org.gilune.spike.s1.MainKt"
-        // The spike loads the kernel dylib from the cargo target dir; a real
-        // app would package it as a resource. Debug by default; override with
-        // -Ps1.kernel.profile=release.
+        // Dev runs load the kernel dylib from the cargo target dir; the
+        // packaged distributable carries it as an app resource instead
+        // (resources/windows-x64/, wired into jna.library.path by main()).
+        // Debug by default; override with -Ps1.kernel.profile=release.
         val profile = (project.findProperty("s1.kernel.profile") as String?) ?: "debug"
         val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
         jvmArgs += "-Djna.library.path=$kernelDir"
+
+        nativeDistributions {
+            packageName = "GiluneS1Diagnostics"
+            packageVersion = "1.0.0"
+            appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
+        }
+        buildTypes.release.proguard {
+            // Spike measures unminified size; minification of JNA/generated
+            // bindings is its own project.
+            isEnabled.set(false)
+        }
     }
 }
 

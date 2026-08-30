@@ -8,3 +8,5 @@ shell/composeApp/src/androidMain/generated/
 # Machine-local SDK path and cross-compiled kernel objects.
 shell/local.properties
 shell/composeApp/src/androidMain/jniLibs/
+# Kernel dylib staged for packaging; copied from kernel/target (README).
+shell/composeApp/resources/

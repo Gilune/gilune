@@ -90,6 +90,28 @@ fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+static LAST_PANIC: Mutex<Option<String>> = Mutex::new(None);
+
+/// The crash-symbolication gate item: capture message + backtrace for the
+/// last panic so the shell can fetch a diagnosable report across the
+/// boundary (uniffi only carries the panic message into the exception).
+fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let default = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let backtrace = std::backtrace::Backtrace::force_capture();
+            *LAST_PANIC.lock().unwrap() = Some(format!("{info}\nbacktrace:\n{backtrace}"));
+            default(info);
+        }));
+    });
+}
+
+#[uniffi::export]
+pub fn last_panic_report() -> Option<String> {
+    LAST_PANIC.lock().unwrap().clone()
+}
+
 /// Two migration steps run on open so "kernel initialisation and migration"
 /// is a real code path, not a stub.
 fn migrate(conn: &rusqlite::Connection) -> Result<i64> {
@@ -125,6 +147,7 @@ impl Kernel {
     /// Open (or create) a kernel at `dir`, running migrations.
     #[uniffi::constructor]
     pub fn open(dir: String) -> Result<Arc<Self>> {
+        install_panic_hook();
         let dir = PathBuf::from(dir);
         std::fs::create_dir_all(dir.join("blobs"))?;
         let conn = rusqlite::Connection::open(dir.join("s1.db"))?;
@@ -418,6 +441,18 @@ mod tests {
         assert_eq!(back, payload);
         use sha2::Digest;
         assert_eq!(handle.sha256, hex::encode(sha2::Sha256::digest(&back)));
+    }
+
+    #[test]
+    fn panic_report_carries_message_and_backtrace() {
+        let (_dir, k) = kernel();
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| k.trigger_panic()));
+        assert!(caught.is_err());
+        let report = last_panic_report().expect("hook should have captured");
+        assert!(report.contains("deliberate spike-s1 panic"));
+        assert!(report.contains("backtrace:"));
+        // Symbol quality is platform evidence, printed for the README.
+        println!("RUST-HOST PANIC REPORT:\n{}", &report[..report.len().min(1500)]);
     }
 
     struct Collect(Mutex<Vec<KernelEvent>>);
