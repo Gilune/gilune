@@ -30,7 +30,7 @@ fn walk_exportable(vault: &Path) -> Result<Vec<String>> {
         for entry in std::fs::read_dir(&dir)? {
             let entry = entry?;
             let path = entry.path();
-            let rel = path.strip_prefix(vault).unwrap().to_string_lossy().to_string();
+            let rel = crate::portable_rel(path.strip_prefix(vault).unwrap());
             if path.is_dir() {
                 if rel == ".gilune/local" {
                     continue;

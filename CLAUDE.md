@@ -45,26 +45,26 @@ namespaces are deliberately project-neutral and must not chase the name.
 - `spikes/s4-sync/README.md`, `spikes/s5-distribution-policy/README.md` —
   evidence reports for sync and store policy.
 
-## Status (as of 2026-08-29)
+## Status (as of 2026-08-30)
 
-Green on Linux: ADR 0002/0004/0007 (S2 crash matrix incl. migration against
-a real v1 fixture), ADR 0003's desktop half (S3: contract parity, sandbox
-containment, ~1 ms calls), ADR 0005/0008 semantics over a shared-folder
-relay (S4: convergence, gaps, corrupt ops, chunked blobs, tombstones).
-S5 policy matrix drafted from live sources. **Not yet validated: ADR 0001 —
-the Compose/Kotlin ↔ Rust boundary — which needs real Windows and Android
-hardware. That is Spike S1, and it is the next task.**
+Green on Linux AND Windows: ADR 0002/0004/0007 (S2 crash matrix incl.
+migration against a real v1 fixture), ADR 0003's desktop half (S3: contract
+parity, sandbox containment, ~1 ms calls), ADR 0005/0008 semantics over a
+shared-folder relay (S4: convergence, gaps, corrupt ops, chunked blobs,
+tombstones). The Windows runs (2026-08-30) found and fixed four
+portability faults — Windows fsync semantics (backup-semantics dirs,
+writable handles), rel-paths normalised to `/` as a portable contract,
+fixture byte-exactness via `.gitattributes`, and S3 harness timing windows
+that included the one-time guest build; each spike README's Windows
+evidence section has the details. S5 policy matrix drafted from live
+sources. **Not yet validated: ADR 0001 — the Compose/Kotlin ↔ Rust
+boundary — which needs real Windows and Android hardware. That is Spike
+S1, and it is the next task.**
 
 ## Next steps on a Windows machine
 
-1. **Toolchain**: rustup (stable ≥ 1.98) with the MSVC toolchain and Visual
-   Studio Build Tools. Then run the existing suites ON WINDOWS —
-   `spikes/s2-durable-capture$ cargo test` and
-   `spikes/s3-plugin-contract/host$ cargo test` (after
-   `rustup target add wasm32-wasip2`) — and add a Windows line to each spike
-   README's evidence section, with any fixes. Likely hazards: path
-   separators, SQLite WAL file locking, renames over open handles. Fix
-   forward; never weaken an invariant to make a platform pass.
+1. ~~Toolchain + run the existing suites on Windows~~ — done 2026-08-30;
+   both suites green (see spike README evidence sections).
 2. **Spike S1** (`architecture/spikes/README.md` § S1; ADR 0001): scaffold
    Compose Multiplatform (JDK 17+, Gradle) with the Rust kernel behind
    UniFFI-generated bindings; a diagnostic screen only; run the S1 fault

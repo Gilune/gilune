@@ -117,6 +117,11 @@ impl Harness {
 fn stdout(o: &Output) -> String {
     String::from_utf8_lossy(&o.stdout).to_string()
 }
+/// Host path as a `/`-separated string, so "Transcripts/" markers match on
+/// every platform.
+fn slashed(p: &std::path::Path) -> String {
+    p.to_string_lossy().replace('\\', "/")
+}
 fn stderr(o: &Output) -> String {
     String::from_utf8_lossy(&o.stderr).to_string()
 }
@@ -267,7 +272,7 @@ fn projection_and_reconcile_crash_points_converge() {
     // Externally edit two transcripts, crash mid-reconcile, rerun, converge.
     let transcripts: Vec<PathBuf> = files
         .iter()
-        .filter(|p| p.to_string_lossy().contains("Transcripts/"))
+        .filter(|p| slashed(p).contains("Transcripts/"))
         .cloned()
         .collect();
     assert_eq!(transcripts.len(), 2);
@@ -377,7 +382,7 @@ fn external_edit_becomes_revision_and_projection_canonicalises() {
     let transcript = h
         .md_files()
         .into_iter()
-        .find(|p| p.to_string_lossy().contains("Transcripts/"))
+        .find(|p| slashed(p).contains("Transcripts/"))
         .expect("transcript file");
     let content = std::fs::read_to_string(&transcript).unwrap();
     let edited = content.replace("original text", "corrected text");
@@ -401,7 +406,7 @@ fn external_delete_becomes_proposal_and_file_is_not_resurrected() {
     let transcript = h
         .md_files()
         .into_iter()
-        .find(|p| p.to_string_lossy().contains("Transcripts/"))
+        .find(|p| slashed(p).contains("Transcripts/"))
         .expect("transcript file");
     std::fs::remove_file(&transcript).unwrap();
 
@@ -425,7 +430,7 @@ fn malformed_front_matter_is_quarantined_untouched() {
     let transcript = h
         .md_files()
         .into_iter()
-        .find(|p| p.to_string_lossy().contains("Transcripts/"))
+        .find(|p| slashed(p).contains("Transcripts/"))
         .expect("transcript file");
     let broken = "---\ngilune: [unclosed\n---\n\nbody\n";
     std::fs::write(&transcript, broken).unwrap();
@@ -462,7 +467,7 @@ fn edited_source_is_flagged_never_rewritten_as_source_history() {
     let capture_md = h
         .md_files()
         .into_iter()
-        .find(|p| p.to_string_lossy().contains("Captures/"))
+        .find(|p| slashed(p).contains("Captures/"))
         .expect("capture file");
     let content = std::fs::read_to_string(&capture_md).unwrap();
     std::fs::write(&capture_md, content.replace("immutable", "tampered")).unwrap();
@@ -481,7 +486,7 @@ fn renamed_file_is_tracked_by_id_not_path() {
     let transcript = h
         .md_files()
         .into_iter()
-        .find(|p| p.to_string_lossy().contains("Transcripts/"))
+        .find(|p| slashed(p).contains("Transcripts/"))
         .expect("transcript file");
     let new_path = transcript.with_file_name("my own name.md");
     std::fs::rename(&transcript, &new_path).unwrap();
@@ -631,7 +636,7 @@ fn unknown_type_objects_are_preserved_projected_and_not_editable() {
     let unknown = h
         .md_files()
         .into_iter()
-        .find(|p| p.to_string_lossy().contains("Objects/"))
+        .find(|p| slashed(p).contains("Objects/"))
         .expect("unknown type projected under Objects/");
     let content = std::fs::read_to_string(&unknown).unwrap();
     assert!(content.contains("com.example.widgets/widget"));

@@ -54,7 +54,7 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<bool> {
     std::fs::create_dir_all(parent)?;
     let tmp = parent.join(format!(".tmp-{}", path.file_name().unwrap().to_string_lossy()));
     std::fs::write(&tmp, bytes)?;
-    std::fs::File::open(&tmp)?.sync_all()?;
+    crate::fsync_file(&tmp)?;
     std::fs::rename(&tmp, path)?;
     fsync_dir(parent)?;
     Ok(true)
@@ -456,7 +456,7 @@ fn assemble_pending_blobs(k: &mut Kernel, relay: &Path) -> Result<(usize, usize)
         }
         let staging = Kernel::staging_dir(&k.vault).join(format!("remote-{blob_id}"));
         std::fs::write(&staging, &bytes)?;
-        std::fs::File::open(&staging)?.sync_all()?;
+        crate::fsync_file(&staging)?;
         let target = k.vault.join(&rel_path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;

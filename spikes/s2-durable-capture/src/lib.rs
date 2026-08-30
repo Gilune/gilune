@@ -81,8 +81,46 @@ impl Kernel {
 }
 
 /// fsync a directory so a rename into it is durable.
+#[cfg(unix)]
 pub fn fsync_dir(dir: &Path) -> Result<()> {
     let f = std::fs::File::open(dir)?;
     f.sync_all()?;
     Ok(())
+}
+
+/// fsync a directory so a rename into it is durable.
+///
+/// Windows: directories only open with FILE_FLAG_BACKUP_SEMANTICS, and
+/// FlushFileBuffers demands a writable handle; a plain read-only open is
+/// ERROR_ACCESS_DENIED for both reasons.
+#[cfg(windows)]
+pub fn fsync_dir(dir: &Path) -> Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    let f = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(dir)?;
+    f.sync_all()?;
+    Ok(())
+}
+
+/// fsync a closed file by path. Windows FlushFileBuffers requires write
+/// access, so a read-only reopen (fine for fsync on POSIX) is refused there.
+pub fn fsync_file(path: &Path) -> Result<()> {
+    let f = std::fs::OpenOptions::new().write(true).open(path)?;
+    f.sync_all()?;
+    Ok(())
+}
+
+/// Relative paths stored in the database, export manifests, and sync files
+/// are a portable contract: `/`-separated on every platform, so a vault can
+/// move between operating systems. Joining them back onto a root with
+/// `Path::join` is fine — Windows accepts `/`.
+pub fn portable_rel(rel: &Path) -> String {
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }

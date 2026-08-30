@@ -150,8 +150,7 @@ fn write_atomic(vault: &Path, rel: &str, content: &str) -> Result<String> {
             target.file_name().unwrap().to_string_lossy()
         ));
         std::fs::write(&tmp, content)?;
-        let f = std::fs::File::open(&tmp)?;
-        f.sync_all()?;
+        crate::fsync_file(&tmp)?;
         std::fs::rename(&tmp, &target)?;
         fsync_dir(parent)?;
     }
@@ -254,11 +253,7 @@ fn scan_vault(vault: &Path) -> Result<Vec<ScannedFile>> {
                 }
                 stack.push(path);
             } else if name.ends_with(".md") && !name.starts_with(".tmp-") {
-                let rel = path
-                    .strip_prefix(vault)
-                    .unwrap()
-                    .to_string_lossy()
-                    .to_string();
+                let rel = crate::portable_rel(path.strip_prefix(vault).unwrap());
                 let bytes = std::fs::read(&path)?;
                 let text = String::from_utf8_lossy(&bytes).to_string();
                 let (front, malformed, body) = parse_front_matter(&text);

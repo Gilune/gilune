@@ -1,0 +1,4 @@
+# The v1 migration fixture was produced by the real schema-v1 binary and its
+# content hashes are recorded inside kernel.db: it must check out byte-exact
+# on every platform, so no end-of-line translation.
+spikes/s2-durable-capture/fixtures/** -text

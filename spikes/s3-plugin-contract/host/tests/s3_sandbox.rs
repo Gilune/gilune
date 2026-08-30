@@ -198,13 +198,16 @@ fn guest_crash_is_contained_and_sandbox_reusable() {
 
 #[test]
 fn infinite_loop_is_bounded_by_fuel() {
+    // Warm the shared sandbox first: the one-time guest build and JIT must
+    // not count against the fuel-bound wall-clock window.
+    let sb = sandbox();
     let started = std::time::Instant::now();
     let config = RunConfig {
         grants: full_grants(),
         fuel: 50_000_000,
         ..RunConfig::default()
     };
-    let report = sandbox().run(config, "spin", "-", "-").unwrap();
+    let report = sb.run(config, "spin", "-", "-").unwrap();
     let RunOutcome::Trapped(t) = report.outcome else {
         panic!("spin must trap on fuel exhaustion");
     };
@@ -273,8 +276,11 @@ fn unknown_handler_is_a_clean_error() {
 fn instantiation_and_call_cost_smoke() {
     // Not a pass/fail budget yet — record the numbers the ADR 0003 gate
     // needs. Generous ceiling only to catch pathology.
+    // component_path() may run the one-time guest cargo build; keep that
+    // outside the load+JIT measurement.
+    let component = component_path();
     let load_start = std::time::Instant::now();
-    let sb = Sandbox::load(&component_path()).unwrap();
+    let sb = Sandbox::load(&component).unwrap();
     let load = load_start.elapsed();
     let report = sb
         .run(cfg(full_grants()), "fake-transcribe", "src-1", "-")

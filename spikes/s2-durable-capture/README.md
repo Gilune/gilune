@@ -1,7 +1,7 @@
 # Spike S2 — Durable Capture, Events, Recovery, and Vault Projection
 
-Status: **In progress** — core fault matrix green on Linux; not yet run on
-target platforms.
+Status: **In progress** — core fault matrix green on Linux and Windows;
+Android still outstanding (S1 owns the platform boundary).
 
 Disposable evidence prototype (see `architecture/spikes/README.md`, S2) for:
 
@@ -106,6 +106,37 @@ cargo run -- --vault /tmp/v project
   unknown type projects in generic form, exports, survives, and rejects
   external edits into quarantine (constitution rules 1, 6, 9).
 
+## Evidence: Windows (Windows 11, MSVC, rustc 1.98, 2026-08-30)
+
+Same suite, 30 tests (20 matrix + 10 S4 sync), 6 consecutive runs, no
+flakes. The first Windows run failed wholesale and surfaced four
+portability faults, fixed forward without weakening an invariant:
+
+- **Directory fsync** — `File::open(dir)` is `ERROR_ACCESS_DENIED` on
+  Windows: directories only open with `FILE_FLAG_BACKUP_SEMANTICS`, and
+  `FlushFileBuffers` requires a writable handle. `fsync_dir` is now
+  platform-split; durability is enforced on both platforms, not skipped.
+- **File fsync via read-only reopen** — `FlushFileBuffers` also refuses
+  read-only handles, so the `File::open(tmp)?.sync_all()` pattern used
+  before renames failed identically. Replaced by `fsync_file`, which
+  reopens for write.
+- **Relative paths are a portable contract** — the vault and export walks
+  built rel-paths with the host separator. On Windows every projected file
+  then looked foreign to `reconcile` (all files became rename/import
+  candidates), and `.gilune/local` slipped past the export skip-check, so
+  device-local state travelled — a real invariant breach, caught by the
+  suite. Walks now normalise rel-paths to `/` (`portable_rel`); stored
+  `/` paths join back onto roots correctly on both platforms.
+- **Fixture byte-exactness (repo, not code)** — `core.autocrlf=true`
+  rewrote the v1 fixture's text files to CRLF on checkout, breaking the
+  content hashes recorded in its `kernel.db`. `.gitattributes` now pins
+  `fixtures/**` as `-text`.
+
+Worth keeping: the reconcile failure mode was preservation-favouring — a
+vault written with foreign separators produced import candidates and
+quarantine, not corruption — but the export leak shows "device-local state
+does not travel" only held per-platform until rel-paths were made portable.
+
 ## Honest gaps (not yet evidence)
 
 - Process abort only: no torn-write / power-failure simulation below the
@@ -116,8 +147,8 @@ cargo run -- --vault /tmp/v project
   by the real v1 binary), but only one migration exists; a materialised
   payload-rewriting migration remains untested.
 - Single process; no concurrent writers or cross-process lease contention.
-- Linux only; the acceptance gate needs Android and Windows runs (S1 owns
-  the platform boundary).
+- Linux and Windows only; the acceptance gate still needs an Android run
+  (S1 owns the platform boundary).
 - Timestamps in front matter are epoch milliseconds; the human-readable
   format is a vault-format decision, not settled here.
 - Blob bytes stored once (in-vault); the copy-versus-reference measurement

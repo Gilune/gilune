@@ -1,7 +1,7 @@
 # Spike S3 — Plugin Contract, Sandbox, and Lifecycle
 
-Status: **In progress** — sandboxed-component half green on Linux;
-bundled-Android parity, streaming, and lifecycle remain.
+Status: **In progress** — sandboxed-component half green on Linux and
+Windows; bundled-Android parity, streaming, and lifecycle remain.
 
 Evidence prototype for ADR 0003 (WIT contracts, WebAssembly component
 execution) and the capability model in `architecture/05-plugin-system.md`.
@@ -58,6 +58,24 @@ broader must become a declared, granted capability. Plugin authors'
 "innocent" standard library use is itself a capability surface; the S5
 policy review and the manifest schema must account for it.
 
+## Evidence: Windows (Windows 11, MSVC, rustc 1.98, 2026-08-30)
+
+Same 13 tests green, cold parallel and serial, with no changes to host,
+guest, or contract — containment, capability denial, and output policy
+behaved identically. Numbers: component load+JIT ~0.35 s (warm OS cache);
+instantiate + call ~1 ms, matching Linux. Fuel per transcribe call observed
+as 33,816 against the 13,335 recorded on Linux: fuel is a property of the
+compiled guest, the lockfile is unchanged, and the cause (toolchain
+codegen for `wasm32-wasip2`) was not chased — within-build determinism,
+which is what the test asserts, holds.
+
+One harness fault fixed: both timing tests started their clocks before the
+one-time guest `cargo build` that `component_path()` triggers, so a cold
+parallel run measured the build — and thirteen tests queueing on cargo's
+target-dir lock — as "load" (~29 s observed) and failed the ceiling. The
+Linux numbers were evidently taken warm. The guest build is now excluded
+from the measured windows on every platform.
+
 ## Honest gaps (not yet evidence)
 
 - No bundled-Android side yet: parity is proved against S2's native Rust
@@ -66,6 +84,7 @@ policy review and the manifest schema must account for it.
   through WIT remain untested — the hardest open question for ADR 0003.
 - No manifest/signature pipeline, no upgrade/quiesce/uninstall lifecycle,
   no per-use confirmation UX: contract and sandbox only.
-- Fuel/latency numbers are one machine, JIT warm-cache untested on mobile.
+- Fuel/latency numbers are two desktop machines (Linux, Windows); JIT
+  warm-cache untested on mobile.
 - The component still links Rust std; a no_std or stripped profile may
   shrink the WASI surface and size further.
