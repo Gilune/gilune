@@ -8,6 +8,9 @@ immutable operations, LAN-first, servers optional. Product principles live in
 authority — read its README first. The project was previously named Memory
 Project, then Linoema; the permanent `memory`/`org.memory` contract
 namespaces are deliberately project-neutral and must not chase the name.
+(One deliberate exception, owner decision 2026-08-30: vault front-matter
+*keys* are `gilune-*` — they are user-visible product surface — while the
+identifiers in their *values* stay `org.memory.*`.)
 
 ## Ground rules (distilled — the constitution is the law, read it in full)
 

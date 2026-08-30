@@ -9,8 +9,11 @@
 //!
 //! Rendering is deterministic: the same committed state always produces
 //! the same bytes, so delete-and-rebuild converges and sync replicas
-//! project identically. Front-matter keys are `memory-*` — the vault
-//! format is a public contract and stays project-neutral.
+//! project identically. Front-matter keys are `gilune-*` (owner decision
+//! 2026-08-30): keys are user-visible product surface in every note, so
+//! they carry the name deliberately. The *values* stay contract-neutral —
+//! type and event identifiers remain `org.memory.*` per the permanent
+//! namespace rule — so a future rename touches keys only.
 
 use crate::capture::record_operation;
 use crate::crashpoints::crashpoint;
@@ -130,9 +133,9 @@ impl Store {
                     summary.imports += self.record_import(&rel_path)?;
                 }
                 FrontMatter::Parsed { keys, body } => {
-                    let Some(object_id) = keys.get("memory-id").cloned() else {
+                    let Some(object_id) = keys.get("gilune-id").cloned() else {
                         summary.quarantined +=
-                            self.quarantine(&rel_path, "front matter has no memory-id")?;
+                            self.quarantine(&rel_path, "front matter has no gilune-id")?;
                         continue;
                     };
                     let known: Option<(String, String)> = self
@@ -317,16 +320,16 @@ impl Store {
     fn render(&self, head: &Head) -> Result<String> {
         let payload: serde_json::Value = serde_json::from_str(&head.payload)?;
         let mut front = String::from("---\n");
-        front.push_str(&format!("memory-id: {}\n", head.object_id));
-        front.push_str(&format!("memory-type: {}\n", head.type_id));
-        front.push_str(&format!("memory-schema: {}\n", head.type_schema));
-        front.push_str(&format!("memory-revision: {}\n", head.revision_id));
-        front.push_str(&format!("memory-created-ms: {}\n", head.created_ms));
+        front.push_str(&format!("gilune-id: {}\n", head.object_id));
+        front.push_str(&format!("gilune-type: {}\n", head.type_id));
+        front.push_str(&format!("gilune-schema: {}\n", head.type_schema));
+        front.push_str(&format!("gilune-revision: {}\n", head.revision_id));
+        front.push_str(&format!("gilune-created-ms: {}\n", head.created_ms));
         if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
-            front.push_str(&format!("memory-blob: {blob_rel}\n"));
+            front.push_str(&format!("gilune-blob: {blob_rel}\n"));
         }
         if head.conflicted {
-            front.push_str("memory-conflicted: true\n");
+            front.push_str("gilune-conflicted: true\n");
         }
         front.push_str("---\n");
 
@@ -558,8 +561,8 @@ mod tests {
         let (_dir, store, rel) = captured("Remember the milk");
         let text = read_rel(&store, &rel);
         assert!(text.starts_with("---\n"));
-        assert!(text.contains("memory-type: org.memory.source\n"));
-        assert!(text.contains("memory-blob: "));
+        assert!(text.contains("gilune-type: org.memory.source\n"));
+        assert!(text.contains("gilune-blob: "));
         assert!(text.ends_with("Remember the milk"));
         assert_eq!(store.status().expect("status").projections, 1);
     }
