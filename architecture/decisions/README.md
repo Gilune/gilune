@@ -13,7 +13,7 @@ technologies can be rejected without weakening the product principles.
 | [0006](0006-mobile-plugin-and-ui-profile.md) | Bundled mobile execution and declarative third-party UI | Accepted for v0 |
 | [0007](0007-markdown-vault-projection.md) | Markdown vault projection over the kernel store; the vault is the export | Proposed |
 | [0008](0008-headless-sync-agent-and-lan-first-sync.md) | Headless desktop sync agent and LAN-first device sync | Proposed |
-| [0009](0009-licensing.md) | MIT/Apache contracts and SDK, MPL-2.0 kernel and apps, AGPL server, DCO | Proposed |
+| [0009](0009-licensing.md) | MIT OR Apache-2.0 repository-wide, DCO | Accepted |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

@@ -80,9 +80,10 @@ physical device. That is the next task.**
    C:\Android\android-sdk` env var must be overridden to
    `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\
    adb.exe` fights the SDK's adb server — kill both, start the SDK's.
-3. **Owner decisions still open**: ratify or amend ADR 0009 (licensing) and
-   add the LICENSE files its split requires; fill the Gilune name TODO in
+3. **Owner decisions still open**: fill the Gilune name TODO in
    `architecture/README.md`; schedule the S5 threat-model workshop.
+   (ADR 0009 was ratified 2026-08-30: MIT OR Apache-2.0 repository-wide,
+   DCO; root LICENSE-MIT + LICENSE-APACHE are in place.)
 
 ## Conventions
 

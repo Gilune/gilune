@@ -1,8 +1,9 @@
 # ADR 0009: Licensing
 
-Status: **Proposed**  
+Status: **Accepted** (owner ratification 2026-08-30, amending the draft)  
 Validation: owner ratification — this is a product decision, not a spike;
-the draft exists so the choice is made deliberately rather than by default.
+the draft existed so the choice was made deliberately rather than by
+default.
 
 ## Context
 
@@ -31,32 +32,43 @@ A related choice rides along: contribution terms. A CLA enables future
 relicensing and dual-licensing but creates a rights asymmetry between the
 project and contributors; a DCO keeps inbound = outbound.
 
-## Proposed decision
+## Decision (ratified)
 
-- **Contracts, plugin SDK, format specifications, test vectors**:
-  dual-licensed **MIT OR Apache-2.0** (the Rust ecosystem convention;
-  Apache contributes the patent grant, MIT the maximal simplicity).
-- **Kernel and applications**: **MPL-2.0** — file-level copyleft keeps
-  changes to our files open, imposes nothing on plugins, other processes,
-  or larger works, and has no linking ambiguity (Syncthing is the working
-  precedent in exactly our category).
-- **Server/relay**: **AGPL-3.0-only** — self-hosting stays first-class,
-  and any hosted offering, ours included, publishes its server changes.
+- **Everything — contracts, SDK, formats, kernel, applications,
+  server/relay**: dual-licensed **MIT OR Apache-2.0** (the Rust ecosystem
+  convention; Apache contributes the patent grant, MIT the maximal
+  simplicity). One licence pair, repository-wide.
 - **Contribution terms**: **DCO**, no CLA. The project binds itself to the
   same terms as everyone else; relicensing flexibility is deliberately
   given up.
 - **Name and marks**: “Gilune” is protected by trademark policy, not by
   the code licenses; forks are welcome under a different name.
-- SPDX headers throughout; per-directory LICENSE files; a dependency
-  license audit (e.g. cargo-deny) in CI before the first release.
+- Root `LICENSE-MIT` and `LICENSE-APACHE`; SPDX headers when files start
+  travelling on their own; a dependency license audit (e.g. cargo-deny)
+  in CI before the first release.
+
+The owner's rationale, recorded for the future reader: the hosted
+offering earns by being the maintained, convenient instance, not by
+exclusivity. Third parties self-hosting — or even selling hosting of —
+the server is accepted, welcomed, and not a threat the licence needs to
+defend against. The drafted split (below) was therefore protection
+against a consequence the owner does not consider harmful, at the price
+of a three-licence surface.
 
 ## Alternatives considered
 
-### Permissive everywhere (MIT/Apache)
+### The drafted split (MIT/Apache contracts, MPL-2.0 kernel, AGPL server)
 
-Maximises adoption and simplicity, but permits closed hosted forks of the
-server, making “hosted offering coexists with self-hosting” a hope rather
-than a guarantee.
+The original proposal: permissive contracts for plugin authors, file-level
+copyleft on the kernel (Syncthing precedent), network copyleft on the
+server so hosted forks must publish changes. Rejected at ratification:
+the AGPL protection guards against commercial hosted forks, which the
+owner explicitly accepts; with that consequence embraced, the split's
+extra licence surface (three licences, per-directory files, harder
+dependency story) buys nothing the project wants. Comparables reviewed at
+ratification: Cap (mostly AGPL-3.0 with MIT crates — effectively this
+split) and FeatureHub (Apache-2.0 + Commons Clause — source-available,
+which rule 13 forbids here).
 
 ### Strong copyleft everywhere (GPL/AGPL)
 
@@ -79,13 +91,13 @@ to enable.
 
 ## Consequences
 
-- The split must be visible in the repository layout (per-crate/dir
-  licensing), and every contract artifact publishable to third parties
-  carries the permissive pair.
-- Dependency choices are constrained (no GPL-incompatible or
-  source-available dependencies in MPL/AGPL components; audit in CI).
-- The hosted service, when it exists, ships its server source as a matter
-  of license, not goodwill.
-- Changing any of this later is an explicit superseding ADR; loosening
-  copyleft after external contributions arrive is effectively impossible
-  without those contributors — by design.
+- One licence pair repository-wide: root `LICENSE-MIT` and
+  `LICENSE-APACHE`, no per-directory scheme.
+- Anyone may run, modify, and commercially host the server without
+  publishing changes; the project's hosted offering competes on being the
+  maintained instance, not on licence terms.
+- Dependency constraints are minimal (avoid copyleft-incompatible or
+  source-available dependencies; audit in CI before first release).
+- Tightening the licence later, after external contributions arrive under
+  MIT OR Apache-2.0, is effectively impossible without those contributors
+  — by design (DCO, inbound = outbound).
