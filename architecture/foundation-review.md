@@ -1,6 +1,8 @@
 # Foundation Acceptance Review
 
-Status: **Prepared — awaiting the owner sitting** (prepared 2026-08-30)
+Status: **§1 dispositions ratified by the owner (2026-08-30) and
+executed — 0002 and 0007 are Accepted for v0. §5 go/no-go is the one
+open item.** (prepared 2026-08-30)
 
 The spike plan requires a single review against the constitution after all
 spikes, producing: final disposition of every Proposed ADR, revised

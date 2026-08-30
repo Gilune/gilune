@@ -1,7 +1,13 @@
 # ADR 0007: Markdown Vault Projection
 
-Status: **Proposed**  
-Validation: Spike S2 (extended)
+Status: **Accepted for v0** (foundation review, owner ratification
+2026-08-30)  
+Validation: Spike S2 (extended) — acceptance gate met on Linux and
+Windows: projection, delete-and-rebuild, bidirectional reconciliation
+including injected crash points, and closed-vault restore on an
+independent tree. The copy-versus-reference blob measurement is moot in
+the ratified layout (blobs live once, in the vault); the human-readable
+timestamp format remains an open vault-format detail.
 
 ## Context
 
@@ -29,7 +35,7 @@ this pattern is drawn from (Obsidian's disposable cache, Jujutsu's
 working-copy snapshots, Fossil's rebuildable tables, Logseq's dual-truth
 failure).
 
-## Proposed decision
+## Decision
 
 - The user's data directory is a **vault**: a folder of Markdown files with
   YAML front matter, original blobs in standard formats, and attachments,

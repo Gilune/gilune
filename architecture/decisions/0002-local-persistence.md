@@ -1,7 +1,12 @@
 # ADR 0002: Local Persistence
 
-Status: **Proposed**  
-Validation: Spike S2
+Status: **Accepted for v0** (foundation review, owner ratification
+2026-08-30)  
+Validation: Spike S2 — acceptance gate met: full termination matrix
+including migration against a real v1 fixture, Linux and Windows, no
+flakes. Pre-1.0 hardening owed: an I/O-interposition/fault-injecting
+filesystem pass (process aborts only so far) and a second, materialised
+migration shape. Encryption-at-rest rides with the crypto ADR.
 
 ## Context
 
@@ -13,7 +18,7 @@ database rows.
 Plugin schemas must be extensible without giving plugins database access or
 turning the entire store into an unindexed entity-attribute-value system.
 
-## Proposed decision
+## Decision
 
 - Use embedded SQLite for kernel envelopes, revisions, relationships,
   provenance, operations, events, jobs, schemas, grants, and blob metadata.

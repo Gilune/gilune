@@ -72,13 +72,13 @@ should be read as Gilune.
 | Durable, at-least-once event processing | Accepted for v0 | Capture/recovery spike |
 | Kotlin Multiplatform/Compose application shell | Accepted for v0 (provisional; device budgets assumed) | Kernel integration spike |
 | Rust portable kernel | Accepted for v0 (provisional; device budgets assumed) | Kernel integration spike |
-| SQLite plus transactional blob storage | Proposed | Capture/recovery spike |
+| SQLite plus transactional blob storage | Accepted for v0 | Capture/recovery spike |
 | WIT contracts and WebAssembly component plugins | Proposed | Plugin spike |
 | Bundled mobile plugin execution | Accepted for v0 | Plugin and policy spikes |
 | Installable sandboxed desktop/server components | Proposed | Plugin spike |
 | Operation-based sync with an opaque encrypted relay | Proposed | Sync spike |
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
-| Markdown vault projection; the vault is the export | Proposed | Capture/recovery spike |
+| Markdown vault projection; the vault is the export | Accepted for v0 | Capture/recovery spike |
 | Headless sync agent with LAN-first device sync | Proposed | Kernel and sync spikes |
 | MIT OR Apache-2.0 licensing repository-wide | Accepted | Owner ratification (2026-08-30) |
 | Downloadable store plugins via the sandboxed runtime | Accepted (direction; store test submission gates promises) | S5 research + future test submission |
