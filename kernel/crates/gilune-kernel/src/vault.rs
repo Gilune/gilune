@@ -309,11 +309,13 @@ impl Store {
                 return Ok(format!("{stem}.md"));
             }
         }
-        Ok(format!(
-            "Objects/{}-{}.md",
-            head.type_id.rsplit('.').next().unwrap_or("object"),
-            ids::short(&head.object_id)
-        ))
+        // Blobless objects project into a folder named for their type:
+        // org.memory.transcript -> Transcripts/transcript-<short>.md.
+        let last = head.type_id.rsplit('.').next().unwrap_or("object");
+        let mut folder: String = last.chars().take(1).flat_map(char::to_uppercase).collect();
+        folder.push_str(&last[1.min(last.len())..]);
+        folder.push('s');
+        Ok(format!("{folder}/{last}-{}.md", ids::short(&head.object_id)))
     }
 
     /// Deterministic canonical form: same committed state, same bytes.

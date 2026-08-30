@@ -21,7 +21,7 @@ fn run() -> Result<(), String> {
     let mut args = args.iter().map(String::as_str);
 
     let usage =
-        "usage: gilune-cli --vault <dir> <init|capture --text <text>|project|reconcile|status|verify>";
+        "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|project|reconcile|status|verify>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
@@ -74,6 +74,30 @@ fn run() -> Result<(), String> {
                     "proposals_open": s.proposals_open,
                     "quarantined_files": s.quarantined_files,
                     "import_candidates": s.import_candidates,
+                })
+            );
+            Ok(())
+        }
+        Some("work") => {
+            // Dev tool: runs the deterministic stand-in transcriber, the
+            // same one the crash harness aborts mid-commit.
+            store
+                .subscribe("transcribe", gilune_kernel::capture::SOURCE_READY_EVENT)
+                .map_err(|e| e.to_string())?;
+            let s = store
+                .run_pending_jobs(
+                    &[&gilune_kernel::processor::FakeTranscriber],
+                    gilune_kernel::ids::now_ms(),
+                    30_000,
+                )
+                .map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "completed": s.completed,
+                    "skipped_duplicate": s.skipped_duplicate,
+                    "failed": s.failed,
+                    "outputs": s.outputs,
                 })
             );
             Ok(())

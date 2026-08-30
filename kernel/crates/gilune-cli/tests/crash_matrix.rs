@@ -105,6 +105,38 @@ fn happy_path_reports_saved_and_verifies_end_to_end() {
 }
 
 #[test]
+fn a_crash_mid_output_commit_yields_exactly_one_transcript_on_retry() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    {
+        let store = gilune_kernel::store::Store::open(dir.path()).expect("open");
+        store
+            .subscribe("transcribe", gilune_kernel::capture::SOURCE_READY_EVENT)
+            .expect("subscribe");
+        store.capture_bytes("wav", &[9u8; 128]).expect("wav capture");
+    }
+    let crashed = cli(dir.path(), Some("output.commit.inside"), &["work"]);
+    assert!(!crashed.status.success(), "work must die mid-commit");
+
+    // The crashed run still holds the job's lease; retry past its expiry.
+    let store = gilune_kernel::store::Store::open(dir.path()).expect("reopen");
+    let past_lease = gilune_kernel::ids::now_ms() + 60_000;
+    let retried = store
+        .run_pending_jobs(&[&gilune_kernel::processor::FakeTranscriber], past_lease, 30_000)
+        .expect("retry");
+    assert_eq!(retried.outputs, 1, "the rolled-back transcript commits exactly once");
+
+    let rerun = store
+        .run_pending_jobs(
+            &[&gilune_kernel::processor::FakeTranscriber],
+            past_lease + 60_000,
+            30_000,
+        )
+        .expect("idempotent rerun");
+    assert_eq!(rerun.outputs, 0, "no duplicates after crash + retry");
+    assert!(store.verify().expect("verify").is_empty());
+}
+
+#[test]
 fn repeated_captures_accumulate_and_stay_verifiable() {
     let dir = tempfile::tempdir().expect("tempdir");
     for i in 0..5 {

@@ -8,6 +8,7 @@ pub mod crashpoints;
 pub mod fs;
 pub mod ids;
 pub mod jobs;
+pub mod processor;
 pub mod query;
 pub mod store;
 pub mod vault;

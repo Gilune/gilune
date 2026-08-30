@@ -1,0 +1,41 @@
+// The Gilune processor contract, v0.1 — the public seam between the
+// kernel and any processor implementation, bundled or sandboxed
+// (ADR 0003). Namespaces are permanently project-neutral (org:memory).
+//
+// The host import is shaped like a scoped `objects.read` grant: a
+// processor sees its job's subject and nothing else. Outputs are
+// proposals; the kernel owns committing them idempotently with
+// provenance. Handlers run at-least-once and must be deterministic
+// enough that recovery failures are distinguishable from provider
+// variation.
+
+package org:memory@0.1.0;
+
+interface host-objects {
+    // The subject's current head payload (canonical JSON document).
+    subject-payload: func() -> result<string, string>;
+    // The subject's original blob bytes, digest-verified by the host.
+    subject-blob: func() -> result<list<u8>, string>;
+}
+
+interface handler {
+    record job {
+        event-id: string,
+        event-type: string,
+        subject-id: string,
+        payload: string,
+    }
+
+    record proposed-output {
+        type-id: string,
+        type-schema: s64,
+        payload: string,
+    }
+
+    process: func(j: job) -> result<list<proposed-output>, string>;
+}
+
+world processor {
+    import host-objects;
+    export handler;
+}

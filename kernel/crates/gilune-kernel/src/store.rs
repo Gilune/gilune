@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -267,6 +267,25 @@ const MIGRATIONS: &[&str] = &[
      CREATE TABLE imports (
          rel_path TEXT PRIMARY KEY,
          created_ms INTEGER NOT NULL
+     );",
+    // v2 -> v3: processing (constitution rules 2 and 7). `processing_runs`
+    // makes handler execution idempotent — one run per (processor,
+    // idempotency key), no matter how often the job is delivered.
+    // `provenance` links every interpretation back to its inputs.
+    "CREATE TABLE processing_runs (
+         run_id TEXT PRIMARY KEY,
+         processor_id TEXT NOT NULL,
+         idempotency_key TEXT NOT NULL,
+         event_id TEXT NOT NULL,
+         created_ms INTEGER NOT NULL,
+         UNIQUE (processor_id, idempotency_key)
+     );
+     CREATE TABLE provenance (
+         object_id TEXT NOT NULL REFERENCES objects(object_id),
+         target_id TEXT NOT NULL,
+         relation TEXT NOT NULL,
+         processor_id TEXT,
+         PRIMARY KEY (object_id, target_id, relation)
      );",
 ];
 
