@@ -39,6 +39,14 @@ migrations. After `1.0`, a deprecated major API remains supported for at least
 one full stable release train, and removal requires an announced replacement and
 data-impact statement.
 
+Generated FFI bindings and the binary they were generated from are one
+versioned artifact, produced and shipped together per target. Binding
+checksums are target-dependent (S1 finding, 2026-08-30: identical source
+produced different API checksums for Windows and Android builds), so a
+packaging pipeline must never pair bindings from one build with a binary
+from another; the mismatch fails closed at first call, loudly, which is the
+intended behaviour and must not be weakened.
+
 ## Schema evolution
 
 Schema IDs are permanent and versions are positive integers.

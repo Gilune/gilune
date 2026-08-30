@@ -98,6 +98,11 @@ to be replaceable:
 
 ## Exit gate
 
+The foundation acceptance review the spike plan requires is prepared in
+[`foundation-review.md`](foundation-review.md) (2026-08-30) — ADR
+dispositions, the constitution-to-evidence trace, consolidated gates, and
+a go recommendation — awaiting the owner sitting.
+
 Feature development beyond the vertical slice should not depend on the proposed
 stack until the spikes demonstrate all of the following:
 

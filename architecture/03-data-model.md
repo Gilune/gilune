@@ -225,3 +225,10 @@ store quiescent, plus an integrity manifest. Together they contain:
 Indexes, retry attempts, cached provider responses, capability grants, and
 secrets are not user data and need not be included in the portable export.
 
+Every relative path recorded in kernel stores, manifests, front matter, or
+operation files is `/`-separated regardless of host platform. Paths are a
+portable contract: a vault written on one operating system must reconcile,
+sync, and export identically on another (S2 Windows evidence, 2026-08-30 —
+host-separator paths made every projected file foreign to reconciliation
+and let device-local state escape the export exclusion).
+

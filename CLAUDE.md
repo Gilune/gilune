@@ -74,17 +74,22 @@ gates promises) are ratified. **Next: application-level engineering — see
 
 ## Next steps
 
-1. **The vertical slice**: first application code under
+1. **The foundation acceptance review sitting** (owner):
+   `architecture/foundation-review.md` is prepared — ratify the ADR
+   dispositions (§1) and the go/no-go (§5); the S5 threat-model workshop
+   feeds its gates and needs the same sitting or its own hour.
+2. **The vertical slice** (on "go"): first application code under
    `architecture/09-engineering-conventions.md` — capture → kernel →
-   vault → sync end to end, per the exit gate in `architecture/README.md`.
-2. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
+   vault → shared-folder sync end to end on Windows and Android, scope
+   drawn to touch no gated area (see review §5).
+3. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.
    Machine notes: emulator AVD `gilune-s1` exists; stale `ANDROID_HOME=
    C:\Android\android-sdk` env var must be overridden to
    `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\
    adb.exe` fights the SDK's adb server — kill both, start the SDK's.
-3. **Owner decisions still open**: fill the Gilune name TODO in
+4. **Owner decisions still open**: fill the Gilune name TODO in
    `architecture/README.md`; schedule the S5 threat-model workshop.
    (ADR 0009 was ratified 2026-08-30: MIT OR Apache-2.0 repository-wide,
    DCO; root LICENSE-MIT + LICENSE-APACHE are in place.)

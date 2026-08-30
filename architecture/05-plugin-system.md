@@ -94,6 +94,14 @@ Initial families include:
 A plugin receives a capability handle, not a global kernel client. The host
 validates every call against the installed manifest and current grant.
 
+A standard-library component implicitly imports WASI interfaces (io, clocks,
+random, cli) even when its own world imports only the plugin contract (S3
+finding, 2026-08-29). The host therefore always supplies a deny-by-default
+WASI context — no filesystem, network, or environment, discarded stdio — and
+any broader ambient facility must be a declared, granted capability. The
+manifest schema accounts for this implicit surface; "innocent" standard
+library use is itself a capability question.
+
 High-risk grants can require per-use confirmation. Revocation affects future
 calls and waiting jobs but does not retroactively delete user-owned outputs.
 
