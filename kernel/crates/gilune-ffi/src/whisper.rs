@@ -1,0 +1,85 @@
+//! The local Whisper transcription provider (bundled profile, desktop).
+//! Local-only by decision: audio never leaves the machine. Accepts the
+//! app's canonical WAV (16 kHz mono s16, the format both recorders emit);
+//! anything else fails the job visibly rather than guessing.
+
+use gilune_kernel::jobs::Job;
+use gilune_kernel::processor::{Processor, ProcessorCtx, ProposedOutput};
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+pub struct WhisperTranscriber {
+    ctx: WhisperContext,
+}
+
+impl WhisperTranscriber {
+    pub fn load(model_path: &str) -> Result<Self, String> {
+        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
+            .map_err(|e| format!("loading whisper model {model_path}: {e}"))?;
+        Ok(Self { ctx })
+    }
+
+    fn transcribe(&self, samples: &[f32]) -> Result<String, String> {
+        let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+        params.set_language(Some("auto"));
+        state.full(params, samples).map_err(|e| e.to_string())?;
+        let mut text = String::new();
+        for i in 0..state.full_n_segments() {
+            if let Some(segment) = state.get_segment(i) {
+                text.push_str(segment.to_str_lossy().map_err(|e| e.to_string())?.trim());
+                text.push(' ');
+            }
+        }
+        Ok(text.trim().to_string())
+    }
+}
+
+/// Parse the app's canonical WAV: 44-byte PCM header, 16 kHz mono s16.
+fn canonical_wav_samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
+    if bytes.len() < 44 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return Err("not a canonical Gilune WAV".to_string());
+    }
+    let channels = u16::from_le_bytes([bytes[22], bytes[23]]);
+    let sample_rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]);
+    let bits = u16::from_le_bytes([bytes[34], bytes[35]]);
+    if channels != 1 || sample_rate != 16_000 || bits != 16 {
+        return Err(format!(
+            "unsupported WAV shape: {channels}ch {sample_rate}Hz {bits}bit (expected 1ch 16000Hz 16bit)"
+        ));
+    }
+    let pcm = &bytes[44..];
+    Ok(pcm
+        .chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+        .collect())
+}
+
+impl Processor for WhisperTranscriber {
+    fn id(&self) -> &str {
+        "transcribe"
+    }
+
+    fn process(&self, ctx: &ProcessorCtx<'_>, _job: &Job) -> Result<Vec<ProposedOutput>, String> {
+        let payload: serde_json::Value =
+            serde_json::from_str(&ctx.subject_payload().map_err(|e| e.to_string())?)
+                .map_err(|e| e.to_string())?;
+        if payload.get("media").and_then(|v| v.as_str()) != Some("wav") {
+            return Ok(Vec::new());
+        }
+        let bytes = ctx.subject_blob().map_err(|e| e.to_string())?;
+        let samples = canonical_wav_samples(&bytes)?;
+        if samples.len() < 16_000 / 10 {
+            return Err("recording shorter than 100 ms".to_string());
+        }
+        let text = self.transcribe(&samples)?;
+        Ok(vec![ProposedOutput {
+            type_id: "org.memory.transcript".to_string(),
+            type_schema: 1,
+            payload: serde_json::json!({ "text": text }).to_string(),
+        }])
+    }
+}

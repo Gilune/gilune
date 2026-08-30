@@ -106,9 +106,21 @@ pub struct TombstoneProposal {
     pub object_id: String,
 }
 
+#[cfg(feature = "whisper")]
+mod whisper;
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ProcessingSummary {
+    pub completed: i64,
+    pub skipped_duplicate: i64,
+    pub failed: i64,
+    pub outputs: i64,
+}
+
 #[derive(uniffi::Object)]
 pub struct Gilune {
     store: Mutex<gilune_kernel::store::Store>,
+    processors: Mutex<Vec<Box<dyn gilune_kernel::processor::Processor>>>,
 }
 
 impl Gilune {
@@ -126,7 +138,52 @@ impl Gilune {
     #[uniffi::constructor]
     pub fn open(dir: String) -> FfiResult<Arc<Self>> {
         let store = gilune_kernel::store::Store::open(dir)?;
-        Ok(Arc::new(Self { store: Mutex::new(store) }))
+        Ok(Arc::new(Self {
+            store: Mutex::new(store),
+            processors: Mutex::new(Vec::new()),
+        }))
+    }
+
+    /// Enable local speech-to-text with a Whisper model file. Desktop
+    /// builds only (`whisper` feature); Android v0 captures and lets a
+    /// paired coordinator transcribe (threat-model decision 1).
+    pub fn enable_whisper(&self, model_path: String) -> FfiResult<()> {
+        #[cfg(feature = "whisper")]
+        {
+            let transcriber = whisper::WhisperTranscriber::load(&model_path)
+                .map_err(|detail| GiluneError::Invalid { detail })?;
+            self.store()
+                .subscribe("transcribe", gilune_kernel::capture::SOURCE_READY_EVENT)?;
+            self.processors
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(Box::new(transcriber));
+            Ok(())
+        }
+        #[cfg(not(feature = "whisper"))]
+        {
+            let _ = model_path;
+            Err(GiluneError::Invalid {
+                detail: "this build has no local transcription".into(),
+            })
+        }
+    }
+
+    /// Run pending processing jobs with whatever processors this build
+    /// registered. A no-op when none are (Android v0).
+    pub fn run_processing(&self) -> FfiResult<ProcessingSummary> {
+        let processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
+        let refs: Vec<&dyn gilune_kernel::processor::Processor> =
+            processors.iter().map(|p| p.as_ref()).collect();
+        let s = self
+            .store()
+            .run_pending_jobs(&refs, gilune_kernel::ids::now_ms(), 60_000)?;
+        Ok(ProcessingSummary {
+            completed: s.completed,
+            skipped_duplicate: s.skipped_duplicate,
+            failed: s.failed,
+            outputs: s.outputs,
+        })
     }
 
     pub fn schema_version(&self) -> FfiResult<i64> {

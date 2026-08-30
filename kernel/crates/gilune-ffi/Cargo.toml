@@ -16,5 +16,15 @@ path = "src/bin/uniffi-bindgen.rs"
 
 [dependencies]
 gilune-kernel = { path = "../gilune-kernel" }
+serde_json.workspace = true
 thiserror.workspace = true
 uniffi = { version = "0.29", features = ["cli"] }
+whisper-rs = { version = "0.16", optional = true }
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[features]
+# Local speech-to-text (desktop builds; the Android v0 profile captures
+# and syncs to a coordinator instead, per the threat-model decision).
+whisper = ["dep:whisper-rs"]
