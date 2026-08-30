@@ -108,12 +108,12 @@ was checked. Re-verify before any release decision.
 - The threat-model workshop (malicious plugin/publisher/device/relay,
   migrations, exports, recovery) — needs the project owner; agenda should
   follow `06-sync-and-security.md` § Required threat-model follow-up.
-- A decision on whether to seek Google Play's interpreted-code carve-out
-  or Apple's 4.7 route for any post-v0 remote extension. The
-  [downloaded-plugins research note](downloaded-plugins-research.md)
-  (2026-08-30) upgrades both from "do not plan on either" to
-  textually-defensible-but-unprecedented; the v0 stance (bundled only)
-  is unchanged, and any promise still requires a minimal test submission
-  to each store first.
+- ~~A decision on whether to seek the stores' interpreted-code routes for
+  post-v0 remote extensions~~ — decided 2026-08-30 by
+  [ADR 0010](../../architecture/decisions/0010-downloadable-plugins-on-store-builds.md)
+  on the strength of the
+  [downloaded-plugins research note](downloaded-plugins-research.md):
+  the sandboxed wasm runtime is the intended path, bundled-only remains
+  v0, and a minimal test submission per store gates any promise.
 - Re-verification of all sources at each release gate (store rules moved
   twice in the twelve months before this draft).
