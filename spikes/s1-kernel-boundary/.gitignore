@@ -2,5 +2,9 @@ kernel/target/
 shell/.gradle/
 shell/build/
 shell/composeApp/build/
-# Regenerated from the dylib; see README "Run it".
+# Regenerated per target from that target's binary; see README "Run it".
 shell/composeApp/src/desktopMain/generated/
+shell/composeApp/src/androidMain/generated/
+# Machine-local SDK path and cross-compiled kernel objects.
+shell/local.properties
+shell/composeApp/src/androidMain/jniLibs/

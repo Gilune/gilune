@@ -69,15 +69,17 @@ physical device. That is the next task.**
 1. ~~Toolchain + run the existing suites on Windows~~ — done 2026-08-30;
    both suites green (see spike README evidence sections).
 2. **Spike S1** (`architecture/spikes/README.md` § S1; ADR 0001):
-   `spikes/s1-kernel-boundary/` exists; the **Windows desktop half is
-   green** (2026-08-30: Compose Desktop ↔ UniFFI ↔ Rust, 7 Kotlin boundary
-   tests + 5 Rust tests, measurements in its README). **The Android half
-   is the remaining work**: install the NDK (Android Studio is present,
-   `%LOCALAPPDATA%\Android\Sdk` has no `ndk/`), add the `androidTarget` to
-   the shell, build the kernel for `aarch64-linux-android` (target already
-   installed via rustup), and run the device fault list (activity
-   recreation, process death, worker restart) plus the cold-start and
-   package budgets on a physical device with USB debugging.
+   `spikes/s1-kernel-boundary/` — **Windows desktop half green** and
+   **Android half green on an x86_64 emulator** (2026-08-30: NDK
+   cross-compile, 8/8 instrumented tests incl. WorkManager reopen,
+   lifecycle faults via adb, and the target-dependent-checksum finding —
+   bindings are generated per target). **Remaining: physical mid-range
+   hardware** for the capture-commit/cold-start budgets and an ARM64
+   end-to-end build (`aarch64-linux-android` target installed, unused).
+   Machine notes: emulator AVD `gilune-s1` exists; stale `ANDROID_HOME=
+   C:\Android\android-sdk` env var must be overridden to
+   `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\
+   adb.exe` fights the SDK's adb server — kill both, start the SDK's.
 3. **Owner decisions still open**: ratify or amend ADR 0009 (licensing) and
    add the LICENSE files its split requires; fill the Gilune name TODO in
    `architecture/README.md`; schedule the S5 threat-model workshop.

@@ -1,6 +1,9 @@
 // Machine-checked S1 boundary evidence: each test is one ADR 0001
 // acceptance-gate item exercised from Kotlin through the UniFFI boundary.
-// Timing prints feed the README's measurement table.
+// Shared verbatim by the desktop JVM suite and the Android instrumented
+// suite. Timing prints feed the README's measurement table.
+
+package org.gilune.spike.s1
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
