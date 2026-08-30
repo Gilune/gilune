@@ -9,6 +9,7 @@ pub mod fs;
 pub mod ids;
 pub mod jobs;
 pub mod store;
+pub mod vault;
 
 /// Errors crossing the kernel's public boundary. Every variant carries
 /// enough context to act on; panics are bugs, not error handling.

@@ -20,7 +20,8 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut args = args.iter().map(String::as_str);
 
-    let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|status|verify>";
+    let usage =
+        "usage: gilune-cli --vault <dir> <init|capture --text <text>|project|reconcile|status|verify>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
@@ -43,7 +44,7 @@ fn run() -> Result<(), String> {
                 return Err(usage.to_string());
             };
             let receipt = store
-                .capture_bytes("md", text.as_bytes())
+                .capture_bytes("txt", text.as_bytes())
                 .map_err(|e| e.to_string())?;
             println!(
                 "{}",
@@ -69,6 +70,36 @@ fn run() -> Result<(), String> {
                     "jobs_pending": s.jobs_pending,
                     "jobs_quarantined": s.jobs_quarantined,
                     "operations": s.operations,
+                    "projections": s.projections,
+                    "proposals_open": s.proposals_open,
+                    "quarantined_files": s.quarantined_files,
+                    "import_candidates": s.import_candidates,
+                })
+            );
+            Ok(())
+        }
+        Some("project") => {
+            let p = store.project().map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "written": p.written,
+                    "unchanged": p.unchanged,
+                    "held_back": p.held_back,
+                })
+            );
+            Ok(())
+        }
+        Some("reconcile") => {
+            let r = store.reconcile().map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "edits": r.edits,
+                    "renames": r.renames,
+                    "tombstone_proposals": r.tombstone_proposals,
+                    "imports": r.imports,
+                    "quarantined": r.quarantined,
                 })
             );
             Ok(())

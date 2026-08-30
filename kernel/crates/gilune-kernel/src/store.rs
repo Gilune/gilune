@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -97,6 +97,10 @@ impl Store {
             jobs_pending: count("SELECT COUNT(*) FROM jobs WHERE state IN ('pending','leased')")?,
             jobs_quarantined: count("SELECT COUNT(*) FROM jobs WHERE state = 'quarantined'")?,
             operations: count("SELECT COUNT(*) FROM operations")?,
+            projections: count("SELECT COUNT(*) FROM projections")?,
+            proposals_open: count("SELECT COUNT(*) FROM proposals WHERE state = 'open'")?,
+            quarantined_files: count("SELECT COUNT(*) FROM quarantine")?,
+            import_candidates: count("SELECT COUNT(*) FROM imports")?,
         })
     }
 
@@ -151,6 +155,10 @@ pub struct Status {
     pub jobs_pending: i64,
     pub jobs_quarantined: i64,
     pub operations: i64,
+    pub projections: i64,
+    pub proposals_open: i64,
+    pub quarantined_files: i64,
+    pub import_candidates: i64,
 }
 
 fn current_version(conn: &rusqlite::Connection) -> Result<i64> {
@@ -232,6 +240,33 @@ const MIGRATIONS: &[&str] = &[
          payload TEXT NOT NULL,
          created_ms INTEGER NOT NULL,
          UNIQUE (device_id, op_seq)
+     );",
+    // v1 -> v2: the vault projection layer (ADR 0007). `projections`
+    // records what the kernel last wrote where, so reconciliation can
+    // tell external edits from its own output; `proposals` holds
+    // reconciliation outcomes awaiting a user decision; `quarantine` and
+    // `imports` record files the reconciler must not touch.
+    "CREATE TABLE projections (
+         object_id TEXT PRIMARY KEY REFERENCES objects(object_id),
+         rel_path TEXT NOT NULL UNIQUE,
+         revision_id TEXT NOT NULL,
+         content_sha256 TEXT NOT NULL
+     );
+     CREATE TABLE proposals (
+         proposal_id TEXT PRIMARY KEY,
+         object_id TEXT NOT NULL REFERENCES objects(object_id),
+         kind TEXT NOT NULL CHECK (kind IN ('tombstone')),
+         state TEXT NOT NULL CHECK (state IN ('open','accepted','rejected')),
+         created_ms INTEGER NOT NULL
+     );
+     CREATE TABLE quarantine (
+         rel_path TEXT PRIMARY KEY,
+         reason TEXT NOT NULL,
+         created_ms INTEGER NOT NULL
+     );
+     CREATE TABLE imports (
+         rel_path TEXT PRIMARY KEY,
+         created_ms INTEGER NOT NULL
      );",
 ];
 

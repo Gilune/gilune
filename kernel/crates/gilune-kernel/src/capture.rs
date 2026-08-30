@@ -169,7 +169,7 @@ impl CaptureStage<'_> {
 /// Operations are the sync substrate (ADR 0005): immutable, per-device
 /// monotonic, self-describing. Written inside the caller's transaction so
 /// a committed change and its operation are inseparable.
-fn record_operation(
+pub(crate) fn record_operation(
     conn: &rusqlite::Connection,
     kind: &str,
     target_id: &str,
