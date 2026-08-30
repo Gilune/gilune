@@ -1,7 +1,14 @@
 # ADR 0001: Application Shell and Kernel Language
 
-Status: **Proposed**  
-Validation: Spike S1
+Status: **Accepted for v0** (owner decision 2026-08-30, provisional)  
+Validation: Spike S1 — desktop half green on Windows; Android half green
+on an x86_64 emulator (build pipeline, fault list, instrumented boundary
+suite, symbolication, packaging). The acceptance gate's physical-device
+items — capture-commit and cold-start budgets on mid-range hardware, and
+first ARM64 execution — are **assumed, not measured**: the owner accepted
+on the existing evidence and will acquire a device. If the device
+measurements later fail the budgets, this acceptance is revisited per the
+failure response in the spike plan.
 
 ## Context
 

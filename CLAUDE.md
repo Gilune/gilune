@@ -57,25 +57,23 @@ writable handles), rel-paths normalised to `/` as a portable contract,
 fixture byte-exactness via `.gitattributes`, and S3 harness timing windows
 that included the one-time guest build; each spike README's Windows
 evidence section has the details. S5 policy matrix drafted from live
-sources. Spike S1 (ADR 0001, the Compose/Kotlin ↔ Rust boundary) now has
-its **Windows desktop half green** — UniFFI boundary proven for records,
-typed errors, panics, cancellation, events, and chunked streaming, with
-measurements in `spikes/s1-kernel-boundary/README.md`. **Not yet
-validated: the Android half of ADR 0001, which needs the NDK and a
-physical device. That is the next task.**
+sources. Spike S1 (ADR 0001, the Compose/Kotlin ↔ Rust boundary) is
+**closed provisionally** (2026-08-30): desktop green on Windows, Android
+green on an x86_64 emulator (fault list, instrumented suite,
+symbolication, packaging, dual-ABI build); ADR 0001 accepted for v0 with
+the mid-range-device budgets and first ARM64 execution **assumed until
+the owner acquires a device**. ADR 0009 (MIT OR Apache-2.0) and ADR 0010
+(downloadable store plugins via the sandboxed runtime; test submission
+gates promises) are ratified. **Next: application-level engineering — see
+`architecture/09-engineering-conventions.md` and the vertical slice.**
 
 ## Next steps on a Windows machine
 
 1. ~~Toolchain + run the existing suites on Windows~~ — done 2026-08-30;
    both suites green (see spike README evidence sections).
-2. **Spike S1** (`architecture/spikes/README.md` § S1; ADR 0001):
-   `spikes/s1-kernel-boundary/` — **Windows desktop half green** and
-   **Android half green on an x86_64 emulator** (2026-08-30: NDK
-   cross-compile, 8/8 instrumented tests incl. WorkManager reopen,
-   lifecycle faults via adb, and the target-dependent-checksum finding —
-   bindings are generated per target). **Remaining: physical mid-range
-   hardware** for the capture-commit/cold-start budgets and an ARM64
-   end-to-end build (`aarch64-linux-android` target installed, unused).
+2. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
+   the owner's device arrives: run the instrumented suite on hardware,
+   measure the capture-commit/cold-start budgets, first ARM64 execution.
    Machine notes: emulator AVD `gilune-s1` exists; stale `ANDROID_HOME=
    C:\Android\android-sdk` env var must be overridden to
    `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\

@@ -5,7 +5,7 @@ technologies can be rejected without weakening the product principles.
 
 | ADR | Decision | Status |
 | --- | --- | --- |
-| [0001](0001-application-shell-and-kernel-language.md) | Compose Multiplatform shell with an embedded Rust kernel | Proposed |
+| [0001](0001-application-shell-and-kernel-language.md) | Compose Multiplatform shell with an embedded Rust kernel | Accepted for v0 (provisional; device budgets assumed) |
 | [0002](0002-local-persistence.md) | SQLite core store plus transactional external blobs | Proposed |
 | [0003](0003-plugin-contract-and-runtime.md) | WIT contracts with WebAssembly components where platforms permit | Proposed |
 | [0004](0004-durable-event-processing.md) | Transactional events and at-least-once durable jobs | Accepted for v0 |

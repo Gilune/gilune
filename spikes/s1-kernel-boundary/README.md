@@ -1,9 +1,12 @@
 # Spike S1 — Kernel Boundary and Cross-Platform Build
 
-Status: **In progress** — Windows desktop half green (Compose Desktop ↔
-UniFFI ↔ Rust); Android half green **on an x86_64 emulator** (build
-pipeline, full fault list, instrumented boundary suite). The performance
-budgets and ARM64 remain gated on physical hardware.
+Status: **Closed — provisional** (owner decision 2026-08-30). Windows
+desktop half green (Compose Desktop ↔ UniFFI ↔ Rust); Android half green
+**on an x86_64 emulator** (build pipeline, full fault list, instrumented
+boundary suite, symbolication, packaging). ADR 0001 accepted for v0 on
+this evidence; the physical-device budget measurements and first ARM64
+execution are deferred until a device is acquired and remain honest
+gaps, not evidence.
 
 Evidence prototype for ADR 0001 (Compose Multiplatform shell, Rust kernel,
 UniFFI-generated bindings) and the headless sync-agent profile assumption

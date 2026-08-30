@@ -1,7 +1,7 @@
 # Gilune Architecture Package
 
 Status: **Draft v0 for validation**  
-Last updated: 2026-08-29
+Last updated: 2026-08-30
 
 This package turns the product principles in
 [`sources/README.md`](../sources/README.md) into a buildable architecture. It
@@ -44,10 +44,13 @@ should be read as Gilune.
    stable across devices and server implementations.
 7. [`07-compatibility.md`](07-compatibility.md) defines API, schema, migration,
    and uninstall behaviour.
-8. [`decisions/`](decisions/) contains Architecture Decision Records (ADRs).
-9. [`spikes/README.md`](spikes/README.md) defines the prototypes that must pass
-   before the proposed stack is adopted.
-10. [`prior-art.md`](prior-art.md) maps existing systems to the mechanisms
+8. [`09-engineering-conventions.md`](09-engineering-conventions.md) defines how
+   the code itself is written: structure, comments, DRY/SOLID as boundary
+   discipline, per-language rules.
+9. [`decisions/`](decisions/) contains Architecture Decision Records (ADRs).
+10. [`spikes/README.md`](spikes/README.md) defines the prototypes that must pass
+    before the proposed stack is adopted.
+11. [`prior-art.md`](prior-art.md) maps existing systems to the mechanisms
     worth adopting from each; spikes cite and verify it.
 
 ## Status vocabulary
@@ -67,8 +70,8 @@ should be read as Gilune.
 | Local-first, source-preserving architecture | Baseline | Capture/recovery spike |
 | Small kernel with capability-mediated plugins | Baseline | Plugin spike |
 | Durable, at-least-once event processing | Accepted for v0 | Capture/recovery spike |
-| Kotlin Multiplatform/Compose application shell | Proposed | Kernel integration spike |
-| Rust portable kernel | Proposed | Kernel integration spike |
+| Kotlin Multiplatform/Compose application shell | Accepted for v0 (provisional; device budgets assumed) | Kernel integration spike |
+| Rust portable kernel | Accepted for v0 (provisional; device budgets assumed) | Kernel integration spike |
 | SQLite plus transactional blob storage | Proposed | Capture/recovery spike |
 | WIT contracts and WebAssembly component plugins | Proposed | Plugin spike |
 | Bundled mobile plugin execution | Accepted for v0 | Plugin and policy spikes |
@@ -77,7 +80,8 @@ should be read as Gilune.
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
 | Markdown vault projection; the vault is the export | Proposed | Capture/recovery spike |
 | Headless sync agent with LAN-first device sync | Proposed | Kernel and sync spikes |
-| Split licensing: permissive contracts, MPL core, AGPL server | Proposed | Owner ratification |
+| MIT OR Apache-2.0 licensing repository-wide | Accepted | Owner ratification (2026-08-30) |
+| Downloadable store plugins via the sandboxed runtime | Accepted (direction; store test submission gates promises) | S5 research + future test submission |
 
 ## What is intentionally not selected yet
 
