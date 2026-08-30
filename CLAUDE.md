@@ -91,10 +91,10 @@ gates promises) are ratified. **Next: application-level engineering — see
    C:\Android\android-sdk` env var must be overridden to
    `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\
    adb.exe` fights the SDK's adb server — kill both, start the SDK's.
-4. **Owner decisions still open**: fill the Gilune name TODO in
-   `architecture/README.md`. (ADR 0009 ratified and the S5 threat-model
-   workshop held 2026-08-30 — see
-   `spikes/s5-distribution-policy/threat-model.md`.)
+4. ~~Owner decisions~~ — all closed 2026-08-30: ADR 0009 ratified, the
+   S5 threat-model workshop held
+   (`spikes/s5-distribution-policy/threat-model.md`), and the Gilune
+   name derivation recorded in `architecture/README.md` § The name.
 
 ## Conventions
 

@@ -15,9 +15,15 @@ be read as making the Windows client secondary.
 
 ## The name
 
-The project is named **Gilune**.
-
-> **TODO**: record the derivation and intended meaning of the name Gilune.
+The project is named **Gilune** — a coined name, pronounced *gih-LOON*
+with a hard G. Its primary inspiration is globe gilia (*Gilia
+capitata*, also called bluehead gilia), which produces dense,
+ball-shaped clusters of many small pale-blue flowers. The symbolism:
+each tiny flower is an individual thought, capture, or memory; together
+they form a larger, coherent whole. Gilune has no literal dictionary
+translation — it is an abstract botanical name carrying the intended
+idea: **small fragments of thought gathered into something whole**
+(owner, 2026-08-30).
 
 The project was previously called *Linoema* (from *Linum*, the flax genus, and
 Greek *noēma*, that which is thought — “threads of thought”: captures preserved
