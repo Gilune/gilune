@@ -1,5 +1,6 @@
 // Android entry point. The vault lives in the app's files dir for v0;
-// the record button appears once RECORD_AUDIO is granted.
+// the record button appears once RECORD_AUDIO is granted. Transcription
+// happens on a paired coordinator, not on the phone (v0 profile).
 
 package org.gilune.app
 
@@ -11,7 +12,10 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
@@ -33,8 +37,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface {
-                    AppScreen(
-                        vaultDir,
+                    val scope = rememberCoroutineScope()
+                    val state = remember { GiluneState(vaultDir, scope) }
+                    LaunchedEffect(Unit) { state.openVault() }
+                    CapturePanel(
+                        state,
                         if (micGranted.value) AndroidAudioRecorder() else null,
                     )
                 }

@@ -96,16 +96,34 @@ gates promises) are ratified. **Next: application-level engineering — see
      `Start-Process` stdio wiring makes the jpackage launcher fail to
      show a window at all, so measure with `cmd /c start`). Mic adapters
      (javax.sound / AudioRecord → WAV) are code-complete and
-     WAV-encoder-tested, but a real microphone recording is
-     human-unverified — first manual test pending.
+     WAV-encoder-tested; microphone recording verified by the owner on
+     Windows desktop (2026-08-30).
    - **Perf review (future)**: desktop startup baseline is JVM+Compose
      bound at ~1.4 s; if it ever needs to shrink, the avenues are
      AppCDS/AOT-cache and deferring kernel open off the first frame.
      Android cold start on real hardware rides with the ADR 0001 device
      budgets.
-   - **M4 transcription** — bundled first-party provider plugin over
-     the public contract, local-only (workshop decision 1), desktop as
-     coordinator for phone captures.
+   - ~~M4 transcription~~ — done 2026-08-31. M4a: processor contract in
+     `contracts/processor/` (WIT + Rust trait mirror), schema v3
+     (processing_runs, provenance), kernel work loop with narrow
+     ProcessorCtx, deterministic outputs (derived IDs), crash-tested
+     (mid-output-commit abort → exactly-one on retry). M4b: local
+     Whisper (whisper-rs 0.16, `whisper` cargo feature, desktop dll
+     only; Android captures and lets a coordinator transcribe). Model
+     auto-downloads to `%LOCALAPPDATA%\Gilune\models\ggml-tiny.bin`
+     (~75 MiB, pre-seeded on this machine). End-to-end proven: TTS
+     speech wav → capture → job → Whisper → transcript object →
+     `Transcripts/*.md`. Build needs LLVM libclang
+     (`scoop install llvm cmake`; LIBCLANG_PATH to scoop llvm bin).
+   - **Review items (open)**: (1) standalone double-click launch of the
+     packaged exe behaved inconsistently under automated probes while
+     gradle-exec and the owner's manual launch worked — re-verify by
+     hand on the current build; probes must not kill processes by name
+     (the owner may be running the app). (2) Two app instances ran
+     concurrently against one vault during testing: multi-process
+     safety is untested (known ADR 0002 gap, now user-reachable) — add
+     a single-instance guard or a vault lock. (3) whisper.cpp logs
+     spam stderr; silence via log hooks.
    - **M5 LAN sync** — discovery, short-code pairing, device keys,
      encrypted transport, op exchange; acceptance = the S4-extended
      scenarios (pair, refuse unpaired, revoke, rejoin). Threat-model
