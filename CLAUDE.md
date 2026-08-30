@@ -90,10 +90,19 @@ gates promises) are ratified. **Next: application-level engineering — see
    - ~~M3 boundary + shells~~ — done 2026-08-30: full FFI surface
      (streamed capture crosses chunk-by-chunk), `app/` Compose project,
      desktop + Android apps boot and pass the shared boundary suite
-     (6 desktop + 6 instrumented). Mic adapters (javax.sound /
-     AudioRecord → WAV) are code-complete and WAV-encoder-tested, but a
-     real microphone recording is human-unverified — first manual test
-     pending.
+     (6 desktop + 6 instrumented). Packaged desktop app measures
+     **~1.4 s cold / ~1.5 s warm to window** (double-click launch;
+     earlier "~4 s" was gradle+probe overhead — and PowerShell
+     `Start-Process` stdio wiring makes the jpackage launcher fail to
+     show a window at all, so measure with `cmd /c start`). Mic adapters
+     (javax.sound / AudioRecord → WAV) are code-complete and
+     WAV-encoder-tested, but a real microphone recording is
+     human-unverified — first manual test pending.
+   - **Perf review (future)**: desktop startup baseline is JVM+Compose
+     bound at ~1.4 s; if it ever needs to shrink, the avenues are
+     AppCDS/AOT-cache and deferring kernel open off the first frame.
+     Android cold start on real hardware rides with the ADR 0001 device
+     budgets.
    - **M4 transcription** — bundled first-party provider plugin over
      the public contract, local-only (workshop decision 1), desktop as
      coordinator for phone captures.

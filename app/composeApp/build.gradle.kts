@@ -88,7 +88,9 @@ compose.desktop {
         // Debug by default; override with -Pgilune.kernel.profile=release.
         val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
         val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
-        jvmArgs += "-Djna.library.path=$kernelDir"
+        // Forward slashes: jpackage's launcher cfg treats backslashes as
+        // escapes and mangles Windows paths (observed 2026-08-30).
+        jvmArgs += "-Djna.library.path=${kernelDir.invariantSeparatorsPath}"
 
         nativeDistributions {
             packageName = "Gilune"
