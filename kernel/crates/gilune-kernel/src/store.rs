@@ -1,18 +1,16 @@
 //! The kernel store: one SQLite database under `.gilune/local/` inside
 //! the vault (ADR 0002, ADR 0007 layout). Device-local by contract —
 //! never synced, never exported; the vault's visible files are the
-//! projection, this is the authority. Opening runs migrations; the
-//! schema grows only through the registry below so every version is a
-//! tested upgrade path (constitution rule 12).
+//! projection, this is the authority. Opening runs migrations and then
+//! capture recovery; the schema grows only through the registry below so
+//! every version is a tested upgrade path (constitution rule 12).
 
-use crate::{fs, KernelError, Result};
+use crate::{capture, fs, ids, KernelError, Result};
 use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-/// Version 0 is the bootstrap (meta table only); the first real schema
-/// arrives with the capture tables in M1.
-pub const SCHEMA_VERSION: i64 = 0;
+pub const SCHEMA_VERSION: i64 = 1;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -21,8 +19,9 @@ pub struct Store {
 
 impl Store {
     /// Open (or create) the store for a vault directory, running any
-    /// pending migrations. The vault directory itself is created if
-    /// absent; a path that exists but is not a directory is refused.
+    /// pending migrations and then startup recovery. The vault directory
+    /// itself is created if absent; a path that exists but is not a
+    /// directory is refused.
     pub fn open(vault: impl Into<PathBuf>) -> Result<Store> {
         let vault = vault.into();
         if vault.exists() && !vault.is_dir() {
@@ -31,8 +30,9 @@ impl Store {
             });
         }
         let local = vault.join(".gilune").join("local");
-        std::fs::create_dir_all(&local).map_err(|e| KernelError::Io {
-            path: local.clone(),
+        let staging = local.join("staging");
+        std::fs::create_dir_all(&staging).map_err(|e| KernelError::Io {
+            path: staging.clone(),
             source: e,
         })?;
         fs::fsync_dir(&local)?;
@@ -41,16 +41,116 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "wal")?;
         conn.pragma_update(None, "foreign_keys", "on")?;
         migrate(&conn)?;
-        Ok(Store { conn, vault })
+        conn.execute(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES ('device_id', ?1)",
+            [ids::new_id()],
+        )?;
+        let store = Store { conn, vault };
+        capture::recover(&store)?;
+        Ok(store)
     }
 
     pub fn schema_version(&self) -> Result<i64> {
         current_version(&self.conn)
     }
 
+    pub fn device_id(&self) -> Result<String> {
+        let id = self.conn.query_row(
+            "SELECT value FROM meta WHERE key = 'device_id'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(id)
+    }
+
     pub fn vault(&self) -> &Path {
         &self.vault
     }
+
+    pub(crate) fn conn(&self) -> &rusqlite::Connection {
+        &self.conn
+    }
+
+    pub(crate) fn local_dir(&self) -> PathBuf {
+        self.vault.join(".gilune").join("local")
+    }
+
+    pub(crate) fn staging_dir(&self) -> PathBuf {
+        self.local_dir().join("staging")
+    }
+
+    pub(crate) fn lost_found_dir(&self) -> PathBuf {
+        self.local_dir().join("lost+found")
+    }
+
+    /// Counters for diagnostics and the crash harness. Cheap; safe on any
+    /// schema-current store.
+    pub fn status(&self) -> Result<Status> {
+        let count = |sql: &str| -> Result<i64> {
+            Ok(self.conn.query_row(sql, [], |row| row.get(0))?)
+        };
+        Ok(Status {
+            sources: count("SELECT COUNT(*) FROM objects WHERE type_id = 'org.memory.source'")?,
+            blobs_ready: count("SELECT COUNT(*) FROM blobs WHERE state = 'ready'")?,
+            blobs_committed: count("SELECT COUNT(*) FROM blobs WHERE state = 'committed'")?,
+            events: count("SELECT COUNT(*) FROM events")?,
+            jobs_pending: count("SELECT COUNT(*) FROM jobs WHERE state IN ('pending','leased')")?,
+            jobs_quarantined: count("SELECT COUNT(*) FROM jobs WHERE state = 'quarantined'")?,
+            operations: count("SELECT COUNT(*) FROM operations")?,
+        })
+    }
+
+    /// Full integrity check: every blob row's bytes exist where the row
+    /// says, with the digest the row records. Returns problems rather than
+    /// failing fast so callers can report all of them.
+    pub fn verify(&self) -> Result<Vec<String>> {
+        let mut problems = Vec::new();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT blob_id, rel_path, sha256, bytes, state FROM blobs")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?;
+        for row in rows {
+            let (blob_id, rel_path, sha256, bytes, state) = row?;
+            if state != "ready" {
+                problems.push(format!("blob {blob_id} is {state}, not ready"));
+                continue;
+            }
+            let path = self.vault.join(&rel_path);
+            match std::fs::read(&path) {
+                Err(_) => problems.push(format!("blob {blob_id} missing at {rel_path}")),
+                Ok(data) => {
+                    if data.len() as i64 != bytes {
+                        problems.push(format!(
+                            "blob {blob_id} size mismatch at {rel_path}: {} != {bytes}",
+                            data.len()
+                        ));
+                    } else if ids::sha256_hex(&data) != sha256 {
+                        problems.push(format!("blob {blob_id} content hash mismatch at {rel_path}"));
+                    }
+                }
+            }
+        }
+        Ok(problems)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Status {
+    pub sources: i64,
+    pub blobs_ready: i64,
+    pub blobs_committed: i64,
+    pub events: i64,
+    pub jobs_pending: i64,
+    pub jobs_quarantined: i64,
+    pub operations: i64,
 }
 
 fn current_version(conn: &rusqlite::Connection) -> Result<i64> {
@@ -70,7 +170,70 @@ fn current_version(conn: &rusqlite::Connection) -> Result<i64> {
 /// Migrations are append-only: entry N upgrades schema version N to N+1
 /// inside one transaction. Editing a shipped entry is forbidden; fixing
 /// a bad migration means shipping the next one.
-const MIGRATIONS: &[&str] = &[];
+const MIGRATIONS: &[&str] = &[
+    // v0 -> v1: the capture core. Payloads are canonical JSON documents;
+    // rel_path values are '/'-separated (03-data-model).
+    "CREATE TABLE objects (
+         object_id TEXT PRIMARY KEY,
+         type_id TEXT NOT NULL,
+         type_schema INTEGER NOT NULL,
+         created_ms INTEGER NOT NULL,
+         deleted INTEGER NOT NULL DEFAULT 0
+     );
+     CREATE TABLE revisions (
+         revision_id TEXT PRIMARY KEY,
+         object_id TEXT NOT NULL REFERENCES objects(object_id),
+         payload TEXT NOT NULL,
+         origin TEXT NOT NULL,
+         created_ms INTEGER NOT NULL
+     );
+     CREATE TABLE heads (
+         object_id TEXT NOT NULL REFERENCES objects(object_id),
+         revision_id TEXT NOT NULL REFERENCES revisions(revision_id),
+         PRIMARY KEY (object_id, revision_id)
+     );
+     CREATE TABLE blobs (
+         blob_id TEXT PRIMARY KEY,
+         object_id TEXT NOT NULL REFERENCES objects(object_id),
+         rel_path TEXT NOT NULL,
+         sha256 TEXT NOT NULL,
+         bytes INTEGER NOT NULL,
+         state TEXT NOT NULL CHECK (state IN ('committed','ready'))
+     );
+     CREATE TABLE events (
+         event_id TEXT PRIMARY KEY,
+         event_type TEXT NOT NULL,
+         subject_id TEXT NOT NULL,
+         payload TEXT NOT NULL,
+         created_ms INTEGER NOT NULL
+     );
+     CREATE TABLE subscriptions (
+         subscription_id TEXT PRIMARY KEY,
+         event_type TEXT NOT NULL,
+         enabled INTEGER NOT NULL DEFAULT 1
+     );
+     CREATE TABLE jobs (
+         job_id TEXT PRIMARY KEY,
+         subscription_id TEXT NOT NULL REFERENCES subscriptions(subscription_id),
+         event_id TEXT NOT NULL REFERENCES events(event_id),
+         state TEXT NOT NULL CHECK (state IN ('pending','leased','done','quarantined')),
+         attempts INTEGER NOT NULL DEFAULT 0,
+         not_before_ms INTEGER NOT NULL DEFAULT 0,
+         lease_until_ms INTEGER,
+         last_error TEXT,
+         UNIQUE (subscription_id, event_id)
+     );
+     CREATE TABLE operations (
+         op_id TEXT PRIMARY KEY,
+         device_id TEXT NOT NULL,
+         op_seq INTEGER NOT NULL,
+         kind TEXT NOT NULL,
+         target_id TEXT NOT NULL,
+         payload TEXT NOT NULL,
+         created_ms INTEGER NOT NULL,
+         UNIQUE (device_id, op_seq)
+     );",
+];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
     // The meta table is bootstrap infrastructure, not a migration: it must
@@ -121,11 +284,14 @@ mod tests {
     }
 
     #[test]
-    fn reopen_is_idempotent_and_preserves_version() {
+    fn reopen_is_idempotent_and_device_identity_is_stable() {
         let dir = tempfile::tempdir().expect("tempdir");
-        drop(Store::open(dir.path()).expect("first open"));
+        let first = Store::open(dir.path()).expect("first open");
+        let device = first.device_id().expect("device id");
+        drop(first);
         let store = Store::open(dir.path()).expect("reopen");
         assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
+        assert_eq!(store.device_id().expect("device id"), device);
     }
 
     #[test]

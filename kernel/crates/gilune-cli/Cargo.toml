@@ -1,0 +1,14 @@
+[package]
+name = "gilune-cli"
+description = "Developer CLI over the kernel: init, capture, status, verify. Also the crash-matrix harness's victim — every command reopens the kernel, so each run after a kill exercises recovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+gilune-kernel = { path = "../gilune-kernel" }
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

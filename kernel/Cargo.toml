@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/gilune-kernel", "crates/gilune-ffi"]
+members = ["crates/gilune-kernel", "crates/gilune-ffi", "crates/gilune-cli"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,9 +9,13 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.98"
 
 [workspace.dependencies]
+hex = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
-thiserror = "2"
+serde_json = "1"
+sha2 = "0.10"
 tempfile = "3"
+thiserror = "2"
+uuid = { version = "1", features = ["v7"] }
 
 [profile.release]
 lto = "thin"

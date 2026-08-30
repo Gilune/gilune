@@ -25,7 +25,9 @@ impl From<gilune_kernel::KernelError> for GiluneError {
         match e {
             K::VaultUnusable { .. } => GiluneError::VaultUnusable { detail: e.to_string() },
             K::SchemaTooNew { .. } => GiluneError::Incompatible { detail: e.to_string() },
-            K::Storage(_) | K::Io { .. } => GiluneError::Storage { detail: e.to_string() },
+            K::Storage(_) | K::Io { .. } | K::Encoding(_) | K::NoSuchJob { .. } => {
+                GiluneError::Storage { detail: e.to_string() }
+            }
         }
     }
 }
