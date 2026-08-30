@@ -80,8 +80,10 @@ gates promises) are ratified. **Next: application-level engineering — see
    feeds its gates and needs the same sitting or its own hour.
 2. **The vertical slice** (on "go"): first application code under
    `architecture/09-engineering-conventions.md` — capture → kernel →
-   vault → shared-folder sync end to end on Windows and Android, scope
-   drawn to touch no gated area (see review §5).
+   vault → LAN peer-to-peer sync between paired devices, end to end on
+   Windows and Android (owner scope decision 2026-08-30; pairing,
+   device keys, and encrypted transport are in scope — relay/E2EE stays
+   gated; see review §5).
 3. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.

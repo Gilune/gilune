@@ -21,7 +21,7 @@ gates the public-launch items in §4, not the slice itself.
 | 0005 operation-based sync | **Keep Proposed** | Convergence semantics proven (3 replicas, tombstones, unknown types, interrupted blobs); causal frontiers, encryption/key epochs, retired devices, compaction, test vectors remain |
 | 0006 bundled mobile + declarative UI | *(already Accepted for v0)* | S5 matrix confirms; ADR 0010 sets post-v0 direction |
 | 0007 Markdown vault projection | **Accept for v0** | Gate met: projection, rebuild, bidirectional reconciliation incl. crash points, closed-vault restore — both platforms |
-| 0008 headless agent + LAN-first | **Keep Proposed** | Feasibility proven (headless kernel hosts in S1/S2; shared-folder transport in S4); LAN discovery, pairing, revocation, service packaging unbuilt |
+| 0008 headless agent + LAN-first | **Keep Proposed** | Feasibility proven (headless kernel hosts in S1/S2; shared-folder transport in S4); LAN discovery, pairing, revocation, service packaging unbuilt — now carried by the vertical slice as its validation vehicle (§5) |
 | 0009 licensing | *(already Accepted)* | Owner ratification 2026-08-30 |
 | 0010 downloadable store plugins | *(already Accepted, direction)* | Test submission gates promises |
 
@@ -106,13 +106,27 @@ these; ADR 0006/0010 cross-references were already recorded.
 
 ## 5. Go/no-go for the first vertical slice
 
-**Recommendation: GO**, with slice scope drawn to touch no gated area:
+**Recommendation: GO**, with the scope amended by the owner (2026-08-30)
+to include one real sync transport:
 
 - capture (real microphone adapters) → durable kernel commit →
   transcription via a bundled first-party plugin exercising the public
-  contract → vault projection → shared-folder sync between two devices —
-  on Windows desktop and Android;
-- excluded from the slice: LAN transport, all cryptography, marketplace,
+  contract → vault projection → **LAN peer-to-peer sync between paired
+  devices** — on Windows desktop and Android;
+- LAN-in-scope consequences, accepted deliberately: device identity
+  keypairs, mutual device authentication, an encrypted transport channel,
+  local discovery, and pairing UX (short code/QR per ADR 0008) are slice
+  deliverables. This is *transport* security only — the relay/E2EE
+  envelope, key hierarchy, and epochs stay behind the pre-hosted-sync
+  gate. The S4-extended LAN scenarios (pair, refuse unpaired, revoke,
+  rejoin) become slice acceptance tests, making the slice ADR 0008's
+  validation vehicle.
+- The shared-folder transport stays spike-proven and ships whenever
+  convenient after the slice; it is not slice-blocking.
+- Excluded from the slice: relay/E2EE cryptography, marketplace,
   third-party plugin installation, hosted anything.
+- Sequencing note: the threat-model workshop should precede the sync
+  milestone of the slice — pairing and impersonation threats are now
+  slice-relevant, not just launch-relevant.
 
 Owner ratification of §1 and this section closes the review.
