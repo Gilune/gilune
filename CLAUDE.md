@@ -81,13 +81,19 @@ gates promises) are ratified. **Next: application-level engineering — see
    Production code lives in `kernel/` (Rust workspace), `contracts/`
    (public contracts), and `app/` (Compose Multiplatform, from M3);
    spikes stay disposable reference. Milestones:
-   - **M1 kernel core** — store, capture commit, events/jobs,
-     operations; the S2 invariants rebuilt as product code with
-     crash-matrix tests in the spike style.
-   - **M2 vault** — projection + bidirectional reconciliation
-     (ADR 0007 semantics).
-   - **M3 boundary + shells** — UniFFI boundary (per-target bindings),
-     Compose desktop and Android apps, real microphone capture.
+   - ~~M1 kernel core~~ — done 2026-08-30: schema v1, capture commit +
+     recovery, at-least-once jobs, per-device operations; 6-point crash
+     matrix green (`kernel/crates/gilune-cli/tests/crash_matrix.rs`).
+   - ~~M2 vault~~ — done 2026-08-30: schema v2, deterministic projection,
+     bidirectional reconciliation (edits→revisions+ops, deletes→proposals,
+     renames-by-id, quarantine, imports); `gilune-*` front-matter keys.
+   - ~~M3 boundary + shells~~ — done 2026-08-30: full FFI surface
+     (streamed capture crosses chunk-by-chunk), `app/` Compose project,
+     desktop + Android apps boot and pass the shared boundary suite
+     (6 desktop + 6 instrumented). Mic adapters (javax.sound /
+     AudioRecord → WAV) are code-complete and WAV-encoder-tested, but a
+     real microphone recording is human-unverified — first manual test
+     pending.
    - **M4 transcription** — bundled first-party provider plugin over
      the public contract, local-only (workshop decision 1), desktop as
      coordinator for phone captures.

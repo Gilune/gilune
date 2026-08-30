@@ -17,10 +17,10 @@ pub const SOURCE_READY_EVENT: &str = "org.memory.source-ready";
 
 /// A capture in staging: bytes stream in chunk by chunk (no whole-copy
 /// requirement on callers), then `finish` runs the commit sequence.
-/// Dropping a stage without finishing leaves an orphan for recovery to
+/// Detached from the store so it can be owned across an FFI boundary;
+/// dropping a stage without finishing leaves an orphan for recovery to
 /// sweep to lost+found — never silent deletion.
-pub struct CaptureStage<'a> {
-    store: &'a Store,
+pub struct CaptureStage {
     file: std::fs::File,
     stage_path: PathBuf,
     hasher: sha2::Sha256,
@@ -41,7 +41,7 @@ pub struct CaptureReceipt {
 impl Store {
     /// Begin staging a capture. `extension` names the media container
     /// ("md", "wav", "m4a", …) and must be a bare extension.
-    pub fn begin_capture(&self, extension: &str) -> Result<CaptureStage<'_>> {
+    pub fn begin_capture(&self, extension: &str) -> Result<CaptureStage> {
         if extension.is_empty() || !extension.chars().all(|c| c.is_ascii_alphanumeric()) {
             return Err(KernelError::VaultUnusable {
                 reason: format!("'{extension}' is not a bare file extension"),
@@ -55,7 +55,6 @@ impl Store {
             source: e,
         })?;
         Ok(CaptureStage {
-            store: self,
             file,
             stage_path,
             hasher: <sha2::Sha256 as sha2::Digest>::new(),
@@ -68,11 +67,11 @@ impl Store {
     pub fn capture_bytes(&self, extension: &str, bytes: &[u8]) -> Result<CaptureReceipt> {
         let mut stage = self.begin_capture(extension)?;
         stage.write_chunk(bytes)?;
-        stage.finish()
+        stage.finish(self)
     }
 }
 
-impl CaptureStage<'_> {
+impl CaptureStage {
     pub fn write_chunk(&mut self, chunk: &[u8]) -> Result<()> {
         use sha2::Digest;
         self.file.write_all(chunk).map_err(|e| KernelError::Io {
@@ -84,10 +83,11 @@ impl CaptureStage<'_> {
         Ok(())
     }
 
-    /// Commit sequence: durable stage → one transaction → promote.
-    pub fn finish(self) -> Result<CaptureReceipt> {
+    /// Commit sequence: durable stage → one transaction → promote. The
+    /// stage must finish against the store that began it.
+    pub fn finish(self, store: &Store) -> Result<CaptureReceipt> {
         use sha2::Digest;
-        let CaptureStage { store, file, stage_path, hasher, bytes, extension } = self;
+        let CaptureStage { file, stage_path, hasher, bytes, extension } = self;
 
         crashpoint("stage.after_write");
         file.sync_all().map_err(|e| KernelError::Io {
@@ -324,7 +324,7 @@ mod tests {
         let mut stage = store.begin_capture("wav").expect("begin");
         stage.write_chunk(b"abc").expect("chunk");
         stage.write_chunk(b"defg").expect("chunk");
-        let receipt = stage.finish().expect("finish");
+        let receipt = stage.finish(&store).expect("finish");
         assert_eq!(receipt.bytes, 7);
         assert_eq!(receipt.sha256, ids::sha256_hex(b"abcdefg"));
     }

@@ -1,0 +1,10 @@
+.gradle/
+build/
+composeApp/build/
+local.properties
+# Regenerated per target from that target's binary (07-compatibility).
+composeApp/src/desktopMain/generated/
+composeApp/src/androidMain/generated/
+# Cross-compiled kernel objects staged for packaging.
+composeApp/src/androidMain/jniLibs/
+composeApp/resources/
