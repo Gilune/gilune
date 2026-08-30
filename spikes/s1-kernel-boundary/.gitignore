@@ -1,0 +1,6 @@
+kernel/target/
+shell/.gradle/
+shell/build/
+shell/composeApp/build/
+# Regenerated from the dylib; see README "Run it".
+shell/composeApp/src/desktopMain/generated/

@@ -2,3 +2,7 @@
 # content hashes are recorded inside kernel.db: it must check out byte-exact
 # on every platform, so no end-of-line translation.
 spikes/s2-durable-capture/fixtures/** -text
+
+# Gradle wrapper scripts must keep their native line endings to run.
+gradlew text eol=lf
+gradlew.bat text eol=crlf

@@ -57,22 +57,27 @@ writable handles), rel-paths normalised to `/` as a portable contract,
 fixture byte-exactness via `.gitattributes`, and S3 harness timing windows
 that included the one-time guest build; each spike README's Windows
 evidence section has the details. S5 policy matrix drafted from live
-sources. **Not yet validated: ADR 0001 — the Compose/Kotlin ↔ Rust
-boundary — which needs real Windows and Android hardware. That is Spike
-S1, and it is the next task.**
+sources. Spike S1 (ADR 0001, the Compose/Kotlin ↔ Rust boundary) now has
+its **Windows desktop half green** — UniFFI boundary proven for records,
+typed errors, panics, cancellation, events, and chunked streaming, with
+measurements in `spikes/s1-kernel-boundary/README.md`. **Not yet
+validated: the Android half of ADR 0001, which needs the NDK and a
+physical device. That is the next task.**
 
 ## Next steps on a Windows machine
 
 1. ~~Toolchain + run the existing suites on Windows~~ — done 2026-08-30;
    both suites green (see spike README evidence sections).
-2. **Spike S1** (`architecture/spikes/README.md` § S1; ADR 0001): scaffold
-   Compose Multiplatform (JDK 17+, Gradle) with the Rust kernel behind
-   UniFFI-generated bindings; a diagnostic screen only; run the S1 fault
-   list and measurements against the budgets in the spike plan's "Initial
-   targets". Create `spikes/s1-kernel-boundary/` with the code and a README
-   in the house style (evidence + honest gaps). Android needs Android
-   Studio + NDK and a physical device; Windows desktop runs via Compose
-   Desktop (JVM).
+2. **Spike S1** (`architecture/spikes/README.md` § S1; ADR 0001):
+   `spikes/s1-kernel-boundary/` exists; the **Windows desktop half is
+   green** (2026-08-30: Compose Desktop ↔ UniFFI ↔ Rust, 7 Kotlin boundary
+   tests + 5 Rust tests, measurements in its README). **The Android half
+   is the remaining work**: install the NDK (Android Studio is present,
+   `%LOCALAPPDATA%\Android\Sdk` has no `ndk/`), add the `androidTarget` to
+   the shell, build the kernel for `aarch64-linux-android` (target already
+   installed via rustup), and run the device fault list (activity
+   recreation, process death, worker restart) plus the cold-start and
+   package budgets on a physical device with USB debugging.
 3. **Owner decisions still open**: ratify or amend ADR 0009 (licensing) and
    add the LICENSE files its split requires; fill the Gilune name TODO in
    `architecture/README.md`; schedule the S5 threat-model workshop.

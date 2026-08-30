@@ -1,0 +1,37 @@
+[package]
+name = "spike-s1-kernel"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Spike S1: diagnostic kernel behind UniFFI for the Compose/Kotlin boundary (disposable evidence prototype)"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "spike_s1_kernel"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/bin/uniffi-bindgen.rs"
+
+[[bin]]
+name = "headless"
+path = "src/bin/headless.rs"
+
+[dependencies]
+anyhow = "1"
+hex = "0.4"
+rusqlite = { version = "0.31", features = ["bundled"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "sync", "macros"] }
+uniffi = { version = "0.29", features = ["cli", "tokio"] }
+uuid = { version = "1", features = ["v7"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+# ADR 0001 measures both package size and crash symbolication; keep symbols
+# in and record the stripped size separately in the README.
+lto = "thin"
