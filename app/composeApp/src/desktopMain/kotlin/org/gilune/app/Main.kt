@@ -1,21 +1,35 @@
-// Desktop entry point and window scaffold: navigation rail, document
-// pane, and a capture bar that is always there (ADR 0011). Settings is a
-// surface over the window, not a dialog, because it holds the plugin
-// panel and will hold devices next.
+// Desktop entry point and window scaffold (ADR 0011): top bar with
+// jump-to search, navigation rail, document pane, and a capture bar that
+// is always there. Settings is a surface over the window, not a dialog,
+// because it holds the plugin panel and will hold devices next.
 
 package org.gilune.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,9 +44,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
@@ -61,6 +89,10 @@ fun main() {
     application {
         var vaultDir by remember { mutableStateOf(Prefs.vaultDir) }
         var theme by remember { mutableStateOf(Prefs.theme) }
+        var settingsOpen by remember { mutableStateOf(false) }
+        val searchFocus = remember { FocusRequester() }
+        val captureFocus = remember { FocusRequester() }
+        val probe = System.getProperty("gilune.probe")
         val dark = when (theme) {
             ThemeChoice.System -> isSystemInDarkTheme()
             ThemeChoice.Light -> false
@@ -68,8 +100,26 @@ fun main() {
         }
         Window(
             onCloseRequest = ::exitApplication,
-            title = "Gilune",
+            title = if (probe == null) "Gilune" else "Gilune probe",
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
+            onPreviewKeyEvent = { event ->
+                when {
+                    event.type != KeyEventType.KeyDown -> false
+                    event.isCtrlPressed && event.isShiftPressed && event.key == Key.C -> {
+                        runCatching { captureFocus.requestFocus() }
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.P -> {
+                        runCatching { searchFocus.requestFocus() }
+                        true
+                    }
+                    event.key == Key.Escape && settingsOpen -> {
+                        settingsOpen = false
+                        true
+                    }
+                    else -> false
+                }
+            },
         ) {
             GiluneTheme(dark) {
                 Surface(Modifier.fillMaxSize()) {
@@ -77,6 +127,11 @@ fun main() {
                         DesktopApp(
                             vaultDir = vaultDir,
                             theme = theme,
+                            probe = probe,
+                            settingsOpen = settingsOpen,
+                            onSettingsOpen = { settingsOpen = it },
+                            searchFocus = searchFocus,
+                            captureFocus = captureFocus,
                             onThemeChange = { theme = it; Prefs.theme = it },
                             onVaultChange = { Prefs.vaultDir = it; vaultDir = it },
                         )
@@ -91,6 +146,11 @@ fun main() {
 private fun DesktopApp(
     vaultDir: String,
     theme: ThemeChoice,
+    probe: String?,
+    settingsOpen: Boolean,
+    onSettingsOpen: (Boolean) -> Unit,
+    searchFocus: FocusRequester,
+    captureFocus: FocusRequester,
     onThemeChange: (ThemeChoice) -> Unit,
     onVaultChange: (String) -> Unit,
 ) {
@@ -98,53 +158,228 @@ private fun DesktopApp(
     val state = remember { GiluneState(vaultDir, scope) }
     val editor = remember { EditorState() }
     val tree = remember { TreeState() }
-    var showSettings by remember { mutableStateOf(false) }
+    val colours = MaterialTheme.colorScheme
+
+    fun openNote(relPath: String) {
+        tree.selectedFile = relPath
+        editor.open(state.vaultDir, relPath)
+    }
 
     LaunchedEffect(Unit) {
         state.openVault { gilune ->
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
+            // UI-probe affordances (dev runs only, -Pgilune.probe): open a
+            // screen so an automated screenshot can look at it.
+            when {
+                probe == null -> Unit
+                probe.startsWith("settings") -> onSettingsOpen(true)
+                probe.startsWith("note:") -> openNote(probe.removePrefix("note:"))
+                probe.startsWith("read:") -> {
+                    editor.reading = true
+                    openNote(probe.removePrefix("read:"))
+                }
+            }
         }
     }
 
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Gilune", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            TextButton(onClick = { state.sync() }) { Text("Sync", fontSize = 12.sp) }
-            TextButton(onClick = { showSettings = true }) { Text("Settings", fontSize = 12.sp) }
+            Text("Gilune", style = MaterialTheme.typography.titleMedium)
+            SearchBox(state, ::openNote, searchFocus, Modifier.width(280.dp))
+            Spacer(Modifier.weight(1f))
+            IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "sync vault",
+                    modifier = Modifier.size(17.dp),
+                    tint = colours.onSurfaceVariant,
+                )
+            }
+            IconButton(onClick = { onSettingsOpen(true) }, modifier = Modifier.size(30.dp)) {
+                Icon(
+                    Icons.Default.Settings,
+                    contentDescription = "settings",
+                    modifier = Modifier.size(17.dp),
+                    tint = colours.onSurfaceVariant,
+                )
+            }
         }
-        HorizontalDivider()
+        HorizontalDivider(color = colours.outlineVariant)
+
+        if (state.proposals.isNotEmpty()) ProposalsBanner(state)
+
         Row(Modifier.fillMaxWidth().weight(1f)) {
             VaultTree(
                 state = state,
                 tree = tree,
-                onOpen = { editor.open(state.vaultDir, it) },
-                modifier = Modifier.width(240.dp).fillMaxHeight(),
+                onOpen = ::openNote,
+                modifier = Modifier.width(230.dp).fillMaxHeight(),
             )
-            Box(
-                Modifier
-                    .width(1.dp)
-                    .fillMaxHeight()
-                    .background(MaterialTheme.colorScheme.outlineVariant),
-            )
+            Box(Modifier.width(1.dp).fillMaxHeight().background(colours.outlineVariant))
             NoteEditor(state, editor, Modifier.weight(1f).fillMaxHeight())
         }
-        HorizontalDivider()
-        CaptureBar(state, DesktopAudioRecorder(), Modifier.fillMaxWidth())
+        HorizontalDivider(color = colours.outlineVariant)
+        CaptureBar(
+            state,
+            DesktopAudioRecorder(),
+            Modifier.fillMaxWidth(),
+            focusRequester = captureFocus,
+            showMessage = false,
+            shortcutHint = "ctrl+shift+c",
+        )
     }
 
-    if (showSettings) {
+    if (settingsOpen) {
         SettingsPane(
             state = state,
             vaultDir = vaultDir,
-            onVaultChange = { showSettings = false; onVaultChange(it) },
+            onVaultChange = { onSettingsOpen(false); onVaultChange(it) },
             theme = theme,
             onThemeChange = onThemeChange,
-            onClose = { showSettings = false },
+            onClose = { onSettingsOpen(false) },
+            initialSection = probe?.removePrefix("settings:")?.takeIf { probe.startsWith("settings:") },
         )
     }
+}
+
+/// Jump-to search: type a fragment of a name or path, Enter opens the
+/// best match, Escape clears. Results drop down without stealing focus.
+@Composable
+private fun SearchBox(
+    state: GiluneState,
+    onOpen: (String) -> Unit,
+    focusRequester: FocusRequester,
+    modifier: Modifier = Modifier,
+) {
+    val colours = MaterialTheme.colorScheme
+    var query by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+    val matches = remember(query, state.vaultTick.value) { searchNotes(state.vaultDir, query) }
+
+    fun open(relPath: String) {
+        onOpen(relPath)
+        query = ""
+        focusManager.clearFocus()
+    }
+
+    Box(modifier) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .border(1.dp, colours.outlineVariant, RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Icon(
+                Icons.Default.Search,
+                contentDescription = null,
+                modifier = Modifier.size(13.dp),
+                tint = colours.onSurfaceVariant,
+            )
+            BasicTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+                    .onPreviewKeyEvent { event ->
+                        when {
+                            event.type != KeyEventType.KeyDown -> false
+                            event.key == Key.Enter && matches.isNotEmpty() -> {
+                                open(matches.first())
+                                true
+                            }
+                            event.key == Key.Escape -> {
+                                query = ""
+                                focusManager.clearFocus()
+                                true
+                            }
+                            else -> false
+                        }
+                    },
+                singleLine = true,
+                textStyle = TextStyle(fontSize = 12.sp, color = colours.onSurface),
+                cursorBrush = SolidColor(colours.primary),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (query.isEmpty()) {
+                            Text("search or jump to…", fontSize = 12.sp, color = colours.onSurfaceVariant)
+                        }
+                        inner()
+                    }
+                },
+            )
+            if (query.isEmpty()) {
+                Text(
+                    "ctrl+p",
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colours.outline,
+                )
+            }
+        }
+        DropdownMenu(
+            expanded = matches.isNotEmpty(),
+            onDismissRequest = { query = "" },
+            properties = PopupProperties(focusable = false),
+        ) {
+            for (relPath in matches.take(8)) {
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(relPath.substringAfterLast('/').removeSuffix(".md"), fontSize = 13.sp)
+                            Text(
+                                relPath,
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = colours.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    onClick = { open(relPath) },
+                )
+            }
+        }
+    }
+}
+
+/// Deletions made by other tools await a decision here; deletions made in
+/// the app answer their own proposal at the point of deletion (ADR 0011).
+@Composable
+private fun ProposalsBanner(state: GiluneState) {
+    val colours = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth().background(colours.errorContainer).padding(horizontal = 14.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        val count = state.proposals.size
+        Text(
+            if (count == 1) "A note was deleted outside the app — keep its history or let it go?"
+            else "$count notes were deleted outside the app — keep their history or let them go?",
+            fontSize = 12.sp,
+            color = colours.onErrorContainer,
+            modifier = Modifier.weight(1f),
+        )
+        TextButton(onClick = {
+            state.pluginAction("restored what other tools deleted") { g ->
+                for (proposal in g.openProposals()) g.resolveTombstone(proposal.proposalId, false)
+                g.project()
+            }
+        }) { Text("Restore", fontSize = 12.sp) }
+        TextButton(onClick = {
+            state.pluginAction("accepted the deletions") { g ->
+                for (proposal in g.openProposals()) g.resolveTombstone(proposal.proposalId, true)
+                g.project()
+            }
+        }) { Text("Delete", fontSize = 12.sp) }
+    }
+    HorizontalDivider(color = colours.outlineVariant)
 }
 
 /// Bring up local transcription, off the capture path by design. The

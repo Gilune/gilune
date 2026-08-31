@@ -159,12 +159,41 @@ gates promises) are ratified. **Next: application-level engineering — see
      desktop palette and density instead of stock Material purple.
      Voice capture is its own shell-declared adapter, so removing
      transcription leaves recording intact. Markdown rendering uses
-     `org.jetbrains:markdown` in shared code. **Next in M6**: editor
-     stage E2 (styled editing, markers visible), E3 only after a
-     spike; keyboard shortcuts and the command-palette slot; Android
-     shell parity (it compiles against the shared `CaptureBar` but has
-     not been run since M3). M5 and M6 are independent; M5 remains the
-     last milestone of the vertical slice.
+     `org.jetbrains:markdown` in shared code.
+   - **M6 second pass (2026-08-31, Fable, screenshot-validated)** —
+     the first shell build shipped unvalidated and missed the design;
+     rebuilt against the wireframe and verified by launching probe
+     instances and reading screenshots. Editor stage **E2 is done**
+     (owner: "I expect to be able to edit the markdown in the app"):
+     `MarkdownEditTransformation` styles the live buffer via
+     VisualTransformation with identity offsets — styling can never
+     change bytes (tested). Segmented Edit|Read; notes open editing.
+     Top bar gained working jump-to search (Ctrl+P) and shortcuts
+     (Ctrl+Shift+C focuses capture, Esc closes settings). Tree: inline
+     naming (no modals), icons, Captures inbox count, context menu
+     incl. Reveal in Explorer. Out-of-app deletions surface as a
+     banner (restore/delete). Settings follows the Obsidian shape the
+     owner asked for: manager section with switches plus one nav entry
+     per plugin opening its own screen (per-permission Allow/Revoke
+     rows, events, contributions, Remove). Consent policy at the host:
+     a bundled plugin's LOCAL capabilities are granted once on first
+     install (FFI test `builtin_grants.rs`); `network.request` always
+     waits for an explicit yes; nothing re-grants after revoke or
+     removal. **Next in M6**: E3 only after a spike; command-palette
+     slot; Android shell parity (bindings are STALE — regenerate from
+     an NDK build before compiling androidMain). M5 remains the last
+     milestone of the vertical slice.
+   - **Dev-run gotcha (machine note)**: `gradlew :composeApp:run` sets
+     `compose.application.resources.dir`, and Main.kt prepends it to
+     `jna.library.path` — so dev runs load
+     `app/composeApp/resources/windows-x64/gilune_ffi.dll` (the staged
+     RELEASE dll), not `kernel/target/debug`. After kernel changes,
+     restage that dll or dev runs silently execute stale kernel code
+     (cost an hour on 2026-08-31). UI probes: `-Pgilune.vault=<dir>`
+     and `-Pgilune.probe=note:<rel>|read:<rel>|settings[:section|
+     :plugin:<id>]` open a screen for screenshots; probe windows are
+     titled "Gilune probe" — automation must only ever kill PIDs of
+     windows with that exact title, never anything named Gilune.
    - **Bug found and fixed 2026-08-31** (owner's vault held two
      recordings but one transcript): `enable_whisper` used to create
      the `transcribe` subscription, so a capture made before the model

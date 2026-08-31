@@ -51,7 +51,10 @@ fun MarkdownBody(blocks: List<MdBlock>, modifier: Modifier = Modifier) {
                 )
                 is MdBlock.ListItem -> Row {
                     Text(
-                        block.marker.ifEmpty { " " },
+                        when (block.marker) {
+                            "-", "*", "+" -> "•"
+                            else -> block.marker.ifEmpty { " " }
+                        },
                         modifier = Modifier.width(22.dp),
                         color = colours.onSurfaceVariant,
                     )

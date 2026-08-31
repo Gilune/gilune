@@ -22,6 +22,7 @@ kotlin {
             dependencies {
                 implementation(compose.desktop.currentOs)
                 implementation(compose.material3)
+                implementation(compose.materialIconsExtended)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
                 implementation("org.jetbrains:markdown:0.7.3")
@@ -39,6 +40,7 @@ kotlin {
             kotlin.srcDir("src/androidMain/generated")
             dependencies {
                 implementation(compose.material3)
+                implementation(compose.materialIconsExtended)
                 implementation("androidx.activity:activity-compose:1.9.3")
                 implementation("androidx.core:core-ktx:1.15.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
@@ -93,6 +95,13 @@ compose.desktop {
         // Forward slashes: jpackage's launcher cfg treats backslashes as
         // escapes and mangles Windows paths (observed 2026-08-30).
         jvmArgs += "-Djna.library.path=${kernelDir.invariantSeparatorsPath}"
+        // Dev-run affordances only: -Pgilune.vault points a `run` at a
+        // scratch vault, -Pgilune.probe opens a screen for UI probes.
+        // Neither is ever passed while packaging, so distributables are
+        // unaffected.
+        listOf("gilune.vault", "gilune.probe").forEach { key ->
+            (project.findProperty(key) as String?)?.let { jvmArgs += "-D$key=$it" }
+        }
 
         nativeDistributions {
             packageName = "Gilune"

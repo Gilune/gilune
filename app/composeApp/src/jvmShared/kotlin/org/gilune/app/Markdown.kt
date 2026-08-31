@@ -154,7 +154,11 @@ private fun walkInline(node: ASTNode, src: String, style: Span, out: MutableList
             if (label == null) {
                 out.add(linked.copy(text = node.getTextInNode(src).toString()))
             } else {
-                for (child in label.children) walkInline(child, src, linked, out)
+                // The label's bracket tokens are syntax, not text.
+                val inner = label.children.filter {
+                    it.type != MarkdownTokenTypes.LBRACKET && it.type != MarkdownTokenTypes.RBRACKET
+                }
+                for (child in inner) walkInline(child, src, linked, out)
             }
             return
         }

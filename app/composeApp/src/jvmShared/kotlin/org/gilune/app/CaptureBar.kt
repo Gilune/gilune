@@ -7,18 +7,24 @@
 package org.gilune.app
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,8 +34,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -40,10 +54,14 @@ fun CaptureBar(
     state: GiluneState,
     recorder: AudioRecorder?,
     modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+    showMessage: Boolean = true,
+    shortcutHint: String? = null,
 ) {
     var draft by remember { mutableStateOf("") }
     var recording by remember { mutableStateOf(false) }
     val ready = state.gilune.value != null
+    val colours = MaterialTheme.colorScheme
     val micOffered =
         recorder != null && state.plugins.contributes(Slots.CAPTURE_ACTIONS, RECORD_VOICE_ACTION)
 
@@ -55,28 +73,61 @@ fun CaptureBar(
         }
     }
 
-    Column(modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+    Column(modifier) {
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            OutlinedTextField(
+            Icon(
+                Icons.Outlined.Edit,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = colours.onSurfaceVariant,
+            )
+            BasicTextField(
                 value = draft,
                 onValueChange = { draft = it },
-                modifier = Modifier.weight(1f),
-                placeholder = { Text("What's on your mind?") },
+                modifier = Modifier
+                    .weight(1f)
+                    .let { m -> focusRequester?.let { m.focusRequester(it) } ?: m }
+                    .onPreviewKeyEvent { event ->
+                        if (event.type == KeyEventType.KeyDown && event.key == Key.Enter) {
+                            capture()
+                            true
+                        } else {
+                            false
+                        }
+                    },
                 singleLine = true,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { capture() }),
+                enabled = ready,
+                textStyle = TextStyle(fontSize = 13.sp, color = colours.onSurface),
+                cursorBrush = SolidColor(colours.primary),
+                decorationBox = { inner ->
+                    Box(contentAlignment = Alignment.CenterStart) {
+                        if (draft.isEmpty()) {
+                            Text("What's on your mind?", fontSize = 13.sp, color = colours.onSurfaceVariant)
+                        }
+                        inner()
+                    }
+                },
             )
+            if (shortcutHint != null && draft.isEmpty()) {
+                Text(
+                    shortcutHint,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colours.outline,
+                )
+            }
             if (micOffered) {
-                OutlinedButton(
+                IconButton(
                     onClick = {
                         if (!recording) {
                             try {
                                 recorder.start()
                                 recording = true
-                                state.message.value = "recording…"
+                                state.message.value = "recording… click the microphone to stop"
                             } catch (e: Throwable) {
                                 state.message.value = "microphone unavailable: ${e.message}"
                             }
@@ -86,17 +137,32 @@ fun CaptureBar(
                         }
                     },
                     enabled = ready,
-                ) { Text(if (recording) "Stop" else "Record") }
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Mic,
+                        contentDescription = if (recording) "stop recording" else "record voice",
+                        modifier = Modifier.size(18.dp),
+                        tint = if (recording) colours.error else colours.onSurfaceVariant,
+                    )
+                }
             }
-            Button(onClick = { capture() }, enabled = ready) { Text("Capture") }
+            Button(
+                onClick = { capture() },
+                enabled = ready,
+                modifier = Modifier.height(30.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+            ) { Text("Capture", fontSize = 12.sp) }
         }
-        Text(
-            state.message.value,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(top = 6.dp, start = 4.dp),
-        )
+        if (showMessage) {
+            Text(
+                state.message.value,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colours.onSurfaceVariant,
+                modifier = Modifier.padding(start = 40.dp, bottom = 8.dp),
+            )
+        }
     }
 }
 

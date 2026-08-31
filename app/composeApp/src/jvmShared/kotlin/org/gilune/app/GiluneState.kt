@@ -13,12 +13,18 @@ import kotlinx.coroutines.launch
 import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.SourceSummary
+import uniffi.gilune_ffi.TombstoneProposal
 
 class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     val gilune = mutableStateOf<Gilune?>(null)
     val message = mutableStateOf("opening vault…")
     val recent = mutableStateListOf<SourceSummary>()
     val plugins = mutableStateListOf<PluginInfo>()
+
+    /// Deletions made outside the app that await a keep-or-delete
+    /// decision. In-app deletions answer their own proposal, so anything
+    /// here came from another tool — supported use (rule 13).
+    val proposals = mutableStateListOf<TombstoneProposal>()
 
     /// Bumped whenever vault contents may have changed; file panels watch it.
     val vaultTick = mutableStateOf(0)
@@ -29,8 +35,15 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 val g = Gilune.open(vaultDir)
                 // The mic is this shell's contribution, so this shell
                 // declares it. Registering is idempotent and never
-                // resurrects a plugin the user removed.
-                g.registerPlugin(voiceCaptureDeclaration())
+                // resurrects a plugin the user removed. Host policy: the
+                // adapter's local recording capability is consented by
+                // installing the app, granted once on first install —
+                // never re-granted after a revoke or removal.
+                val fresh = g.plugins().none { it.pluginId == VOICE_CAPTURE_PLUGIN }
+                val registered = g.registerPlugin(voiceCaptureDeclaration())
+                if (fresh && registered == "enabled") {
+                    g.grantCapability(VOICE_CAPTURE_PLUGIN, "platform.audio-record")
+                }
                 g.project()
                 gilune.value = g
                 refresh()
@@ -50,6 +63,9 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         val installed = g.plugins()
         plugins.clear()
         plugins.addAll(installed)
+        val open = g.openProposals()
+        proposals.clear()
+        proposals.addAll(open)
         vaultTick.value += 1
     }
 

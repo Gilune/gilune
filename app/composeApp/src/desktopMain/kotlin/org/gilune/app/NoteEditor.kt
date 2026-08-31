@@ -1,23 +1,41 @@
 // The document pane. One buffer of Markdown is the document; Rich is a
 // reading of it and Raw is the same bytes unstyled (ADR 0012, stage E1).
-// The mode is view state and is never written into the file.
+// The mode is view state and is never written into the file. The footer
+// strip carries the app's status line, mirroring the ratified layout.
 
 package org.gilune.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -28,8 +46,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -71,19 +94,52 @@ class EditorState {
 
 @Composable
 fun NoteEditor(state: GiluneState, editor: EditorState, modifier: Modifier = Modifier) {
-    val relPath = editor.openRelPath
-    if (relPath == null) {
-        Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(
-                "select a note, or capture a thought",
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    val colours = MaterialTheme.colorScheme
+    Column(modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            val relPath = editor.openRelPath
+            if (relPath == null) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text("select a note, or capture a thought", color = colours.onSurfaceVariant)
+                }
+            } else {
+                OpenNote(state, editor, relPath)
+            }
         }
-        return
+        HorizontalDivider(color = colours.outlineVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                state.message.value,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colours.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+            if (editor.openRelPath != null) {
+                Text(
+                    if (editor.dirty) "unsaved" else "saved",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (editor.dirty) colours.primary else colours.onSurfaceVariant,
+                )
+            }
+        }
     }
+}
 
+@Composable
+private fun OpenNote(state: GiluneState, editor: EditorState, relPath: String) {
+    val colours = MaterialTheme.colorScheme
     val file = File(state.vaultDir, relPath)
     val note = remember(editor.text) { splitNote(editor.text) }
+    var menuOpen by remember { mutableStateOf(false) }
+    val rawFocus = remember { FocusRequester() }
 
     fun onDiskHash(): String? = if (file.exists()) contentHash(file.readBytes()) else null
 
@@ -115,9 +171,9 @@ fun NoteEditor(state: GiluneState, editor: EditorState, modifier: Modifier = Mod
         if (editor.dirty) editor.staleBuffer = true else editor.open(state.vaultDir, relPath)
     }
 
-    Column(modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+            Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
@@ -125,27 +181,55 @@ fun NoteEditor(state: GiluneState, editor: EditorState, modifier: Modifier = Mod
                 relPath,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = colours.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (editor.dirty) Text("unsaved", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            TextButton(onClick = { editor.reading = true }, enabled = !editor.reading) {
-                Text("Rich", fontSize = 12.sp)
+            if (editor.dirty) {
+                Box(Modifier.size(7.dp).clip(CircleShape).background(colours.primary))
             }
-            TextButton(onClick = { editor.reading = false }, enabled = editor.reading) {
-                Text("Raw", fontSize = 12.sp)
+            SegmentedToggle(editor.reading) { editor.reading = it }
+            Box {
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "note actions",
+                        modifier = Modifier.size(16.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Save now", fontSize = 13.sp) },
+                        onClick = {
+                            menuOpen = false
+                            write()
+                            state.sync(announce = false)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Reveal in Explorer", fontSize = 13.sp) },
+                        onClick = {
+                            menuOpen = false
+                            runCatching {
+                                ProcessBuilder("explorer.exe", "/select,${file.absolutePath}").start()
+                            }
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Close", fontSize = 13.sp) },
+                        onClick = {
+                            menuOpen = false
+                            if (editor.dirty) write()
+                            editor.close()
+                            state.sync(announce = false)
+                        },
+                    )
+                }
             }
-            TextButton(onClick = {
-                write()
-                state.sync(announce = false)
-            }) { Text("Save", fontSize = 12.sp) }
-            TextButton(onClick = {
-                if (editor.dirty) write()
-                editor.close()
-                state.sync(announce = false)
-            }) { Text("Close", fontSize = 12.sp) }
         }
-        HorizontalDivider()
+        HorizontalDivider(color = colours.outlineVariant)
 
         if (editor.staleBuffer) StaleBufferBanner(state, editor, relPath, ::write)
 
@@ -157,20 +241,83 @@ fun NoteEditor(state: GiluneState, editor: EditorState, modifier: Modifier = Mod
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                    .padding(horizontal = 18.dp, vertical = 14.dp),
             )
         } else {
-            OutlinedTextField(
-                value = editor.text,
-                onValueChange = {
-                    editor.text = it
-                    editor.dirty = true
-                },
-                modifier = Modifier.fillMaxSize().padding(12.dp),
-                textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
-            )
+            // Styled editing (E2): the full source stays visible and
+            // editable; styling rides on top with identity offsets.
+            val transformation = remember(colours) {
+                MarkdownEditTransformation(
+                    MarkdownPalette(
+                        muted = colours.outline,
+                        marker = colours.primary,
+                        heading = colours.onSurface,
+                        code = colours.primary,
+                        codeBackground = colours.surfaceVariant,
+                        link = colours.primary,
+                    ),
+                )
+            }
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { rawFocus.requestFocus() },
+            ) {
+                BasicTextField(
+                    value = editor.text,
+                    onValueChange = {
+                        editor.text = it
+                        editor.dirty = true
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .defaultMinSize(minHeight = 200.dp)
+                        .padding(14.dp)
+                        .focusRequester(rawFocus),
+                    textStyle = TextStyle(
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp,
+                        color = colours.onSurface,
+                    ),
+                    cursorBrush = SolidColor(colours.primary),
+                    visualTransformation = transformation,
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun SegmentedToggle(reading: Boolean, onChange: (Boolean) -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    val shape = RoundedCornerShape(6.dp)
+    Row(
+        Modifier.clip(shape).border(1.dp, colours.outlineVariant, shape).height(24.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Segment("Edit", !reading) { onChange(false) }
+        Box(Modifier.width(1.dp).height(24.dp).background(colours.outlineVariant))
+        Segment("Read", reading) { onChange(true) }
+    }
+}
+
+@Composable
+private fun Segment(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    Text(
+        label,
+        fontSize = 11.sp,
+        color = if (selected) colours.onSurface else colours.onSurfaceVariant,
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .background(if (selected) colours.surfaceVariant else colours.surface)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
 }
 
 /// The machine header, shown as properties rather than hidden. It is
@@ -183,11 +330,20 @@ private fun PropertiesStrip(note: Note, editor: EditorState) {
     val revision = note.frontMatter.firstOrNull { it.key == "gilune-revision" }?.value?.take(8)
     val conflicted = note.frontMatter.any { it.key == "gilune-conflicted" && it.value == "true" }
 
-    Column(Modifier.fillMaxWidth().background(colours.surfaceVariant).padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onClick = { editor.showProperties = !editor.showProperties }) {
-                Text(if (editor.showProperties) "▾" else "▸", fontSize = 11.sp)
-            }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(colours.surfaceVariant)
+            .clickable { editor.showProperties = !editor.showProperties }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Icon(
+                if (editor.showProperties) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = "properties",
+                modifier = Modifier.size(14.dp),
+                tint = colours.onSurfaceVariant,
+            )
             Text(
                 listOfNotNull(summary, revision?.let { "rev $it" }).joinToString(" · "),
                 fontSize = 11.sp,
@@ -195,7 +351,15 @@ private fun PropertiesStrip(note: Note, editor: EditorState) {
                 color = colours.onSurfaceVariant,
             )
             if (conflicted) {
-                Text("conflicted", fontSize = 11.sp, color = colours.error)
+                Text(
+                    "conflicted",
+                    fontSize = 10.sp,
+                    color = colours.onErrorContainer,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(colours.errorContainer)
+                        .padding(horizontal = 7.dp, vertical = 1.dp),
+                )
             }
         }
         if (editor.showProperties) {
@@ -205,7 +369,7 @@ private fun PropertiesStrip(note: Note, editor: EditorState) {
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = colours.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, bottom = 2.dp),
+                    modifier = Modifier.padding(start = 20.dp, top = 2.dp),
                 )
             }
         }
@@ -221,7 +385,7 @@ private fun StaleBufferBanner(
 ) {
     val colours = MaterialTheme.colorScheme
     Row(
-        Modifier.fillMaxWidth().background(colours.primaryContainer).padding(horizontal = 12.dp, vertical = 8.dp),
+        Modifier.fillMaxWidth().background(colours.primaryContainer).padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -231,7 +395,7 @@ private fun StaleBufferBanner(
             color = colours.onPrimaryContainer,
             modifier = Modifier.weight(1f),
         )
-        Button(onClick = { editor.open(state.vaultDir, relPath) }) { Text("Use the disk version") }
-        TextButton(onClick = { write(true) }) { Text("Keep mine") }
+        Button(onClick = { editor.open(state.vaultDir, relPath) }) { Text("Use the disk version", fontSize = 12.sp) }
+        TextButton(onClick = { write(true) }) { Text("Keep mine", fontSize = 12.sp) }
     }
 }

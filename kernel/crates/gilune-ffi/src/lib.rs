@@ -282,7 +282,20 @@ impl Gilune {
 fn register_builtins(store: &gilune_kernel::store::Store) -> gilune_kernel::Result<()> {
     store.register_plugin(&gilune_kernel::vault::plugin_descriptor())?;
     #[cfg(feature = "whisper")]
-    store.register_plugin(&whisper::descriptor())?;
+    {
+        // Host policy (the kernel grants nothing on its own): a bundled
+        // plugin's LOCAL capabilities are consented by installing the
+        // application, so they are granted once, on first install.
+        // `network.request` is deliberately not here — leaving the
+        // device always takes an explicit yes (ADR 0011). Nothing is
+        // ever re-granted after a revoke or a removal.
+        let fresh = store.plugin(whisper::PLUGIN_ID)?.is_none();
+        let state = store.register_plugin(&whisper::descriptor())?;
+        if fresh && state == gilune_kernel::plugins::PluginState::Enabled {
+            store.grant_capability(whisper::PLUGIN_ID, "blobs.read")?;
+            store.grant_capability(whisper::PLUGIN_ID, "objects.write")?;
+        }
+    }
     Ok(())
 }
 
