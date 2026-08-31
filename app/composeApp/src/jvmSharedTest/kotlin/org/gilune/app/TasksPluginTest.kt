@@ -14,6 +14,7 @@ import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /// A plugin as the kernel reports it back. Shared with the desktop UI
@@ -75,13 +76,14 @@ class TasksPluginTest {
     }
 
     @Test
-    fun theDeclarationCoversTheThreeSlotsT1Needs() {
+    fun theDeclarationCoversTheFourSlotsTheShippedStagesNeed() {
         val slots = tasksDeclaration().contributions.associate { it.slot to it.id }
         assertEquals(
             mapOf(
                 Slots.TASKS_FIELDS to TASKS_DUE_FIELD,
                 Slots.EDITOR_DECORATIONS to TASKS_DECORATIONS_CONTRIBUTION,
                 Slots.EDITOR_SUGGEST to TASKS_SUGGEST_CONTRIBUTION,
+                Slots.SEARCH_TYPES to "task",
             ),
             slots,
         )
@@ -270,20 +272,166 @@ class TasksPluginTest {
     }
 
     @Test
-    fun stylingIsAllTheseRegistrationsDoInT1() {
-        // No activation handler: a due token answers no click, which is
-        // why the toggle behaves exactly as it did before the plugin.
-        assertTrue(tasksDecorations().all { it.activate == null })
-        assertEquals(2, tasksDecorations().size)
+    fun theTokenRegistrationsStyleAndNothingElse() {
+        // Three registrations: two style a token and answer no click, and
+        // the third — the stamper — bears the plugin's only activation but
+        // never renders. So the click a user makes is still the checkbox's.
+        val decorations = tasksDecorations(today = today)
+        assertEquals(3, decorations.size)
+        assertEquals(
+            listOf("org.memory.tasks.done-stamp"),
+            decorations.filter { it.activate != null }.map { it.id },
+        )
         val source = "notes\n- [ ] milk due:2026-09-05"
-        val decorations = builtInDecorations() + tasksDecorations()
         val hit = assertNotNull(
-            decorationAt(source, transform(source).text.text.indexOf("☐"), 0, decorations),
+            decorationAt(source, transform(source).text.text.indexOf("☐"), 0, chain()),
             "the checkbox still answers",
         )
         assertEquals("gilune.checkbox", hit.decoration.id)
         val token = transform(source).text.text.indexOf("due:") + 2
-        assertEquals(null, decorationAt(source, token, 0, decorations), "the date does not")
+        assertEquals(null, decorationAt(source, token, 0, chain()), "the date does not")
+    }
+
+    // ------------------------------------------------------------------
+    // The done date on toggle (§ 1's write-on-action, § 5's chain)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun tickingATaskStampsTodayAfterWhateverTheLineAlreadyCarries() {
+        assertEquals(
+            "- [x] file the return due:2026-09-05 done:2026-09-01",
+            activateLine("- [ ] file the return due:2026-09-05", chain()),
+            "core flips the marker, the stamper then reads the line core wrote",
+        )
+    }
+
+    @Test
+    fun untickingStripsTheDoneTokenAndNothingElse() {
+        assertEquals(
+            "- [ ] file the return due:2026-09-05",
+            activateLine("- [x] file the return due:2026-09-05 done:2026-08-30", chain()),
+            "the done date goes, the due date the user typed stays",
+        )
+    }
+
+    @Test
+    fun tickingALineThatAlreadyCarriesADoneDateLeavesOneToken() {
+        assertEquals(
+            "- [x] milk done:2026-08-30",
+            activateLine("- [ ] milk done:2026-08-30", chain()),
+            "write-on-action, not rewrite-on-action: a stamped line is left as it stands",
+        )
+    }
+
+    @Test
+    fun proseIsNotATaskAndIsLeftAlone() {
+        assertNull(activateLine("done:2026-08-30 is when the passport arrived", chain()))
+        assertNull(activateLine("- a bullet, not a checklist item", chain()))
+    }
+
+    @Test
+    fun theStamperIsGatedOutOfAFenceLikeEveryOtherTaskRegistration() {
+        // The shell owns fence state, so the gate is provable where the
+        // shell composes: alone, the stamper answers on an ordinary task
+        // line and answers nothing inside a fence. (In the shipped chain
+        // the checkbox takes that range anyway, and it opts in, because
+        // presentation of a GFM element is not task metadata.)
+        val plugin = tasksDecorations(today = today)
+        val plain = "notes\n- [ ] quoted"
+        val fenced = "notes\n```\n- [ ] quoted\n```"
+        assertNotNull(
+            decorationAt(plain, plain.indexOf("[ ]"), 0, plugin),
+            "an ordinary task line is the stamper's",
+        )
+        assertNull(
+            decorationAt(fenced, fenced.indexOf("[ ]"), 0, plugin),
+            "§ 1: a documented example never becomes somebody's agenda",
+        )
+    }
+
+    @Test
+    fun aFilteredOutLineStillTogglesAndIsNotStamped() {
+        val filtered = chain(filter = "#task")
+        assertEquals(
+            "- [x] milk",
+            activateLine("- [ ] milk", filtered),
+            "the core toggle is not the plugin's to hold back",
+        )
+        assertEquals(
+            "- [x] milk #task done:2026-09-01",
+            activateLine("- [ ] milk #task", filtered),
+            "and the line the filter admits is stamped",
+        )
+    }
+
+    @Test
+    fun removingThePluginLeavesAToggleThatStillToggles() {
+        assertEquals("- [x] milk", activateLine("- [ ] milk", builtInDecorations()))
+        assertEquals(
+            "- [ ] milk done:2026-08-30",
+            activateLine("- [x] milk done:2026-08-30", builtInDecorations()),
+            "and a date already written stays written — removal changes no byte",
+        )
+    }
+
+    @Test
+    fun aRegistrationThatLosesTheContestedRangeIsStillFoldedIntoTheActivation() {
+        // The stamper claims the marker, which the checkbox claims first
+        // and wins, so it renders nothing at all …
+        val source = "notes\n- [ ] file the return"
+        assertEquals("notes\n- ☐ file the return", transform(source).text.text)
+        assertEquals(
+            "gilune.checkbox",
+            assertNotNull(decorationAt(source, transform(source).text.text.indexOf("☐"), 0, chain())).decoration.id,
+        )
+        // … and is folded into the activation regardless: participation is
+        // by recognition of the evolving line, never by winning a range.
+        assertEquals("- [x] file the return done:2026-09-01", activateLine("- [ ] file the return", chain()))
+    }
+
+    // ------------------------------------------------------------------
+    // The two rewrites, on their own (§ 1)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun stampDoneAppendsOnlyToATickedTaskLackingOne() {
+        assertEquals("- [x] milk done:2026-09-01", stampDone("- [x] milk", today))
+        assertEquals("  * [X] milk done:2026-09-01", stampDone("  * [X] milk", today), "indented, starred, GFM's [X]")
+        assertEquals("- [ ] milk", stampDone("- [ ] milk", today), "unticked: the wrong marker state")
+        assertEquals("milk done", stampDone("milk done", today), "prose is not a task line")
+        assertEquals(
+            "- [x] milk done:2026-08-30",
+            stampDone("- [x] milk done:2026-08-30", today),
+            "already stamped, so idempotent",
+        )
+        assertEquals(
+            "- [x] milk done:2026-08-30 later",
+            stampDone("- [x] milk done:2026-08-30 later", today),
+            "position-independent: a token mid-line is still a token",
+        )
+    }
+
+    @Test
+    fun stripDoneRemovesExactlyOneTokenFromAnUntickedTaskLine() {
+        assertEquals("- [ ] milk", stripDone("- [ ] milk done:2026-08-30"))
+        assertEquals(
+            "- [ ] milk due:2026-09-05",
+            stripDone("- [ ] milk done:2026-08-30 due:2026-09-05"),
+            "the token is taken from where it sits, with the space it owns",
+        )
+        assertEquals(
+            "- [ ] milk done:2026-08-29",
+            stripDone("- [ ] milk done:2026-08-30 done:2026-08-29"),
+            "exactly one",
+        )
+        assertEquals("- [ ] milk", stripDone("- [ ] milk"), "nothing to strip")
+        assertEquals("- [x] milk done:2026-08-30", stripDone("- [x] milk done:2026-08-30"), "ticked: the wrong state")
+        assertEquals("done:2026-08-30 in prose", stripDone("done:2026-08-30 in prose"), "prose is not a task line")
+        assertEquals(
+            "- [ ] milk done:2026-8-30",
+            stripDone("- [ ] milk done:2026-8-30"),
+            "a half-written date is not a token",
+        )
     }
 
     // ------------------------------------------------------------------
@@ -309,8 +457,12 @@ class TasksPluginTest {
     /// shell's registrations then the plugin's, with the caret parked on
     /// line 0 so every line under test is decorated.
     private fun transform(source: String, filter: String = "") =
-        MarkdownEditTransformation(palette, caretLine = 0, decorations = builtInDecorations() + tasksDecorations(filter))
+        MarkdownEditTransformation(palette, caretLine = 0, decorations = chain(filter))
             .filter(AnnotatedString(source))
+
+    /// The chain the editor folds, with the date fixed so a test never
+    /// depends on the day it runs.
+    private fun chain(filter: String = "") = builtInDecorations() + tasksDecorations(filter, today)
 
     /// Every colour applied to exactly the span `token` occupies in the
     /// rendered text. Empty means nothing styled it.

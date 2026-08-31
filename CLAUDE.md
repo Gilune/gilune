@@ -346,10 +346,29 @@ gates promises) are ratified. **Next: application-level engineering — see
      (can drift); `done:` styled but stamped only in T2; no
      mouse-click acceptance in the popup; popup highlight not
      scrolled into view; Android bindings pre-existing stale
-     (Plugins.kt uncompilable there since M6a). **Remaining: T2
-     (done-stamp chain, search.types note+task, panel `type:`
-     operators, cross-plugin tasks.fields hook), T3 (agenda panel +
-     off switch), T4 (filter-block rendering).**
+     (Plugins.kt uncompilable there since M6a). **T2 SHIPPED
+     (2026-08-31, two parallel agents + coordinator alignment)**:
+     done-stamping rides the activation chain via a registration
+     matching the TASK MARKER itself (a line about to be ticked has
+     no done: token to host the handler); render-losing registrations
+     still activate (pinned by test, no seam change needed);
+     `type:`/SearchType registry in Search.kt (line-level =
+     narrowed-note evaluation per §4), TaskSearch.kt carries
+     `type:task` + due:/done: operators (date/today/overdue/week/
+     none/before:/after:, malformed ⇒ empty not prose) + the T4 seam
+     (`TaskHit`/`taskRows`, `searchVault(maxLines=)`); panel gate =
+     declared `search.types` contribution (coordinator aligned the
+     slot constant + declaration after both agents landed). Suite
+     ~284. Live-proven: toggle stamped done:2026-08-31 to disk;
+     `type:task due:week` in Ctrl+F returned exactly the task lines.
+     Gaps: a checkbox quoted in a code fence still stamps (activateLine
+     carries no fence context); `today` resolves when the decoration
+     registry builds (session over midnight stamps the open day);
+     suggest's trailing space + stamp's leading space = double space
+     before done:; validation lesson — scratch-vault PLUGIN STATE
+     persists (a disabled test plugin stays disabled next probe).
+     **Remaining: T3 (agenda panel + off switch, navigation slot),
+     T4 (filter-block rendering).**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

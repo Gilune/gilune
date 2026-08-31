@@ -7,6 +7,7 @@ package org.gilune.app
 
 import java.io.File
 import java.nio.file.Files
+import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -22,6 +23,29 @@ private object TagOperator : SearchOperator {
         .flatMap { it.value.split(',') }
         .any { it.trim().equals(argument, ignoreCase = true) }
 }
+
+/// A plugin's operator scoped to a type, which is how ADR 0015 § 4 says
+/// operators arrive: `starts:` is a keyword under `line` and prose
+/// anywhere else. Under the narrowed-note rule the body it reads is one
+/// line, so "starts with" means the line's start.
+private object StartsOperator : SearchOperator {
+    override val name = "starts"
+    override fun matches(note: SearchedNote, argument: String) =
+        note.body.startsWith(argument, ignoreCase = true)
+}
+
+/// A plugin's *type*: a hit is a line, not a note. The other half of the
+/// registry, and deliberately generic — the engine's line-level rule is
+/// not the tasks plugin's, and this fixture proves it without one.
+private val LineType = SearchType(
+    key = "line",
+    operators = { listOf(StartsOperator) },
+    extract = { note ->
+        note.lines.mapIndexedNotNull { index, text ->
+            if (text.isBlank()) null else CandidateLine(index + 1, text)
+        }
+    },
+)
 
 class SearchTest {
     private val vault: String by lazy { buildVault() }
@@ -306,5 +330,116 @@ class SearchTest {
     @Test
     fun aMissingVaultDirectoryFindsNothing() {
         assertEquals(emptyList(), searchVault("$vault/nowhere", "milk"))
+    }
+
+    // -----------------------------------------------------------------
+    // `type:` — what a hit is (ADR 0015 § 4).
+    // -----------------------------------------------------------------
+
+    /// Hits, not just paths: the point is that naming the default type
+    /// changes nothing at all, ranking and quoted lines included.
+    private fun hitsOf(query: String, types: List<SearchType> = listOf(NOTE_SEARCH_TYPE)): List<SearchHit> =
+        searchVault(vault, query, SearchOperators(), types)
+
+    private fun findAs(
+        query: String,
+        types: List<SearchType>,
+        operators: SearchOperators = SearchOperators(),
+        maxLines: Int = MAX_MATCHED_LINES,
+    ): List<String> =
+        searchVault(vault, query, operators, types, LocalDate.of(2026, 9, 3), maxLines)
+            .flatMap { hit -> hit.lines.map { "${hit.relPath}:${it.number}" } }
+
+    @Test
+    fun theDefaultTypeIsNoteAndNamingItChangesNothing() {
+        assertEquals(hitsOf("milk"), hitsOf("type:note milk"))
+        assertEquals(hitsOf("kitchen"), hitsOf("type:note kitchen"))
+    }
+
+    @Test
+    fun theTypeKeywordIsCaseInsensitiveAndTheFirstOneWins() {
+        assertEquals(hitsOf("milk"), hitsOf("TYPE:NOTE milk"))
+        assertEquals(hitsOf("milk"), hitsOf("type:note type:line milk"))
+    }
+
+    @Test
+    fun aTypeNobodyRegisteredFindsNothing() {
+        assertEquals(emptyList(), find("type:person milk"))
+        assertEquals(
+            emptyList(),
+            hitsOf("type:line milk"),
+            "the line type exists, but this caller did not register it",
+        )
+    }
+
+    @Test
+    fun aNegatedTypeIsProseRatherThanASelector() {
+        assertEquals(
+            hitsOf("milk"),
+            hitsOf("-type:note milk"),
+            "negating what a hit is means nothing, so it degrades like any unknown keyword",
+        )
+    }
+
+    @Test
+    fun aTypeAloneIsEveryHitOfThatTypeButAnEmptyQueryIsStillNothing() {
+        assertEquals(
+            listOf("Journal/monday.md", "Journal/tuesday.md", "Kitchen.md", "Notes/repeat.md", "Notes/shopping.md"),
+            hitsOf("type:note").map { it.relPath }.sorted(),
+        )
+        assertEquals(emptyList(), find(""), "no type and no terms is still nothing rather than everything")
+    }
+
+    // -----------------------------------------------------------------
+    // Line-level types: the narrowed-note rule.
+    // -----------------------------------------------------------------
+
+    private val lineTypes = listOf(NOTE_SEARCH_TYPE, LineType)
+
+    @Test
+    fun underALineTypeEachMatchingLineIsTheHit() {
+        assertEquals(
+            listOf("Journal/tuesday.md:1", "Kitchen.md:1", "Notes/shopping.md:1"),
+            findAs("type:line milk", lineTypes).sorted(),
+        )
+    }
+
+    @Test
+    fun textTermsBindToTheLineWhileNoteTermsBindToTheNote() {
+        // Both words are in Kitchen.md, so the note matches; no single
+        // line holds both, so no line does.
+        assertEquals(listOf("Kitchen.md"), find("milk plumber"))
+        assertEquals(emptyList(), findAs("type:line milk plumber", lineTypes))
+        // `path:` is about the note, and narrows which lines are offered.
+        assertEquals(listOf("Notes/shopping.md:1"), findAs("type:line milk path:Notes", lineTypes))
+    }
+
+    @Test
+    fun aRegisteredOperatorIsScopedToItsType() {
+        assertEquals(
+            listOf("Journal/monday.md:2", "Kitchen.md:2", "Notes/shopping.md:2"),
+            findAs("type:line starts:The", lineTypes).sorted(),
+        )
+        assertEquals(
+            emptyList(),
+            findAs("starts:The", lineTypes),
+            "under `note` the keyword is nobody's, so it is prose — and no note says `starts:The`",
+        )
+    }
+
+    @Test
+    fun everyKeptLineIsAHitLineEvenWithNothingToHighlight() {
+        val hits = searchVault(vault, "type:line tag:chores", SearchOperators(TagOperator), lineTypes)
+        assertEquals(listOf("Kitchen.md"), hits.map { it.relPath })
+        assertEquals(listOf(1, 2, 3), hits[0].lines.map { it.number }, "the tag matched the note, so every line is a hit")
+        assertTrue(hits[0].lines.all { it.ranges.isEmpty() })
+        assertEquals(0, hits[0].matchCount)
+    }
+
+    @Test
+    fun theLineCapIsTheCallersToRaise() {
+        assertEquals(5, findAs("type:line line", lineTypes).size, "the panel's default cap")
+        val raised = findAs("type:line line", lineTypes, maxLines = 50)
+        assertEquals((1..7).map { "Notes/repeat.md:$it" }, raised, "T4 renders rows, so it lifts the cap")
     }
 }

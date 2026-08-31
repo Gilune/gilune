@@ -8,6 +8,7 @@ package org.gilune.app
 import uniffi.gilune_ffi.PluginContribution
 import uniffi.gilune_ffi.PluginDeclaration
 import uniffi.gilune_ffi.PluginInfo
+import java.time.LocalDate
 
 object Slots {
     const val CAPTURE_ACTIONS = "capture.actions"
@@ -20,6 +21,7 @@ object Slots {
     /// contribute, and the shell renders what they declare.
     const val EDITOR_DECORATIONS = "editor.decorations"
     const val EDITOR_SUGGEST = "editor.suggest"
+    const val SEARCH_TYPES = "search.types"
 
     /// **Published by a plugin, not by the shell** (ADR 0015 § 3) — the
     /// tasks plugin owns task-line semantics, so a field must compose
@@ -138,13 +140,20 @@ fun tasksDeclaration(): PluginDeclaration =
                 // wasm host has to read one (§ 7).
                 config = """{"line":"task","tokens":[""" +
                     """{"key":"due","pattern":"\\sdue:\\d{4}-\\d{2}-\\d{2}\\b","role":"marker"},""" +
-                    """{"key":"done","pattern":"\\sdone:\\d{4}-\\d{2}-\\d{2}\\b","role":"muted"}]}""",
+                    """{"key":"done","pattern":"\\sdone:\\d{4}-\\d{2}-\\d{2}\\b","role":"muted"}],""" +
+                    """"onToggle":"done"}""",
             ),
             PluginContribution(
                 slot = Slots.EDITOR_SUGGEST,
                 id = TASKS_SUGGEST_CONTRIBUTION,
                 label = "Inline field menu (/)",
                 config = """{"trigger":"/","fields":"${Slots.TASKS_FIELDS}"}""",
+            ),
+            PluginContribution(
+                slot = Slots.SEARCH_TYPES,
+                id = "task",
+                label = "type:task in search and filters",
+                config = """{"type":"task","operators":["due","done"]}""",
             ),
         ),
     )
@@ -164,6 +173,49 @@ private fun tokenPattern(key: String) = Regex("""\s$key:\d{4}-\d{2}-\d{2}\b""")
 private val DUE_TOKEN = tokenPattern("due")
 private val DONE_TOKEN = tokenPattern("done")
 
+private const val TASKS_MARKER_GROUP = 4
+private const val TASKS_MARKER_LENGTH = 3
+
+/// Is this line a task the plugin owns? The global filter (§ 1) is one
+/// setting read by every recogniser here, so the vault never disagrees
+/// with itself; empty — the shipped default — means every GFM checklist
+/// item is a task.
+private fun isTaskLine(line: String, filter: String): Boolean =
+    TASKS_TASK_LINE.containsMatchIn(line) && (filter.isEmpty() || line.contains(filter))
+
+/// The three characters of the marker, or null on a line that is not a
+/// task list item.
+private fun taskMarkerRange(line: String): IntRange? =
+    TASKS_TASK_LINE.find(line)?.groups?.get(TASKS_MARKER_GROUP)
+        ?.let { it.range.first until it.range.first + TASKS_MARKER_LENGTH }
+
+/// A ticked marker — `[x]` or GFM's `[X]`. False on prose.
+private fun isCheckedTask(line: String): Boolean =
+    taskMarkerRange(line)?.let { line[it.first + 1] != ' ' } == true
+
+/// § 1's write-on-action, first half: a **ticked** task line gains
+/// ` done:<today>` unless it already carries one. Every other line comes
+/// back byte-identical — prose, an unticked task, one already stamped — so
+/// folding this over a line is safe wherever the chain reaches it.
+///
+/// The token is appended, never inserted: position-independence is the
+/// *reader's* rule, and appending is the one placement that cannot disturb
+/// bytes the user typed.
+fun stampDone(line: String, today: LocalDate): String {
+    if (!isCheckedTask(line)) return line
+    if (DONE_TOKEN.containsMatchIn(line)) return line
+    return "$line done:$today"
+}
+
+/// The other half: unticking takes the done date away again. Exactly one
+/// token goes, with the whitespace the pattern owns, from wherever on the
+/// line it sits — never parsed from the end backwards (§ 1).
+fun stripDone(line: String): String {
+    if (taskMarkerRange(line) == null || isCheckedTask(line)) return line
+    val token = DONE_TOKEN.find(line) ?: return line
+    return line.removeRange(token.range)
+}
+
 /// One `key:ISO` token recogniser. **StyleOnly**: the bytes render as
 /// themselves and only the role's colour is added, so `due:2026-09-05`
 /// reads identically in Notepad, and no activation — T1 styles, it does
@@ -180,8 +232,7 @@ private fun tokenDecoration(
     // on it: a documented example must never become somebody's agenda.
     firesInsideCodeFences = false,
     recognise = { line ->
-        val isTask = TASKS_TASK_LINE.containsMatchIn(line) && (filter.isEmpty() || line.contains(filter))
-        if (!isTask) {
+        if (!isTaskLine(line, filter)) {
             emptyList()
         } else {
             pattern.findAll(line)
@@ -191,15 +242,45 @@ private fun tokenDecoration(
     },
 )
 
-/// The plugin's two `editor.decorations` registrations (§ 1): a due date
-/// takes the marker colour, a done date the muted one, both only on a
-/// task line and never inside a fence. `filter` is the global setting —
-/// recognisers read the one setting so the vault never disagrees with
-/// itself — and defaults to § 1's shipped empty, meaning every GFM
-/// checklist item is a task.
-fun tasksDecorations(filter: String = ""): List<EditorDecoration> = listOf(
+/// The done-date stamper (§ 1's toggle rule), and the plugin's only
+/// activation. It recognises the **task marker itself** rather than a
+/// token, because a line about to be ticked carries no `done:` yet for a
+/// token recogniser to find: the registration that must run at the toggle
+/// is the one that recognises the toggle.
+///
+/// It renders nothing. The range it claims is the checkbox's, the shell's
+/// registrations lead, and a contested range goes to the first one (§ 5),
+/// so this claim is always discarded — [DecorationRender.StyleOnly] with
+/// [DecorationRole.NONE] is what that would cost if it ever won: the bytes
+/// as themselves and no span. Activation is a separate question, asked of
+/// every registration that recognises the *evolving* line, so losing the
+/// render costs the stamper nothing and it reads the marker the checkbox
+/// has just flipped.
+private fun doneStamper(filter: String, today: LocalDate): EditorDecoration = EditorDecoration(
+    id = "org.memory.tasks.done-stamp",
+    role = DecorationRole.NONE,
+    firesInsideCodeFences = false,
+    recognise = { line ->
+        val marker = if (isTaskLine(line, filter)) taskMarkerRange(line) else null
+        if (marker == null) emptyList() else listOf(DecorationMatch(marker, DecorationRender.StyleOnly))
+    },
+    activate = { line -> if (isCheckedTask(line)) stampDone(line, today) else stripDone(line) },
+)
+
+/// The plugin's `editor.decorations` registrations (§ 1): a due date takes
+/// the marker colour, a done date the muted one, and the stamper writes
+/// the done date at the toggle. All three fire only on a task line and
+/// never inside a fence. `filter` is the global setting — recognisers read
+/// the one setting so the vault never disagrees with itself — and defaults
+/// to § 1's shipped empty, meaning every GFM checklist item is a task.
+///
+/// `today` is resolved when the registry is built, not at the click, so a
+/// session held open across midnight stamps the day it opened; re-resolving
+/// would need a supplier the seam does not carry.
+fun tasksDecorations(filter: String = "", today: LocalDate = LocalDate.now()): List<EditorDecoration> = listOf(
     tokenDecoration("org.memory.tasks.due", DUE_TOKEN, DecorationRole.MARKER, filter),
     tokenDecoration("org.memory.tasks.done", DONE_TOKEN, DecorationRole.MUTED, filter),
+    doneStamper(filter, today),
 )
 
 /// The `/` menu's stage one, read from the registry rather than from a

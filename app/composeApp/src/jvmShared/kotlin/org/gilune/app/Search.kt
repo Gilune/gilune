@@ -2,7 +2,9 @@
 // matter — behind a small Obsidian-flavoured query language. The operator
 // set is an open registry rather than a fixed grammar, because the
 // language is a plugin surface (ADR 0010, ADR 0011): a plugin adds a
-// keyword, it does not patch this file.
+// keyword, it does not patch this file. `type:` (ADR 0015 § 4) is the
+// same idea one level up — a plugin adds what a *hit* is, and its
+// keywords arrive through that type rather than loose.
 //
 // Pure over a directory and a string, so it is testable without a screen.
 // There is no index: a search reads each note once, which is honest for
@@ -12,6 +14,7 @@
 package org.gilune.app
 
 import java.io.File
+import java.time.LocalDate
 
 /// A note as an operator sees it, with front matter already split off by
 /// `splitNote`, so `body` and `lines` are prose alone. `lines` is computed
@@ -23,6 +26,13 @@ class SearchedNote(
     val frontMatter: List<FrontMatterEntry>,
 ) {
     val lines: List<String> by lazy { body.lines() }
+
+    /// The same note with one of its lines for a body — **the narrowed-note
+    /// rule** (ADR 0015 § 4), and the whole of what a line-level type needs
+    /// from the evaluator. Name, path and front matter are the containing
+    /// note's, so terms about text bind to the line and terms about the
+    /// note bind to the note, with no new operator interface.
+    fun narrowedTo(line: String): SearchedNote = SearchedNote(relPath, name, line, frontMatter)
 }
 
 /// One keyword of the query language: `name` is what the user types before
@@ -55,13 +65,52 @@ interface SearchOperator {
 /// replaces an earlier one of the same name, so a plugin may deliberately
 /// override a built-in.
 class SearchOperators(vararg extra: SearchOperator) {
+    private val registered: List<SearchOperator> = extra.toList()
+
     private val byName: Map<String, SearchOperator> =
-        (BUILT_INS + extra).associateBy { it.name.lowercase() }
+        (BUILT_INS + registered).associateBy { it.name.lowercase() }
 
     operator fun get(name: String): SearchOperator? = byName[name.lowercase()]
 
     val names: Set<String> get() = byName.keys
+
+    /// The same set with the active type's keywords layered on top
+    /// (ADR 0015 § 4). **Operators arrive through a type**, so `due:` is a
+    /// keyword under `task` and prose under `note`, and switching a plugin
+    /// off cannot leave a keyword behind meaning something nobody can
+    /// answer. `today` is passed because a relative word resolves at
+    /// evaluation, not at registration.
+    fun scopedTo(type: SearchType, today: LocalDate): SearchOperators {
+        val scoped = type.operators(today)
+        return if (scoped.isEmpty()) this else SearchOperators(*(registered + scoped).toTypedArray())
+    }
 }
+
+/// One line a line-level type offers the evaluator. `number` is
+/// body-relative and 1-based, exactly as [MatchedLine.number] is, so a hit
+/// addresses the buffer the same way whichever type produced it.
+data class CandidateLine(val number: Int, val text: String)
+
+/// What a `type:` names — what a hit **is** (ADR 0015 § 4). [extract] is
+/// which of the two kinds this is:
+///
+/// - **note-level** (no extractor): a hit is a note. `note` is the shell's
+///   own, and the search panel's semantics unchanged.
+/// - **line-level** (an extractor): a hit is a line, and each candidate is
+///   judged by [SearchedNote.narrowedTo].
+///
+/// [operators] is a function of the day the query runs, because relative
+/// words resolve **at evaluation**: `due:today` is the query's meaning,
+/// not a date that rots.
+class SearchType(
+    val key: String,
+    val operators: (today: LocalDate) -> List<SearchOperator> = { emptyList() },
+    val extract: ((SearchedNote) -> List<CandidateLine>)? = null,
+)
+
+/// The shell's own type, always registered beside whatever a plugin
+/// contributes, exactly as [SearchOperators] always carries its built-ins.
+val NOTE_SEARCH_TYPE = SearchType("note")
 
 private val FILE_OPERATOR = object : SearchOperator {
     override val name = "file"
@@ -124,12 +173,24 @@ const val MAX_MATCHED_LINES = 5
 ///   must not silently empty the result set;
 /// - `[key:value]` matches a front-matter entry whose key is `key` and
 ///   whose value contains `value`; `[key]` alone matches notes that carry
-///   the key at all.
+///   the key at all;
+/// - `type:key` says what a hit is (ADR 0015 § 4), absent it is `note` and
+///   nothing a person has already typed changes meaning.
 ///
 /// Gaps, honestly: there is no OR and no grouping in v0 — a query is a
 /// conjunction and nothing else; bare terms do not search front matter
 /// (`[key:value]` is how metadata is addressed); and quotes delimit a
 /// phrase, so a literal `"` cannot be searched for.
+///
+/// `types` is the type registry and `today` the day relative words
+/// resolve against; both default so a caller that only wants the old
+/// note-level search says nothing about either. A `type:` **nobody
+/// registered finds nothing** — an unanswerable question is not a text
+/// search — which is precisely what a disabled or removed contributor
+/// leaves behind. A type with no terms beside it is every hit of that
+/// type. `maxLines` caps the lines one hit quotes; the rest are counted
+/// in `moreMatches`, and a caller rendering rows rather than a panel
+/// (T4's `filter` blocks) raises it.
 ///
 /// Ranking puts name matches first, then more matches ahead of fewer, then
 /// path order so results are stable. Markdown files only, dot-directories
@@ -139,11 +200,23 @@ fun searchVault(
     vaultDir: String,
     query: String,
     operators: SearchOperators = SearchOperators(),
+    types: List<SearchType> = listOf(NOTE_SEARCH_TYPE),
+    today: LocalDate = LocalDate.now(),
+    maxLines: Int = MAX_MATCHED_LINES,
 ): List<SearchHit> {
-    val terms = parseQuery(query, operators)
-    if (terms.isEmpty()) return emptyList()
+    val typed = splitType(tokenise(query))
+    val type = resolveType(types, typed.typeKey) ?: return emptyList()
+    val scoped = operators.scopedTo(type, today)
+    val terms = typed.tokens.mapNotNull { parseTerm(it, scoped) }
+    // An empty query finds nothing rather than everything — unchanged, and
+    // § 4's empty block for the same reason. A query that names its type
+    // and nothing else is **not** empty: it has asked a well-formed
+    // question ("tasks", "notes") and answering it with silence would read
+    // as a broken query rather than as no filters.
+    if (terms.isEmpty() && typed.typeKey == null) return emptyList()
     val root = File(vaultDir)
     if (!root.isDirectory) return emptyList()
+    val extract = type.extract
     return root.walkTopDown()
         .onEnter { it == root || !it.name.startsWith(".") }
         .filter { it.isFile && it.name.endsWith(".md") }
@@ -157,26 +230,53 @@ fun searchVault(
                 frontMatter = note.frontMatter,
             )
         }
-        .mapNotNull { note -> hitFor(note, terms) }
+        .mapNotNull { note ->
+            if (extract == null) hitFor(note, terms, maxLines) else lineHitFor(note, terms, extract, maxLines)
+        }
         .sortedWith(RANK)
         .toList()
+}
+
+/// `note` is answerable whether or not the caller listed it — the
+/// built-in the registry always carries — while any other key must have
+/// been registered. A caller's own `note` type wins over the built-in.
+private fun resolveType(types: List<SearchType>, key: String?): SearchType? {
+    val wanted = key ?: NOTE_SEARCH_TYPE.key
+    return (types + NOTE_SEARCH_TYPE).firstOrNull { it.key.equals(wanted, ignoreCase = true) }
+}
+
+private const val TYPE_KEYWORD = "type"
+
+private class TypedQuery(val typeKey: String?, val tokens: List<String>)
+
+/// `type:` is the one keyword the parser answers itself, because it
+/// decides which operators are in scope and so cannot be one of them. The
+/// first occurrence wins and a second is ignored: a query says what it is
+/// looking at once. `-type:` is not a form — negating what a hit *is*
+/// means nothing — so it falls through to the term parser and degrades to
+/// prose, like any keyword nobody registered.
+private fun splitType(tokens: List<String>): TypedQuery {
+    var key: String? = null
+    val rest = mutableListOf<String>()
+    for (token in tokens) {
+        val colon = if (token.startsWith('[')) -1 else token.indexOf(':')
+        val argument = if (colon > 0) unquote(token.drop(colon + 1)) else ""
+        if (argument.isNotEmpty() && token.take(colon).equals(TYPE_KEYWORD, ignoreCase = true)) {
+            if (key == null) key = argument
+            continue
+        }
+        rest.add(token)
+    }
+    return TypedQuery(key, rest)
 }
 
 private val RANK = compareByDescending<SearchHit> { it.nameMatched }
     .thenByDescending { it.matchCount }
     .thenBy { it.relPath }
 
-private fun hitFor(note: SearchedNote, terms: List<ParsedTerm>): SearchHit? {
-    for (term in terms) {
-        if (term.term.matches(note) == term.negated) return null
-    }
-    // Only terms the note had to satisfy describe why it is here: a
-    // negated term is a reason it was not excluded, never a highlight.
-    val kept = terms.filterNot { it.negated }.map { it.term }
-    val bodyNeedles = kept.mapNotNull { it.bodyNeedle }.filter { it.isNotEmpty() }
-    val nameMatched = kept.any { term ->
-        term.nameNeedle?.let { note.name.contains(it, ignoreCase = true) } == true
-    }
+private fun hitFor(note: SearchedNote, terms: List<ParsedTerm>, maxLines: Int): SearchHit? {
+    if (!keeps(note, terms)) return null
+    val bodyNeedles = bodyNeedles(terms)
 
     val lines = mutableListOf<MatchedLine>()
     var matchCount = 0
@@ -185,10 +285,52 @@ private fun hitFor(note: SearchedNote, terms: List<ParsedTerm>): SearchHit? {
         val ranges = rangesIn(text, bodyNeedles)
         if (ranges.isEmpty()) return@forEachIndexed
         matchCount += ranges.size
-        if (lines.size < MAX_MATCHED_LINES) lines.add(MatchedLine(index + 1, text, ranges)) else moreMatches++
+        if (lines.size < maxLines) lines.add(MatchedLine(index + 1, text, ranges)) else moreMatches++
     }
-    return SearchHit(note.relPath, note.name, nameMatched, lines, moreMatches, matchCount)
+    return SearchHit(note.relPath, note.name, nameMatched(note, terms), lines, moreMatches, matchCount)
 }
+
+/// The line-level path (ADR 0015 § 4): the type says which lines are
+/// candidates, and each is judged on its own as a narrowed note. Every
+/// line that survives **is** a hit line, highlighted or not — a task kept
+/// by `due:today` alone has nothing to emphasise and must still show.
+private fun lineHitFor(
+    note: SearchedNote,
+    terms: List<ParsedTerm>,
+    extract: (SearchedNote) -> List<CandidateLine>,
+    maxLines: Int,
+): SearchHit? {
+    val kept = extract(note).filter { keeps(note.narrowedTo(it.text), terms) }
+    if (kept.isEmpty()) return null
+    val bodyNeedles = bodyNeedles(terms)
+
+    val lines = mutableListOf<MatchedLine>()
+    var matchCount = 0
+    var moreMatches = 0
+    for (candidate in kept) {
+        val ranges = rangesIn(candidate.text, bodyNeedles)
+        matchCount += ranges.size
+        if (lines.size < maxLines) lines.add(MatchedLine(candidate.number, candidate.text, ranges)) else moreMatches++
+    }
+    return SearchHit(note.relPath, note.name, nameMatched(note, terms), lines, moreMatches, matchCount)
+}
+
+private fun keeps(note: SearchedNote, terms: List<ParsedTerm>): Boolean {
+    for (term in terms) {
+        if (term.term.matches(note) == term.negated) return false
+    }
+    return true
+}
+
+// Only terms the note had to satisfy describe why it is here: a negated
+// term is a reason it was not excluded, never a highlight.
+private fun bodyNeedles(terms: List<ParsedTerm>): List<String> =
+    terms.filterNot { it.negated }.mapNotNull { it.term.bodyNeedle }.filter { it.isNotEmpty() }
+
+private fun nameMatched(note: SearchedNote, terms: List<ParsedTerm>): Boolean =
+    terms.filterNot { it.negated }.any { parsed ->
+        parsed.term.nameNeedle?.let { note.name.contains(it, ignoreCase = true) } == true
+    }
 
 /// Every occurrence of every needle in one line, merged where they
 /// overlap so the ranges stay disjoint and ordered.
@@ -245,9 +387,6 @@ private class MetaTerm(private val key: String, private val value: String?) : Te
 }
 
 private class ParsedTerm(val term: Term, val negated: Boolean)
-
-private fun parseQuery(query: String, operators: SearchOperators): List<ParsedTerm> =
-    tokenise(query).mapNotNull { parseTerm(it, operators) }
 
 /// Whitespace splits terms, except inside a quoted phrase or a bracketed
 /// metadata term, where it is part of the term.

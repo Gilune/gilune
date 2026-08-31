@@ -4,7 +4,10 @@
 // tools' edits are found the moment they land (constitution rule 13).
 //
 // The query language lives in `searchVault`; this panel only shows it,
-// and hints at its forms while the box is empty.
+// and hints at its forms while the box is empty. What a hit *is* comes
+// from the live plugin list (ADR 0015 § 4): switch the tasks plugin off
+// and `type:task` stops being a type and `due:` goes back to being a
+// word, here and in the hint both.
 
 package org.gilune.app
 
@@ -54,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.time.LocalDate
 
 /// Searching is one pass over the vault per keystroke, on the composing
 /// thread: honest for a personal vault, and the thing to reach for if a
@@ -69,8 +73,21 @@ fun SearchPanel(
     val colours = MaterialTheme.colorScheme
     var query by remember { mutableStateOf(initialQuery) }
     val focusManager = LocalFocusManager.current
-    val hits = remember(query, state.vaultTick.value) {
-        if (query.isBlank()) emptyList() else searchVault(state.vaultDir, query)
+    // Built from the plugin list on every composition, so enabling or
+    // removing a plugin changes the language on the next keystroke — no
+    // registry to re-seed, nothing to restart. `filter` is a key of its
+    // own because it changes what a task line is without changing the
+    // list's identity.
+    val types = searchTypesFor(state.plugins)
+    val filter = state.tasksFilter()
+    val hits = remember(query, state.vaultTick.value, types.size, filter) {
+        if (query.isBlank()) {
+            emptyList()
+        } else {
+            // `today` is read here rather than inside the engine so the
+            // day a relative word means is the day the query ran.
+            searchVault(state.vaultDir, query, types = types, today = LocalDate.now())
+        }
     }
 
     Column(modifier) {
@@ -125,7 +142,7 @@ fun SearchPanel(
         }
 
         when {
-            query.isBlank() -> QueryForms()
+            query.isBlank() -> QueryForms(types.any { it.key == TASK_SEARCH_TYPE })
             hits.isEmpty() -> Text(
                 "nothing matches",
                 fontSize = 11.sp,
@@ -218,14 +235,21 @@ private val QUERY_FORMS = listOf(
     "[key:value]" to "in the front matter",
 )
 
+/// Shown only while the tasks plugin is on: a hint is a promise, and a
+/// keyword that has gone back to being prose must not be advertised.
+private val TASK_QUERY_FORMS = listOf(
+    "type:task" to "task lines, not notes",
+    "due:" to "today, overdue, week, none",
+)
+
 @Composable
-private fun QueryForms() {
+private fun QueryForms(taskForms: Boolean) {
     val colours = MaterialTheme.colorScheme
     Column(
         Modifier.padding(start = 12.dp, end = 10.dp, top = 4.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        for ((form, gloss) in QUERY_FORMS) {
+        for ((form, gloss) in QUERY_FORMS + if (taskForms) TASK_QUERY_FORMS else emptyList()) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
                     form,
