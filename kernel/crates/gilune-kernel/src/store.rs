@@ -394,6 +394,44 @@ mod tests {
     }
 
     #[test]
+    fn an_older_store_upgrades_in_place_without_losing_what_it_held() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let local = dir.path().join(".gilune").join("local");
+        std::fs::create_dir_all(&local).expect("dirs");
+        let conn = rusqlite::Connection::open(local.join("kernel.db")).expect("raw");
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value NOT NULL);")
+            .expect("meta");
+        let previous = SCHEMA_VERSION - 1;
+        for step in &MIGRATIONS[..previous as usize] {
+            conn.execute_batch(step).expect("migration step");
+        }
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
+            [previous],
+        )
+        .expect("stamp version");
+        conn.execute(
+            "INSERT INTO objects (object_id, type_id, type_schema, created_ms)
+             VALUES ('kept', 'org.memory.source', 1, 1)",
+            [],
+        )
+        .expect("existing data");
+        drop(conn);
+
+        let store = Store::open(dir.path()).expect("open a store one version behind");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
+        assert_eq!(
+            store.status().expect("status").sources,
+            1,
+            "an upgrade never costs the user what they already had"
+        );
+        store
+            .register_plugin(&crate::vault::plugin_descriptor())
+            .expect("the new schema is usable straight after the upgrade");
+        assert_eq!(store.installed_plugins().expect("list").len(), 1);
+    }
+
+    #[test]
     fn a_file_where_the_vault_should_be_is_refused() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("not-a-dir");
