@@ -119,11 +119,17 @@ gates promises) are ratified. **Next: application-level engineering — see
      packaged exe behaved inconsistently under automated probes while
      gradle-exec and the owner's manual launch worked — re-verify by
      hand on the current build; probes must not kill processes by name
-     (the owner may be running the app). (2) Two app instances ran
-     concurrently against one vault during testing: multi-process
-     safety is untested (known ADR 0002 gap, now user-reachable) — add
-     a single-instance guard or a vault lock. (3) whisper.cpp logs
-     spam stderr; silence via log hooks.
+     (the owner may be running the app). (2) ~~multi-process safety~~ —
+     **multi-instance on one vault is supported use by owner decision
+     (2026-08-31)**, torture-tested (20 concurrent capture processes
+     racing project/reconcile/work; 20 clean runs). Fixes: SQLite
+     busy_timeout, unique projection temp files, both-constraint
+     upsert, age-gated stage sweeping (recovery can't steal a live
+     capture; `force_stage_sweep` for tools), idempotent promotion,
+     bounded rename retry — and `ids::short()` now uses the UUIDv7
+     random tail, since the timestamp prefix collided filenames for
+     same-millisecond captures. (3) whisper.cpp logs spam stderr;
+     silence via log hooks.
    - **M5 LAN sync** — discovery, short-code pairing, device keys,
      encrypted transport, op exchange; acceptance = the S4-extended
      scenarios (pair, refuse unpaired, revoke, rejoin). Threat-model
