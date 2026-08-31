@@ -417,7 +417,15 @@ gates promises) are ratified. **Next: application-level engineering — see
      the T4 edit-mode deviation (pending owner word: accept as final
      or schedule the overlay round). Suite 351. Live-proven:
      `type:task due:before:today is:open` returned exactly the one
-     open overdue task.
+     open overdue task. **Owner-reported fix (2026-08-31)**: a
+     just-opened note rendered its FIRST task line raw (caret parked
+     at offset 0 with no visible caret ⇒ line 0 was "the caret's
+     line") and the first click couldn't toggle it. Now
+     `caretLine == null` means "no caret — decorate every line" and
+     NoteEditor passes null while the body field is unfocused; the
+     raw-line exception follows a caret someone can see. Coordinator
+     fix; two seam tests rewritten to the new contract; live-proven
+     (fresh open shows all glyphs, first click stamps done:).
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

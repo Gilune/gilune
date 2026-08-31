@@ -90,14 +90,18 @@ class MarkdownEditingTest {
     }
 
     @Test
-    fun withoutACaretLineTheTextAndEveryOffsetAreUntouched() {
+    fun withoutACaretEveryMarkerRendersAsAGlyph() {
+        // No caret line means no caret at all — an unfocused, just-opened
+        // buffer — and a note must open showing its checkboxes, ready to
+        // be ticked (owner report, 2026-08-31). The raw-line exception
+        // belongs to a caret someone can see.
         val source = "- [ ] one\n- [x] two"
+        assertEquals("- $unchecked one\n- $checked two", transform(source).text.text)
         val result = transform(source)
-        assertEquals(source, result.text.text, "the default constructor is still E2 behaviour")
-        for (offset in 0..source.length) {
-            assertEquals(offset, result.offsetMapping.originalToTransformed(offset))
-            assertEquals(offset, result.offsetMapping.transformedToOriginal(offset))
-        }
+        val back = result.offsetMapping.transformedToOriginal(
+            result.offsetMapping.originalToTransformed(source.length),
+        )
+        assertEquals(source.length, back, "the document's end still round-trips exactly")
     }
 
     @Test
@@ -596,7 +600,10 @@ class MarkdownEditingTest {
         assertEquals(hit.range, decorationAt(source, glyph + 1, caretLine = 0)?.range)
         assertNull(decorationAt(source, glyph + 2, caretLine = 0), "past the glyph is ordinary text")
         assertNull(decorationAt(source, glyph, caretLine = 1), "a marker on the caret's line is raw and answers nothing")
-        assertNull(decorationAt(source, glyph, caretLine = null), "no caret, no decorations, no hit")
+        // No caret at all — the unfocused buffer — leaves every glyph
+        // clickable: opening a note and immediately ticking its first
+        // task is the use this exists for.
+        assertNotNull(decorationAt(source, glyph, caretLine = null), "no caret means every marker answers")
     }
 
     @Test

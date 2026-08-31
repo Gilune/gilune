@@ -100,11 +100,14 @@ fun builtInDecorations(): List<EditorDecoration> = BUILT_IN_DECORATIONS
 /// registered decorations render on every *other* line (E3, Obsidian's
 /// model: the line you are editing always shows its raw Markdown).
 ///
-/// With `caretLine == null`, or when nothing is claimed, the transformed
-/// text is byte-identical to the source and offsets are identity. Otherwise
-/// every match is folded into one table and offsets travel through one
-/// [OffsetMapping]. Styling is always computed against the *transformed*
-/// string, so spans land where the replacements put them.
+/// `caretLine == null` means there is no caret at all — an unfocused
+/// buffer — so *every* line decorates: a note must open showing its
+/// checkboxes, ready to be ticked (owner report, 2026-08-31). The raw-line
+/// exception belongs to a caret someone can see. When nothing is claimed
+/// the transformed text is byte-identical to the source and offsets are
+/// identity; otherwise every match folds into one table and offsets travel
+/// through one [OffsetMapping]. Styling is always computed against the
+/// *transformed* string, so spans land where the replacements put them.
 class MarkdownEditTransformation(
     private val palette: MarkdownPalette,
     private val caretLine: Int? = null,
@@ -112,7 +115,7 @@ class MarkdownEditTransformation(
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val source = text.text
-        val placed = caretLine?.let { decorate(source, it, decorations) }.orEmpty()
+        val placed = decorate(source, caretLine, decorations)
         if (placed.isEmpty()) {
             return TransformedText(styleMarkdown(source, palette), OffsetMapping.Identity)
         }
@@ -162,7 +165,7 @@ fun decorationAt(
     caretLine: Int?,
     decorations: List<EditorDecoration> = builtInDecorations(),
 ): DecorationHit? {
-    val placed = caretLine?.let { decorate(text, it, decorations) }.orEmpty()
+    val placed = decorate(text, caretLine, decorations)
     if (placed.isEmpty()) return null
     val starts = transformedStarts(placed)
     var onEdge: DecorationHit? = null
@@ -267,7 +270,7 @@ private class PlacedDecoration(
 /// start and non-overlapping, which is what every stage after it assumes.
 private fun decorate(
     source: String,
-    caretLine: Int,
+    caretLine: Int?,
     decorations: List<EditorDecoration>,
 ): List<PlacedDecoration> {
     if (decorations.isEmpty()) return emptyList()

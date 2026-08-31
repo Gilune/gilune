@@ -533,7 +533,12 @@ private fun OpenNote(
                 }
             }
 
-            val line = caretLine(editor.text.text, editor.text.selection.start)
+            // The raw-line exception follows a caret someone can see: an
+            // unfocused buffer has none, so a note opens with every task
+            // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
+            var bodyFocused by remember { mutableStateOf(false) }
+            val line =
+                if (bodyFocused) caretLine(editor.text.text, editor.text.selection.start) else null
             val transformation = remember(palette, line, decorations) {
                 MarkdownEditTransformation(palette, line, decorations)
             }
@@ -557,7 +562,8 @@ private fun OpenNote(
             fun activationUnder(position: Offset): DecorationHit? {
                 val placed = layout ?: return null
                 val text = editor.text.text
-                val caret = caretLine(text, editor.text.selection.start)
+                val caret =
+                    if (bodyFocused) caretLine(text, editor.text.selection.start) else null
                 return decorationAt(text, placed.getOffsetForPosition(position), caret, decorations)
             }
 
@@ -630,7 +636,10 @@ private fun OpenNote(
                             .onGloballyPositioned { fieldOrigin = it.localToWindow(Offset.Zero) }
                             // A field the caret has left cannot have a menu
                             // over its caret.
-                            .onFocusChanged { if (!it.isFocused) session = null }
+                            .onFocusChanged {
+                                bodyFocused = it.isFocused
+                                if (!it.isFocused) session = null
+                            }
                             // The menu's keys, and **only** while it is up:
                             // with no session every key is the field's, so
                             // nothing about ordinary editing changes. The
