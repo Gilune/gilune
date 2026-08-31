@@ -6,6 +6,14 @@ Validation: owner ratification; a shell-structure decision, not a spike, and
 nothing here crosses the FFI. The drag gesture in stage three is gated on a
 Compose spike before it is attempted, as ADR 0012 gates E3.
 
+Amendments (owner, 2026-08-31, after stages M and M+1 shipped):
+
+- The Compose-spike gate on the stage-M+2 drag gesture is **waived**;
+  the gesture is implemented directly in the shell.
+- Drag scope gains **reordering within a strip**, which the original
+  decision left unstated; the tear-out and four-edge drop grid stay
+  out, as decided below.
+
 ## Context
 
 ADR 0011 fixed the desktop regions; the document region is one of them, and

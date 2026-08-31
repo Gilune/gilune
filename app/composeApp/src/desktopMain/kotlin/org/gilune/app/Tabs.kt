@@ -177,11 +177,47 @@ class TabsState(val vaultDir: String) {
         val pane = activePane
         val tab = pane.active ?: return false
         if (pane.tabs.size < 2) return false
-        detach(pane, tab)
-        val fresh = TabPane()
-        fresh.tabs.add(tab)
-        insertRightOf(pane, fresh)
-        select(fresh, tab)
+        splitOff(tab, pane, pane)
+        return true
+    }
+
+    /// Dragging a tab (ADR 0014 stage M+2). `index` names a gap in `to`'s
+    /// strip as it stands before the move, so a same-pane drop accounts
+    /// for the gap the tab itself is about to vacate.
+    ///
+    /// A reorder within one strip changes nothing else: not the tab in
+    /// front, not a buffer. Across panes the tab arrives in front, which
+    /// deactivates whatever was there — flushed through the same
+    /// discipline as any other switch, and left dirty and stale if that
+    /// write is refused. The tab that moved is never flushed: it was in
+    /// front and stays in front.
+    fun moveTab(tab: Tab, from: TabPane, to: TabPane, index: Int) {
+        val at = from.tabs.indexOfFirst { it === tab }
+        if (at < 0) return
+        if (from === to) {
+            val gap = index.coerceIn(0, from.tabs.size)
+            val landing = if (gap > at) gap - 1 else gap
+            if (landing == at) return
+            from.tabs.removeAt(at)
+            from.tabs.add(landing, tab)
+            return
+        }
+        detach(from, tab)
+        to.tabs.add(index.coerceIn(0, to.tabs.size), tab)
+        select(to, tab)
+    }
+
+    /// Dropping a tab on a pane's outer quarter: a new pane opens to the
+    /// right of `target` holding it, halving that pane's share exactly as
+    /// `splitRight` does. False where the result would be the layout it
+    /// started with — a pane's only tab moved to just right of itself
+    /// would dissolve the pane it left and land where it already was. A
+    /// pane's only tab dropped on a *different* pane is legitimate: the
+    /// source dissolves and the new pane appears at the target.
+    fun splitWith(tab: Tab, from: TabPane, target: TabPane): Boolean {
+        if (from.tabs.none { it === tab }) return false
+        if (from === target && from.tabs.size < 2) return false
+        splitOff(tab, from, target)
         return true
     }
 
@@ -250,6 +286,19 @@ class TabsState(val vaultDir: String) {
     private fun insertAfterActive(pane: TabPane, tab: Tab) {
         val at = pane.tabs.indexOfFirst { it === pane.active }
         pane.tabs.add(if (at < 0) pane.tabs.size else at + 1, tab)
+    }
+
+    /// The tree surgery behind every split: the tab leaves the pane
+    /// holding it and lands alone in a fresh pane to the right of
+    /// `target`. The moved tab is never flushed — it goes straight to the
+    /// front of the new pane — and the source follows the neighbour rule,
+    /// dissolving if that was its last tab.
+    private fun splitOff(tab: Tab, from: TabPane, target: TabPane) {
+        detach(from, tab)
+        val fresh = TabPane()
+        fresh.tabs.add(tab)
+        insertRightOf(target, fresh)
+        select(fresh, tab)
     }
 
     /// Removal without a flush: closing flushes first, and a move keeps

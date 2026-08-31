@@ -10,13 +10,16 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.MouseButton
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.CoroutineScope
@@ -78,5 +81,57 @@ class PaneHostUiTest {
             alpha.editor.dirty = true
         }
         compose.onAllNodesWithTag("tab-affordance").assertCountEquals(2)
+    }
+
+    /// Two notes open in one pane, drawn: what the button tests below
+    /// both need before they can press anything.
+    private fun twoTabs(): TabsState {
+        val vault = Files.createTempDirectory("gilune-panes").toFile()
+        note(vault, "alpha.md", "alpha body")
+        note(vault, "beta.md", "beta body")
+        val state = GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val tabs = TabsState(vault.absolutePath)
+        tabs.open("alpha.md").editor.reading = false
+        tabs.open("beta.md").editor.reading = false
+        compose.setContent {
+            GiluneTheme(dark = false) {
+                Box(Modifier.fillMaxSize()) { PaneHost(state, tabs, Modifier.fillMaxSize()) }
+            }
+        }
+        compose.onAllNodesWithTag("tab-label").assertCountEquals(2)
+        return tabs
+    }
+
+    // The primary press on a chip grew a drag behind it (ADR 0014 stage
+    // M+2), and the other two buttons share its pointer loop: these two
+    // say that neither lost its gesture to the one that moves tabs.
+
+    @Test
+    fun middle_clicking_a_tab_still_closes_it() {
+        twoTabs()
+
+        compose.onAllNodesWithTag("tab-label")[1].performMouseInput {
+            moveTo(center)
+            press(MouseButton.Tertiary)
+            release(MouseButton.Tertiary)
+        }
+
+        val left = compose.onAllNodesWithTag("tab-label")
+        left.assertCountEquals(1)
+        left[0].assertTextEquals("alpha")
+    }
+
+    @Test
+    fun right_clicking_a_tab_still_opens_its_menu() {
+        twoTabs()
+
+        compose.onAllNodesWithTag("tab-label")[0].performMouseInput {
+            moveTo(center)
+            press(MouseButton.Secondary)
+            release(MouseButton.Secondary)
+        }
+
+        compose.onNodeWithText("Split right").assertIsDisplayed()
+        compose.onNodeWithText("Close").assertIsDisplayed()
     }
 }

@@ -343,6 +343,226 @@ class TabsTest {
         assertNull(tabs.dictationTabId)
     }
 
+    /// Three tabs in one pane, the last of them split off to the right:
+    /// the shape every drag test below starts from, as `[a, b] | [c]`.
+    private fun split(dir: String): Triple<TabsState, TabPane, TabPane> {
+        listOf("a.md", "b.md", "c.md").forEach { note(dir, it) }
+        val tabs = TabsState(dir)
+        tabs.open("a.md")
+        tabs.open("b.md")
+        tabs.open("c.md")
+        assertTrue(tabs.splitRight())
+        return Triple(tabs, tabs.panes()[0], tabs.panes()[1])
+    }
+
+    private fun tabIn(pane: TabPane, rel: String): Tab = pane.tabs.first { it.relPath == rel }
+
+    @Test
+    fun reorderingWithinAStripDropsTheTabAtTheGapItWasLeftOn() {
+        val dir = vault()
+        listOf("a.md", "b.md", "c.md").forEach { note(dir, it) }
+        val tabs = TabsState(dir)
+        tabs.open("a.md")
+        tabs.open("b.md")
+        val c = tabs.open("c.md")
+        val pane = tabs.activePane
+
+        tabs.moveTab(c, pane, pane, 0)
+        assertEquals(listOf("c.md", "a.md", "b.md"), pane.tabs.map { it.relPath })
+
+        // Gap two of [c, a, b] is the space after a, and removing c first
+        // shifts it left by one.
+        tabs.moveTab(c, pane, pane, 2)
+        assertEquals(listOf("a.md", "c.md", "b.md"), pane.tabs.map { it.relPath })
+
+        tabs.moveTab(c, pane, pane, 9)
+        assertEquals(listOf("a.md", "b.md", "c.md"), pane.tabs.map { it.relPath })
+
+        assertSame(c, pane.active, "reordering never changes which tab is in front")
+        assertSame(pane, tabs.activePane)
+    }
+
+    @Test
+    fun reorderingATabThatIsNotInFrontLeavesTheFrontAndItsBufferAlone() {
+        val dir = vault()
+        listOf("a.md", "b.md", "c.md").forEach { note(dir, it) }
+        val tabs = TabsState(dir)
+        val a = tabs.open("a.md")
+        tabs.open("b.md")
+        val c = tabs.open("c.md")
+        val pane = tabs.activePane
+        edit(a, "typed")
+
+        tabs.moveTab(a, pane, pane, 3)
+
+        assertEquals(listOf("b.md", "c.md", "a.md"), pane.tabs.map { it.relPath })
+        assertSame(c, tabs.activeTab)
+        // A reorder is not a switch: nothing was deactivated, so nothing
+        // was written.
+        assertTrue(a.editor.dirty)
+        assertEquals("---\ngilune-id: a\n---\nbody", onDisk(dir, "a.md"))
+    }
+
+    @Test
+    fun movingATabToAnotherPaneBringsItAndThatPaneToTheFront() {
+        val dir = vault()
+        val (tabs, left, right) = split(dir)
+        val a = tabIn(left, "a.md")
+        val b = tabIn(left, "b.md")
+
+        tabs.moveTab(a, left, right, 0)
+
+        assertEquals(listOf(listOf("b.md"), listOf("a.md", "c.md")), shape(tabs))
+        assertSame(a, right.active)
+        assertSame(right, tabs.activePane)
+        assertSame(b, left.active, "the pane it left keeps the neighbour it fell back to")
+    }
+
+    @Test
+    fun arrivingInAPaneFlushesTheTabItPushesOffTheFront() {
+        val dir = vault()
+        val (tabs, left, right) = split(dir)
+        val c = tabIn(right, "c.md")
+        edit(c, "typed")
+
+        tabs.moveTab(tabIn(left, "a.md"), left, right, 0)
+
+        assertEquals("---\ngilune-id: c\n---\ntyped", onDisk(dir, "c.md"))
+        assertFalse(c.editor.dirty)
+    }
+
+    @Test
+    fun aRefusedFlushOnTheDisplacedTabMarksItStaleAndTheMoveStillHappens() {
+        val dir = vault()
+        val (tabs, left, right) = split(dir)
+        val a = tabIn(left, "a.md")
+        val c = tabIn(right, "c.md")
+        edit(c, "mine")
+        File(dir, "c.md").writeText("theirs")
+
+        tabs.moveTab(a, left, right, 0)
+
+        assertTrue(c.editor.staleBuffer)
+        assertTrue(c.editor.dirty)
+        assertEquals("theirs", onDisk(dir, "c.md"), "a refused flush writes nothing")
+        assertEquals(listOf(listOf("b.md"), listOf("a.md", "c.md")), shape(tabs))
+        assertSame(a, right.active, "the drop is not undone by the buffer it displaced")
+    }
+
+    @Test
+    fun movingAPanesOnlyTabDissolvesThePaneItLeaves() {
+        val dir = vault()
+        note(dir, "a.md")
+        note(dir, "b.md")
+        val tabs = TabsState(dir)
+        tabs.open("a.md")
+        tabs.open("b.md")
+        assertTrue(tabs.splitRight())
+        val left = tabs.panes()[0]
+        val right = tabs.panes()[1]
+        val a = tabIn(left, "a.md")
+
+        tabs.moveTab(a, left, right, 1)
+
+        val root = assertNotNull(tabs.root as? TabPane)
+        assertSame(right, root)
+        assertEquals(listOf("b.md", "a.md"), root.tabs.map { it.relPath })
+        assertSame(a, tabs.activeTab)
+        assertSame(right, tabs.activePane)
+    }
+
+    @Test
+    fun splittingWithADraggedTabHalvesTheTargetAndTakesTheTab() {
+        val dir = vault()
+        val (tabs, left, right) = split(dir)
+        val a = tabIn(left, "a.md")
+
+        assertTrue(tabs.splitWith(a, left, right))
+
+        assertEquals(listOf(listOf("b.md"), listOf("c.md"), listOf("a.md")), shape(tabs))
+        val root = assertNotNull(tabs.root as? Split)
+        listOf(0.5f, 0.25f, 0.25f).forEachIndexed { i, expected ->
+            assertEquals(expected, root.weights[i], 0.0001f)
+        }
+        assertSame(a, tabs.activeTab)
+        assertSame(tabs.panes()[2], tabs.activePane)
+    }
+
+    @Test
+    fun splittingAPanesOnlyTabOntoAnotherPaneDissolvesTheSource() {
+        val dir = vault()
+        note(dir, "a.md")
+        note(dir, "b.md")
+        val tabs = TabsState(dir)
+        tabs.open("a.md")
+        tabs.open("b.md")
+        assertTrue(tabs.splitRight())
+        val left = tabs.panes()[0]
+        val right = tabs.panes()[1]
+
+        assertTrue(tabs.splitWith(tabIn(left, "a.md"), left, right))
+
+        val root = assertNotNull(tabs.root as? Split)
+        assertEquals(2, root.children.size, "the source dissolved as the new pane appeared")
+        assertEquals(listOf(listOf("b.md"), listOf("a.md")), shape(tabs))
+        assertEquals("a.md", tabs.activeTab?.relPath)
+    }
+
+    @Test
+    fun splittingAPanesOnlyTabAwayFromItselfIsTheLayoutItAlreadyHas() {
+        val dir = vault()
+        note(dir, "a.md")
+        val tabs = TabsState(dir)
+        val a = tabs.open("a.md")
+        val pane = tabs.activePane
+
+        assertFalse(tabs.splitWith(a, pane, pane))
+
+        assertTrue(tabs.root is TabPane)
+        assertEquals(listOf(listOf("a.md")), shape(tabs))
+        assertSame(pane, tabs.activePane)
+        assertSame(a, tabs.activeTab)
+    }
+
+    @Test
+    fun aMovedTabIsStillTheDictationTarget() {
+        val dir = vault()
+        val (tabs, left, right) = split(dir)
+        val a = tabIn(left, "a.md")
+        tabs.dictationTabId = a.id
+
+        tabs.moveTab(a, left, right, 0)
+        assertEquals(a.id, tabs.dictationTabId)
+
+        tabs.moveTab(a, right, right, 2)
+        assertEquals(a.id, tabs.dictationTabId, "a reorder is not a close")
+    }
+
+    @Test
+    fun aLayoutBuiltByDraggingRoundTripsThroughSerialisation() {
+        val dir = vault()
+        listOf("a.md", "b.md", "c.md", "d.md").forEach { note(dir, it) }
+        val tabs = TabsState(dir)
+        tabs.open("a.md")
+        tabs.open("b.md")
+        tabs.open("c.md")
+        tabs.open("d.md")
+        assertTrue(tabs.splitRight())
+        val left = tabs.panes()[0]
+        val right = tabs.panes()[1]
+        tabs.moveTab(tabIn(left, "a.md"), left, right, 0)
+        assertTrue(tabs.splitWith(tabIn(left, "b.md"), left, right))
+
+        val restored = TabsState.restore(dir, tabs.serialise())
+
+        assertEquals(listOf(listOf("c.md"), listOf("a.md", "d.md"), listOf("b.md")), shape(restored))
+        val root = assertNotNull(restored.root as? Split)
+        listOf(0.5f, 0.25f, 0.25f).forEachIndexed { i, expected ->
+            assertEquals(expected, root.weights[i], 0.0001f)
+        }
+        assertEquals("b.md", restored.activeTab?.relPath)
+    }
+
     @Test
     fun aLayoutRoundTripsThroughSerialisation() {
         val dir = vault()

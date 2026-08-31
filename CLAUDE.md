@@ -272,6 +272,29 @@ gates promises) are ratified. **Next: application-level engineering — see
      "Save now" on a clean buffer writes nothing (single write path);
      search results have no Open to the side yet; suite ~119 desktop
      tests (2 UI) + 23 model.
+   - **M+2 drag (2026-08-31, same day: one Opus implementer, Fable
+     validating with real scripted mouse drags + screenshots)** — the
+     owner waived the ADR's Compose-spike gate and added within-strip
+     reorder (both recorded in ADR 0014's Amendments). Model:
+     `moveTab(tab, from, to, index)` (same-pane reorder never flushes;
+     cross-pane activates the moved tab and flushes the displaced one
+     through select's path) and `splitWith(tab, from, target)`
+     (splitRight's surgery extracted to `splitOff`; identity drop
+     returns false). Gesture in Panes.kt: press still selects, ~6.dp
+     slop turns the held press into a drag inside the SAME TabChip
+     pointer loop (no competing pointerInput); `TabDrag` holds a
+     bounds registry (panes/strips/chips via boundsInRoot) and the
+     live session; drop targets in order: strip gap (2dp caret) then
+     a pane's outer right quarter (12% primary tint) then nothing.
+     Drag image, caret and tint all render in the PaneHost root
+     overlay — never laid out inside the horizontalScroll strip
+     (infinite constraints). Edge auto-scroll on overflowing strips
+     (read-verified only: a test would deadlock waitForIdle). Suite
+     137 desktop tests; live validation: cross-pane move, reorder,
+     and edge-split each performed with a real mouse drag via
+     scratchpad drag.ps1 (SendInput on the "Gilune probe" window
+     only) and screenshot-confirmed, incl. mid-gesture affordances.
+     Tear-out and the four-edge grid remain out of scope.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry
