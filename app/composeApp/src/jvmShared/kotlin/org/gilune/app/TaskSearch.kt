@@ -1,8 +1,8 @@
 // The tasks plugin's contribution to the search language (ADR 0015 § 4):
-// the `task` type — what a hit is — and the `due:`/`done:` operators
-// scoped to it. Nothing here widens the grammar; it registers into the
-// one `Search.kt` already has, which is the whole point of § 4's "one
-// grammar, one engine".
+// the `task` type — what a hit is — and the `due:`/`done:`/`is:`
+// operators scoped to it. Nothing here widens the grammar; it registers
+// into the one `Search.kt` already has, which is the whole point of § 4's
+// "one grammar, one engine".
 //
 // Pure over strings and an injected `today`, so it is testable without a
 // screen and a mobile reader could evaluate the same query (ADR 0006).
@@ -19,17 +19,20 @@ import uniffi.gilune_ffi.PluginInfo
 /// The key this plugin registers. A hit is a task line, not a note.
 const val TASK_SEARCH_TYPE = "task"
 
-/// `type:task`, with `due:` and `done:` scoped to it (§ 4). `filter` is
+/// `type:task`, with `due:`, `done:` and `is:` scoped to it (§ 4). `filter` is
 /// § 1's global setting, read by the caller from the plugin's own
 /// settings so recogniser, menu and query never disagree about what a
 /// task is; empty — the shipped default — means every GFM checklist item
 /// is one.
 ///
-/// The type is a registration and carries no day: its operators are built
-/// per query, against the day that query runs.
+/// The type is a registration and carries no day: its date operators are
+/// built per query, against the day that query runs. `is:` needs no day,
+/// so it is one value registered beside them.
 fun taskSearchType(filter: String = ""): SearchType = SearchType(
     key = TASK_SEARCH_TYPE,
-    operators = { today -> listOf(DateFieldOperator(DUE_FIELD, today), DateFieldOperator(DONE_FIELD, today)) },
+    operators = { today ->
+        listOf(DateFieldOperator(DUE_FIELD, today), DateFieldOperator(DONE_FIELD, today), MARKER_OPERATOR)
+    },
     extract = { note -> taskLines(note, filter) },
 )
 
@@ -113,7 +116,12 @@ private val TASK_ORDER = compareBy<TaskHit>(
 /// because that one is file-private, exactly as `Suggest.kt` and
 /// `Plugins.kt` duplicate it. If it is ever published, all four become
 /// the import: one definition of a task line is the point of § 1.
-private val TASK_SEARCH_TASK_LINE = Regex("""^([ \t]*)([-*+])([ \t]+)(\[[ xX]])""")
+///
+/// Group 4 is the character between the brackets, as `TasksPanel.kt`
+/// captures it: the extractor only asks whether a line matches, but `is:`
+/// asks which marker it carries, and reading it off the one recogniser
+/// keeps the two answers from ever disagreeing.
+private val TASK_SEARCH_TASK_LINE = Regex("""^([ \t]*)([-*+])([ \t]+)\[([ xX])]""")
 
 /// § 1's three rules, and all three: a task marker, the global filter,
 /// and **never inside a fenced code block** — the documented `filter`
@@ -143,9 +151,10 @@ private fun taskLines(note: SearchedNote, filter: String): List<CandidateLine> {
 
 private const val DUE_FIELD = "due"
 private const val DONE_FIELD = "done"
+private const val MARKER_FIELD = "is"
 
-/// `due:` and `done:`, the two § 1 stores and the only two § 6 scopes to
-/// this type. Under the narrowed-note rule the note handed to [matches]
+/// `due:` and `done:`, the two § 1 stores and the only dates this type
+/// scopes. Under the narrowed-note rule the note handed to [matches]
 /// **is one line**, so reading its body reads the task line.
 ///
 /// No needle hooks: the operator filters, it does not highlight — the
@@ -158,6 +167,24 @@ private class DateFieldOperator(override val name: String, private val today: Lo
         dateMatches(dateIn(note.body, token), argument, today)
 }
 
+/// `is:` — the checkbox itself, the one thing about a task that is not a
+/// date: `is:open` is the `[ ]` marker, `is:done` is `[x]` or `[X]`.
+///
+/// The marker is read off the same recogniser that decided the line was a
+/// task at all, under the narrowed-note rule, so the answer is the line's
+/// own bytes and not a second opinion about them.
+///
+/// Negation is the DSL's, not ours: `-is:done` is "not done", and on task
+/// lines it is exactly `is:open`, because a line the extractor yielded
+/// carries one marker or the other. No day is involved, so unlike the
+/// date operators this one needs no `today` and is a single value.
+private val MARKER_OPERATOR = object : SearchOperator {
+    override val name = MARKER_FIELD
+
+    override fun matches(note: SearchedNote, argument: String): Boolean =
+        markerMatches(markerIn(note.body), argument)
+}
+
 /// § 4's value forms, and the whole of them:
 ///
 /// - `YYYY-MM-DD` — that day exactly
@@ -166,12 +193,19 @@ private class DateFieldOperator(override val name: String, private val today: Lo
 /// - `week` — today through today + 6, both ends included
 /// - `none` — the line carries no such token. `-due:none` is therefore
 ///   "has a due date", which is why no `has`/`no` keywords exist
-/// - `before:<date>` / `after:<date>` — both **exclusive**, so
+/// - `before:<when>` / `after:<when>` — both **exclusive**, so
 ///   `before:2026-09-05` does not match the 5th and `after:2026-09-05`
 ///   does not either
 ///
-/// `<date>` is an ISO date and only that: `today` is already a value in
-/// its own right and `overdue` already says `before:today`.
+/// `<when>` is anything [resolveDatePhrase] resolves — an ISO date, or a
+/// relative word: `before:today`, `after:tomorrow`, `after:monday`, where
+/// a weekday is its **next** occurrence and never today (owner request,
+/// 2026-08-31, closing the gap to "due before today"). Resolution happens
+/// at evaluation against the day the query runs, like every other
+/// relative word here, so no query stores a date that rots. The resolver's
+/// multi-word phrases ("next week") cannot reach here — the DSL splits a
+/// query on whitespace — and the truncated `before:next` is simply a
+/// value it does not resolve.
 ///
 /// Anything else matches **nothing**. A typo inside a known operator is
 /// an empty result, not a text search: the DSL's degradation rule is
@@ -185,11 +219,35 @@ private fun dateMatches(date: LocalDate?, argument: String, today: LocalDate): B
         value == TODAY_VALUE -> date == today
         value == OVERDUE_VALUE -> date < today
         value == WEEK_VALUE -> !date.isBefore(today) && !date.isAfter(today.plusDays(WEEK_DAYS))
-        value.startsWith(BEFORE_VALUE) -> isoDate(value.removePrefix(BEFORE_VALUE))?.let { date < it } == true
-        value.startsWith(AFTER_VALUE) -> isoDate(value.removePrefix(AFTER_VALUE))?.let { date > it } == true
+        value.startsWith(BEFORE_VALUE) -> boundary(value, BEFORE_VALUE, today)?.let { date < it } == true
+        value.startsWith(AFTER_VALUE) -> boundary(value, AFTER_VALUE, today)?.let { date > it } == true
         else -> isoDate(value)?.let { date == it } == true
     }
 }
+
+/// The day a `before:`/`after:` value names, or null if it names none —
+/// [resolveDatePhrase] is the one resolver, so the operator and the `/`
+/// menu accept the same words and validate an ISO date the same way.
+private fun boundary(value: String, prefix: String, today: LocalDate): LocalDate? =
+    resolveDatePhrase(value.removePrefix(prefix), today)
+
+/// The marker values, and the whole of them: `open` is `[ ]`, `done` is
+/// `[x]` or `[X]`. Case-insensitive on both sides — the value as typed
+/// and the marker as written — and anything else matches nothing, by the
+/// same rule that makes `due:soonish` empty rather than prose.
+private fun markerMatches(marker: Char?, argument: String): Boolean {
+    if (marker == null) return false
+    return when (argument.trim().lowercase(Locale.ROOT)) {
+        OPEN_VALUE -> marker == ' '
+        DONE_VALUE -> marker == 'x'
+        else -> false
+    }
+}
+
+/// The marker a line carries, lower-cased, or null when the line is not a
+/// task at all — which under `type:task` it always is.
+private fun markerIn(line: String): Char? =
+    TASK_SEARCH_TASK_LINE.find(line)?.groupValues?.get(4)?.firstOrNull()?.lowercaseChar()
 
 private const val NONE_VALUE = "none"
 private const val TODAY_VALUE = "today"
@@ -197,6 +255,8 @@ private const val OVERDUE_VALUE = "overdue"
 private const val WEEK_VALUE = "week"
 private const val BEFORE_VALUE = "before:"
 private const val AFTER_VALUE = "after:"
+private const val OPEN_VALUE = "open"
+private const val DONE_VALUE = "done"
 
 /// `week` is today plus the six days after it — seven days counting
 /// today, which is what "the next seven days" means to a person reading

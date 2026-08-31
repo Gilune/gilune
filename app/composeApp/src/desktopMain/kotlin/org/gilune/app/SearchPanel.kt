@@ -239,7 +239,8 @@ private val QUERY_FORMS = listOf(
 /// keyword that has gone back to being prose must not be advertised.
 private val TASK_QUERY_FORMS = listOf(
     "type:task" to "task lines, not notes",
-    "due:" to "today, overdue, week, none",
+    "due:" to "today, overdue, week, none, before:/after:",
+    "is:" to "open, done",
 )
 
 @Composable

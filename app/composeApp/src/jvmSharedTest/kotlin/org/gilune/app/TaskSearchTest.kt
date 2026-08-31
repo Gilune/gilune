@@ -22,6 +22,11 @@ class TaskSearchTest {
 
     private val vault: String by lazy { buildVault() }
 
+    /// A second, tiny vault for `is:`: one line of each marker form, the
+    /// uppercase `[X]` among them. Separate so that exercising the marker
+    /// does not move a line number every other assertion here counts on.
+    private val markerVault: String by lazy { buildMarkerVault() }
+
     private fun buildVault(): String {
         val root = Files.createTempDirectory("gilune-task-search").toFile()
         fun write(relPath: String, text: String) {
@@ -79,6 +84,28 @@ class TaskSearchTest {
         return root.toString()
     }
 
+    /// Body lines 1-4 are the four marker forms; line 5 is prose that
+    /// carries the bytes `is:open`, so degradation to a text search can be
+    /// proven by what it finds and not only by what it does not.
+    private fun buildMarkerVault(): String {
+        val root = Files.createTempDirectory("gilune-task-markers").toFile()
+        val file = File(root, "Markers/list.md")
+        file.parentFile?.mkdirs()
+        file.writeText(
+            """
+            ---
+            gilune-id: id-markers
+            ---
+            - [ ] open one due:2026-09-01
+            - [x] lower done
+            - [X] upper done
+            - [ ] open two
+            A note about is:open, written as prose.
+            """.trimIndent(),
+        )
+        return root.toString()
+    }
+
     private fun types(filter: String = "") = listOf(NOTE_SEARCH_TYPE, taskSearchType(filter))
 
     /// Every hit line as `path:line`, which is what a task hit is.
@@ -88,8 +115,9 @@ class TaskSearchTest {
         filter: String = "",
         on: LocalDate = today,
         types: List<SearchType> = types(filter),
+        dir: String = vault,
     ): List<String> =
-        searchVault(vault, query, SearchOperators(), types, on, maxLines = 50)
+        searchVault(dir, query, SearchOperators(), types, on, maxLines = 50)
             .flatMap { hit -> hit.lines.map { "${hit.relPath}:${it.number}" } }
 
     private fun hits(query: String, on: LocalDate = today): List<SearchHit> =
@@ -261,6 +289,80 @@ class TaskSearchTest {
     }
 
     @Test
+    fun beforeAndAfterTakeRelativeWordsAndResolveAtEvaluation() {
+        assertEquals(
+            rows("type:task due:overdue"),
+            rows("type:task due:before:today"),
+            "`overdue` is `before:today` spelled out, and now sayable either way",
+        )
+        assertEquals(listOf("Work/project.md:3", "Work/project.md:4"), rows("type:task due:before:today"))
+        assertEquals(
+            listOf("Work/project.md:3", "Work/project.md:4", "Work/project.md:6"),
+            rows("type:task due:before:tomorrow"),
+            "the line due today is before tomorrow",
+        )
+        assertEquals(
+            listOf("Work/project.md:3", "Work/project.md:4", "Work/project.md:6"),
+            rows("type:task due:before:today", on = LocalDate.of(2026, 9, 4)),
+            "the word resolves the day the query runs, so the same query is a different question",
+        )
+    }
+
+    @Test
+    fun afterTodayIsStrictlyFutureAndTomorrowIsInIt() {
+        assertEquals(
+            listOf(
+                "Fenced/docs.md:7",
+                "Home/kitchen.md:1",
+                "Work/project.md:2",
+                "Work/project.md:8",
+                "Work/project.md:9",
+            ),
+            rows("type:task due:after:today"),
+            "the 4th is tomorrow and is in; today's own line is not",
+        )
+        assertTrue("Work/project.md:6" !in rows("type:task due:after:today"), "the line due today is excluded")
+        assertEquals(rows("type:task due:after:2026-09-03"), rows("type:task due:after:today"))
+    }
+
+    @Test
+    fun aWeekdayValueIsItsNextOccurrenceAndNeverToday() {
+        assertEquals(
+            listOf(
+                "Fenced/docs.md:7",
+                "Home/kitchen.md:1",
+                "Work/project.md:2",
+                "Work/project.md:3",
+                "Work/project.md:4",
+                "Work/project.md:6",
+                "Work/project.md:8",
+            ),
+            rows("type:task due:before:thursday"),
+            "today is a Thursday, so `thursday` is the 10th — a week away, never today",
+        )
+        assertEquals(
+            listOf("Home/kitchen.md:1", "Work/project.md:2", "Work/project.md:8", "Work/project.md:9"),
+            rows("type:task due:after:friday"),
+            "friday is tomorrow, the 4th, and `after:` excludes it",
+        )
+        assertEquals(rows("type:task due:before:tomorrow"), rows("type:task due:before:friday"))
+    }
+
+    @Test
+    fun aRelativeWordTheResolverRejectsIsAnEmptyResultLikeAnyOtherTypo() {
+        for (query in listOf(
+            "type:task due:before:banana",
+            // "next week" cannot survive the whitespace split, so the
+            // truncation is what actually reaches the operator.
+            "type:task due:before:next",
+            "type:task due:after:someday",
+            "type:task done:before:whenever",
+        )) {
+            assertEquals(emptyList(), rows(query), query)
+        }
+    }
+
+    @Test
     fun doneTakesTheSameFormsAsDue() {
         assertEquals(listOf("Work/project.md:4"), rows("type:task done:2026-09-02"))
         assertEquals(listOf("Work/project.md:4"), rows("type:task done:overdue"))
@@ -282,6 +384,68 @@ class TaskSearchTest {
         )) {
             assertEquals(emptyList(), rows(query), query)
         }
+    }
+
+    @Test
+    fun doneTakesTheRelativeBoundariesToo() {
+        assertEquals(listOf("Work/project.md:4"), rows("type:task done:before:today"))
+        assertEquals(listOf("Work/project.md:4"), rows("type:task done:before:friday"))
+        assertEquals(listOf("Work/project.md:4"), rows("type:task done:after:2026-09-01"), "the ISO twin, unchanged")
+        assertEquals(emptyList(), rows("type:task done:after:today"), "nothing was finished after today")
+    }
+
+    // -----------------------------------------------------------------
+    // `is:` — the marker itself.
+    // -----------------------------------------------------------------
+
+    @Test
+    fun isOpenAndIsDonePartitionTheTaskLines() {
+        assertEquals(listOf("Markers/list.md:1", "Markers/list.md:4"), rows("type:task is:open", dir = markerVault))
+        assertEquals(
+            listOf("Markers/list.md:2", "Markers/list.md:3"),
+            rows("type:task is:done", dir = markerVault),
+            "an uppercase [X] is done as much as a lowercase one",
+        )
+        assertEquals(listOf("Work/project.md:4"), rows("type:task is:done"), "and one finished line in the fixture")
+    }
+
+    @Test
+    fun theMarkerValueIsCaseInsensitiveAndAnythingElseIsEmpty() {
+        assertEquals(rows("type:task is:done", dir = markerVault), rows("type:task is:DONE", dir = markerVault))
+        assertEquals(emptyList(), rows("type:task is:banana", dir = markerVault))
+        assertEquals(emptyList(), rows("type:task is:x"), "the marker is what is read, not what is typed")
+    }
+
+    @Test
+    fun negatingTheMarkerIsTheOtherHalfOfThePartition() {
+        assertEquals(
+            rows("type:task is:open", dir = markerVault),
+            rows("type:task -is:done", dir = markerVault),
+            "negation is the DSL's; on task lines the two halves are a true partition",
+        )
+        assertEquals(rows("type:task is:done", dir = markerVault), rows("type:task -is:open", dir = markerVault))
+        assertEquals(rows("type:task is:open"), rows("type:task -is:done"), "the same on the main fixture")
+    }
+
+    @Test
+    fun isIsProseUnderTheDefaultType() {
+        assertEquals(
+            listOf("Markers/list.md:5"),
+            rows("is:open", dir = markerVault),
+            "no type registered the keyword, so it reads the bytes as written",
+        )
+        assertEquals(rows("is:open", dir = markerVault), rows("type:note is:open", dir = markerVault))
+        assertEquals(emptyList(), rows("type:note is:done", dir = markerVault), "text that is not there finds nothing")
+    }
+
+    @Test
+    fun theCanonicalAskIsOverdueAndStillOpen() {
+        assertEquals(
+            listOf("Work/project.md:3"),
+            rows("type:task due:before:today is:open"),
+            "the 2nd is overdue as well, but it is done — the ask is what is still open",
+        )
+        assertEquals(rows("type:task due:overdue is:open"), rows("type:task due:before:today is:open"))
     }
 
     // -----------------------------------------------------------------

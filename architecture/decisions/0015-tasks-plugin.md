@@ -599,3 +599,21 @@ privilege and not only the shell's. Both were then ratified:
 
 The ADR is Accepted and moves to build. ADR 0011 was amended the same day with
 the four new slot ids and the plugin-published-slot rule.
+
+Post-delivery amendments (owner, 2026-08-31, after all four stages shipped):
+
+- § 4's `before:`/`after:` values widen from ISO-only to **anything the one
+  date resolver resolves** — `today`, `tomorrow`, a weekday's next occurrence —
+  resolved at evaluation as ever; a value the resolver rejects stays an empty
+  result. Multi-word phrases cannot reach an operator value and are not
+  contorted for.
+- A **`is:` operator scoped to `type:task`**: `is:open` and `is:done` read the
+  checkbox marker itself off the line's bytes — the one fact about a task that
+  is not a date, and what "not done" actually means. `done:none` remains the
+  date-token question.
+- T4's Edit-mode rendering shipped as the raw fence rather than the
+  caret-outside overlay (rendered rows do not sit on the editor's line grid;
+  the composed offset table would thread back through checkbox activation,
+  hover and the popup anchor; a covered block cannot be clicked into). Read
+  mode renders; no evaluation runs in Edit mode. Deviation pinned by test,
+  pending either owner acceptance as final or a future overlay round.

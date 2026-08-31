@@ -407,6 +407,17 @@ gates promises) are ratified. **Next: application-level engineering — see
      fences with in-fence tokens correctly un-decorated. Gaps: each
      block = one vault pass; rows open the note not the line;
      EDITOR_BLOCKS has one producer (the settings.form lesson).
+     **Post-delivery (2026-08-31, owner ask "due before today / not
+     done")**: `before:`/`after:` values now take anything
+     `resolveDatePhrase` resolves (today/tomorrow/weekday-next),
+     resolved at evaluation; new `is:open`/`is:done` operator on
+     `type:task` reads the checkbox marker itself (what "not done"
+     means; `done:none` stays the date-token question); hint rows
+     updated; recorded in 0015's post-delivery amendments alongside
+     the T4 edit-mode deviation (pending owner word: accept as final
+     or schedule the overlay round). Suite 351. Live-proven:
+     `type:task due:before:today is:open` returned exactly the one
+     open overdue task.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry
