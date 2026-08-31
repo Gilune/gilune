@@ -13,6 +13,7 @@ import androidx.compose.ui.text.input.TransformedText
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -308,5 +309,361 @@ class MarkdownEditingTest {
         assertEquals(source, toggleCheckbox(source, 2 until 4), "a two-character range is not a marker")
         assertEquals(source, toggleCheckbox(source, -3 until 0))
         assertEquals(source, toggleCheckbox(source, source.length until source.length + 3))
+    }
+
+    // ---------------------------------------------------------------
+    // The `editor.decorations` seam (ADR 0015 § 5). Everything above
+    // this line is the contract the refactor had to preserve: the
+    // checkbox behaves identically now that it arrives as the shell's
+    // own first registration rather than by name.
+    // ---------------------------------------------------------------
+
+    private fun transform(source: String, caretLine: Int, decorations: List<EditorDecoration>): TransformedText =
+        MarkdownEditTransformation(palette, caretLine, decorations).filter(AnnotatedString(source))
+
+    /// A test registration replacing every literal occurrence of `pattern`.
+    private fun replacing(
+        id: String,
+        pattern: String,
+        replacement: String,
+        role: DecorationRole = DecorationRole.NONE,
+        activate: ((String) -> String)? = null,
+    ) = EditorDecoration(
+        id = id,
+        role = role,
+        activate = activate,
+        recognise = { line ->
+            Regex(Regex.escape(pattern)).findAll(line)
+                .map { DecorationMatch(it.range.first until it.range.last + 1, DecorationRender.Replace(replacement)) }
+                .toList()
+        },
+    )
+
+    // The tasks plugin's due token, built here exactly as ADR 0015 § 1
+    // specifies it — `\sdue:` plus an ISO date, on a task line only, styled
+    // where it stands and never replaced. It is not registered by the
+    // shell; this is the second producer proving the seam carries one.
+    private val taskLine = Regex("""^[ \t]*[-*+][ \t]+\[[ xX]]""")
+    private val duePattern = Regex("""\sdue:\d{4}-\d{2}-\d{2}\b""")
+    private val dueDecoration = EditorDecoration(
+        id = "org.memory.tasks.due",
+        role = DecorationRole.MARKER,
+        recognise = { line ->
+            if (!taskLine.containsMatchIn(line)) {
+                emptyList()
+            } else {
+                duePattern.findAll(line)
+                    .map { DecorationMatch(it.range.first + 1 until it.range.last + 1, DecorationRender.StyleOnly) }
+                    .toList()
+            }
+        },
+    )
+
+    /// Both directions over the whole document: in bounds, never going
+    /// backwards, and the two ends meeting. Compose crashes on a mapping
+    /// that breaks any of the three.
+    private fun assertMappingIsSound(source: String, result: TransformedText) {
+        val transformed = result.text.text
+        var previous = 0
+        for (offset in 0..source.length) {
+            val mapped = result.offsetMapping.originalToTransformed(offset)
+            assertTrue(mapped in 0..transformed.length, "original $offset mapped to $mapped, out of bounds")
+            assertTrue(mapped >= previous, "original $offset went backwards: $previous then $mapped")
+            previous = mapped
+        }
+        assertEquals(transformed.length, result.offsetMapping.originalToTransformed(source.length))
+        previous = 0
+        for (offset in 0..transformed.length) {
+            val mapped = result.offsetMapping.transformedToOriginal(offset)
+            assertTrue(mapped in 0..source.length, "transformed $offset mapped to $mapped, out of bounds")
+            assertTrue(mapped >= previous, "transformed $offset went backwards: $previous then $mapped")
+            previous = mapped
+        }
+        assertEquals(source.length, result.offsetMapping.transformedToOriginal(transformed.length))
+    }
+
+    @Test
+    fun theBuiltInRegistryIsTheCheckboxSliceAndIsWhatTheDefaultUses() {
+        assertEquals(1, builtInDecorations().size, "one built-in today: the checkbox")
+        val explicit = transform(taskDoc, taskDocCaretLine, builtInDecorations())
+        val default = transform(taskDoc, taskDocCaretLine)
+        assertEquals(default.text.text, explicit.text.text)
+        for (offset in 0..taskDoc.length) {
+            assertEquals(
+                default.offsetMapping.originalToTransformed(offset),
+                explicit.offsetMapping.originalToTransformed(offset),
+                "offset $offset must not care whether the registry was passed or defaulted",
+            )
+        }
+    }
+
+    @Test
+    fun anEmptyRegistryLeavesTheTextAndEveryOffsetAlone() {
+        val source = "- [ ] one\n- [x] two"
+        val result = transform(source, caretLine = 0, decorations = emptyList())
+        assertEquals(source, result.text.text, "nothing registered, nothing rendered")
+        for (offset in 0..source.length) {
+            assertEquals(offset, result.offsetMapping.originalToTransformed(offset))
+            assertEquals(offset, result.offsetMapping.transformedToOriginal(offset))
+        }
+    }
+
+    @Test
+    fun matchesOfDifferentLengthsOnOneLineFoldIntoOneOffsetTable() {
+        val source = "notes\n- [ ] AB and XYZ here"
+        val decorations = builtInDecorations() +
+            replacing("grow", "AB", "<<<<<") +
+            replacing("shrink", "XYZ", "~")
+        val result = transform(source, caretLine = 0, decorations = decorations)
+        val transformed = result.text.text
+        assertEquals("notes\n- $unchecked <<<<< and ~ here", transformed)
+        assertMappingIsSound(source, result)
+
+        // Each replacement's own delta carries every offset behind it: -2
+        // for the glyph, +3 for the grown span, -2 for the shrunk one.
+        val mapping = result.offsetMapping
+        for ((sourceText, renderedText) in listOf("[ ]" to unchecked.toString(), "AB" to "<<<<<", "XYZ" to "~")) {
+            val start = source.indexOf(sourceText)
+            val end = start + sourceText.length
+            val renderedStart = transformed.indexOf(renderedText)
+            val renderedEnd = renderedStart + renderedText.length
+            assertEquals(renderedStart, mapping.originalToTransformed(start), "`$sourceText` starts where it renders")
+            assertEquals(renderedEnd, mapping.originalToTransformed(end), "`$sourceText` ends where it renders")
+            assertEquals(start, mapping.transformedToOriginal(renderedStart), "and back again")
+            assertEquals(end, mapping.transformedToOriginal(renderedEnd))
+        }
+    }
+
+    @Test
+    fun anOffsetInsideAReplacedRangeSnapsToTheNearerEdgeInBothDirections() {
+        val source = "notes\n- [ ] AB and XYZ here"
+        val decorations = builtInDecorations() + replacing("grow", "AB", "<<<<<")
+        val result = transform(source, caretLine = 0, decorations = decorations)
+        val mapping = result.offsetMapping
+        val start = source.indexOf("AB")
+        val rendered = result.text.text.indexOf("<<<<<")
+
+        // Source side: two characters became five, so the midpoint rounds
+        // out to the far edge rather than landing in the middle of a span
+        // that no longer has a middle.
+        assertEquals(rendered + 5, mapping.originalToTransformed(start + 1))
+        // Transformed side: the first two of five come back to the start,
+        // the last two to the end — monotone, and never inside the source
+        // range where no caret may sit.
+        assertEquals(start, mapping.transformedToOriginal(rendered + 1))
+        assertEquals(start, mapping.transformedToOriginal(rendered + 2))
+        assertEquals(start + 2, mapping.transformedToOriginal(rendered + 3))
+        assertEquals(start + 2, mapping.transformedToOriginal(rendered + 4))
+    }
+
+    @Test
+    fun aStyleOnlySpanColoursWithoutMovingAnySingleOffset() {
+        val source = "notes\n- [ ] pay the bill due:2026-09-05"
+        val result = transform(source, caretLine = 0, decorations = listOf(dueDecoration))
+        assertEquals(source, result.text.text, "a zero-delta registration changes no byte and no length")
+        for (offset in 0..source.length) {
+            assertEquals(offset, result.offsetMapping.originalToTransformed(offset), "offset $offset moved")
+            assertEquals(offset, result.offsetMapping.transformedToOriginal(offset), "offset $offset moved")
+        }
+        val token = "due:2026-09-05"
+        assertTrue(
+            result.text.spanStyles.any {
+                it.item.color == palette.marker && source.substring(it.start, it.end) == token
+            },
+            "the token is styled where it stands",
+        )
+    }
+
+    @Test
+    fun overlappingMatchesGoToTheFirstRegistrationInDeclarationOrder() {
+        val source = "notes\nabcdef"
+        val first = replacing("first", "abcd", "1")
+        val second = replacing("second", "cdef", "2")
+        assertEquals(
+            "notes\n1ef",
+            transform(source, caretLine = 0, decorations = listOf(first, second)).text.text,
+            "the first registration claims the ground it overlaps",
+        )
+        assertEquals(
+            "notes\nab2",
+            transform(source, caretLine = 0, decorations = listOf(second, first)).text.text,
+            "swap the order and the other one wins — order is the whole rule",
+        )
+    }
+
+    @Test
+    fun builtInsLeadTheRegistryAndTakeAContestedRange() {
+        val source = "notes\n- [ ] task"
+        val plugin = replacing("plugin", "[ ]", "!!")
+        assertEquals(
+            "notes\n- $unchecked task",
+            transform(source, caretLine = 0, decorations = builtInDecorations() + plugin).text.text,
+            "built-ins first, so the checkbox keeps the marker",
+        )
+        assertEquals(
+            "notes\n- !! task",
+            transform(source, caretLine = 0, decorations = listOf(plugin) + builtInDecorations()).text.text,
+            "and it keeps it by position, not by privilege",
+        )
+    }
+
+    @Test
+    fun theCaretsLineIsFilteredOutBeforeAnyRegistrationIsAsked() {
+        val asked = mutableListOf<String>()
+        val spy = EditorDecoration(
+            id = "spy",
+            recognise = { line ->
+                asked += line
+                emptyList()
+            },
+        )
+        transform("one\ntwo\nthree", caretLine = 1, decorations = listOf(spy))
+        assertEquals(
+            listOf("one", "three"),
+            asked,
+            "E3's raw-on-the-caret-line rule is the shell's to honour, not a registration's",
+        )
+    }
+
+    @Test
+    fun aRegistrationThatOptsInStillFiresInsideAFence() {
+        val source = "notes\n```\n- [ ] quoted\n```"
+        assertEquals(
+            "notes\n```\n- $unchecked quoted\n```",
+            transform(source, caretLine = 0).text.text,
+            "presentation of a GFM element is not task metadata; the checkbox renders as it always has",
+        )
+    }
+
+    @Test
+    fun activateLineFoldsEveryHandlerWithTheCheckboxAsTheFirstLink() {
+        // The T2 shape from § 5, one stage early: core flips the marker,
+        // the second link then stamps or strips the done date, and the
+        // shell writes the line once.
+        val stamp = EditorDecoration(
+            id = "org.memory.tasks.done",
+            recognise = { line ->
+                if (taskLine.containsMatchIn(line)) listOf(DecorationMatch(0 until 1, DecorationRender.StyleOnly))
+                else emptyList()
+            },
+            activate = { line ->
+                if (line.contains("[x]")) "$line done:2026-08-31" else line.replace(" done:2026-08-31", "")
+            },
+        )
+        val chain = builtInDecorations() + stamp
+        assertEquals(
+            "- [x] file the return done:2026-08-31",
+            activateLine("- [ ] file the return", chain),
+            "the second link sees the line the first one wrote",
+        )
+        assertEquals(
+            "- [ ] file the return",
+            activateLine("- [x] file the return done:2026-08-31", chain),
+            "and folding back the other way strips it again",
+        )
+    }
+
+    @Test
+    fun activateLineIsTheCheckboxToggleWhenTheShellStandsAlone() {
+        assertEquals("- [x] a", activateLine("- [ ] a"), "remove the plugin and the toggle still toggles")
+        assertEquals("- [ ] a", activateLine("- [x] a"))
+        assertNull(activateLine("plain prose"), "nothing claimed the line, so the document is left alone")
+        assertNull(activateLine("- [ ] a", emptyList()))
+        assertNull(activateLine("- [ ] a", listOf(dueDecoration)), "a registration with no handler activates nothing")
+    }
+
+    @Test
+    fun decorationAtAnswersTheCheckboxPathThroughTheSeam() {
+        val source = "notes\n- [ ] task"
+        val marker = source.indexOf("[ ]")
+        val glyph = transform(source, caretLine = 0).text.text.indexOf(unchecked)
+
+        val hit = assertNotNull(decorationAt(source, glyph, caretLine = 0))
+        assertEquals(marker until marker + 3, hit.range, "the hit carries the source range the toggle needs")
+        assertEquals("gilune.checkbox", hit.decoration.id)
+        assertEquals(
+            "notes\n- [x] task",
+            toggleCheckbox(source, hit.range),
+            "the checkbox path is expressible through the general helper",
+        )
+        assertEquals(
+            "- [x] task",
+            activateLine(source.substring(hit.lineRange.first, hit.lineRange.last + 1)),
+            "and so is the activation, from the line the hit names",
+        )
+
+        // A click on the glyph's right half lands the cursor just past it.
+        assertEquals(hit.range, decorationAt(source, glyph + 1, caretLine = 0)?.range)
+        assertNull(decorationAt(source, glyph + 2, caretLine = 0), "past the glyph is ordinary text")
+        assertNull(decorationAt(source, glyph, caretLine = 1), "a marker on the caret's line is raw and answers nothing")
+        assertNull(decorationAt(source, glyph, caretLine = null), "no caret, no decorations, no hit")
+    }
+
+    @Test
+    fun decorationAtIgnoresARegistrationThatBearsNoActivation() {
+        val source = "notes\n- [ ] pay the bill due:2026-09-05"
+        val token = source.indexOf("due:")
+        assertNull(
+            decorationAt(source, token, caretLine = 0, decorations = listOf(dueDecoration)),
+            "styling a token does not make it clickable",
+        )
+    }
+
+    @Test
+    fun theDueTokenRidesTheSeamBesideTheCheckbox() {
+        val decorations = builtInDecorations() + dueDecoration
+        val source = "notes\n- [ ] renew the passport due:2026-09-05"
+        val result = transform(source, caretLine = 0, decorations = decorations)
+        val transformed = result.text.text
+        val token = "due:2026-09-05"
+
+        // Two producers, one line: the checkbox replaces, the token only
+        // colours, and both survive the same fold.
+        assertEquals("notes\n- $unchecked renew the passport $token", transformed)
+        assertTrue(
+            result.text.spanStyles.any {
+                it.item.color == palette.marker && transformed.substring(it.start, it.end) == token
+            },
+            "the token is styled at its transformed offsets, behind the glyph's two-character shift",
+        )
+        assertMappingIsSound(source, result)
+        assertEquals(
+            transformed.indexOf(token),
+            result.offsetMapping.originalToTransformed(source.indexOf(token)),
+            "the token moved by the glyph's delta, not by its own",
+        )
+        assertEquals(
+            source.indexOf(token),
+            result.offsetMapping.transformedToOriginal(transformed.indexOf(token)),
+        )
+
+        // The caret's line is nobody's to decorate, the plugin's included.
+        val onTheCaretLine = transform(source, caretLine = 1, decorations = decorations)
+        assertEquals(source, onTheCaretLine.text.text)
+        assertTrue(
+            onTheCaretLine.text.spanStyles.none {
+                it.item.color == palette.marker && source.substring(it.start, it.end) == token
+            },
+            "the line being edited shows its raw Markdown, styled by the core rules only",
+        )
+
+        // And a documented example is not somebody's agenda (§ 1): inside a
+        // fence the token is text, while the opted-in checkbox still draws.
+        val fenced = """
+            notes
+            ```markdown
+            - [ ] example due:2026-09-05
+            ```
+            - [ ] real due:2026-09-06
+        """.trimIndent()
+        val quoted = transform(fenced, caretLine = 0, decorations = decorations)
+        val quotedText = quoted.text.text
+        val styled = quoted.text.spanStyles.filter {
+            it.item.color == palette.marker && quotedText.substring(it.start, it.end).startsWith("due:")
+        }
+        assertEquals(1, styled.size, "only the token outside the fence is a due date")
+        assertEquals("due:2026-09-06", quotedText.substring(styled.single().start, styled.single().end))
+        assertEquals(2, quotedText.count { it == unchecked }, "both checkboxes still render")
+        assertMappingIsSound(fenced, quoted)
     }
 }

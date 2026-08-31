@@ -80,6 +80,7 @@ import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -101,8 +102,26 @@ import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.delay
 import java.io.File
+import java.time.LocalDate
 
 private const val AUTOSAVE_IDLE_MS = 1200L
+
+/// ADR 0015 § 1's fence rule, asked **here** because the `/` menu's
+/// machine is line-scoped: [SuggestSession] sees one line and cannot know
+/// it sits inside a ``` block, so withholding the call is the caller's
+/// job. Counts the fence delimiters on the complete lines above the
+/// caret, exactly as `styleMarkdown` and the decoration seam track them.
+internal fun caretIsInsideCodeFence(text: String, caret: Int): Boolean {
+    val bounded = caret.coerceIn(0, text.length)
+    val lines = text.substring(0, bounded).split('\n')
+    var open = false
+    // The last element is the caret's own line up to the caret, which is
+    // not yet a delimiter of anything above it.
+    for (index in 0 until lines.size - 1) {
+        if (lines[index].trim().startsWith("```")) open = !open
+    }
+    return open
+}
 
 class EditorState {
     var openRelPath by mutableStateOf<String?>(null)
@@ -458,27 +477,84 @@ private fun OpenNote(
                     link = colours.primary,
                 )
             }
+            // The editor seams (ADR 0015 § 5). What is composed comes from
+            // the registry: the shell's own registrations lead, and the
+            // tasks plugin's date styling and `/` menu are here only while
+            // that plugin is enabled and still declares them. Switch it off
+            // and the tokens are prose and the menu never opens — no byte
+            // changes either way, which is what removability has to mean.
+            val plugins = state.plugins.toList()
+            val filter = plugins.tasksFilter()
+            val decorations = remember(plugins, filter) {
+                if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
+                    builtInDecorations() + tasksDecorations(filter)
+                } else {
+                    builtInDecorations()
+                }
+            }
+            // Stage one's fields, gated the same way and additionally by
+            // the both-enabled rule inside `taskFields`. Empty means
+            // `openAt` can never fire, so a removed plugin takes the
+            // trigger with it rather than leaving a menu with no rows.
+            val fields = remember(plugins) {
+                if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_SUGGEST)) {
+                    taskFields(plugins)
+                } else {
+                    emptyList()
+                }
+            }
+
             val line = caretLine(editor.text.text, editor.text.selection.start)
-            val transformation = remember(palette, line) { MarkdownEditTransformation(palette, line) }
+            val transformation = remember(palette, line, decorations) {
+                MarkdownEditTransformation(palette, line, decorations)
+            }
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
-            var hoveringCheckbox by remember { mutableStateOf(false) }
+            var hoveringActivation by remember { mutableStateOf(false) }
+
+            // The `/` menu belongs to this note and this mode; leaving
+            // either drops it. Dismissal costs the buffer nothing, because
+            // a session never wrote to it (ADR 0015 § 2).
+            var session by remember(relPath) { mutableStateOf<SuggestSession?>(null) }
+            var fieldOrigin by remember { mutableStateOf(Offset.Zero) }
 
             /// The one question both the tap and the pointer ask of the
-            /// same machinery: which marker, if any, is drawn under this
-            /// position? Markers on the caret's line are raw text, and
-            /// answer nothing.
-            fun checkboxUnder(position: Offset): IntRange? {
+            /// same machinery: which activation-bearing decoration is
+            /// drawn under this position? The seam takes the offset
+            /// straight from the layout and answers in source
+            /// coordinates. Decorations on the caret's line are raw text
+            /// and answer nothing; so does a style-only registration —
+            /// every one the tasks plugin makes in T1 — which is why a
+            /// due token is inert to the mouse by construction.
+            fun activationUnder(position: Offset): DecorationHit? {
+                val placed = layout ?: return null
                 val text = editor.text.text
                 val caret = caretLine(text, editor.text.selection.start)
-                val placed = layout ?: return null
-                val mapping = MarkdownEditTransformation(palette, caret)
-                    .filter(AnnotatedString(text))
-                    .offsetMapping
-                val original = mapping.transformedToOriginal(placed.getOffsetForPosition(position))
-                // A hit on the glyph's right half maps just past the
-                // marker; step back one.
-                val marker = checkboxMarkerAt(text, original) ?: checkboxMarkerAt(text, original - 1)
-                return marker?.takeIf { caretLine(text, it.first) != caret }
+                return decorationAt(text, placed.getOffsetForPosition(position), caret, decorations)
+            }
+
+            /// Activation is the only route by which a decoration may
+            /// change a byte, and it changes exactly one line: the chain
+            /// folds left over every registration that claims it and the
+            /// result is written once, as one edit (§ 5). With the shell
+            /// standing alone that is the checkbox toggle, unchanged.
+            fun activate(hit: DecorationHit) {
+                val text = editor.text.text
+                val from = hit.lineRange.first
+                val to = (hit.lineRange.last + 1).coerceIn(from, text.length)
+                val rewritten = activateLine(text.substring(from, to), decorations) ?: return
+                val written = text.substring(0, from) + rewritten + text.substring(to)
+                val selection = editor.text.selection
+                editor.text = editor.text.copy(
+                    text = written,
+                    // A rewrite may change the line's length once a
+                    // registration stamps rather than flips; the caret
+                    // stays where it was and is only kept in bounds.
+                    selection = TextRange(
+                        selection.start.coerceIn(0, written.length),
+                        selection.end.coerceIn(0, written.length),
+                    ),
+                )
+                editor.dirty = true
             }
 
             // The input surface is the pane, not the text: a short note
@@ -494,37 +570,110 @@ private fun OpenNote(
                             // nobody typed into would sit dirty for ever.
                             editor.dirty = editor.dirty || it.text != editor.text.text
                             editor.text = it
+                            // A live session re-reads the line; otherwise
+                            // the trigger is offered the caret. `openAt`
+                            // asks § 2's own questions — a `/` at a word
+                            // boundary on a task line — so all that is
+                            // owed here is what it cannot see: an empty
+                            // registry, a selection, and the fence rule.
+                            val live = session
+                            session = when {
+                                live != null -> live.updateAt(it.text, it.selection.start)
+                                fields.isEmpty() -> null
+                                !it.selection.collapsed -> null
+                                caretIsInsideCodeFence(it.text, it.selection.start) -> null
+                                else -> SuggestSession.openAt(
+                                    it.text,
+                                    it.selection.start,
+                                    fields,
+                                    filter,
+                                    LocalDate.now(),
+                                )
+                            }
                         },
                         modifier = Modifier
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = paneHeight)
                             .padding(14.dp)
+                            // Window coordinates for the caret popup: the
+                            // layout gives a rectangle in the field's own
+                            // space, and this is what puts it on screen.
+                            .onGloballyPositioned { fieldOrigin = it.localToWindow(Offset.Zero) }
+                            // A field the caret has left cannot have a menu
+                            // over its caret.
+                            .onFocusChanged { if (!it.isFocused) session = null }
+                            // The menu's keys, and **only** while it is up:
+                            // with no session every key is the field's, so
+                            // nothing about ordinary editing changes. The
+                            // popup is not focusable, so this is where its
+                            // keyboard lives (§ 2).
+                            .onPreviewKeyEvent { event ->
+                                val live = session
+                                when {
+                                    live == null -> false
+                                    event.type != KeyEventType.KeyDown -> false
+                                    event.key == Key.DirectionDown -> {
+                                        session = live.moveDown()
+                                        true
+                                    }
+                                    event.key == Key.DirectionUp -> {
+                                        session = live.moveUp()
+                                        true
+                                    }
+                                    event.key == Key.Enter -> {
+                                        when (val outcome = live.accept()) {
+                                            // The session decided the exact
+                                            // range and the exact text; the
+                                            // caller is what writes.
+                                            is SuggestOutcome.Insert -> {
+                                                editor.text = replaceRange(
+                                                    editor.text,
+                                                    outcome.acceptance.replaceRange,
+                                                    outcome.acceptance.text,
+                                                )
+                                                editor.dirty = true
+                                                session = null
+                                            }
+                                            is SuggestOutcome.Open -> session = outcome.session
+                                            SuggestOutcome.Dismissed -> session = null
+                                        }
+                                        true
+                                    }
+                                    // Consumed, so dismissing the menu
+                                    // cannot also close settings behind it.
+                                    // The `/` and what follows stay: they
+                                    // are the user's own bytes.
+                                    event.key == Key.Escape -> {
+                                        session = null
+                                        true
+                                    }
+                                    else -> false
+                                }
+                            }
                             // A tap on a checkbox glyph toggles it and never
                             // moves the caret, so it is intercepted ahead of
                             // the field on the initial pass. A tap anywhere
                             // else passes through untouched.
-                            .pointerInput(editor.openRelPath) {
+                            .pointerInput(editor.openRelPath, decorations) {
                                 awaitEachGesture {
                                     val down = awaitFirstDown(pass = PointerEventPass.Initial)
-                                    val text = editor.text.text
-                                    val marker = checkboxUnder(down.position) ?: return@awaitEachGesture
+                                    val hit = activationUnder(down.position) ?: return@awaitEachGesture
                                     down.consume()
                                     waitForUpOrCancellation(pass = PointerEventPass.Initial)?.consume()
-                                    editor.text = editor.text.copy(text = toggleCheckbox(text, marker))
-                                    editor.dirty = true
+                                    activate(hit)
                                 }
                             }
                             // A glyph answers a click, so it must not look
                             // like text. Only a move asks the question.
-                            .pointerInput(editor.openRelPath) {
+                            .pointerInput(editor.openRelPath, decorations) {
                                 awaitPointerEventScope {
                                     while (true) {
                                         val event = awaitPointerEvent()
                                         when (event.type) {
                                             PointerEventType.Move ->
-                                                hoveringCheckbox =
-                                                    checkboxUnder(event.changes.last().position) != null
-                                            PointerEventType.Exit -> hoveringCheckbox = false
+                                                hoveringActivation =
+                                                    activationUnder(event.changes.last().position) != null
+                                            PointerEventType.Exit -> hoveringActivation = false
                                             else -> {}
                                         }
                                     }
@@ -533,7 +682,7 @@ private fun OpenNote(
                             // The field sets an I-beam of its own inside,
                             // so the override has to reach past it.
                             .pointerHoverIcon(
-                                if (hoveringCheckbox) PointerIcon.Hand else PointerIcon.Text,
+                                if (hoveringActivation) PointerIcon.Hand else PointerIcon.Text,
                                 overrideDescendants = true,
                             )
                             // Named so tests can ask for the body without
@@ -549,6 +698,29 @@ private fun OpenNote(
                         cursorBrush = SolidColor(colours.primary),
                         visualTransformation = transformation,
                     )
+                }
+
+                // The caret-anchored menu (ADR 0015 § 2). The session's
+                // document offset travels through the transformation the
+                // field is actually showing, then through the layout,
+                // then into window coordinates — so the popup follows the
+                // caret rather than a node, and a checkbox glyph earlier
+                // on the line cannot put it in the wrong place.
+                val live = session
+                val placed = layout
+                if (live != null && placed != null) {
+                    val anchor = runCatching {
+                        val transformed = transformation
+                            .filter(AnnotatedString(editor.text.text))
+                            .offsetMapping
+                            .originalToTransformed(live.caret)
+                        placed
+                            .getCursorRect(transformed.coerceIn(0, placed.layoutInput.text.length))
+                            .translate(fieldOrigin)
+                    }.getOrNull()
+                    if (anchor != null) {
+                        SuggestPopup(live, anchor, onDismiss = { session = null })
+                    }
                 }
             }
         }

@@ -32,6 +32,7 @@ pub fn descriptor() -> PluginDescriptor {
             slot: "settings.form".to_string(),
             id: "transcription-model".to_string(),
             label: "Model and language".to_string(),
+            config: String::new(),
         }],
     }
 }

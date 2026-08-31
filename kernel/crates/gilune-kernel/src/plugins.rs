@@ -45,6 +45,12 @@ pub struct Contribution {
     pub slot: String,
     pub id: String,
     pub label: String,
+    /// Contribution-private payload, canonical JSON by convention and
+    /// opaque here exactly as `settings` is (ADR 0015 § 5). Three strings
+    /// cannot express "a decoration matching this regex", and smuggling a
+    /// payload into `id` or `label` is not a seam. Empty is the default and
+    /// the reading of a manifest written before this field existed.
+    pub config: String,
 }
 
 /// What an implementation declares about itself — the subset of the
@@ -425,7 +431,14 @@ fn manifest_json(descriptor: &PluginDescriptor) -> String {
         "contributions": descriptor
             .contributions
             .iter()
-            .map(|c| serde_json::json!({ "slot": c.slot, "id": c.id, "label": c.label }))
+            .map(|c| {
+                serde_json::json!({
+                    "slot": c.slot,
+                    "id": c.id,
+                    "label": c.label,
+                    "config": c.config,
+                })
+            })
             .collect::<Vec<_>>(),
     })
     .to_string()
@@ -456,6 +469,14 @@ fn contributions_from(manifest: &serde_json::Value) -> Vec<Contribution> {
                         slot: item.get("slot")?.as_str()?.to_string(),
                         id: item.get("id")?.as_str()?.to_string(),
                         label: item.get("label")?.as_str()?.to_string(),
+                        // Absent in every manifest written before ADR 0015,
+                        // and absent is empty — no migration, because a
+                        // contribution has never been a row.
+                        config: item
+                            .get("config")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_default()
+                            .to_string(),
                     })
                 })
                 .collect()
@@ -525,6 +546,7 @@ mod tests {
                 slot: "note.actions".to_string(),
                 id: "transcribe-again".to_string(),
                 label: "Transcribe again".to_string(),
+                config: String::new(),
             }],
         }
     }
@@ -683,6 +705,67 @@ mod tests {
                 .is_granted("org.memory.transcription", "network.request")
                 .expect("check"),
             "a disabled plugin may do nothing, whatever it was granted"
+        );
+    }
+
+    #[test]
+    fn a_contribution_carries_its_config_across_a_reopen_and_the_kernel_never_reads_it() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut declared = transcription();
+        declared.contributions.push(Contribution {
+            slot: "editor.decorations".to_string(),
+            id: "due-date".to_string(),
+            label: "Due date".to_string(),
+            config: r#"{"key":"due","pattern":"\\sdue:\\d{4}-\\d{2}-\\d{2}\\b"}"#.to_string(),
+        });
+        {
+            let store = Store::open(dir.path()).expect("open");
+            store.register_plugin(&declared).expect("register");
+        }
+        let store = Store::open(dir.path()).expect("reopen");
+        let plugin = store.plugin("org.memory.transcription").expect("get").expect("present");
+        assert_eq!(
+            plugin.descriptor.contributions, declared.contributions,
+            "config round-trips through the manifest byte for byte"
+        );
+        assert_eq!(
+            plugin.descriptor.contributions[0].config, "",
+            "a contribution that declares no config reads back as empty"
+        );
+    }
+
+    #[test]
+    fn a_manifest_written_before_config_existed_still_parses() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        store.register_plugin(&transcription()).expect("register");
+        // Exactly what `manifest_json` produced before ADR 0015: a
+        // contribution is three strings. Contributions are serialised
+        // inside the manifest column, never rows, so an older vault needs
+        // no migration — the absent key reads as empty.
+        store
+            .conn()
+            .execute(
+                "UPDATE plugins SET manifest = ?2 WHERE plugin_id = ?1",
+                rusqlite::params![
+                    "org.memory.transcription",
+                    r#"{"subscribes":"org.memory.source-ready","emits":[],"capabilities":[],
+                        "contributions":[{"slot":"note.actions","id":"transcribe-again",
+                                          "label":"Transcribe again"}]}"#,
+                ],
+            )
+            .expect("write an old manifest");
+
+        let plugin = store.plugin("org.memory.transcription").expect("get").expect("present");
+        assert_eq!(
+            plugin.descriptor.contributions,
+            vec![Contribution {
+                slot: "note.actions".to_string(),
+                id: "transcribe-again".to_string(),
+                label: "Transcribe again".to_string(),
+                config: String::new(),
+            }],
+            "an old serialisation opens clean and keeps the contribution it held"
         );
     }
 

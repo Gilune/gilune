@@ -145,6 +145,11 @@ pub struct PluginContribution {
     pub slot: String,
     pub id: String,
     pub label: String,
+    /// Contribution-private payload, canonical JSON by convention and
+    /// opaque to the kernel (ADR 0015 § 5). Defaulted so that a host
+    /// declaring the three original strings keeps compiling.
+    #[uniffi(default = "")]
+    pub config: String,
 }
 
 /// What a host declares when it registers an implementation it carries.
@@ -187,6 +192,7 @@ impl From<gilune_kernel::plugins::InstalledPlugin> for PluginInfo {
                     slot: c.slot.clone(),
                     id: c.id.clone(),
                     label: c.label.clone(),
+                    config: c.config.clone(),
                 })
                 .collect(),
             settings: p.settings,
@@ -237,6 +243,7 @@ impl TryFrom<PluginDeclaration> for gilune_kernel::plugins::PluginDescriptor {
                     slot: c.slot,
                     id: c.id,
                     label: c.label,
+                    config: c.config,
                 })
                 .collect(),
         })

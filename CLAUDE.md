@@ -317,6 +317,39 @@ gates promises) are ratified. **Next: application-level engineering — see
      typed query landing focused, drag-shut. Gap: stacked splits
      would need a vertical DragDivider twin (no renderer builds them
      yet).
+   - **Tasks plugin T1 (2026-08-31, agent team: two researchers → design
+     synthesis + mockups → ADR 0015 ratified in stages → four
+     implementers; Fable coordinating, live-validating with scripted
+     typing)** — ADR 0015 **Accepted**: `due:`/`done:` plain ISO keys on
+     task lines only, `/` two-stage caret menu (natural language → ISO
+     at insertion, never stored), global filter (default empty = every
+     checkbox), generic ` ```filter ` blocks behind a required `type:`
+     (T4), `search.types` + type-scoped operators (T2), `tasks.fields`
+     as the first plugin-published slot; ADR 0011 amended five→nine
+     slots; research notes in `architecture/research/`. T1 SHIPPED:
+     kernel `Contribution.config` (manifest JSON — no migration;
+     uniffi default "" keeps Kotlin call sites compiling; dll
+     restaged); `editor.decorations` seam in MarkdownEditing.kt
+     (checkbox = the shell's own first registration, per-match offset
+     table, fence gating per-registration with the checkbox opting
+     in, activation chain, `decorationAt` replaces checkboxUnder);
+     suggest machinery (TaskDates/SuggestSession immutable state
+     machine/`replaceRange` — insertAtCaret trims so cannot express
+     completions/SuggestPopup non-focusable caret popup); tasks
+     plugin wired (declaration `org.memory.tasks`, both-enabled
+     tasks.fields gate, filter live without restart, settings screen
+     with contribution chips). Suite 242 desktop + 65 cargo. Live
+     proof: typed `/due tom` in a probe → `due:2026-09-01` on disk
+     via autosave; prose `due:` stays plain; plugin off → tokens
+     plain text, bytes unchanged, checkboxes still draw. Known gaps:
+     decorations `config` JSON mirrors Kotlin recognisers untested
+     (can drift); `done:` styled but stamped only in T2; no
+     mouse-click acceptance in the popup; popup highlight not
+     scrolled into view; Android bindings pre-existing stale
+     (Plugins.kt uncompilable there since M6a). **Remaining: T2
+     (done-stamp chain, search.types note+task, panel `type:`
+     operators, cross-plugin tasks.fields hook), T3 (agenda panel +
+     off switch), T4 (filter-block rendering).**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

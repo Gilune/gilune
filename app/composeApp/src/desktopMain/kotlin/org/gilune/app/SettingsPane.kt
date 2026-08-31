@@ -369,6 +369,11 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
         TranscriptionSettings(state, plugin)
     }
 
+    if (plugin.pluginId == TASKS_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        TasksSettings(state, plugin)
+    }
+
     if (!plugin.required) {
         HorizontalDivider(color = colours.outlineVariant)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -419,6 +424,53 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 }
             },
             enabled = language.trim().isNotEmpty() && language.trim() != saved,
+        ) { Text("Apply", fontSize = 12.sp) }
+    }
+}
+
+/// The tasks plugin's settings: § 1's global filter, the one setting the
+/// recognisers, the `/` menu and — later — the panel and queries all read,
+/// so the vault can never disagree with itself about what a task is.
+@Composable
+private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    val saved = remember(plugin.settings) { listOf(plugin).tasksFilter() }
+    var filter by remember(plugin.settings) { mutableStateOf(saved) }
+    Text("Global filter", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Which checkboxes count as tasks. Empty — the default — means every " +
+            "checklist item is one. Set it to something like #task and only " +
+            "checkbox lines carrying that text get the / menu and coloured dates. " +
+            "Nothing in your vault is rewritten either way, and the change takes " +
+            "effect as soon as you apply it.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.OutlinedTextField(
+            value = filter,
+            onValueChange = { filter = it },
+            singleLine = true,
+            placeholder = {
+                Text("empty — every checkbox is a task", fontSize = 12.sp, color = colours.onSurfaceVariant)
+            },
+            modifier = Modifier.width(300.dp),
+        )
+        Button(
+            onClick = {
+                val wanted = filter.trim()
+                state.pluginAction(
+                    if (wanted.isEmpty()) {
+                        "every checkbox is a task again"
+                    } else {
+                        "only checkbox lines containing $wanted are tasks"
+                    },
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted)) }
+            },
+            // An empty filter is a legitimate value — the shipped default
+            // — so only "no change" disables the button.
+            enabled = filter.trim() != saved,
         ) { Text("Apply", fontSize = 12.sp) }
     }
 }

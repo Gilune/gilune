@@ -44,6 +44,13 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 if (fresh && registered == "enabled") {
                     g.grantCapability(VOICE_CAPTURE_PLUGIN, "platform.audio-record")
                 }
+                // Tasks is this shell's too (ADR 0015 § 7): no processor,
+                // no events and no capabilities, so there is nothing to
+                // grant — consent is the enable switch. Registered on the
+                // same idempotent path, so enable, disable, remove and
+                // tombstone all apply with no new machinery, and a plugin
+                // the user removed is never resurrected.
+                g.registerPlugin(tasksDeclaration())
                 g.project()
                 gilune.value = g
                 refresh()
@@ -170,6 +177,13 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
             }
         }
     }
+
+    /// The tasks plugin's global filter (ADR 0015 § 1), read from the
+    /// plugin list so it is live: `pluginAction` refreshes that list
+    /// after a settings write, the read below is a snapshot read, and a
+    /// composition that asked for the filter recomposes on the next
+    /// recognise/menu pass. Nothing is rewritten and nothing restarts.
+    fun tasksFilter(): String = plugins.tasksFilter()
 
     /// Run a plugin action and report it. Every plugin change refreshes
     /// the contribution lists, so controls appear and disappear with it.
