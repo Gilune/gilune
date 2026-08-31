@@ -19,6 +19,7 @@ technologies can be rejected without weakening the product principles.
 | [0012](0012-markdown-editing-model.md) | The Markdown buffer is always the document; rich presentation renders it and never serialises back | Accepted |
 | [0013](0013-transcription-lands-in-the-note.md) | Processor outputs may revise their subject; transcription lands in the capture note; attached captures project no note | Accepted |
 | [0014](0014-tabs-and-split-panes.md) | Pane tree with per-note editor buffers: tabs, explicit splits, one buffer per note in v0 | Accepted |
+| [0015](0015-tasks-plugin.md) | Tasks plugin: `due:`/`done:` plain-text dates, a caret-anchored inline suggester, and the editor, search and navigation seams it is built on | Proposed |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or
