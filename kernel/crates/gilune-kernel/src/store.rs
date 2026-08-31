@@ -40,6 +40,9 @@ impl Store {
         let conn = rusqlite::Connection::open(local.join("kernel.db"))?;
         conn.pragma_update(None, "journal_mode", "wal")?;
         conn.pragma_update(None, "foreign_keys", "on")?;
+        // Multiple processes share one vault by design (app, agent, CLI —
+        // owner decision 2026-08-31): writers queue instead of failing.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&conn)?;
         conn.execute(
             "INSERT OR IGNORE INTO meta (key, value) VALUES ('device_id', ?1)",

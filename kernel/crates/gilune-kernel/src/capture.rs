@@ -69,6 +69,13 @@ impl Store {
         stage.write_chunk(bytes)?;
         stage.finish(self)
     }
+
+    /// Sweep orphaned stages regardless of age. For tools and tests; the
+    /// age gate exists so ordinary recovery cannot steal a live capture
+    /// from a concurrent process.
+    pub fn force_stage_sweep(&self) -> Result<()> {
+        recover_with_sweep_age(self, 0)
+    }
 }
 
 impl CaptureStage {
@@ -204,10 +211,15 @@ fn promote(store: &Store, blob_id: &str, stage_path: &std::path::Path, rel_path:
             path: parent.to_path_buf(),
             source: e,
         })?;
-        std::fs::rename(stage_path, &target).map_err(|e| KernelError::Io {
-            path: target.clone(),
-            source: e,
-        })?;
+        // Idempotent under concurrency: another process's recovery may
+        // have completed this promotion between our commit and here.
+        match std::fs::rename(stage_path, &target) {
+            Ok(()) => {}
+            Err(e) if target.exists() => {
+                let _ = e; // promotion already happened elsewhere
+            }
+            Err(e) => return Err(KernelError::Io { path: target.clone(), source: e }),
+        }
         fs::fsync_dir(parent)?;
     }
     crashpoint("promote.after");
@@ -218,11 +230,23 @@ fn promote(store: &Store, blob_id: &str, stage_path: &std::path::Path, rel_path:
     Ok(())
 }
 
-/// Startup recovery, run by `Store::open`. Committed-but-unpromoted blobs
-/// finish promoting (or are marked ready if the rename already happened);
-/// staged bytes with no committed row move to lost+found — preserved,
-/// never silently deleted (failure favours preservation).
+/// How old an orphaned stage must be before recovery sweeps it. Another
+/// process may be mid-capture: its stage is orphaned only in appearance,
+/// and stealing it would fail a live capture (multi-instance is
+/// supported use). Any real commit completes orders of magnitude faster
+/// than this.
+pub const STAGE_SWEEP_AGE_MS: u128 = 15 * 60 * 1000;
+
+/// Startup recovery, run by `Store::open` with the default sweep age.
+/// Committed-but-unpromoted blobs finish promoting (or are marked ready
+/// if the rename already happened); staged bytes with no committed row
+/// move to lost+found once old enough that no live process can own them
+/// — preserved, never silently deleted (failure favours preservation).
 pub(crate) fn recover(store: &Store) -> Result<()> {
+    recover_with_sweep_age(store, STAGE_SWEEP_AGE_MS)
+}
+
+pub(crate) fn recover_with_sweep_age(store: &Store, sweep_age_ms: u128) -> Result<()> {
     let committed: Vec<(String, String)> = {
         let conn = store.conn();
         let mut stmt =
@@ -257,6 +281,16 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         let path = entry.path();
         if !path.is_file() {
             continue;
+        }
+        let age_ms = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .map(|d| d.as_millis())
+            .unwrap_or(u128::MAX);
+        if age_ms < sweep_age_ms {
+            continue; // possibly a live capture in another process
         }
         std::fs::create_dir_all(&lost).map_err(|e| KernelError::Io {
             path: lost.clone(),
@@ -330,7 +364,7 @@ mod tests {
     }
 
     #[test]
-    fn an_abandoned_stage_goes_to_lost_and_found_not_oblivion() {
+    fn an_abandoned_stage_survives_until_it_cannot_be_a_live_capture() {
         let dir = tempfile::tempdir().expect("tempdir");
         {
             let store = Store::open(dir.path()).expect("open");
@@ -338,7 +372,12 @@ mod tests {
             stage.write_chunk(b"never finished").expect("chunk");
             // stage dropped unfinished: process-death stand-in
         }
-        drop(Store::open(dir.path()).expect("reopen runs recovery"));
+        let store = Store::open(dir.path()).expect("reopen runs recovery");
+        // A fresh stage is NOT swept: it could belong to a concurrent
+        // process mid-capture (multi-instance is supported use).
+        assert!(!dir.path().join(".gilune/local/lost+found").exists());
+        // Past the age gate it sweeps to lost+found, never to oblivion.
+        store.force_stage_sweep().expect("sweep");
         let lost: Vec<_> = std::fs::read_dir(dir.path().join(".gilune/local/lost+found"))
             .expect("lost+found exists")
             .collect();

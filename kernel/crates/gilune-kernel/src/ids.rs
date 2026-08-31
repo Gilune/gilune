@@ -8,9 +8,13 @@ pub fn new_id() -> String {
 
 /// Filename-friendly fragment of an ID for projected file names. Files
 /// are matched by front-matter ID, never by name (ADR 0007), so this is
-/// legibility, not identity.
+/// legibility, not identity — but fragments do become distinct on-disk
+/// paths, so they are drawn from the ID's random tail: a UUIDv7's LEADING
+/// hex is the timestamp, and concurrent same-millisecond captures would
+/// collide on it (found by the multi-process torture test, 2026-08-31).
 pub fn short(id: &str) -> String {
-    id.chars().filter(|c| *c != '-').take(12).collect()
+    let hex: Vec<char> = id.chars().filter(|c| *c != '-').collect();
+    hex[hex.len().saturating_sub(12)..].iter().collect()
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {

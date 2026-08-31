@@ -407,11 +407,13 @@ impl Store {
     }
 
     fn record_projection(&self, head: &Head, rel_path: &str, content_sha: &str) -> Result<()> {
+        // OR REPLACE covers both unique constraints (object_id, rel_path):
+        // two processes recording the same projection concurrently must
+        // both succeed, whichever constraint SQLite trips first.
         self.conn().execute(
-            "INSERT INTO projections (object_id, rel_path, revision_id, content_sha256)
-             VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT(object_id) DO UPDATE
-             SET rel_path = ?2, revision_id = ?3, content_sha256 = ?4",
+            "INSERT OR REPLACE INTO projections
+             (object_id, rel_path, revision_id, content_sha256)
+             VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![head.object_id, rel_path, head.revision_id, content_sha],
         )?;
         Ok(())
@@ -525,11 +527,23 @@ fn write_atomic(target: &std::path::Path, content: &[u8]) -> Result<()> {
         })?
         .to_string_lossy()
         .to_string();
-    let tmp = parent.join(format!(".tmp-{file_name}"));
+    // Unique per writer: concurrent processes projecting the same object
+    // must never share a temp file (multi-instance is supported use).
+    let tmp = parent.join(format!(".tmp-{}-{file_name}", ids::short(&ids::new_id())));
     std::fs::write(&tmp, content).map_err(|e| KernelError::Io { path: tmp.clone(), source: e })?;
     fs::fsync_file(&tmp)?;
-    std::fs::rename(&tmp, target)
-        .map_err(|e| KernelError::Io { path: target.to_path_buf(), source: e })?;
+    // Windows can transiently refuse a replace while another process has
+    // the target mid-replace or open; a bounded retry rides it out
+    // (multi-instance is supported use).
+    let mut renamed = std::fs::rename(&tmp, target);
+    for _ in 0..10 {
+        if renamed.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        renamed = std::fs::rename(&tmp, target);
+    }
+    renamed.map_err(|e| KernelError::Io { path: target.to_path_buf(), source: e })?;
     fs::fsync_dir(parent)?;
     Ok(())
 }

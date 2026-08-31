@@ -88,7 +88,10 @@ fn a_committed_capture_survives_every_post_commit_abort() {
 fn an_aborted_stage_is_preserved_in_lost_and_found() {
     let dir = tempfile::tempdir().expect("tempdir");
     cli(dir.path(), Some("stage.after_fsync"), &["capture", "--text", "orphan"]);
-    ok_json(dir.path(), &["status"]); // any command runs recovery
+    ok_json(dir.path(), &["status"]); // recovery runs, but the stage is
+                                      // young enough to be a live capture
+    let store = gilune_kernel::store::Store::open(dir.path()).expect("open");
+    store.force_stage_sweep().expect("sweep past the age gate");
     let lost = dir.path().join(".gilune/local/lost+found");
     assert_eq!(lost.read_dir().expect("lost+found").count(), 1);
 }
