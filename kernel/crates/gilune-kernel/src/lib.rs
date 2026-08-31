@@ -11,7 +11,9 @@ pub mod jobs;
 pub mod plugins;
 pub mod processor;
 pub mod query;
+pub mod revisions;
 pub mod store;
+mod transcript_merge;
 pub mod vault;
 
 /// Errors crossing the kernel's public boundary. Every variant carries

@@ -1,12 +1,15 @@
 // The rail lists what is on disk, and a collapsed folder stays closed —
 // the vault is a real folder tree that other tools also write to, so the
-// listing is never a cache of one.
+// listing is never a cache of one. Captured audio is listed as its note's
+// attachment, folded away until the note is expanded.
 
 package org.gilune.app
 
+import java.io.File
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class VaultTreeTest {
@@ -14,6 +17,8 @@ class VaultTreeTest {
         val root = Files.createTempDirectory("gilune-tree").toFile()
         root.resolve("Captures").mkdirs()
         root.resolve("Captures/one.md").writeText("one")
+        root.resolve("Captures/one.wav").writeText("audio")
+        root.resolve("Captures/nobody.wav").writeText("audio")
         root.resolve("Projects/House").mkdirs()
         root.resolve("Projects/House/rewire.md").writeText("rewire")
         root.resolve(".gilune/local").mkdirs()
@@ -41,5 +46,50 @@ class VaultTreeTest {
     @Test
     fun kernelStateIsNeverListedAsVaultContent() {
         assertTrue(listVault(vault(), expanded = setOf(".gilune")).none { it.relPath.startsWith(".") })
+    }
+
+    @Test
+    fun aNotesAttachmentsStayHiddenUntilTheNoteIsExpanded() {
+        val listing = listVault(vault(), expanded = setOf("Captures"))
+        assertEquals(listOf("Captures", "Captures/one.md", "Projects", "loose.md"), listing.map { it.relPath })
+        assertTrue(listing.first { it.relPath == "Captures/one.md" }.hasAttachments)
+    }
+
+    @Test
+    fun expandingANoteListsItsAttachmentsBeneathItOneLevelIn() {
+        val listing = listVault(vault(), expanded = setOf("Captures", "Captures/one.md"))
+        assertEquals(
+            listOf("Captures", "Captures/one.md", "Captures/one.wav", "Projects", "loose.md"),
+            listing.map { it.relPath },
+        )
+        val note = listing.first { it.relPath == "Captures/one.md" }
+        val attachment = listing.first { it.relPath == "Captures/one.wav" }
+        assertEquals(VaultEntryKind.NOTE, note.kind)
+        assertEquals(VaultEntryKind.ATTACHMENT, attachment.kind)
+        assertEquals(note.depth + 1, attachment.depth)
+    }
+
+    @Test
+    fun nonMarkdownFilesNoNoteOwnsAreListedNowhere() {
+        val listing = listVault(
+            vault(),
+            expanded = setOf("Captures", "Captures/one.md", "Captures/nobody.wav"),
+        )
+        assertTrue(listing.none { it.relPath == "Captures/nobody.wav" })
+    }
+
+    @Test
+    fun aNoteWithoutAttachmentsHasNothingToExpand() {
+        val note = listVault(vault()).first { it.relPath == "loose.md" }
+        assertEquals(VaultEntryKind.NOTE, note.kind)
+        assertFalse(note.hasAttachments)
+    }
+
+    @Test
+    fun directoriesSortBeforeFilesRegardlessOfName() {
+        val dir = vault()
+        File(dir, "Zebra").mkdirs()
+        val listing = listVault(dir).map { it.relPath }
+        assertEquals(listOf("Captures", "Projects", "Zebra", "loose.md"), listing)
     }
 }

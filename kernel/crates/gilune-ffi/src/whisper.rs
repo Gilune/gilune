@@ -5,7 +5,7 @@
 
 use gilune_kernel::jobs::Job;
 use gilune_kernel::plugins::{Contribution, PluginClass, PluginDescriptor, PluginProfile};
-use gilune_kernel::processor::{Processor, ProcessorCtx, ProposedOutput};
+use gilune_kernel::processor::{OutputTarget, Processor, ProcessorCtx, ProposedOutput};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 pub const PLUGIN_ID: &str = "org.memory.transcription";
@@ -22,7 +22,7 @@ pub fn descriptor() -> PluginDescriptor {
         required: false,
         processor_id: Some("transcribe".to_string()),
         subscribes: Some(gilune_kernel::capture::SOURCE_READY_EVENT.to_string()),
-        emits: vec!["org.memory.transcript-ready".to_string()],
+        emits: vec![gilune_kernel::revisions::REVISION_ADDED_EVENT.to_string()],
         capabilities: vec![
             "blobs.read".to_string(),
             "objects.write".to_string(),
@@ -93,10 +93,10 @@ impl Processor for WhisperTranscriber {
     }
 
     fn process(&self, ctx: &ProcessorCtx<'_>, _job: &Job) -> Result<Vec<ProposedOutput>, String> {
-        let payload: serde_json::Value =
+        let mut document: serde_json::Value =
             serde_json::from_str(&ctx.subject_payload().map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
-        if payload.get("media").and_then(|v| v.as_str()) != Some("wav") {
+        if document.get("media").and_then(|v| v.as_str()) != Some("wav") {
             return Ok(Vec::new());
         }
         let bytes = ctx.subject_blob().map_err(|e| e.to_string())?;
@@ -104,11 +104,14 @@ impl Processor for WhisperTranscriber {
         if samples.len() < 16_000 / 10 {
             return Err("recording shorter than 100 ms".to_string());
         }
-        let text = self.transcribe(&samples)?;
+        document["text"] = serde_json::Value::String(self.transcribe(&samples)?);
         Ok(vec![ProposedOutput {
-            type_id: "org.memory.transcript".to_string(),
+            // The revised document is still the subject's own, so it keeps
+            // the subject's type; both fields are ignored either way.
+            type_id: gilune_kernel::capture::SOURCE_TYPE.to_string(),
             type_schema: 1,
-            payload: serde_json::json!({ "text": text }).to_string(),
+            payload: document.to_string(),
+            target: OutputTarget::ReviseSubject,
         }])
     }
 }

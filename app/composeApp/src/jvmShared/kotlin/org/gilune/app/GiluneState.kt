@@ -83,7 +83,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 if (announce) {
                     message.value =
                         "synced: ${r.edits} edits, ${r.imports} imports, " +
-                            "${p.outputs} transcripts, ${r.tombstoneProposals} proposals"
+                            "${p.outputs} transcribed, ${r.tombstoneProposals} proposals"
                 }
             } catch (e: Throwable) {
                 message.value = "sync failed: ${e.message}"
@@ -105,29 +105,68 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         }
     }
 
-    fun captureAudio(audio: RecordedAudio) {
+    private fun writeChunked(writer: uniffi.gilune_ffi.CaptureWriter, wav: ByteArray): uniffi.gilune_ffi.CaptureReceipt {
+        var offset = 0
+        while (offset < wav.size) {
+            val end = minOf(offset + CAPTURE_CHUNK, wav.size)
+            writer.writeChunk(wav.copyOfRange(offset, end))
+            offset = end
+        }
+        return writer.finish()
+    }
+
+    /// Speech becomes a note of its own: the audio commits durably, the
+    /// transcript becomes the note's body (ADR 0013), and the note opens.
+    fun captureAudio(audio: RecordedAudio, onOpenNote: ((String) -> Unit)? = null) {
         val g = gilune.value ?: return
         scope.launch(Dispatchers.IO) {
             try {
                 val wav = wavBytes(audio)
-                val writer = g.beginCapture("wav")
-                var offset = 0
-                while (offset < wav.size) {
-                    val end = minOf(offset + CAPTURE_CHUNK, wav.size)
-                    writer.writeChunk(wav.copyOfRange(offset, end))
-                    offset = end
-                }
-                writer.finish()
+                val receipt = writeChunked(g.beginCapture("wav"), wav)
                 message.value = "voice captured (${wav.size / 1024} KiB); transcribing…"
                 val p = g.runProcessing()
                 g.project()
                 refresh()
                 message.value =
-                    if (p.outputs > 0) "voice captured and transcribed"
+                    if (p.outputs > 0) "spoken note ready"
                     else if (p.failed > 0) "voice captured; transcription failed (will retry)"
                     else "voice captured"
+                if (onOpenNote != null) {
+                    recent.firstOrNull { it.objectId == receipt.sourceId }
+                        ?.projectionRelPath
+                        ?.let(onOpenNote)
+                }
             } catch (e: Throwable) {
                 message.value = "voice capture failed: ${e.message}"
+            }
+        }
+    }
+
+    /// Dictation into an open note: the audio commits as an attached
+    /// capture — durable, transcribed in the kernel, but never a note of
+    /// its own — and the words come back for the caller to place at the
+    /// caret. A crash before insertion loses nothing: the audio and its
+    /// transcript stay in the kernel (ADR 0013).
+    fun dictate(audio: RecordedAudio, onText: (String) -> Unit) {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val wav = wavBytes(audio)
+                val receipt = writeChunked(g.beginAttachedCapture("wav"), wav)
+                message.value = "transcribing…"
+                val p = g.runProcessing()
+                val text = g.objectText(receipt.sourceId)
+                refresh()
+                if (!text.isNullOrBlank()) {
+                    message.value = "dictated"
+                    onText(text)
+                } else if (p.failed > 0) {
+                    message.value = "dictation saved; transcription failed (will retry)"
+                } else {
+                    message.value = "dictation saved; no words recognised"
+                }
+            } catch (e: Throwable) {
+                message.value = "dictation failed: ${e.message}"
             }
         }
     }

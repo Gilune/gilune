@@ -183,6 +183,38 @@ gates promises) are ratified. **Next: application-level engineering — see
      slot; Android shell parity (bindings are STALE — regenerate from
      an NDK build before compiling androidMain). M5 remains the last
      milestone of the vertical slice.
+   - **M6 third pass (2026-08-31, agent team: four Opus implementers,
+     Fable managing/validating; screenshot-validated)** — ADR 0013
+     ratified and implemented: processor outputs may **revise their
+     subject**; transcription lands in the capture note (body = text
+     only, audio linked via `gilune-blob`); `Transcripts/` is gone and
+     old vaults merge once on open (`transcript_merge`, flag
+     `transcripts_merged_v1`; proven on a copy of the owner's vault).
+     **Attached captures** (`begin_attached_capture`) commit like any
+     capture but never project — the dictation substrate. App: editor
+     mic **dictates at the cursor** (attached capture → whisper →
+     `object_text` → insert at caret); capture-bar mic = new note from
+     speech, opening the note it makes. Checkbox E3 slice: `- [ ]`
+     renders as a glyph off the caret's line, raw on it, click toggles
+     (offset-mapped transformation, exhaustively tested). Editor buffer
+     is body-only (`splitNoteRaw`/`assembleNote`, byte-lossless,
+     tested) with `TextFieldValue`; click-anywhere-to-edit with a UI
+     regression test (compose uiTestJUnit4); Properties window (⋯ menu;
+     `gilune-*` locked, custom pairs editable); tree nests attachments
+     under their notes hidden until expanded, orphan non-md hidden;
+     inline rename (co-renames attachments by stem); neutral
+     surfaceContainer colours (dialogs no longer purple). Kernel bug
+     fixed with test: `ingest_external_edit` used to REPLACE the
+     document, stripping `rel_path` (a voice note lost its audio link
+     on first edit) — now merges text into the head document. Owner
+     added the logo (`gilune-logo.png` window icon, `gilune.ico`
+     packaged). Suite: ~60 kernel tests + 22 desktop (incl. 1 UI).
+     **Open after this pass**: dictation not yet voice-tested end to
+     end by a person; imports (front-matter-less files) recorded but
+     surfaced nowhere; `- []` without a space is not a task marker
+     (matches Obsidian); deleting a note leaves its wav on disk
+     unlisted (correct — preserved source); Android bindings STILL
+     stale.
    - **Dev-run gotcha (machine note)**: `gradlew :composeApp:run` sets
      `compose.application.resources.dir`, and Main.kt prepends it to
      `jna.library.path` — so dev runs load

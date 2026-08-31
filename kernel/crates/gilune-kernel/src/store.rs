@@ -5,7 +5,7 @@
 //! capture recovery; the schema grows only through the registry below so
 //! every version is a tested upgrade path (constitution rule 12).
 
-use crate::{capture, fs, ids, KernelError, Result};
+use crate::{capture, fs, ids, transcript_merge, KernelError, Result};
 use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
@@ -50,6 +50,10 @@ impl Store {
         )?;
         let store = Store { conn, vault };
         capture::recover(&store)?;
+        // A data merge, not a schema step: it depends on object state that
+        // recovery may still have been completing (ADR 0013), and it is
+        // flagged rather than versioned so it can be re-run to converge.
+        transcript_merge::run(&store)?;
         Ok(store)
     }
 

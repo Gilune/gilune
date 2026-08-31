@@ -33,6 +33,7 @@ kotlin {
             kotlin.srcDir("src/jvmSharedTest/kotlin")
             dependencies {
                 implementation(kotlin("test"))
+                implementation(compose.desktop.uiTestJUnit4)
             }
         }
         val androidMain by getting {
@@ -107,6 +108,9 @@ compose.desktop {
             packageName = "Gilune"
             packageVersion = "1.0.0"
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
+            windows {
+                iconFile.set(project.file("src/desktopMain/resources/gilune.ico"))
+            }
         }
         buildTypes.release.proguard {
             isEnabled.set(false)

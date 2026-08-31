@@ -17,11 +17,10 @@
 
 use crate::capture::record_operation;
 use crate::crashpoints::crashpoint;
+use crate::revisions::{add_revision, Announce};
 use crate::store::Store;
 use crate::{fs, ids, KernelError, Result};
 use std::collections::BTreeMap;
-
-pub const REVISION_ADDED_EVENT: &str = "org.memory.revision-added";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ProjectSummary {
@@ -68,14 +67,21 @@ pub fn plugin_descriptor() -> crate::plugins::PluginDescriptor {
 }
 
 impl Store {
-    /// Project every live object into the vault. Idempotent and safe to
-    /// run at any time: a file that differs from what the kernel last
-    /// wrote is held back for `reconcile` rather than clobbered, and
-    /// quarantined paths and tombstone-proposed objects are never
-    /// touched.
+    /// Project every live object into the vault, attached captures aside
+    /// (ADR 0013). Idempotent and safe to run at any time: a file that
+    /// differs from what the kernel last wrote is held back for
+    /// `reconcile` rather than clobbered, and quarantined paths and
+    /// tombstone-proposed objects are never touched.
     pub fn project(&self) -> Result<ProjectSummary> {
         let mut summary = ProjectSummary::default();
         for head in self.live_heads()? {
+            if is_attached(&head.payload) {
+                // An attached capture belongs to a note that already
+                // exists (ADR 0013), so it has no note of its own and
+                // nothing to hold back: it is absent from the projection
+                // rather than pending in it, and no counter reports it.
+                continue;
+            }
             let rel_path = self.projection_path(&head)?;
             if self.is_quarantined(&rel_path)? || self.has_open_tombstone(&head.object_id)? {
                 summary.held_back += 1;
@@ -374,37 +380,26 @@ impl Store {
     fn ingest_external_edit(&self, object_id: &str, body: &str, disk: &[u8]) -> Result<()> {
         let revision_id = ids::new_id();
         let created_ms = ids::now_ms();
-        let payload = serde_json::json!({ "text": body }).to_string();
+        // An edit changes the words, not the document's other facts: the
+        // new text merges into the current head so `rel_path` and friends
+        // survive. Replacing the document here would strip a voice note's
+        // link to its own audio on the first edit (found 2026-08-31).
+        let mut document = crate::revisions::head_payload(self.conn(), object_id)?
+            .and_then(|payload| serde_json::from_str::<serde_json::Value>(&payload).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        document["text"] = serde_json::Value::String(body.to_string());
+        let payload = document.to_string();
         let conn = self.conn();
         conn.execute_batch("BEGIN IMMEDIATE;")?;
         let done: Result<()> = (|| {
-            conn.execute(
-                "INSERT INTO revisions (revision_id, object_id, payload, origin, created_ms)
-                 VALUES (?1, ?2, ?3, 'external-edit', ?4)",
-                rusqlite::params![revision_id, object_id, payload, created_ms],
-            )?;
-            conn.execute("DELETE FROM heads WHERE object_id = ?1", [object_id])?;
-            conn.execute(
-                "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
-                [object_id, revision_id.as_str()],
-            )?;
-            record_operation(
+            add_revision(
                 conn,
-                "create-revision",
                 object_id,
-                &serde_json::json!({
-                    "revision_id": revision_id,
-                    "payload": payload,
-                    "origin": "external-edit",
-                    "created_ms": created_ms,
-                })
-                .to_string(),
+                &revision_id,
+                &payload,
+                "external-edit",
                 created_ms,
-            )?;
-            conn.execute(
-                "INSERT INTO events (event_id, event_type, subject_id, payload, created_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![ids::new_id(), REVISION_ADDED_EVENT, object_id, payload, created_ms],
+                Announce::Event,
             )?;
             // Record the disk state we ingested so projection may
             // canonicalise over it.
@@ -566,6 +561,12 @@ fn write_atomic(target: &std::path::Path, content: &[u8]) -> Result<()> {
     Ok(())
 }
 
+fn is_attached(payload: &str) -> bool {
+    serde_json::from_str(payload)
+        .map(|document| crate::capture::is_attached(&document))
+        .unwrap_or(false)
+}
+
 fn no_rows_none<T>(e: rusqlite::Error) -> std::result::Result<Option<T>, rusqlite::Error> {
     match e {
         rusqlite::Error::QueryReturnedNoRows => Ok(None),
@@ -653,6 +654,45 @@ mod tests {
     }
 
     #[test]
+    fn an_edit_changes_the_words_and_keeps_the_documents_other_facts() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = crate::store::Store::open(dir.path()).expect("open");
+        let receipt = store.capture_bytes("wav", &[7u8; 64]).expect("capture");
+        store.project().expect("project");
+        let rel = {
+            let head: String = store
+                .conn()
+                .query_row(
+                    "SELECT rel_path FROM projections WHERE object_id = ?1",
+                    [&receipt.source_id],
+                    |row| row.get(0),
+                )
+                .expect("projection");
+            head
+        };
+        let path = store.vault().join(&rel);
+        let edited = std::fs::read_to_string(&path).expect("read") + "typed under the recording\n";
+        std::fs::write(&path, &edited).expect("edit");
+
+        assert_eq!(store.reconcile().expect("reconcile").edits, 1);
+        let payload: serde_json::Value = serde_json::from_str(
+            &crate::revisions::head_payload(store.conn(), &receipt.source_id)
+                .expect("head")
+                .expect("present"),
+        )
+        .expect("json");
+        assert!(
+            payload["text"].as_str().unwrap_or("").contains("typed under the recording"),
+            "the edit's words are the document's text"
+        );
+        assert_eq!(
+            payload["rel_path"].as_str(),
+            Some(receipt.rel_path.as_str()),
+            "editing a voice note must not strip its link to its own audio"
+        );
+    }
+
+    #[test]
     fn the_original_blob_is_never_rewritten_by_an_edit() {
         let (_dir, store, rel) = captured("immutable capture");
         let blob_rel = rel.replace(".md", ".txt");
@@ -706,6 +746,32 @@ mod tests {
         store.project().expect("project");
         assert!(!store.vault().join(&rel).exists(), "no duplicate at the old path");
         assert!(target.exists());
+    }
+
+    #[test]
+    fn an_attached_capture_is_preserved_but_never_becomes_a_note() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        let mut stage = store.begin_attached_capture("wav").expect("begin");
+        stage.write_chunk(&[5u8; 32]).expect("chunk");
+        let receipt = stage.finish(&store).expect("finish");
+        store.capture_bytes("txt", b"an ordinary thought").expect("capture");
+
+        let summary = store.project().expect("project");
+        assert_eq!(summary.written, 1, "only the ordinary capture projects");
+        assert_eq!(summary.held_back, 0, "an attachment is absent, not pending");
+        assert_eq!(store.status().expect("status").projections, 1);
+        assert!(
+            !dir.path().join(receipt.rel_path.replace(".wav", ".md")).exists(),
+            "an attachment has no note of its own"
+        );
+        // Preserved all the same: the bytes are in the vault and verify.
+        assert_eq!(
+            std::fs::read(dir.path().join(&receipt.rel_path)).expect("blob"),
+            vec![5u8; 32]
+        );
+        assert!(store.verify().expect("verify").is_empty());
+        assert_eq!(store.reconcile().expect("reconcile").tombstone_proposals, 0);
     }
 
     #[test]

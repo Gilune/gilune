@@ -1,8 +1,12 @@
-// The navigation rail: the vault as folders and notes, with the creation
-// and deletion a file browser owes you. It works the vault the way any
-// third-party tool does — plain file IO, reconciled by the kernel
-// afterwards (constitution rule 13 as UI). New items are named inline in
-// the tree, not in a modal (ADR 0011 design session).
+// The navigation rail: the vault as folders and notes, with the creation,
+// renaming and deletion a file browser owes you. It works the vault the
+// way any third-party tool does — plain file IO, reconciled by the kernel
+// afterwards (constitution rule 13 as UI). Names are typed inline in the
+// tree, not in a modal (ADR 0011 design session).
+//
+// Captured audio sits beside its note as `<stem>.wav`; the rail treats
+// such files as the note's attachments and keeps them folded away, since
+// the note is what the user came for.
 //
 // Deleting is the one gesture that is not plain file IO all the way
 // down: removing a projected note raises a tombstone proposal rather
@@ -18,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -32,6 +37,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Audiotrack
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Folder
@@ -41,7 +48,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -57,39 +63,78 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.io.File
 
-data class VaultEntry(val relPath: String, val isDir: Boolean, val depth: Int)
+enum class VaultEntryKind { DIRECTORY, NOTE, ATTACHMENT }
+
+data class VaultEntry(
+    val relPath: String,
+    val kind: VaultEntryKind,
+    val depth: Int,
+    val hasAttachments: Boolean = false,
+) {
+    val isDir: Boolean get() = kind == VaultEntryKind.DIRECTORY
+}
 
 /// Flat, ordered listing of the vault tree with collapsed folders left
-/// unopened. `.gilune` and dot-files are excluded. Pure over the
-/// filesystem so it is trivially testable.
+/// unopened. `expanded` names both: an expanded folder lists its
+/// children, an expanded note lists its attachments. Only folders and
+/// notes are listed by default; `.gilune` and dot-files never are, and a
+/// non-markdown file no note owns is not vault content the rail shows —
+/// it stays on disk regardless. Pure over the filesystem so it is
+/// trivially testable.
 fun listVault(vaultDir: String, expanded: Set<String> = emptySet()): List<VaultEntry> {
     val root = File(vaultDir)
     val out = mutableListOf<VaultEntry>()
     fun walk(dir: File, depth: Int) {
-        val children = dir.listFiles()?.sortedWith(
-            compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() },
-        ) ?: return
-        for (child in children) {
-            if (child.name.startsWith(".")) continue
+        val children = dir.listFiles()?.filterNot { it.name.startsWith(".") } ?: return
+        val attachments = children.groupBy { it.attachmentStem() }
+        for (child in children.sortedWith(TREE_ORDER)) {
             val rel = child.relativeTo(root).invariantSeparatorsPath
-            out.add(VaultEntry(rel, child.isDirectory, depth))
-            if (child.isDirectory && rel in expanded) walk(child, depth + 1)
+            if (child.isDirectory) {
+                out.add(VaultEntry(rel, VaultEntryKind.DIRECTORY, depth))
+                if (rel in expanded) walk(child, depth + 1)
+                continue
+            }
+            if (!child.name.endsWith(".md")) continue
+            val owned = attachments[child.name.removeSuffix(".md")].orEmpty()
+            out.add(VaultEntry(rel, VaultEntryKind.NOTE, depth, hasAttachments = owned.isNotEmpty()))
+            if (rel !in expanded) continue
+            for (file in owned.sortedBy { it.name.lowercase() }) {
+                val attachment = file.relativeTo(root).invariantSeparatorsPath
+                out.add(VaultEntry(attachment, VaultEntryKind.ATTACHMENT, depth + 1))
+            }
         }
     }
     walk(root, 0)
     return out
 }
+
+private val TREE_ORDER =
+    compareByDescending<File> { it.isDirectory }.thenBy { it.name.lowercase() }
+
+/// A non-markdown file belongs to the sibling note that shares its stem:
+/// `kitchen.wav` is an attachment of `kitchen.md`. Sharing the stem is
+/// the whole of the binding — nothing records it — which is why renaming
+/// a note has to take its attachments with it.
+private fun File.attachmentStem(): String? =
+    if (isFile && !name.startsWith(".") && !name.endsWith(".md")) {
+        name.substringBeforeLast('.')
+    } else {
+        null
+    }
 
 /// Notes matching a query, best first: name prefix beats name substring
 /// beats path substring. Pure, for the jump-to search in the top bar.
@@ -129,12 +174,19 @@ class TreeState {
     }
 }
 
-private data class PendingCreate(val parent: String, val folder: Boolean)
-
-private sealed interface TreeDialog {
-    data class Rename(val relPath: String, val draft: String) : TreeDialog
-    data class Delete(val relPath: String) : TreeDialog
+/// The two gestures that put a name into the tree, both answered by the
+/// same inline row.
+private sealed interface PendingName {
+    data class Create(val parent: String, val folder: Boolean) : PendingName
+    data class Rename(val relPath: String, val isDir: Boolean) : PendingName
 }
+
+private class TreeActions(
+    val open: (String) -> Unit,
+    val create: (Boolean, String) -> Unit,
+    val rename: (VaultEntry) -> Unit,
+    val delete: (String) -> Unit,
+)
 
 @Composable
 fun VaultTree(
@@ -143,8 +195,8 @@ fun VaultTree(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var dialog by remember { mutableStateOf<TreeDialog?>(null) }
-    var pending by remember { mutableStateOf<PendingCreate?>(null) }
+    var pending by remember { mutableStateOf<PendingName?>(null) }
+    var deleting by remember { mutableStateOf<String?>(null) }
     val entries = remember(state.vaultTick.value, state.vaultDir, tree.expanded.toList()) {
         listVault(state.vaultDir, tree.expanded.toSet())
     }
@@ -157,8 +209,15 @@ fun VaultTree(
 
     fun startCreate(folder: Boolean, parent: String = tree.selectedDir) {
         if (parent.isNotEmpty() && parent !in tree.expanded) tree.expanded.add(parent)
-        pending = PendingCreate(parent, folder)
+        pending = PendingName.Create(parent, folder)
     }
+
+    val actions = TreeActions(
+        open = onOpen,
+        create = ::startCreate,
+        rename = { entry -> pending = PendingName.Rename(entry.relPath, entry.isDir) },
+        delete = { relPath -> deleting = relPath },
+    )
 
     Column(modifier) {
         Row(
@@ -191,15 +250,27 @@ fun VaultTree(
         }
 
         LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp)) {
-            val atRoot = pending?.takeIf { it.parent.isEmpty() }
+            val atRoot = (pending as? PendingName.Create)?.takeIf { it.parent.isEmpty() }
             if (atRoot != null) {
                 item(key = "pending-root") {
                     InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null }, onOpen = onOpen)
                 }
             }
             items(entries, key = { it.relPath }) { entry ->
-                TreeRow(entry, tree, state.vaultDir, capturesCount, onOpen, ::startCreate) { dialog = it }
-                val inside = pending?.takeIf { entry.isDir && it.parent == entry.relPath }
+                val renaming = (pending as? PendingName.Rename)?.takeIf { it.relPath == entry.relPath }
+                if (renaming != null) {
+                    InlineNameRow(
+                        state,
+                        renaming,
+                        depth = entry.depth,
+                        onDone = { pending = null },
+                        onOpen = onOpen,
+                    )
+                } else {
+                    TreeRow(entry, tree, state.vaultDir, capturesCount, actions)
+                }
+                val inside = (pending as? PendingName.Create)
+                    ?.takeIf { entry.isDir && it.parent == entry.relPath }
                 if (inside != null) {
                     InlineNameRow(
                         state,
@@ -213,11 +284,8 @@ fun VaultTree(
         }
     }
 
-    when (val open = dialog) {
-        null -> Unit
-        is TreeDialog.Rename -> RenameDialog(state, open, onClose = { dialog = null })
-        is TreeDialog.Delete -> DeleteDialog(state, open.relPath, onClose = { dialog = null })
-    }
+    val doomed = deleting
+    if (doomed != null) DeleteDialog(state, doomed, onClose = { deleting = null })
 }
 
 @Composable
@@ -226,10 +294,12 @@ private fun TreeRow(
     tree: TreeState,
     vaultDir: String,
     capturesCount: Int,
-    onOpen: (String) -> Unit,
-    startCreate: (Boolean, String) -> Unit,
-    request: (TreeDialog) -> Unit,
+    actions: TreeActions,
 ) {
+    if (entry.kind == VaultEntryKind.ATTACHMENT) {
+        AttachmentRow(entry, vaultDir)
+        return
+    }
     val colours = MaterialTheme.colorScheme
     val selected =
         if (entry.isDir) tree.selectedDir == entry.relPath else tree.selectedFile == entry.relPath
@@ -238,10 +308,10 @@ private fun TreeRow(
 
     ContextMenuArea(items = {
         listOf(
-            ContextMenuItem("New note here") { startCreate(false, parentDir) },
-            ContextMenuItem("New folder here") { startCreate(true, parentDir) },
-            ContextMenuItem("Rename") { request(TreeDialog.Rename(entry.relPath, label)) },
-            ContextMenuItem("Delete") { request(TreeDialog.Delete(entry.relPath)) },
+            ContextMenuItem("New note here") { actions.create(false, parentDir) },
+            ContextMenuItem("New folder here") { actions.create(true, parentDir) },
+            ContextMenuItem("Rename") { actions.rename(entry) },
+            ContextMenuItem("Delete") { actions.delete(entry.relPath) },
             ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) },
         )
     }) {
@@ -255,37 +325,42 @@ private fun TreeRow(
                     if (entry.isDir) {
                         tree.selectedDir = if (tree.selectedDir == entry.relPath) "" else entry.relPath
                         tree.toggle(entry.relPath)
-                    } else if (entry.relPath.endsWith(".md")) {
-                        onOpen(entry.relPath)
+                    } else {
+                        actions.open(entry.relPath)
                     }
                 }
                 .padding(start = (6 + entry.depth * 14).dp, top = 4.dp, bottom = 4.dp, end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            if (entry.isDir) {
-                Icon(
-                    if (entry.relPath in tree.expanded) Icons.Default.KeyboardArrowDown
-                    else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            when {
+                entry.isDir -> Icon(
+                    chevron(entry.relPath in tree.expanded),
                     contentDescription = null,
                     modifier = Modifier.size(14.dp),
                     tint = colours.onSurfaceVariant,
                 )
-                Icon(
-                    Icons.Outlined.Folder,
-                    contentDescription = null,
-                    modifier = Modifier.size(14.dp),
-                    tint = colours.onSurfaceVariant,
-                )
-            } else {
-                Spacer(Modifier.width(14.dp))
-                Icon(
-                    Icons.Outlined.Description,
-                    contentDescription = null,
-                    modifier = Modifier.size(13.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+                // A note's own chevron folds its attachments away; the
+                // name beside it still opens the note.
+                entry.hasAttachments -> Box(
+                    Modifier.size(14.dp).clickable { tree.toggle(entry.relPath) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        chevron(entry.relPath in tree.expanded),
+                        contentDescription = "attachments",
+                        modifier = Modifier.size(14.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
+                else -> Spacer(Modifier.width(14.dp))
             }
+            Icon(
+                if (entry.isDir) Icons.Outlined.Folder else Icons.Outlined.Description,
+                contentDescription = null,
+                modifier = Modifier.size(if (entry.isDir) 14.dp else 13.dp),
+                tint = colours.onSurfaceVariant,
+            )
             Text(
                 if (entry.isDir) label else label.removeSuffix(".md"),
                 fontSize = 13.sp,
@@ -301,33 +376,97 @@ private fun TreeRow(
     }
 }
 
-/// The inline naming row: type, Enter creates, Escape cancels. A new
-/// note opens in the editor immediately.
+/// An attachment is shown only while its note is expanded and is never
+/// opened here — the editor edits notes, and the file itself belongs to
+/// whichever application owns its type.
+@Composable
+private fun AttachmentRow(entry: VaultEntry, vaultDir: String) {
+    val colours = MaterialTheme.colorScheme
+    ContextMenuArea(items = {
+        listOf(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
+    }) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .padding(
+                    start = (12 + entry.depth * 14).dp,
+                    top = 2.dp,
+                    bottom = 2.dp,
+                    end = 8.dp,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+        ) {
+            Icon(
+                attachmentIcon(entry.relPath),
+                contentDescription = null,
+                modifier = Modifier.size(12.dp),
+                tint = colours.outline,
+            )
+            Text(
+                entry.relPath.substringAfterLast('/'),
+                fontSize = 11.sp,
+                maxLines = 1,
+                color = colours.onSurfaceVariant,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+        }
+    }
+}
+
+private val AUDIO_SUFFIXES = setOf("wav", "m4a", "mp3", "ogg", "opus", "flac")
+
+private fun attachmentIcon(relPath: String): ImageVector =
+    if (relPath.substringAfterLast('.', "").lowercase() in AUDIO_SUFFIXES) {
+        Icons.Outlined.Audiotrack
+    } else {
+        Icons.Outlined.AttachFile
+    }
+
+private fun chevron(open: Boolean): ImageVector =
+    if (open) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight
+
+/// The inline naming row, shared by both naming gestures: type, Enter
+/// commits, Escape cancels. A new note opens in the editor immediately;
+/// a rename starts with the current name selected.
 @Composable
 private fun InlineNameRow(
     state: GiluneState,
-    pending: PendingCreate,
+    pending: PendingName,
     depth: Int,
     onDone: () -> Unit,
     onOpen: (String) -> Unit,
 ) {
     val colours = MaterialTheme.colorScheme
-    var name by remember { mutableStateOf("") }
+    val folder = when (pending) {
+        is PendingName.Create -> pending.folder
+        is PendingName.Rename -> pending.isDir
+    }
+    var field by remember {
+        val start = startingName(pending)
+        mutableStateOf(TextFieldValue(start, TextRange(0, start.length)))
+    }
     val focus = remember { FocusRequester() }
 
     fun commit() {
-        val trimmed = name.trim().trimEnd('/')
-        if (trimmed.isNotEmpty() && !trimmed.contains("..") && !trimmed.contains('/')) {
-            val base =
-                if (pending.parent.isEmpty()) File(state.vaultDir) else File(state.vaultDir, pending.parent)
-            if (pending.folder) {
-                File(base, trimmed).mkdirs()
-            } else {
-                val file = File(base, if (trimmed.endsWith(".md")) trimmed else "$trimmed.md")
-                if (!file.exists()) file.writeText("")
-                onOpen(file.relativeTo(File(state.vaultDir)).invariantSeparatorsPath)
+        val trimmed = field.text.trim().trimEnd('/')
+        if (isSegment(trimmed)) {
+            when (pending) {
+                is PendingName.Create -> {
+                    val base =
+                        if (pending.parent.isEmpty()) File(state.vaultDir)
+                        else File(state.vaultDir, pending.parent)
+                    if (pending.folder) {
+                        File(base, trimmed).mkdirs()
+                    } else {
+                        val file = File(base, if (trimmed.endsWith(".md")) trimmed else "$trimmed.md")
+                        if (!file.exists()) file.writeText("")
+                        onOpen(file.relativeTo(File(state.vaultDir)).invariantSeparatorsPath)
+                    }
+                    state.sync(announce = false)
+                }
+                is PendingName.Rename -> renameEntry(state, pending, trimmed)
             }
-            state.sync(announce = false)
         }
         onDone()
     }
@@ -342,14 +481,14 @@ private fun InlineNameRow(
         horizontalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         Icon(
-            if (pending.folder) Icons.Outlined.Folder else Icons.Outlined.Description,
+            if (folder) Icons.Outlined.Folder else Icons.Outlined.Description,
             contentDescription = null,
             modifier = Modifier.size(13.dp),
             tint = colours.onSurfaceVariant,
         )
         BasicTextField(
-            value = name,
-            onValueChange = { name = it },
+            value = field,
+            onValueChange = { field = it },
             modifier = Modifier
                 .weight(1f)
                 .focusRequester(focus)
@@ -371,11 +510,48 @@ private fun InlineNameRow(
             textStyle = TextStyle(fontSize = 13.sp, color = colours.onSurface),
             cursorBrush = SolidColor(colours.primary),
         )
-        if (!pending.folder) {
+        if (!folder) {
             Text(".md", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = colours.outline)
         }
     }
     LaunchedEffect(Unit) { focus.requestFocus() }
+}
+
+private fun startingName(pending: PendingName): String = when (pending) {
+    is PendingName.Create -> ""
+    is PendingName.Rename -> pending.relPath.substringAfterLast('/')
+        .let { if (pending.isDir) it else it.removeSuffix(".md") }
+}
+
+/// A name the tree may write: one segment, never a path and never
+/// traversal.
+private fun isSegment(name: String): Boolean =
+    name.isNotEmpty() && !name.contains("..") && !name.contains('/') && !name.contains('\\')
+
+/// Rename in place, taking a note's attachments with it. The kernel
+/// tracks a note by its front-matter id, so the note's own history
+/// survives any name; an attachment is bound to its note only by sharing
+/// its stem, so the stem has to move as one or the pairing is lost. The
+/// note moves first: an attachment left behind is merely unlisted, while
+/// a note that failed to move would have stolen its attachments' names.
+private fun renameEntry(state: GiluneState, pending: PendingName.Rename, name: String) {
+    val note = !pending.isDir && pending.relPath.endsWith(".md")
+    val source = File(state.vaultDir, pending.relPath)
+    val target = File(source.parentFile, if (note && !name.endsWith(".md")) "$name.md" else name)
+    if (target.name == source.name) return
+    val caseOnly = target.name.equals(source.name, ignoreCase = true)
+    if ((!caseOnly && target.exists()) || !source.renameTo(target)) {
+        state.message.value = "could not rename ${source.name}"
+        return
+    }
+    if (note) {
+        val stem = source.name.removeSuffix(".md")
+        val renamed = target.name.removeSuffix(".md")
+        source.parentFile?.listFiles()?.filter { it.attachmentStem() == stem }?.forEach {
+            it.renameTo(File(it.parentFile, renamed + it.name.removePrefix(stem)))
+        }
+    }
+    state.sync(announce = false)
 }
 
 private fun revealInExplorer(vaultDir: String, entry: VaultEntry) {
@@ -387,44 +563,6 @@ private fun revealInExplorer(vaultDir: String, entry: VaultEntry) {
             ProcessBuilder("explorer.exe", "/select,${target.absolutePath}").start()
         }
     }
-}
-
-@Composable
-private fun RenameDialog(state: GiluneState, request: TreeDialog.Rename, onClose: () -> Unit) {
-    var draft by remember { mutableStateOf(request.draft) }
-    AlertDialog(
-        onDismissRequest = onClose,
-        title = { Text("Rename") },
-        text = {
-            Column {
-                Text(
-                    "notes are tracked by identity, so renaming keeps their history",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    singleLine = true,
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val name = draft.trim()
-                    val source = File(state.vaultDir, request.relPath)
-                    if (name.isNotEmpty() && !name.contains("..") && !name.contains('/')) {
-                        source.renameTo(File(source.parentFile, name))
-                        state.sync(announce = false)
-                    }
-                    onClose()
-                },
-                enabled = draft.isNotBlank(),
-            ) { Text("Rename") }
-        },
-        dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
-    )
 }
 
 @Composable

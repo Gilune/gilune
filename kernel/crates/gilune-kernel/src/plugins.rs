@@ -544,12 +544,12 @@ mod tests {
         }
     }
 
-    fn store_with_wav() -> (tempfile::TempDir, Store) {
+    fn store_with_wav() -> (tempfile::TempDir, Store, String) {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open(dir.path()).expect("open");
         store.register_plugin(&transcription()).expect("register");
-        store.capture_bytes("wav", &[7u8; 64]).expect("capture");
-        (dir, store)
+        let receipt = store.capture_bytes("wav", &[7u8; 64]).expect("capture");
+        (dir, store, receipt.source_id)
     }
 
     #[test]
@@ -597,7 +597,7 @@ mod tests {
 
     #[test]
     fn a_disabled_plugin_parks_its_jobs_and_enabling_resumes_them() {
-        let (_dir, store) = store_with_wav();
+        let (_dir, store, _source_id) = store_with_wav();
         store.set_plugin_enabled("org.memory.transcription", false).expect("disable");
 
         let parked = store
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn removing_a_plugin_keeps_what_it_created_and_drops_what_it_was_given() {
-        let (_dir, store) = store_with_wav();
+        let (_dir, store, source_id) = store_with_wav();
         store.grant_capability("org.memory.transcription", "blobs.read").expect("grant");
         store.run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000).expect("run");
 
@@ -624,15 +624,11 @@ mod tests {
 
         assert!(store.installed_plugins().expect("list").is_empty());
         assert!(!store.is_granted("org.memory.transcription", "blobs.read").expect("grant check"));
-        let transcripts: i64 = store
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM objects WHERE type_id = 'org.memory.transcript'",
-                [],
-                |row| row.get(0),
-            )
-            .expect("count");
-        assert_eq!(transcripts, 1, "objects a plugin created are the user's, not the plugin's");
+        assert!(
+            store.object_text(&source_id).expect("text").is_some(),
+            "what a plugin wrote into a note is the user's, not the plugin's"
+        );
+        assert_eq!(store.revision_count(&source_id).expect("revisions"), 2);
     }
 
     #[test]

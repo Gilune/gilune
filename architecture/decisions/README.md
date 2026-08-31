@@ -17,6 +17,7 @@ technologies can be rejected without weakening the product principles.
 | [0010](0010-downloadable-plugins-on-store-builds.md) | Downloadable store plugins via the sandboxed wasm runtime under the VM/interpreter carve-outs; bundled stays v0; test submission before promising | Accepted |
 | [0011](0011-desktop-shell-structure-and-plugin-owned-ui.md) | Desktop shell regions and a fixed v0 slot list; all non-chrome UI is a plugin contribution; every plugin but the vault projection is removable | Accepted |
 | [0012](0012-markdown-editing-model.md) | The Markdown buffer is always the document; rich presentation renders it and never serialises back | Accepted |
+| [0013](0013-transcription-lands-in-the-note.md) | Processor outputs may revise their subject; transcription lands in the capture note; attached captures project no note | Accepted |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

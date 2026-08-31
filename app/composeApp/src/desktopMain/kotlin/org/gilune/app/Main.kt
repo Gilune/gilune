@@ -7,6 +7,7 @@ package org.gilune.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -55,6 +56,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.DpSize
@@ -101,6 +103,7 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             title = if (probe == null) "Gilune" else "Gilune probe",
+            icon = painterResource("gilune-logo.png"),
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
             onPreviewKeyEvent = { event ->
                 when {
@@ -188,6 +191,11 @@ private fun DesktopApp(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            Image(
+                painter = painterResource("gilune-logo.png"),
+                contentDescription = "Gilune",
+                modifier = Modifier.size(22.dp),
+            )
             Text("Gilune", style = MaterialTheme.typography.titleMedium)
             SearchBox(state, ::openNote, searchFocus, Modifier.width(280.dp))
             Spacer(Modifier.weight(1f))
@@ -220,7 +228,12 @@ private fun DesktopApp(
                 modifier = Modifier.width(230.dp).fillMaxHeight(),
             )
             Box(Modifier.width(1.dp).fillMaxHeight().background(colours.outlineVariant))
-            NoteEditor(state, editor, Modifier.weight(1f).fillMaxHeight())
+            NoteEditor(
+                state,
+                editor,
+                Modifier.weight(1f).fillMaxHeight(),
+                recorder = DesktopAudioRecorder(),
+            )
         }
         HorizontalDivider(color = colours.outlineVariant)
         CaptureBar(
@@ -230,6 +243,7 @@ private fun DesktopApp(
             focusRequester = captureFocus,
             showMessage = false,
             shortcutHint = "ctrl+shift+c",
+            onOpenNote = ::openNote,
         )
     }
 

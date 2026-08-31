@@ -5,6 +5,9 @@
 //! lock-free by design. Bindings are generated per target from that
 //! target's own binary (07-compatibility).
 
+// Methods on `dyn Processor` need no trait import; only the whisper
+// build's concrete transcriber does.
+#[cfg(feature = "whisper")]
 use gilune_kernel::processor::Processor;
 use std::sync::{Arc, Mutex};
 
@@ -390,6 +393,28 @@ impl Gilune {
             gilune: self.clone(),
             stage: Mutex::new(Some(stage)),
         }))
+    }
+
+    /// Begin a streamed *attached* capture (ADR 0013): as durable as any
+    /// other, but it projects no note of its own because it belongs to
+    /// one the user is already writing. Dictation records through this,
+    /// then inserts `object_text` at the cursor when transcription lands.
+    pub fn begin_attached_capture(
+        self: Arc<Self>,
+        extension: String,
+    ) -> FfiResult<Arc<CaptureWriter>> {
+        let stage = self.store().begin_attached_capture(&extension)?;
+        Ok(Arc::new(CaptureWriter {
+            gilune: self.clone(),
+            stage: Mutex::new(Some(stage)),
+        }))
+    }
+
+    /// The text of an object's current document, or `None` while there is
+    /// none — a dictation not yet transcribed answers `None`, and so does
+    /// an object that does not exist.
+    pub fn object_text(&self, object_id: String) -> FfiResult<Option<String>> {
+        Ok(self.store().object_text(&object_id)?)
     }
 
     pub fn project(&self) -> FfiResult<ProjectSummary> {

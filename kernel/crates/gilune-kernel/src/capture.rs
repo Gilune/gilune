@@ -15,6 +15,19 @@ use std::path::PathBuf;
 pub const SOURCE_TYPE: &str = "org.memory.source";
 pub const SOURCE_READY_EVENT: &str = "org.memory.source-ready";
 
+/// Document key marking a capture as *attached* (ADR 0013): preserved and
+/// processed like any other, but belonging to a note the user is already
+/// writing, so it projects no note of its own.
+pub const ATTACHED_KEY: &str = "attached";
+
+/// Whether a source document says it is attached.
+pub fn is_attached(document: &serde_json::Value) -> bool {
+    document
+        .get(ATTACHED_KEY)
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 /// A capture in staging: bytes stream in chunk by chunk (no whole-copy
 /// requirement on callers), then `finish` runs the commit sequence.
 /// Detached from the store so it can be owned across an FFI boundary;
@@ -26,6 +39,7 @@ pub struct CaptureStage {
     hasher: sha2::Sha256,
     bytes: u64,
     extension: String,
+    attached: bool,
 }
 
 /// What a successful capture durably is.
@@ -42,6 +56,21 @@ impl Store {
     /// Begin staging a capture. `extension` names the media container
     /// ("md", "wav", "m4a", …) and must be a bare extension.
     pub fn begin_capture(&self, extension: &str) -> Result<CaptureStage> {
+        self.begin(extension, false)
+    }
+
+    /// Begin staging an *attached* capture (ADR 0013). Durability is
+    /// unchanged in every respect — the same staging, fsync, transaction,
+    /// promotion, operation, event and jobs — and only the projection
+    /// differs: an attached capture belongs to a note the user is already
+    /// writing, so it never becomes a note of its own. This is the
+    /// dictation substrate: a crash between the words being transcribed
+    /// and the shell inserting them loses nothing.
+    pub fn begin_attached_capture(&self, extension: &str) -> Result<CaptureStage> {
+        self.begin(extension, true)
+    }
+
+    fn begin(&self, extension: &str, attached: bool) -> Result<CaptureStage> {
         if extension.is_empty() || !extension.chars().all(|c| c.is_ascii_alphanumeric()) {
             return Err(KernelError::VaultUnusable {
                 reason: format!("'{extension}' is not a bare file extension"),
@@ -60,6 +89,7 @@ impl Store {
             hasher: <sha2::Sha256 as sha2::Digest>::new(),
             bytes: 0,
             extension: extension.to_string(),
+            attached,
         })
     }
 
@@ -94,7 +124,7 @@ impl CaptureStage {
     /// stage must finish against the store that began it.
     pub fn finish(self, store: &Store) -> Result<CaptureReceipt> {
         use sha2::Digest;
-        let CaptureStage { file, stage_path, hasher, bytes, extension } = self;
+        let CaptureStage { file, stage_path, hasher, bytes, extension, attached } = self;
 
         crashpoint("stage.after_write");
         file.sync_all().map_err(|e| KernelError::Io {
@@ -111,14 +141,17 @@ impl CaptureStage {
         let blob_id = ids::new_id();
         let created_ms = ids::now_ms();
         let rel_path = format!("Captures/capture-{}.{extension}", ids::short(&source_id));
-        let payload = serde_json::json!({
+        let mut document = serde_json::json!({
             "media": extension,
             "blob_id": blob_id,
             "rel_path": rel_path,
             "sha256": sha256,
             "bytes": bytes,
-        })
-        .to_string();
+        });
+        if attached {
+            document[ATTACHED_KEY] = serde_json::Value::Bool(true);
+        }
+        let payload = document.to_string();
 
         let conn = store.conn();
         conn.execute_batch("BEGIN IMMEDIATE;")?;
@@ -382,6 +415,44 @@ mod tests {
             .expect("lost+found exists")
             .collect();
         assert_eq!(lost.len(), 1);
+    }
+
+    #[test]
+    fn an_attached_capture_commits_exactly_as_any_other_does() {
+        let (dir, store) = open();
+        let mut stage = store.begin_attached_capture("wav").expect("begin");
+        stage.write_chunk(b"dictated mid-note").expect("chunk");
+        let receipt = stage.finish(&store).expect("finish");
+
+        let status = store.status().expect("status");
+        assert_eq!(status.sources, 1);
+        assert_eq!(status.blobs_ready, 1, "the bytes are promoted, not held");
+        assert_eq!(status.events, 1, "it is announced like any capture, so it is processed");
+        assert_eq!(status.operations, 1, "and it reaches other devices");
+        assert!(store.verify().expect("verify").is_empty());
+        assert_eq!(
+            std::fs::read(dir.path().join(&receipt.rel_path)).expect("blob"),
+            b"dictated mid-note"
+        );
+
+        let payload: String = store
+            .conn()
+            .query_row("SELECT payload FROM revisions", [], |row| row.get(0))
+            .expect("revision");
+        let document: serde_json::Value = serde_json::from_str(&payload).expect("json");
+        assert!(is_attached(&document));
+    }
+
+    #[test]
+    fn an_ordinary_capture_says_nothing_about_attachment() {
+        let (_dir, store) = open();
+        store.capture_bytes("md", b"plain").expect("capture");
+        let payload: String = store
+            .conn()
+            .query_row("SELECT payload FROM revisions", [], |row| row.get(0))
+            .expect("revision");
+        let document: serde_json::Value = serde_json::from_str(&payload).expect("json");
+        assert!(document.get(ATTACHED_KEY).is_none(), "the ordinary document is unchanged");
     }
 
     #[test]

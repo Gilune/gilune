@@ -26,10 +26,24 @@ interface handler {
         payload: string,
     }
 
+    // Where an output lands. `new-object` is an interpretation of its
+    // own, with provenance back to the subject; `revise-subject` is a new
+    // revision of the subject's document, replacing its head (ADR 0013).
+    enum output-target {
+        new-object,
+        revise-subject,
+    }
+
     record proposed-output {
+        // The output document's type, e.g. "org.memory.transcript". The
+        // last segment names the vault folder and the `<type>-ready`
+        // event. Ignored for `revise-subject`, which writes the subject's
+        // own document and so keeps the subject's type.
         type-id: string,
+        // Ignored for `revise-subject`, as type-id is.
         type-schema: s64,
         payload: string,
+        target: output-target,
     }
 
     process: func(j: job) -> result<list<proposed-output>, string>;

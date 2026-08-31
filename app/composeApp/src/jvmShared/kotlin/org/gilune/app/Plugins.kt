@@ -19,6 +19,7 @@ object Slots {
 
 const val VOICE_CAPTURE_PLUGIN = "org.memory.voice-capture"
 const val RECORD_VOICE_ACTION = "record-voice"
+const val DICTATE_ACTION = "dictate"
 
 /// Declared by the kernel binary when it carries a transcriber, so the
 /// shell only ever reads it back.
@@ -46,7 +47,12 @@ fun voiceCaptureDeclaration(): PluginDeclaration =
             PluginContribution(
                 slot = Slots.CAPTURE_ACTIONS,
                 id = RECORD_VOICE_ACTION,
-                label = "Record voice",
+                label = "New note from speech",
+            ),
+            PluginContribution(
+                slot = Slots.NOTE_ACTIONS,
+                id = DICTATE_ACTION,
+                label = "Dictate at the cursor",
             ),
         ),
     )

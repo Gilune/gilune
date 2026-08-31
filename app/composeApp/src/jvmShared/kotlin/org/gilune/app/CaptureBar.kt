@@ -57,6 +57,7 @@ fun CaptureBar(
     focusRequester: FocusRequester? = null,
     showMessage: Boolean = true,
     shortcutHint: String? = null,
+    onOpenNote: ((String) -> Unit)? = null,
 ) {
     var draft by remember { mutableStateOf("") }
     var recording by remember { mutableStateOf(false) }
@@ -133,7 +134,7 @@ fun CaptureBar(
                             }
                         } else {
                             recording = false
-                            state.captureAudio(recorder.stop())
+                            state.captureAudio(recorder.stop(), onOpenNote)
                         }
                     },
                     enabled = ready,

@@ -4,14 +4,16 @@
 //! `objects.read` grant: the job's subject and its blob bytes, never a
 //! store handle. Outputs commit transactionally, idempotently (one
 //! processing run per processor + idempotency key, however often the job
-//! is delivered), as separate interpretation objects with provenance to
-//! their inputs. The Rust trait mirrors the public WIT contract in
+//! is delivered), either as separate interpretation objects with
+//! provenance to their inputs or as a revision of the subject itself
+//! (ADR 0013). The Rust trait mirrors the public WIT contract in
 //! `contracts/processor/`; bundled and sandboxed implementations must
 //! stay behaviourally interchangeable (ADR 0003).
 
 use crate::capture::record_operation;
 use crate::crashpoints::crashpoint;
 use crate::jobs::Job;
+use crate::revisions::{add_revision, head_payload, Announce};
 use crate::store::Store;
 use crate::{ids, KernelError, Result};
 
@@ -26,15 +28,9 @@ pub struct ProcessorCtx<'a> {
 impl ProcessorCtx<'_> {
     /// The subject's current head payload (canonical JSON document).
     pub fn subject_payload(&self) -> Result<String> {
-        let payload = self.store.conn().query_row(
-            "SELECT r.payload FROM heads h
-             JOIN revisions r ON r.revision_id = h.revision_id
-             WHERE h.object_id = ?1
-             ORDER BY r.created_ms DESC LIMIT 1",
-            [&self.subject_id],
-            |row| row.get(0),
-        )?;
-        Ok(payload)
+        head_payload(self.store.conn(), &self.subject_id)?.ok_or_else(|| KernelError::Corrupt {
+            detail: format!("{} has no current revision", self.subject_id),
+        })
     }
 
     /// The subject's original blob bytes, verified against the recorded
@@ -57,15 +53,31 @@ impl ProcessorCtx<'_> {
     }
 }
 
+/// Where a proposed output lands (ADR 0013).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputTarget {
+    /// A new interpretation object, with provenance back to the subject.
+    NewObject,
+    /// A new revision of the subject's own document, replacing its head.
+    /// The words belong in the note they were spoken into, not beside it.
+    ReviseSubject,
+}
+
 /// An interpretation a processor proposes. The kernel owns committing it.
 #[derive(Debug, Clone)]
 pub struct ProposedOutput {
     /// e.g. "org.memory.transcript"; the last segment names the vault
-    /// folder and the `<type>-ready` event.
+    /// folder and the `<type>-ready` event. **Ignored for
+    /// `ReviseSubject`**, which writes the subject's own document and so
+    /// keeps the subject's type; the revision's origin records who wrote
+    /// it, and no provenance row is added because there is no new object
+    /// to attach one to.
     pub type_id: String,
+    /// Ignored for `ReviseSubject`, as `type_id` is.
     pub type_schema: i64,
     /// Canonical JSON document.
     pub payload: String,
+    pub target: OutputTarget,
 }
 
 pub trait Processor: Send + Sync {
@@ -140,10 +152,12 @@ impl Store {
         Ok(hit.is_some())
     }
 
-    /// One transaction: run record, every output object with provenance
-    /// and operation, and the `<type>-ready` event. Output IDs derive
-    /// from the idempotency inputs, so a duplicate commit is impossible
-    /// by construction, not by luck.
+    /// One transaction: the run record, then each output — a new object
+    /// with provenance and its `<type>-ready` event, or a revision of the
+    /// subject with its `revision-added` event — each with the operation
+    /// that carries it to other devices. Output IDs derive from the
+    /// idempotency inputs, so a duplicate commit is impossible by
+    /// construction, not by luck.
     fn commit_outputs(
         &self,
         processor_id: &str,
@@ -161,10 +175,24 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![ids::new_id(), processor_id, idempotency_key, job.event_id, created_ms],
             )?;
+            let origin = format!("processor:{processor_id}");
             let mut committed = 0i64;
             for (index, output) in outputs.iter().enumerate() {
-                let object_id = derived_id(&format!("{idempotency_key}:{index}"));
                 let revision_id = derived_id(&format!("{idempotency_key}:{index}:rev"));
+                if output.target == OutputTarget::ReviseSubject {
+                    add_revision(
+                        conn,
+                        &job.subject_id,
+                        &revision_id,
+                        &output.payload,
+                        &origin,
+                        created_ms,
+                        Announce::Event,
+                    )?;
+                    committed += 1;
+                    continue;
+                }
+                let object_id = derived_id(&format!("{idempotency_key}:{index}"));
                 conn.execute(
                     "INSERT INTO objects (object_id, type_id, type_schema, created_ms)
                      VALUES (?1, ?2, ?3, ?4)",
@@ -173,13 +201,7 @@ impl Store {
                 conn.execute(
                     "INSERT INTO revisions (revision_id, object_id, payload, origin, created_ms)
                      VALUES (?1, ?2, ?3, ?4, ?5)",
-                    rusqlite::params![
-                        revision_id,
-                        object_id,
-                        output.payload,
-                        format!("processor:{processor_id}"),
-                        created_ms
-                    ],
+                    rusqlite::params![revision_id, object_id, output.payload, origin, created_ms],
                 )?;
                 conn.execute(
                     "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
@@ -198,7 +220,7 @@ impl Store {
                         "type_id": output.type_id,
                         "type_schema": output.type_schema,
                         "payload": output.payload,
-                        "origin": format!("processor:{processor_id}"),
+                        "origin": origin,
                         "derived_from": job.subject_id,
                         "created_ms": created_ms,
                     })
@@ -265,7 +287,7 @@ pub fn fake_transcriber_descriptor() -> crate::plugins::PluginDescriptor {
         required: false,
         processor_id: Some("transcribe".to_string()),
         subscribes: Some(crate::capture::SOURCE_READY_EVENT.to_string()),
-        emits: vec!["org.memory.transcript-ready".to_string()],
+        emits: vec![crate::revisions::REVISION_ADDED_EVENT.to_string()],
         capabilities: vec!["blobs.read".to_string(), "objects.write".to_string()],
         contributions: Vec::new(),
     }
@@ -281,10 +303,10 @@ impl Processor for FakeTranscriber {
         ctx: &ProcessorCtx<'_>,
         _job: &Job,
     ) -> std::result::Result<Vec<ProposedOutput>, String> {
-        let payload: serde_json::Value =
+        let mut document: serde_json::Value =
             serde_json::from_str(&ctx.subject_payload().map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
-        if payload.get("media").and_then(|v| v.as_str()) != Some("wav") {
+        if document.get("media").and_then(|v| v.as_str()) != Some("wav") {
             return Ok(Vec::new()); // only audio transcribes
         }
         let bytes = ctx.subject_blob().map_err(|e| e.to_string())?;
@@ -293,10 +315,14 @@ impl Processor for FakeTranscriber {
             bytes.len(),
             &ids::sha256_hex(&bytes)[..12]
         );
+        document["text"] = serde_json::Value::String(text);
         Ok(vec![ProposedOutput {
-            type_id: "org.memory.transcript".to_string(),
+            // The revised document is still the subject's own, so it keeps
+            // the subject's type; both fields are ignored either way.
+            type_id: crate::capture::SOURCE_TYPE.to_string(),
             type_schema: 1,
-            payload: serde_json::json!({ "text": text }).to_string(),
+            payload: document.to_string(),
+            target: OutputTarget::ReviseSubject,
         }])
     }
 }
@@ -313,8 +339,23 @@ mod tests {
         (dir, store)
     }
 
+    fn subject_id(store: &Store) -> String {
+        store
+            .conn()
+            .query_row(
+                "SELECT object_id FROM objects WHERE type_id = 'org.memory.source'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("the capture")
+    }
+
+    fn revisions_on(store: &Store, object_id: &str) -> i64 {
+        store.revision_count(object_id).expect("count")
+    }
+
     #[test]
-    fn a_wav_capture_becomes_a_transcript_with_provenance() {
+    fn a_wav_capture_becomes_the_text_of_its_own_note() {
         let (_dir, store) = wav_captured();
         let summary = store
             .run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000)
@@ -322,33 +363,52 @@ mod tests {
         assert_eq!(summary.completed, 1);
         assert_eq!(summary.outputs, 1);
 
-        let (type_id, origin): (String, String) = store
+        let source_id = subject_id(&store);
+        assert_eq!(
+            revisions_on(&store, &source_id),
+            2,
+            "the capture revision plus the transcription revision"
+        );
+        let (origin, payload): (String, String) = store
             .conn()
             .query_row(
-                "SELECT o.type_id, r.origin FROM objects o
-                 JOIN revisions r ON r.object_id = o.object_id
-                 WHERE o.type_id = 'org.memory.transcript'",
-                [],
+                "SELECT r.origin, r.payload FROM heads h
+                 JOIN revisions r ON r.revision_id = h.revision_id
+                 WHERE h.object_id = ?1",
+                [&source_id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .expect("transcript");
-        assert_eq!(type_id, "org.memory.transcript");
+            .expect("the new head");
         assert_eq!(origin, "processor:transcribe");
-        let provenance: i64 = store
-            .conn()
-            .query_row("SELECT COUNT(*) FROM provenance WHERE relation = 'derived-from'", [], |r| r.get(0))
-            .expect("provenance");
-        assert_eq!(provenance, 1);
-        // The transcript projects into the vault with its text as body.
+        let document: serde_json::Value = serde_json::from_str(&payload).expect("json");
+        assert!(document["text"].as_str().expect("text").starts_with("[fake transcript"));
+        assert_eq!(document["media"], "wav", "the revision keeps the capture's own facts");
+        assert_eq!(
+            store.conn().query_row("SELECT COUNT(*) FROM objects", [], |r| r.get::<_, i64>(0)),
+            Ok(1),
+            "one spoken thought is one object"
+        );
+
+        // The note is the capture's own, in Captures, with the words as
+        // its body — no audio embed line survives (ADR 0013).
         store.project().expect("project");
-        let files: Vec<_> = std::fs::read_dir(store.vault().join("Transcripts"))
-            .expect("Transcripts dir")
-            .collect();
-        assert_eq!(files.len(), 1);
+        let rel: String = store
+            .conn()
+            .query_row("SELECT rel_path FROM projections WHERE object_id = ?1", [&source_id], |r| {
+                r.get(0)
+            })
+            .expect("projection");
+        assert!(rel.starts_with("Captures/"), "the note lives with its capture: {rel}");
+        let note = std::fs::read_to_string(store.vault().join(&rel)).expect("note");
+        assert!(note.contains("gilune-blob: "), "the audio stays linked as metadata");
+        assert!(!note.contains("![["), "no embed line remains");
+        let body = note.rsplit_once("---\n").expect("front matter").1;
+        assert_eq!(body, document["text"].as_str().expect("text"));
+        assert!(!store.vault().join("Transcripts").exists());
     }
 
     #[test]
-    fn duplicate_delivery_produces_exactly_one_transcript() {
+    fn revising_the_subject_is_idempotent_across_redelivery() {
         let (_dir, store) = wav_captured();
         store.run_pending_jobs(&[&FakeTranscriber], 1_000, 1_000).expect("first run");
         // Force the completed job back to pending, as a redelivery would.
@@ -361,15 +421,56 @@ mod tests {
             .expect("second run");
         assert_eq!(second.skipped_duplicate, 1);
         assert_eq!(second.outputs, 0);
-        let transcripts: i64 = store
+        assert_eq!(revisions_on(&store, &subject_id(&store)), 2, "one revision, not two");
+    }
+
+    #[test]
+    fn a_new_object_output_still_commits_with_provenance() {
+        struct Interpreter;
+        impl Processor for Interpreter {
+            fn id(&self) -> &str {
+                "transcribe"
+            }
+            fn process(
+                &self,
+                _ctx: &ProcessorCtx<'_>,
+                _job: &Job,
+            ) -> std::result::Result<Vec<ProposedOutput>, String> {
+                Ok(vec![ProposedOutput {
+                    type_id: "org.memory.summary".to_string(),
+                    type_schema: 1,
+                    payload: serde_json::json!({ "text": "a summary" }).to_string(),
+                    target: OutputTarget::NewObject,
+                }])
+            }
+        }
+        let (_dir, store) = wav_captured();
+        let source_id = subject_id(&store);
+        assert_eq!(
+            store.run_pending_jobs(&[&Interpreter], 1_000, 30_000).expect("run").outputs,
+            1
+        );
+        let provenance: i64 = store
             .conn()
             .query_row(
-                "SELECT COUNT(*) FROM objects WHERE type_id = 'org.memory.transcript'",
-                [],
+                "SELECT COUNT(*) FROM provenance WHERE relation = 'derived-from' AND target_id = ?1",
+                [&source_id],
                 |r| r.get(0),
             )
-            .expect("count");
-        assert_eq!(transcripts, 1);
+            .expect("provenance");
+        assert_eq!(provenance, 1);
+        assert_eq!(revisions_on(&store, &source_id), 1, "the subject is untouched");
+        let kinds: Vec<String> = {
+            let mut stmt = store
+                .conn()
+                .prepare("SELECT kind FROM operations ORDER BY op_seq")
+                .expect("stmt");
+            stmt.query_map([], |row| row.get(0))
+                .expect("query")
+                .collect::<std::result::Result<_, _>>()
+                .expect("rows")
+        };
+        assert_eq!(kinds, vec!["create-source".to_string(), "create-object".to_string()]);
     }
 
     #[test]
@@ -395,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn a_text_capture_produces_no_transcript() {
+    fn a_text_capture_is_left_exactly_as_it_was() {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open(dir.path()).expect("open");
         store.subscribe("transcribe", crate::capture::SOURCE_READY_EVENT).expect("subscribe");
@@ -405,5 +506,6 @@ mod tests {
             .expect("run");
         assert_eq!(summary.completed, 1);
         assert_eq!(summary.outputs, 0);
+        assert_eq!(revisions_on(&store, &subject_id(&store)), 1);
     }
 }
