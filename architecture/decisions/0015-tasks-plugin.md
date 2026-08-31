@@ -1,12 +1,15 @@
 # ADR 0015: Tasks Plugin — Inline Dates and the Editor Seams They Need
 
-Status: **Proposed** (design round 2026-08-31; owner ratification pending)  
+Status: **Proposed** (design round 2026-08-31; five original questions ratified
+by the owner 2026-08-31 — see Ratification record; the query and
+extension-point sections await ratification)  
 Validation: owner ratification for the format and the scope line; the seams are
 validated by delivery, not a spike — T1 is not done until the shipped checkbox
 slice runs through the same registry a plugin uses, and until removing the
 plugin removes every control it added and changes no byte in the vault.
-Recognisers, date resolution and insert ranges are pure and tested without a
-screen.
+Recognisers, date resolution, query evaluation and insert ranges are pure and
+tested without a screen. T4 is not done until an unregistered fence still
+renders as an ordinary code block.
 
 ## Context
 
@@ -35,6 +38,11 @@ structurally the fault ADR 0011 named for the microphone. Most of this work is
 therefore shell infrastructure, and the plugin is what proves it. That is the
 point, not a side effect.
 
+This revision folds in the owner's answers to the draft's five questions, plus
+two requirements taken on 2026-08-31: **task queries, in the search panel and
+embedded live in a note**, and **an extension point on the plugin itself**, so a
+later People plugin can add an `assignee` field to the tasks plugin's own menu.
+
 ## Decision
 
 ### 1. Storage: `due:YYYY-MM-DD`, one format, on the task line
@@ -52,15 +60,30 @@ point, not a side effect.
   false-positive answer: the pattern is `\sdue:\d{4}-\d{2}-\d{2}\b` on a
   checklist line, so `due:` in prose, and `due:tomorrow` anywhere, are text the
   plugin does not see.
+- **Not inside a fenced code block.** The scan tracks fences, as `styleMarkdown`
+  already does — still pure over the text — so a documented example, including
+  the `tasks` blocks of § 4, never becomes somebody's agenda. Obsidian excludes
+  code blocks for the same reason.
 - **Done dates use the same convention**: `done:YYYY-MM-DD`, not Dataview's
   `completion`.
 - **Toggling writes it, at the toggle.** `[ ]`→`[x]` appends ` done:<today>`;
   `[x]`→`[ ]` removes it. Write-on-action; no save-time rewrite pass, no
   background process editing an open document.
-- **Every GFM checklist item is a task.** No global-filter opt-in: a marker
-  meaning "this checkbox is really a task" is the rule a stranger cannot infer.
 - **No index, no sidecar.** Recognition is per-line over the text, so a due date
   typed in vim is indistinguishable from one typed here (rule 13).
+
+**Which checkboxes are tasks: a global filter, default empty.** A plugin setting
+holds a filter string. Empty — the shipped default — means every GFM checklist
+item is a task. Set to `#task`, only checkbox lines carrying that string are,
+for people whose checklists mostly are not. Recognisers, the `/` menu, the panel
+and queries read the one setting, so the vault never disagrees with itself; the
+line renders as written, with no filter-stripping display mode; a change takes
+effect on the next recompute, rewriting nothing.
+
+*The default-empty reading is the coordinator's, pending no owner objection.*
+The owner ratified that a filter is a good idea without naming a default, and a
+non-empty one would make "this checkbox is really a task" a rule nobody can
+infer from the vault — the unreadable rule this section exists to reject.
 
 ### 2. Entry: `/` on a task line, two stages, ISO at insertion
 
@@ -68,11 +91,11 @@ point, not a side effect.
   always-on is where every complaint in the research lands — blocked suggesters,
   stuck menus, firing on non-tasks, and a minimum-match-length setting whose
   purpose is to get the menu out of the way.
-- **Two stages:** stage one offers the *fields* registered providers contribute
-  (v1: `due`), stage two that field's *values*. With one field, stage one is a
-  single highlighted entry Enter passes through, so the path is `/`, Enter,
-  `tom`, Enter. The structure stays because stage one is where a second plugin's
-  field appears for free.
+- **Two stages:** stage one offers the *fields* registered in `tasks.fields`
+  (§ 3; v1: `due`), stage two that field's *values*. With one field, stage one is
+  a single highlighted entry Enter passes through, so the path is `/`, Enter,
+  `tom`, Enter. The structure stays because stage one is where another plugin's
+  field appears.
 - **Natural language is UI, never storage.** Stage two offers `today`,
   `tomorrow`, each weekday, `next week`, `in a week`; typing narrows; a typed ISO
   date is accepted verbatim. The phrase resolves to an absolute local date **at
@@ -88,14 +111,129 @@ point, not a side effect.
   the caret near the window foot. None of this exists today; it is new shell
   infrastructure, published as a seam rather than built for this plugin.
 
-### 3. The seams
+### 3. Fields are a registry, and `tasks.fields` is a slot this plugin publishes
 
-Three new slot ids, plus the one ADR 0011 reserved and the code never built.
-**Ratifying this ADR amends 0011's fixed five-slot list to eight**; that
-amendment is written into 0011 on acceptance, not before. `Contribution` gains
-an optional **`config: String`** — canonical JSON, opaque to the kernel,
-mirroring the `settings` column. Three strings cannot express "a decoration
-matching this regex", and smuggling payload into `id` or `label` is not a seam.
+The owner's requirement is that a future People plugin adds an `assignee` field
+to tasks and its option appears in the *same* `/` menu. The framework advance,
+stated plainly: **slot ids stop being shell-only. A plugin may publish a slot
+other plugins contribute to.** The tasks plugin publishes `tasks.fields`.
+
+**Kernel work: none** beyond the `config` string § 5 already adds — slot ids are
+opaque, and the kernel neither knows who publishes one nor cares. **The gating
+rule** is the shell's: a contribution into a plugin-published slot is live only
+while **both** the publishing and the contributing plugin are enabled.
+`contributionsTo` already drops a disabled contributor; the publisher check is
+the addition. Disable or remove either side and the field leaves the menu and
+its tokens stop being styled, **changing no bytes** — `assignee:anna` then reads
+as plain text, exactly as `due:2026-09-05` does when tasks itself is removed.
+
+A contribution declares itself in `config`:
+
+```json
+{ "key": "assignee", "label": "Assignee", "values": "org.people.contacts",
+  "pattern": "[A-Za-z0-9._-]+", "operator": true }
+```
+
+— the field key, its stage-one label, its stage-two value source (a Kotlin
+provider id while plugins are bundled; § 7 carries what a declarative one would
+need), an optional pattern for token recognition, and whether to publish the
+matching search keyword.
+
+**`due` is the first registration into this slot**: the plugin's own field list
+*is* that registry, one entry long — the two-producers-or-it-rots discipline the
+checkbox re-registration follows. Honestly, at T2 the second producer is a
+test-only fixture, the `SearchOperators(TagOperator)` precedent; a shipped one
+waits for a real People plugin, and a fixture is the weaker evidence.
+
+**Storage generalises unchanged**: a contributed field is a `key:value` token on
+the task line under § 1's rules. Values are **unspaced** in v1 (`assignee:anna`
+is a handle, not a name); spaces and quoting are deferred, not designed.
+
+**Search follows for free.** `"operator": true` registers the key as a
+`search.operator` meaning "this line carries `key:value`", so `assignee:anna`
+works in the panel and inside a `tasks` block with no further machinery, by the
+scoping rule in § 4.
+
+### 4. Queries: one grammar, in the panel and in the page
+
+The owner's requirement is querying as an extension of our search, and the same
+query embeddable in a note as a live view. This overturns the draft's refusal of
+an embedded query DSL; the constraints below answer the objection that refusal
+rested on. **JavaScript in queries stays refused permanently.**
+
+**One grammar.** The query language *is* `Search.kt`'s: bare terms ANDed by
+whitespace, `"quoted phrases"`, `-negation`, `file:`, `path:`, `content:`,
+`[key:value]` front matter, plus whatever operators enabled plugins registered.
+No second parser, no sort/group/layout vocabulary, no boolean algebra beyond the
+existing conjunction-with-negation, no templating.
+
+**A hit is a task line.** The evaluator is handed, per candidate line, a
+`SearchedNote` whose `body` is that one line and whose name, path and front
+matter are the containing note's. Every existing operator then behaves correctly
+with no new interface: terms about text — bare terms, `content:`, the task
+operators — bind to the **line**; terms about the note — `file:`, `path:`,
+`[key:value]` — bind to the **note**. A bare term still also matches the note's
+name, as in the panel. Scanning is `searchVault`'s: whole vault, each file read
+once, no index.
+
+**Task operators** (registered at T2). `due:` and `done:` take `YYYY-MM-DD`, or
+`today`, `overdue`, `week` (today through the next seven days), `none`. The one
+extension to value forms is `before:<date>` and `after:<date>`, because a
+project note's horizon is otherwise unsayable and the alternative is people
+typing rotting dates into prose. Obsidian's five-operator × six-field matrix and
+its `YYYY-Www`/quarter ranges are refused; `-due:none` already means "has a due
+date", so no `has`/`no` keywords are added. Relative words resolve **at
+evaluation**, the inverse of § 2 and for the same reason: `due:today` is the
+query's meaning, not a date that rots.
+
+**Syntax in the file** — a fenced block whose info string is `tasks`:
+
+````markdown
+```tasks
+due:week
+-done:none
+path:Work
+```
+````
+
+One filter per line, lines ANDed, whitespace ANDing within a line — the search
+DSL's own semantics applied twice over. Blank lines are ignored; there is no
+comment syntax, because `#` opens a plausible term. **An empty block matches
+nothing** and says so: the empty query is precisely the freeze the Tasks
+maintainers propose a breaking change to fix, and `searchVault` already returns
+nothing for no terms.
+
+**Degradation.** A stranger, Notepad, GitHub and Obsidian all see a legible
+fenced code block labelled `tasks` holding readable filters; nothing is hidden
+and nothing executes. The info string is a namespace we share with Obsidian
+Tasks and do not own — a debt, not a thing to dodge with a private name.
+
+**What renders** is the T3 panel's row, reused: the checkbox glyph, the line's
+text with its tokens styled, its dates, and the note it came from. Rows
+**navigate, they do not edit** — a click opens the note at that line. Toggling
+from a result would write to a file the user is not looking at, needing the
+stale-buffer story, and the prior art's own bug (a checkbox in a callout failing
+to write its done date) lives exactly there.
+
+**Bounds by construction.** One order — due ascending, undated last, then path,
+then line number — because it is the only order an agenda needs and there are
+then no sort or group instructions to get wrong. **50 rows, then a `+N more`
+line.** Matching is cheap (~17,000 tasks in ~80 ms) and *rendering* results is
+what freezes an editor, so the cap is on rendering and is not optional.
+
+**Refresh** is on the vault tick (`GiluneState.vaultTick`) and on opening a
+note, plus buffer settle in Edit mode, reusing `AUTOSAVE_IDLE_MS`. Never per
+keystroke.
+
+### 5. The seams
+
+Four new slot ids, plus the one ADR 0011 reserved and the code never built.
+**Ratifying this ADR takes 0011's fixed five-slot list to nine, and adds the
+rule that a plugin may publish a slot of its own** (§ 3); both are written into
+0011 on acceptance, not before. `Contribution` gains an optional
+**`config: String`** — canonical JSON, opaque to the kernel, mirroring the
+`settings` column. Three strings cannot express "a decoration matching this
+regex", and smuggling payload into `id` or `label` is not a seam.
 
 **`editor.decorations`** — a registration is a line recogniser, a per-match
 replacement (or none) and span role, and an optional activation handler taking
@@ -120,10 +258,33 @@ replace and the exact text to write**. A registration never touches the buffer.
 Needs one new primitive, `replaceRange(editor, IntRange, String)`, beside
 `insertAtCaret`, which trims and auto-spaces and cannot express this.
 
+**`editor.blocks`** — a fence recogniser (the info string) plus a renderer, on
+the same shell-owned terms as `editor.decorations`. It is the block-level
+analogue of E3's caret rule:
+
+- **Read mode needs no new block type.** `parseMarkdown` already models a fenced
+  block as `MdBlock.Code(text, language)`, carrying the info string, so the seam
+  is a renderer table consulted in `MarkdownBody`'s `Code` branch and an info
+  string nobody registered falls through to today's monospace box. `MdBlock`
+  stays sealed and the `when` stays exhaustive — the resolution the draft's
+  Consequences left open.
+- **Edit mode.** Caret outside: the fence span is replaced, through the same
+  offset table `editor.decorations` builds, by a placeholder of blank lines sized
+  to the result, reserving the vertical box; the rows compose in an overlay
+  aligned to it via `TextLayoutResult.getBoundingBox`, the layout facility the
+  caret popup needs anyway. Caret inside: the registration is filtered out for
+  that block, exactly as the caret's line is filtered today, and the raw fence
+  shows. Bytes never change in either state.
+- Honestly, the row count must be known before the transformation is built, so
+  the query is evaluated ahead of layout — tolerable only because results
+  recompute on tick, not per keystroke (§ 4). It is the least elegant part of
+  this design, which is why it is staged last.
+
 **`search.operator`** — the shell builds its `SearchOperators` from enabled
 plugins' contributions and passes it to `SearchPanel`, which today takes the
 empty default; everything below that line already works and is tested. Tasks
-registers `due:` and `done:`, taking a date or `today`/`overdue`/`week`/`none`.
+registers `due:` and `done:`, and any `tasks.fields` contribution that asked for
+its keyword (§ 3).
 
 **`navigation`** — the dead slot becomes real: `contributionsTo(NAVIGATION)`
 renders as rail tabs beside Files and Search, `RailPanel` becomes a plugin-keyed
@@ -140,53 +301,67 @@ holds `BUILT_INS + extra`, so the seam demonstrably carries two producers and th
 plugin is not a special case bolted beside a hard-coded one.
 
 **Removal** takes away the `/` menu, the token styling, the done-date stamp, the
-two keywords and the rail tab, and changes no byte:
-`- [x] file the return due:2026-09-01 done:2026-08-30` still renders as a
-checkbox, still reads in Notepad, still greps. The plugin creates no kernel
-object, so removal has nothing to retain or orphan.
+keywords, the rail tab and the live rendering of `tasks` blocks, and changes no
+byte: `- [x] file the return due:2026-09-01 done:2026-08-30` still renders as a
+checkbox, still reads in Notepad, still greps, and the query block goes back to
+being a code block that says what it wanted. No kernel object is created, so
+removal has nothing to orphan.
 
-### 4. Scope
+### 6. Scope
 
 - **T1 — inline due date, end to end.** `Contribution.config`;
   `editor.decorations` with the checkbox re-registered and the date token as the
   second producer; `editor.suggest` with the caret popup and `replaceRange`; the
-  descriptor, registration, settings entry and removal. Nothing in the rail,
-  nothing in search.
-- **T2 — done date on toggle** through the activation chain, and the
-  `search.operator` wiring that makes `due:`/`done:` live keywords.
+  `tasks.fields` registry with `due` as its only entry, read by the suggest's
+  stage one; the global-filter setting; the descriptor, registration, settings
+  entry and removal. Nothing in the rail, nothing in search.
+- **T2 — done date on toggle** through the activation chain; the
+  `search.operator` wiring that makes `due:`/`done:` live keywords with § 4's
+  value forms; and **`tasks.fields` published as a cross-plugin slot** — other
+  plugins' contributions read, both-enabled gating enforced, paired operator
+  registered, proven by a fixture. The hook ships here so the owner's
+  requirement is real rather than notional, whenever a second plugin arrives.
 - **T3 — the agenda panel**: a contributed navigation destination with four
-  bounded views — overdue, today, next seven days, undated. Capped by
-  construction: the measured finding is that matching is cheap (~17,000 tasks in
-  ~80 ms) and *rendering* results is what freezes an editor, a footgun the
-  maintainers are now fixing with a breaking default limit and we can decline to
-  build.
+  bounded views — overdue, today, next seven days, undated — each one of § 4's
+  queries. **A plugin setting turns the panel off**; while it is off the shell
+  does not compose the tab, the same shape as every other `contributes(…)` gate,
+  one condition further in.
+- **T4 — embedded `tasks` blocks**: the `editor.blocks` seam, the Read-mode
+  renderer table, the Edit-mode overlay and the 50-row cap. Last because it
+  reuses T3's rows and T2's operators wholesale and adds only rendering.
 - **Recurrence is deferred**, by name. It is the one advanced feature the
   research says earns its keep, and also where scope crept — a natural-language
   grammar, line-spawning on completion, a reference-date rule, `when done`
-  changing the calculation base. It gets its own decision after T1–T3.
+  changing the calculation base. It gets its own decision after T1–T4.
 
 **Refused for v0**, each because meaning must survive reading the file, or
 because the research shows the cost: **custom statuses** whose semantics live in
 a CSS snippet (`- [/]` is opaque anywhere else); **JavaScript in queries**,
 refused permanently — Tasks shipped it in 7.21.0 and disabled it by default in
 8.0.0 because query text arrives inside synced Markdown, which is exactly our
-threat model (ADR 0005); **an embedded query DSL**, since bounded views are what
-the canonical agenda actually is; **priorities** and with them **urgency
-scoring** — an ordering rule nobody infers plus an invisible score the
-maintainers call arbitrary (if wanted later, `priority:high`, same convention);
-**dependencies and on-completion actions** (`⛔ dcf64c` cannot be resolved by
-reading); **scheduled, start, created and cancelled dates** — two types, not six;
-and **filename-implied dates**, despite the research liking them, because the
+threat model (ADR 0005); **priorities** and with them **urgency scoring** — an
+ordering rule nobody infers plus an invisible score the maintainers call
+arbitrary (if wanted later, `priority:high`, same convention); **dependencies
+and on-completion actions** (`⛔ dcf64c` cannot be resolved by reading);
+**scheduled, start, created and cancelled dates** — two types, not six; and
+**filename-implied dates**, despite the research liking them, because the
 inheritance rule lives nowhere in the vault.
 
-### 5. Plumbing
+**Overturned from the draft:** *an embedded query DSL* was refused here on the
+grounds that bounded views are what an agenda actually is. The owner ruled on
+2026-08-31 that querying must extend into notes; § 4 is the constrained form,
+and the constraint is that it is not a second language.
+
+### 7. Plumbing
 
 A **bundled Kotlin shell plugin** on the voice-capture precedent:
 `tasksDeclaration()` beside `voiceCaptureDeclaration()` in `Plugins.kt`,
 registered from `GiluneState.openVault`, id `org.memory.tasks`,
 `class = "domain"`, `profile = "bundled"`, `required = false`, no processor, no
 subscription, no emitted events. Enable, disable, remove, tombstone and the
-per-plugin settings screen apply with no new machinery.
+per-plugin settings screen apply with no new machinery; the global filter, the
+panel switch and the field registry all sit in the settings document it already
+has.
 
 **No capabilities.** The whole surface is contributions to shell-rendered slots
 and nothing gates that today; declaring `ui.contribute` would be its first use
@@ -197,45 +372,47 @@ Consent is the enable switch.
 **The kernel learns no task type**: plugin id, slot ids, contribution ids and
 `config` are opaque strings; no column, no table, no task-aware query, no
 projection special case (rule 4), and no object is created so no `type_id` is
-minted. **Capture is untouched** (rule 1). **Rule 2 holds trivially**: a due
-date is the user's typed bytes, an ordinary edit reconciled as a revision with
-origin external, and there is no inference anywhere in T1–T3. If a later stage
-parses dates out of speech, that is a processor output under ADR 0013 and must
-not be laundered through the external-edit path.
+minted. Cross-plugin gating is likewise a shell rule over strings the kernel
+cannot interpret. **Capture is untouched** (rule 1). **Rule 2 holds trivially**:
+a due date is the user's typed bytes, an ordinary edit reconciled as a revision
+with origin external, and there is no inference anywhere in T1–T4. If a later
+stage parses dates out of speech, that is a processor output under ADR 0013 and
+must not be laundered through the external-edit path.
 
-**Mobile (ADR 0006).** Recognisers, token format and date resolution are pure and
-live in `jvmShared`, so a mobile reader styles the same tokens from the same
-code. The popup, the rail panel and search are desktop-only — `NoteEditor`,
-`EditorState` and the rail sit in the desktop source set, and ADR 0014 forbids
-the shared set learning about panes. Mobile v0 therefore reads and toggles task
-lines; inline suggest waits for a mobile editor. Nothing is an arbitrary widget:
-every contribution is data the shell renders, as 0006's declarative profile
-requires.
+**Mobile (ADR 0006).** Recognisers, token format, date resolution and query
+evaluation are pure and live in `jvmShared`, so a mobile reader styles the same
+tokens and could render the same block from the same code. The popup, the rail
+panel, the search panel and the Edit-mode overlay are desktop-only, since
+`NoteEditor`, `EditorState` and the rail sit in the desktop source set. Mobile
+v0 therefore reads and toggles task lines; inline suggest waits for a mobile
+editor. Nothing is an arbitrary widget: every contribution is data the shell
+renders, as 0006's declarative profile requires.
 
 **Wasm trajectory (ADR 0003, 0010).** The seams are ids plus JSON `config`
 precisely so a sandboxed plugin can declare them later — a decoration is a regex,
 a replacement template and a span role; an operator is a keyword; a destination is
-a label and an icon. Honestly, in v1 the *behaviour* behind each id is Kotlin in
-the shell: the candidate generator, the date resolver, the panel composable.
-Three things must change for a wasm plugin to declare the same surface — the
-recogniser becomes fully declarative rather than a Kotlin predicate;
-`editor.suggest` needs a `suggest(line, fragment) -> candidates` export the WIT
-contract has no shape for; the panel needs a declarative description. Two
-existing limits would also bite: one subscription per plugin, and no
+a label and an icon; a field is the object in § 3. Honestly, in v1 the
+*behaviour* behind each id is Kotlin in the shell, and four things must change
+for a wasm plugin to declare the same surface: the recogniser becomes fully
+declarative rather than a Kotlin predicate; `editor.suggest` needs a
+`suggest(line, fragment) -> candidates` export the WIT contract has no shape
+for; a `tasks.fields` value source needs that same export rather than a provider
+id; and the panel and the block renderer need declarative descriptions.
+Two existing limits would also bite: one subscription per plugin, and no
 `register_processor` across the FFI.
 
 ## Alternatives considered
 
 ### `[due:: 2026-09-05]` — the Dataview-compatible form
 
-The strongest rival, and why the format is an open question below: self-
-describing, what Obsidian Tasks writes in its alternative format, and read
-natively by Dataview, so an Obsidian user gets queryable fields free. Rejected as
-default on three counts — roughly double the characters on a phone-width line,
-which the research flags as a real cost for a capture-first product; two bracket
-pairs meaning different things on one line (`- [ ] milk [due:: 2026-09-05]`); and
-`::` is one ecosystem's convention, bought at the price of the leanest form that
-needs no ecosystem at all.
+The strongest rival, and the one the owner ruled against: self-describing, what
+Obsidian Tasks writes in its alternative format, and read natively by Dataview,
+so an Obsidian user gets queryable fields free. Rejected on three counts —
+roughly double the characters on a phone-width line, which the research flags as
+a real cost for a capture-first product; two bracket pairs meaning different
+things on one line (`- [ ] milk [due:: 2026-09-05]`); and `::` is one
+ecosystem's convention, bought at the price of the leanest form that needs no
+ecosystem at all.
 
 ### The other signifiers — `📅`, `>`, `@due(...)`
 
@@ -247,6 +424,28 @@ blockquote character, our styler already keys on it at line start, and "goes to"
 is guessed rather than read. `@due(...)` is rejected outright — the research
 checked and corrected the assumption that NotePlan uses it, so it has no lineage,
 more punctuation, and no ecosystem.
+
+### An embedded query DSL — refused in the draft, ratified by the owner
+
+The draft refused it: bounded views are what the canonical agenda is, and the
+prior art's query block acquired filters, sorts, groups, layouts, presets,
+comments, Mustache placeholders and finally JavaScript. The owner overruled it
+on 2026-08-31, and the overturn is recorded rather than quietly absorbed. What
+makes § 4 a different object from the thing refused: it adds **no language** —
+the block holds the query the search panel already takes, with no sort, group or
+layout vocabulary — the result set is capped where the measured cost is, and the
+escape hatch that ended in a security retreat is refused permanently.
+
+### A contributing plugin registers with `editor.suggest` directly
+
+A People plugin could declare its own `editor.suggest` registration and offer
+`assignee` itself, needing no new slot. Rejected: it would have to re-derive what
+a task line is, read tasks' global-filter setting to agree with it, style its own
+token, and keep out of the way of tasks' own menu — a second trigger on the same
+lines, precisely Obsidian's "suggesters block each other" complaint. **The tasks
+plugin owns task-line semantics, so fields must compose *through* it, not around
+it.** The slot costs one gating rule; the alternative costs two plugins holding
+the same fragile agreement.
 
 ### Trigger-less suggest on every recognised task line
 
@@ -266,22 +465,26 @@ one producer — which is how the `settings.form` declaration ended up decorativ
 ## Consequences
 
 - `MarkdownEditTransformation` takes a list of registrations instead of a
-  hard-coded checkbox path; `TASK_MARKER`, the glyphs and the toggle become the
-  shell's first registration, and the offset mapping generalises from a constant
-  marker length to a per-match table.
-- The shell gains its first caret-anchored popup and a range-replacement
-  primitive.
+  hard-coded checkbox path; the offset mapping generalises from a constant marker
+  length to a per-match table.
+- The shell gains its first caret-anchored popup, a range-replacement primitive,
+  and its first overlay aligned to a span of the text buffer.
 - `Contribution`/`PluginContribution` gain `config` — a kernel schema migration
   and an FFI change, the only kernel work here, teaching it nothing about tasks.
-- ADR 0011's slot list grows to eight; the navigation slot stops being a claim
-  the code contradicts (T3) and `SearchOperators` stops being a registry nothing
-  registers into (T2).
-- Read mode still shows `• [ ] milk` and a due date as plain text, because
-  `MdBlock` is sealed and `MarkdownView`'s `when` exhaustive. Cosmetic, not
+- ADR 0011's slot list grows to nine and gains plugin-published slots; the
+  navigation slot stops being a claim the code contradicts (T3) and
+  `SearchOperators` stops being a registry nothing registers into (T2).
+- `MarkdownBody`'s `Code` branch consults a renderer table; `MdBlock` stays
+  sealed and its `when` exhaustive. The draft's open consequence is resolved
+  without unsealing anything, because a fenced block is already parsed and
+  already carries its info string.
+- Read mode still shows `• [ ] milk` and a due date as plain text. Cosmetic, not
   incorrect — the raw form was chosen to be legible.
-- Four bounded views over a no-index search reading each note once is a
-  deliberate ceiling; when it stops being honest the answer is an index plugin
-  (`05-plugin-system.md`), not a query language.
+- Search reads every note once per query, and an embedded block is a query, so a
+  note carrying several pays several passes. The tick-not-keystroke rule and the
+  row cap keep that honest; an index plugin (`05-plugin-system.md`) is where the
+  answer goes when they stop doing.
+- We take a dependency on a fence info string another product also claims.
 - Nothing touches capture, sync or projection, so the crash matrix, convergence
   harness and boundary suite are unaffected.
 
@@ -304,19 +507,34 @@ Surfaced, not fixed, and none absorbed into this plugin's scope:
    is distinguishable from shell chrome by convention only — precisely the
    boundary this feature is meant to demonstrate.
 6. Plugin settings are an opaque JSON string with no schema, read back in one
-   place by a regex over the JSON (`SettingsPane.kt:396`).
+   place by a regex over the JSON (`SettingsPane.kt:396`). The global filter, the
+   panel switch and the field registry all land in that same string.
 7. One subscription per plugin, and no route for a non-Rust processor across the
-   FFI. Neither blocks T1–T3; both block the wasm version of this plugin.
+   FFI. Neither blocks T1–T4; both block the wasm version of this plugin.
+8. `editor.blocks` is renderer-only: a plugin may render a **fenced** block, never
+   add block syntax. Anything that is not a fence stays shell-parsed.
+9. The `tasks` info string is a namespace shared with Obsidian Tasks and owned by
+   neither. Legibility to a reader was chosen over safety from a collision;
+   revisit if round-tripping through that plugin becomes a real workflow.
+10. Plugin-published slots have no registry of publishers: the shell knows
+    `tasks.fields` belongs to `org.memory.tasks` because it is written in shell
+    code. The both-enabled gate is therefore a shell rule, and a second host
+    would have to re-implement it.
 
-## Open questions for the owner
+## Ratification record
 
-1. **Format** — `due:2026-09-05` *(recommended)*, or `[due:: 2026-09-05]` to buy
-   Obsidian-ecosystem interop at double the width and a second bracket pair?
-2. **Agenda panel** — T3 as staged *(recommended)*, or pulled into T1 so the
-   first ship is visibly a Tasks plugin rather than a date affordance?
-3. **Done date on toggle** — automatic in T2 *(recommended)*, or off by default
-   behind a plugin setting?
-4. **Is every checkbox a task** — yes, no opt-in marker *(recommended)*, or a
-   global filter for people who use checklists for non-tasks?
-5. **Trigger** — `/` at a word boundary on task lines *(recommended)*, or
-   trigger-less on every recognised task line as Obsidian does?
+Owner review round, 2026-08-31. The draft's five open questions, answered:
+
+| # | Question | Answer | Date |
+|---|---|---|---|
+| 1 | Format | `due:YYYY-MM-DD`, as recommended (§ 1) | 2026-08-31 |
+| 2 | Agenda panel | T3 as staged, **and** switchable off in the plugin's settings; off means the rail tab is not contributed (§ 6) | 2026-08-31 |
+| 3 | Done date on toggle | Automatic in T2, as recommended (§ 1, § 6) | 2026-08-31 |
+| 4 | Is every checkbox a task | A **global filter** setting. Default-empty — every GFM checkbox is a task — is the coordinator's reading of an answer that did not name a default, recorded in § 1 | 2026-08-31 |
+| 5 | Trigger | `/` at a word boundary on task lines, as recommended (§ 2) | 2026-08-31 |
+
+Two requirements were added in the same round and are designed in above:
+**task queries, in search and embedded in notes** (§ 4, `editor.blocks` in § 5,
+T4), which overturns the draft's refusal of an embedded query DSL; and **an
+extension point on the tasks plugin** (§ 3, T2), which makes publishing a slot a
+plugin's privilege and not only the shell's. Both await ratification.
