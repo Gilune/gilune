@@ -80,10 +80,10 @@ fn canonical_wav_samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
             "unsupported WAV shape: {channels}ch {sample_rate}Hz {bits}bit (expected 1ch 16000Hz 16bit)"
         ));
     }
-    let pcm = &bytes[44..];
-    Ok(pcm
-        .chunks_exact(2)
-        .map(|c| i16::from_le_bytes([c[0], c[1]]) as f32 / 32768.0)
+    let (samples, _trailing_byte) = bytes[44..].as_chunks::<2>();
+    Ok(samples
+        .iter()
+        .map(|sample| i16::from_le_bytes(*sample) as f32 / 32768.0)
         .collect())
 }
 

@@ -5,6 +5,7 @@
 //! lock-free by design. Bindings are generated per target from that
 //! target's own binary (07-compatibility).
 
+use gilune_kernel::processor::Processor;
 use std::sync::{Arc, Mutex};
 
 uniffi::setup_scaffolding!();
@@ -492,6 +493,13 @@ impl Gilune {
 
     pub fn set_plugin_settings(&self, plugin_id: String, settings: String) -> FfiResult<()> {
         Ok(self.store().set_plugin_settings(&plugin_id, &settings)?)
+    }
+
+    /// Queue work for captures no enabled plugin ever saw — ones made
+    /// before a plugin was installed, or while it was switched off.
+    /// Deliberate, and safe to repeat. Returns how many were queued.
+    pub fn backfill_jobs(&self) -> FfiResult<i64> {
+        Ok(self.store().backfill_jobs()?)
     }
 }
 

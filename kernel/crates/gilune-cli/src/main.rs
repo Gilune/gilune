@@ -21,7 +21,7 @@ fn run() -> Result<(), String> {
     let mut args = args.iter().map(String::as_str);
 
     let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|project|\
-                 reconcile|status|verify|plugins [enable|disable|remove <id>]>";
+                 reconcile|status|verify|backfill|plugins [enable|disable|remove <id>]>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
@@ -134,6 +134,11 @@ fn run() -> Result<(), String> {
                     "quarantined": r.quarantined,
                 })
             );
+            Ok(())
+        }
+        Some("backfill") => {
+            let queued = store.backfill_jobs().map_err(|e| e.to_string())?;
+            println!("{}", serde_json::json!({ "queued": queued }));
             Ok(())
         }
         Some("plugins") => {

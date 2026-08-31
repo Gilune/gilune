@@ -1,6 +1,7 @@
 // Shared UI state over the boundary: one open vault, its capture feed,
-// and the sync/processing cycle. Composables render this; every decision
-// stays across the boundary (conventions § Kotlin).
+// the installed plugins, and the sync/processing cycle. Composables
+// render this; every decision stays across the boundary (conventions
+// § Kotlin).
 
 package org.gilune.app
 
@@ -10,12 +11,14 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import uniffi.gilune_ffi.Gilune
+import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.SourceSummary
 
 class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     val gilune = mutableStateOf<Gilune?>(null)
     val message = mutableStateOf("opening vault…")
     val recent = mutableStateListOf<SourceSummary>()
+    val plugins = mutableStateListOf<PluginInfo>()
 
     /// Bumped whenever vault contents may have changed; file panels watch it.
     val vaultTick = mutableStateOf(0)
@@ -24,6 +27,10 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) {
             try {
                 val g = Gilune.open(vaultDir)
+                // The mic is this shell's contribution, so this shell
+                // declares it. Registering is idempotent and never
+                // resurrects a plugin the user removed.
+                g.registerPlugin(voiceCaptureDeclaration())
                 g.project()
                 gilune.value = g
                 refresh()
@@ -40,10 +47,15 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         val sources = g.recentSources(100u)
         recent.clear()
         recent.addAll(sources)
+        val installed = g.plugins()
+        plugins.clear()
+        plugins.addAll(installed)
         vaultTick.value += 1
     }
 
-    /// Reconcile external edits, run local processing, canonicalise, refresh.
+    /// Reconcile external edits, run local processing, canonicalise,
+    /// refresh. Reconcile precedes projection deliberately: the reverse
+    /// order re-creates a moved note at its old path (ADR 0012).
     fun sync(announce: Boolean = true) {
         val g = gilune.value ?: return
         scope.launch(Dispatchers.IO) {
@@ -100,6 +112,40 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                     else "voice captured"
             } catch (e: Throwable) {
                 message.value = "voice capture failed: ${e.message}"
+            }
+        }
+    }
+
+    /// Run a plugin action and report it. Every plugin change refreshes
+    /// the contribution lists, so controls appear and disappear with it.
+    fun pluginAction(describe: String, act: (Gilune) -> Unit) {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                act(g)
+                refresh()
+                message.value = describe
+            } catch (e: Throwable) {
+                message.value = "$describe failed: ${e.message}"
+            }
+        }
+    }
+
+    /// Process captures no plugin ever saw — ones made before a plugin
+    /// was installed or while it was off.
+    fun backfill() {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val queued = g.backfillJobs()
+                val p = g.runProcessing()
+                g.project()
+                refresh()
+                message.value =
+                    if (queued == 0L) "nothing was waiting"
+                    else "caught up $queued capture(s): ${p.outputs} new"
+            } catch (e: Throwable) {
+                message.value = "catch-up failed: ${e.message}"
             }
         }
     }

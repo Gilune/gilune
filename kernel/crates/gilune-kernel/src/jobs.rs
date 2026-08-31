@@ -37,6 +37,30 @@ impl Store {
         Ok(())
     }
 
+    /// Queue work for events that no enabled subscription ever saw —
+    /// captures made before a plugin was installed, or while it was off.
+    /// Deliberate by design: switching a plugin on must not silently
+    /// re-run the past, but a person may ask for the catch-up. Safe to
+    /// repeat: processing runs stay idempotent, so an event that was
+    /// already handled produces nothing new. Returns jobs queued.
+    pub fn backfill_jobs(&self) -> Result<i64> {
+        let queued = self.conn().execute(
+            "INSERT OR IGNORE INTO jobs
+             (job_id, subscription_id, event_id, state, attempts, not_before_ms)
+             SELECT e.event_id || s.subscription_id, s.subscription_id, e.event_id,
+                    'pending', 0, 0
+             FROM events e
+             JOIN subscriptions s ON s.event_type = e.event_type
+             WHERE s.enabled = 1
+               AND NOT EXISTS (
+                   SELECT 1 FROM jobs j
+                   WHERE j.subscription_id = s.subscription_id AND j.event_id = e.event_id
+               )",
+            [],
+        )?;
+        Ok(queued as i64)
+    }
+
     /// Claim the next runnable job under a lease. A job whose lease has
     /// expired is claimable again — that is at-least-once, by design.
     pub fn claim_next_job(&self, now_ms: i64, lease_ms: i64) -> Result<Option<Job>> {
@@ -208,6 +232,31 @@ mod tests {
 
         store.capture_bytes("md", b"capture still works").expect("capture unblocked");
         assert!(store.claim_next_job(now + 1, 30_000).expect("claim").is_some());
+    }
+
+    #[test]
+    fn a_capture_made_before_its_plugin_existed_can_be_caught_up_deliberately() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        // Captured while nothing was listening: an event, but no job.
+        store.capture_bytes("wav", &[3u8; 32]).expect("capture");
+        assert!(store.claim_next_job(1_000, 30_000).expect("claim").is_none());
+
+        store
+            .register_plugin(&crate::processor::fake_transcriber_descriptor())
+            .expect("install the plugin afterwards");
+        assert_eq!(
+            store.claim_next_job(1_000, 30_000).expect("claim"),
+            None,
+            "installing a plugin does not silently re-run the past"
+        );
+
+        assert_eq!(store.backfill_jobs().expect("backfill"), 1);
+        let summary = store
+            .run_pending_jobs(&[&crate::processor::FakeTranscriber], 2_000, 30_000)
+            .expect("run");
+        assert_eq!(summary.outputs, 1, "the stranded capture is finally processed");
+        assert_eq!(store.backfill_jobs().expect("second backfill"), 0);
     }
 
     #[test]

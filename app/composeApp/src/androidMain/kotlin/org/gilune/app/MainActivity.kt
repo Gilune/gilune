@@ -10,12 +10,17 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 
 class MainActivity : ComponentActivity() {
@@ -40,10 +45,13 @@ class MainActivity : ComponentActivity() {
                     val scope = rememberCoroutineScope()
                     val state = remember { GiluneState(vaultDir, scope) }
                     LaunchedEffect(Unit) { state.openVault() }
-                    CapturePanel(
-                        state,
-                        if (micGranted.value) AndroidAudioRecorder() else null,
-                    )
+                    Column(Modifier.fillMaxSize()) {
+                        CaptureBar(
+                            state,
+                            if (micGranted.value) AndroidAudioRecorder() else null,
+                        )
+                        RecentList(state, modifier = Modifier.padding(horizontal = 16.dp))
+                    }
                 }
             }
         }

@@ -148,13 +148,33 @@ gates promises) are ratified. **Next: application-level engineering — see
      `set_plugin_enabled`, `remove_plugin`, `grant_capability`, …)
      and `gilune-cli plugins`. Off means nothing is queued and waiting
      jobs are parked; switching on resumes them but never backfills.
-     Still to do in (a): declare voice capture as a shell-side adapter
-     and gate the mic on its contribution; (b) shell restructure — rail with a real tree and
-     creation affordances, document pane, persistent capture bar,
-     settings sections; (c) editor stage E1 (rendered read + raw edit,
-     hash guard, autosave with batched reconcile), then E2; E3 only
-     after a spike. M5 and M6 are independent; M5 remains the last
-     milestone of the vertical slice.
+     ~~(b) shell restructure~~ and ~~(c) editor E1~~ — done
+     2026-08-31: rail with a collapsing tree, creation, rename, and
+     delete-that-answers-its-own-tombstone-proposal; document pane
+     with Rich/Raw, properties strip, autosave and the stale-buffer
+     guard; capture bar across the foot with the mic drawn only when
+     a plugin contributes `capture.actions`; settings surface (vault
+     with a folder picker, plugins with permissions/events/
+     contributions and enable/remove/allow, appearance, about);
+     desktop palette and density instead of stock Material purple.
+     Voice capture is its own shell-declared adapter, so removing
+     transcription leaves recording intact. Markdown rendering uses
+     `org.jetbrains:markdown` in shared code. **Next in M6**: editor
+     stage E2 (styled editing, markers visible), E3 only after a
+     spike; keyboard shortcuts and the command-palette slot; Android
+     shell parity (it compiles against the shared `CaptureBar` but has
+     not been run since M3). M5 and M6 are independent; M5 remains the
+     last milestone of the vertical slice.
+   - **Bug found and fixed 2026-08-31** (owner's vault held two
+     recordings but one transcript): `enable_whisper` used to create
+     the `transcribe` subscription, so a capture made before the model
+     finished loading produced an event with **no job** and was never
+     transcribed. Registering the plugin during `Gilune::open` now
+     subscribes it before any capture is possible. Captures already
+     stranded are recovered deliberately with `backfill_jobs`
+     (`gilune-cli backfill`, or Settings ▸ Plugins ▸ Catch up missed
+     captures) — proven on a copy of the owner's vault: 1 queued,
+     1 output, verify clean.
 3. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.
