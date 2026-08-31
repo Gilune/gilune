@@ -23,6 +23,22 @@ object Slots {
     const val EDITOR_SUGGEST = "editor.suggest"
     const val SEARCH_TYPES = "search.types"
 
+    /// A fence info string plus a renderer (§ 5), on the same shell-owned
+    /// terms as [EDITOR_DECORATIONS]: rendering may never change a byte,
+    /// and an info string nobody registered stays an ordinary code block.
+    ///
+    /// **Its first and only producer in v1 is the shell itself** — the
+    /// `filter` fence belongs to the search machinery, not to the tasks
+    /// plugin (§ 4), which is what makes a block go on rendering when
+    /// every removable plugin is gone. The tasks plugin contributes
+    /// nothing here; what it contributes is a *type* ([SEARCH_TYPES]),
+    /// and a block that asked for a type nobody registered says so.
+    ///
+    /// Honestly, one producer is the shape that let `settings.form` rot:
+    /// the registry is real ([BlockRenderers]) and takes a contribution as
+    /// an entry, but the second producer is still notional.
+    const val EDITOR_BLOCKS = "editor.blocks"
+
     /// **Published by a plugin, not by the shell** (ADR 0015 § 3) — the
     /// tasks plugin owns task-line semantics, so a field must compose
     /// through it. A contribution here is live only while *both* the

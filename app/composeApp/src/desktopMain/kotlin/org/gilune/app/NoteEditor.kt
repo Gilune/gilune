@@ -288,6 +288,19 @@ private fun OpenNote(
 
     fun onDiskHash(): String? = if (file.exists()) contentHash(file.readBytes()) else null
 
+    // Where a rendered block's rows send a click (ADR 0015 § 4: rows
+    // navigate, they do not edit). A row opens its note through the pane
+    // showing this editor, which is the one rule every opener takes
+    // (ADR 0014) — reuse the tab, else a new one. Without tabs, which is
+    // the pre-tab editor and the tests, there is nowhere to send a click
+    // and the rows draw inert.
+    val openRow: ((String) -> Unit)? = tabs?.let { host ->
+        { relPath: String ->
+            host.open(relPath)
+            Unit
+        }
+    }
+
     // One write path in the app: autosave, leaving a tab and closing one
     // all go through the same guard (ADR 0012). `force` is the answer the
     // stale-buffer banner takes, and only it may pass the guard.
@@ -456,12 +469,28 @@ private fun OpenNote(
         if (header.frontMatter.isNotEmpty()) PropertiesStrip(header, editor)
 
         if (editor.reading) {
+            // The `editor.blocks` seam (ADR 0015 § 5, T4). The Code branch
+            // resolves through a table keyed by info string; the shell's
+            // own `filter` is its only entry, and every other fence — and
+            // every fence at all with this list empty — is the code box it
+            // has always been. Reading `vaultTick` here is what makes a
+            // block recompute on the tick rather than per keystroke (§ 4).
             MarkdownBody(
                 remember(editor.text.text) { parseMarkdown(editor.text.text) },
                 Modifier
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 18.dp, vertical = 14.dp),
+                renderers = BlockRenderers(
+                    listOf(
+                        filterBlockRegistration(
+                            state.vaultDir,
+                            state.vaultTick.value,
+                            state.plugins.toList(),
+                            onOpen = openRow,
+                        ),
+                    ),
+                ),
             )
         } else {
             // Styled editing (E2 + the E3 checkbox slice): markers off the

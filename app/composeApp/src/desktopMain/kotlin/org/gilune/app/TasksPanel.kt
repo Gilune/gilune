@@ -12,6 +12,11 @@
 //
 // The partition is pure over rows and a day, so the boundaries below are
 // testable without a screen.
+//
+// T4's `filter` block renders here too (§ 4: "what renders is the type's
+// row"), sharing [TaskHitRow] with the panel rather than forking it — one
+// row shape per type, so an agenda row and a block row cannot drift. The
+// panel groups and the block does not; everything else is the same row.
 
 package org.gilune.app
 
@@ -41,10 +46,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
+import uniffi.gilune_ffi.PluginInfo
 
 /// § 4's cap, and it is not optional: matching is cheap and *rendering*
 /// results is what freezes an editor, so it sits on the rows drawn, per
@@ -164,11 +171,12 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
     val colours = MaterialTheme.colorScheme
     val types = searchTypesFor(state.plugins)
     val filter = state.tasksFilter()
-    val sections = remember(state.vaultTick.value, state.vaultDir, types.size, filter) {
-        // `today` is read here rather than inside the partition so the
-        // day every view means is the day the pass ran.
+    // `today` is read inside the pass and carried out of it, so the day
+    // every view means — and the day every row's date is coloured against
+    // — is the day the pass ran, not the day a recomposition happened.
+    val computed = remember(state.vaultTick.value, state.vaultDir, types.size, filter) {
         val today = LocalDate.now()
-        agenda(
+        today to agenda(
             taskRows(
                 searchVault(
                     state.vaultDir,
@@ -181,6 +189,8 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
             today,
         )
     }
+    val today = computed.first
+    val sections = computed.second
     // Undated is folded away to begin with: it is the view least likely
     // to be about today, and the one most likely to be long.
     val collapsed = remember { mutableStateListOf(AgendaGroup.UNDATED) }
@@ -213,7 +223,7 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
                 }
                 if (!open) continue
                 items(section.rows, key = { "${section.group.name}:${it.relPath}:${it.line}" }) { hit ->
-                    TaskRow(hit, section.group, onOpen)
+                    TaskHitRow(hit, today, onOpen)
                 }
                 if (section.more > 0) {
                     item(key = "more-${section.group.name}") {
@@ -259,16 +269,29 @@ private fun GroupHeader(section: AgendaSection, open: Boolean, onToggle: () -> U
 private fun chevronFor(open: Boolean): ImageVector =
     if (open) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight
 
+/// **One task row, drawn the same way wherever a task line is listed** —
+/// the agenda panel (§ 6) and a `filter` block (§ 4). The task's own words,
+/// the note it came from beneath them, its due date right-aligned and
+/// coloured by what the date is asking for.
+///
+/// `onOpen` is nullable because a row is only navigable where the surface
+/// drawing it has somewhere to send the click; null draws the same row,
+/// inert. **Rows navigate, they never toggle** (§ 4) either way.
+///
+/// The colour comes from the date against `today` rather than from the
+/// panel's group, so the block gets the same reading with no groups at
+/// all — and the panel's four views agree with it by construction, since
+/// they partition on that same comparison.
 @Composable
-private fun TaskRow(hit: TaskHit, group: AgendaGroup, onOpen: (String) -> Unit) {
+fun TaskHitRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?, modifier: Modifier = Modifier) {
     val colours = MaterialTheme.colorScheme
     Row(
-        Modifier
+        modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
             .clip(RoundedCornerShape(5.dp))
             .background(colours.surface)
-            .clickable { onOpen(hit.relPath) }
+            .let { if (onOpen == null) it else it.clickable { onOpen(hit.relPath) } }
             .padding(start = 12.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -296,18 +319,150 @@ private fun TaskRow(hit: TaskHit, group: AgendaGroup, onOpen: (String) -> Unit) 
                 due.toString(),
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
-                color = dueColour(group),
+                color = dueColour(due, today),
                 modifier = Modifier.padding(top = 1.dp),
             )
         }
     }
 }
 
-/// Overdue takes the error colour and today the accent; the week ahead is
-/// ordinary secondary text, because it is not yet asking for anything.
+/// Overdue takes the error colour and today the accent; anything further
+/// out is ordinary secondary text, because it is not yet asking for
+/// anything.
 @Composable
-private fun dueColour(group: AgendaGroup): Color = when (group) {
-    AgendaGroup.OVERDUE -> MaterialTheme.colorScheme.error
-    AgendaGroup.TODAY -> MaterialTheme.colorScheme.primary
+private fun dueColour(due: LocalDate, today: LocalDate): Color = when {
+    due < today -> MaterialTheme.colorScheme.error
+    due == today -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+// ---------------------------------------------------------------------
+// The `filter` block (§ 4, T4) — the shell's own `editor.blocks`
+// registration, rendering beside the panel it shares its rows with.
+// ---------------------------------------------------------------------
+
+/// The shell's registration of the `filter` fence: **v1's only producer**
+/// of [BlockRenderers] (§ 5). It is the shell's and not the tasks
+/// plugin's, which is why a block keeps rendering — as a hint row naming
+/// the type it wanted — when every removable plugin is gone.
+fun filterBlockRegistration(
+    vaultDir: String,
+    tick: Int,
+    plugins: List<PluginInfo>,
+    onOpen: ((String) -> Unit)? = null,
+): BlockRegistration = BlockRegistration(FILTER_FENCE) { block ->
+    FilterBlockView(vaultDir, tick, plugins, block.text, onOpen)
+}
+
+/// A `filter` block as a live list. Group-less — a block asked one
+/// question and gets one answer — capped at [FILTER_ROW_CAP] with the rest
+/// counted, and degenerate blocks get their single hint row.
+///
+/// **Recomputed on the tick, never per keystroke** (§ 4), keyed exactly as
+/// the agenda panel is: the vault, its tick, this block's own text, and
+/// the live plugin state that the type registry and the global filter
+/// stand for. In Edit mode with the caret inside the block, nothing here
+/// is composed at all, so no evaluation runs.
+@Composable
+fun FilterBlockView(
+    vaultDir: String,
+    tick: Int,
+    plugins: List<PluginInfo>,
+    block: String,
+    onOpen: ((String) -> Unit)? = null,
+    modifier: Modifier = Modifier,
+) {
+    val colours = MaterialTheme.colorScheme
+    val types = searchTypesFor(plugins)
+    val filter = plugins.tasksFilter()
+    val computed = remember(vaultDir, tick, block, types.size, filter) {
+        val today = LocalDate.now()
+        today to evaluateFilterBlock(vaultDir, block, types, today)
+    }
+    val today = computed.first
+    val result = computed.second
+
+    Column(
+        modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(colours.surfaceVariant)
+            .padding(vertical = 5.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        when (result) {
+            is FilterResult.Hint -> FilterNoteRow(result.text)
+            is FilterResult.Tasks -> {
+                if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
+                for (row in result.rows) TaskHitRow(row, today, onOpen)
+                FilterMore(result.more)
+            }
+            is FilterResult.Notes -> {
+                if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
+                for (row in result.rows) NoteHitRow(row, onOpen)
+                FilterMore(result.more)
+            }
+        }
+    }
+}
+
+/// A note-level hit: its name, and the path that says which one it is.
+@Composable
+private fun NoteHitRow(row: NoteRow, onOpen: ((String) -> Unit)?) {
+    val colours = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 6.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .background(colours.surface)
+            .let { if (onOpen == null) it else it.clickable { onOpen(row.relPath) } }
+            .padding(start = 12.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            row.name,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = colours.onSurface,
+        )
+        Text(
+            row.relPath,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = colours.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+    }
+}
+
+/// The one row a block says something in rather than listing something:
+/// a hint, or an answered question with no matches. Muted and italic, so
+/// it never reads as a result.
+@Composable
+private fun FilterNoteRow(text: String) {
+    Text(
+        text,
+        fontSize = 11.sp,
+        fontStyle = FontStyle.Italic,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(start = 18.dp, end = 12.dp, top = 2.dp, bottom = 2.dp),
+    )
+}
+
+/// § 4's footer. Nought is drawn as nothing rather than as a line saying
+/// so.
+@Composable
+private fun FilterMore(count: Int) {
+    if (count <= 0) return
+    Text(
+        "+$count more",
+        fontSize = 11.sp,
+        color = MaterialTheme.colorScheme.outline,
+        modifier = Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp),
+    )
 }

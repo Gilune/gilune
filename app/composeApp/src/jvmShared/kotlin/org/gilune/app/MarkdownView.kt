@@ -1,5 +1,17 @@
 // Rendering the Markdown model. Reading only: nothing here can change a
 // document, which is what keeps the buffer authoritative (ADR 0012).
+//
+// ADR 0015 § 5 adds `editor.blocks` here: a fenced block already carries
+// its info string, so the seam is a **renderer table** consulted in the
+// `Code` branch, and an info string nobody registered falls through to
+// today's monospace box. `MdBlock` stays sealed and the `when` stays
+// exhaustive — no new block type, and no parser change.
+//
+// The table is shared; the rows a registration draws are not. The shell's
+// own `filter` renderer is desktop code beside the agenda panel it shares
+// its row shape with, exactly as every other list in this shell is, and a
+// mobile reader would register its own over the same `runFilterBlock`
+// (ADR 0015 § 7: what jvmShared owes the phone is the evaluation).
 
 package org.gilune.app
 
@@ -34,8 +46,35 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+/// One `editor.blocks` registration (ADR 0015 § 5): the fence info string
+/// it claims, and what draws that block. `render` never sees the buffer
+/// and cannot change a byte — the shell owns composition, exactly as it
+/// does for `editor.decorations`.
+class BlockRegistration(val info: String, val render: @Composable (MdBlock.Code) -> Unit)
+
+/// The registration list, and in v1 it **is** the registry: a table keyed
+/// by info string rather than a branch in the `when`, so a contributed
+/// block is an entry away. Info strings are matched case-insensitively and
+/// a later registration replaces an earlier one of the same name, on the
+/// `SearchOperators` precedent.
+///
+/// Empty — the default — is today's shell exactly: every fence is a code
+/// box. That is also the removal story, since the `filter` registration is
+/// the shell's own and not the tasks plugin's (§ 4).
+class BlockRenderers(registrations: List<BlockRegistration> = emptyList()) {
+    private val byInfo: Map<String, BlockRegistration> =
+        registrations.associateBy { it.info.trim().lowercase() }
+
+    operator fun get(info: String?): BlockRegistration? =
+        info?.trim()?.lowercase()?.let(byInfo::get)
+}
+
 @Composable
-fun MarkdownBody(blocks: List<MdBlock>, modifier: Modifier = Modifier) {
+fun MarkdownBody(
+    blocks: List<MdBlock>,
+    modifier: Modifier = Modifier,
+    renderers: BlockRenderers = BlockRenderers(),
+) {
     val colours = MaterialTheme.colorScheme
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
         for (block in blocks) {
@@ -69,17 +108,13 @@ fun MarkdownBody(blocks: List<MdBlock>, modifier: Modifier = Modifier) {
                         modifier = Modifier.padding(start = 10.dp),
                     )
                 }
-                is MdBlock.Code -> Text(
-                    block.text,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(colours.surfaceVariant)
-                        .horizontalScroll(rememberScrollState())
-                        .padding(10.dp),
-                )
+                // The seam (§ 5). A registered info string draws itself;
+                // every other one — and every unfenced code block, which
+                // carries none — is the box it has always been.
+                is MdBlock.Code -> {
+                    val registration = renderers[block.language]
+                    if (registration == null) CodeBox(block.text) else registration.render(block)
+                }
                 is MdBlock.Embed -> Text(
                     "▸ ${block.target}",
                     fontFamily = FontFamily.Monospace,
@@ -95,6 +130,26 @@ fun MarkdownBody(blocks: List<MdBlock>, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+/// The monospace box, unchanged and moved only so the `Code` branch can
+/// fall through to it. **This is the removal story for a block renderer**
+/// (§ 4): an info string nobody registered — including one whose plugin
+/// has gone — is a legible code block again, byte for byte.
+@Composable
+private fun CodeBox(text: String) {
+    val colours = MaterialTheme.colorScheme
+    Text(
+        text,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(colours.surfaceVariant)
+            .horizontalScroll(rememberScrollState())
+            .padding(10.dp),
+    )
 }
 
 private fun headingSize(level: Int) = when (level) {

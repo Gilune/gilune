@@ -385,8 +385,28 @@ gates promises) are ratified. **Next: application-level engineering — see
      settle-refresh not implemented); rows open the note, not the
      line; tasks due past today+7 appear in no view (bounded by
      design — search answers them); `navigationPanels` knows the
-     tasks panel by id in shell code (debt 10). **Remaining: T4
-     (filter-block rendering in notes).**
+     tasks panel by id in shell code (debt 10). **T4 SHIPPED
+     (2026-08-31, one agent) — ADR 0015 delivery complete**:
+     FilterBlock.kt (pure: lines joined = the DSL's whitespace-AND;
+     classify Empty/NoType/UnknownType/Runnable BEFORE evaluating —
+     the hint row never guesses); MarkdownView gains
+     `BlockRenderers` (a table keyed by fence info string —
+     `filter` is the shell's own and only registration into
+     `Slots.EDITOR_BLOCKS`; unknown info strings fall to the code
+     box, which is also the removal story); TaskHitRow extracted
+     from the panel and shared; Read-mode rows navigate via
+     TabsState.open. **DEVIATION, owner-visible: Edit mode ships
+     the raw fence, not the ADR's caret-outside overlay** — rows
+     don't sit on the text line grid, the composed offset mapping
+     threads back through checkbox/hover/popup anchors, and a
+     covered block can't be clicked into; pinned by test
+     `editModeShowsTheFenceItselfRatherThanTheList`; no evaluation
+     runs in Edit mode at all. Suite 341. Live-proven:
+     `type:task due:week done:none` rendered exactly its two rows
+     in Read mode, the type-less block its hint, Edit mode the raw
+     fences with in-fence tokens correctly un-decorated. Gaps: each
+     block = one vault pass; rows open the note not the line;
+     EDITOR_BLOCKS has one producer (the settings.form lesson).
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry
