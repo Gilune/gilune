@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -190,7 +191,10 @@ class TreeState {
 /// to the search panel's query field, so a window shortcut that focuses
 /// it must set `tree.railPanel` to SEARCH first — a focus request cannot
 /// switch panels. `onCreateNote` is handed a note that already exists on
-/// disk.
+/// disk. `onOpenToSide`, `onRenamed` and `onDeleted` are how the tree
+/// tells the pane host what happened to a note it may have open
+/// (ADR 0014); each defaults to nothing, so a rail without panes behind
+/// it still compiles.
 @Composable
 fun RailPanels(
     state: GiluneState,
@@ -200,11 +204,17 @@ fun RailPanels(
     onCreateNote: (String) -> Unit,
     modifier: Modifier = Modifier,
     initialSearchQuery: String = "",
+    onOpenToSide: (String) -> Unit = {},
+    onRenamed: (String, String) -> Unit = { _, _ -> },
+    onDeleted: (String) -> Unit = {},
 ) {
     val colours = MaterialTheme.colorScheme
     Column(modifier) {
+        // Exactly as tall as a pane's tab strip, so the divider below it
+        // runs unbroken across the seam (owner-reported misalignment,
+        // screenshot 2026-08-31).
         Row(
-            Modifier.fillMaxWidth().padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 5.dp),
+            Modifier.fillMaxWidth().height(PANE_HEADER_HEIGHT).padding(start = 8.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
@@ -217,7 +227,16 @@ fun RailPanels(
         }
         HorizontalDivider(color = colours.outlineVariant)
         when (tree.railPanel) {
-            RailPanel.FILES -> VaultTree(state, tree, onOpen, onCreateNote, Modifier.weight(1f))
+            RailPanel.FILES -> VaultTree(
+                state,
+                tree,
+                onOpen,
+                onCreateNote,
+                Modifier.weight(1f),
+                onOpenToSide = onOpenToSide,
+                onRenamed = onRenamed,
+                onDeleted = onDeleted,
+            )
             RailPanel.SEARCH ->
                 SearchPanel(state, searchFocus, onOpen, Modifier.weight(1f), initialSearchQuery)
         }
@@ -253,6 +272,7 @@ private sealed interface PendingName {
 
 private class TreeActions(
     val open: (String) -> Unit,
+    val openToSide: (String) -> Unit,
     val newNote: (String) -> Unit,
     val newFolder: (String) -> Unit,
     val rename: (VaultEntry) -> Unit,
@@ -261,6 +281,8 @@ private class TreeActions(
 
 /// `onCreateNote` receives an untitled note that is already on disk;
 /// opening it is the least a caller can do, so that is the default.
+/// A rename and a deletion are reported as they happen: a tab over the
+/// note has to follow it, or go with it (ADR 0014).
 @Composable
 fun VaultTree(
     state: GiluneState,
@@ -268,6 +290,9 @@ fun VaultTree(
     onOpen: (String) -> Unit,
     onCreateNote: (String) -> Unit = onOpen,
     modifier: Modifier = Modifier,
+    onOpenToSide: (String) -> Unit = {},
+    onRenamed: (String, String) -> Unit = { _, _ -> },
+    onDeleted: (String) -> Unit = {},
 ) {
     var pending by remember { mutableStateOf<PendingName?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
@@ -300,6 +325,7 @@ fun VaultTree(
 
     val actions = TreeActions(
         open = onOpen,
+        openToSide = onOpenToSide,
         newNote = ::newNote,
         newFolder = ::newFolder,
         rename = { entry -> pending = PendingName.Rename(entry.relPath, entry.isDir) },
@@ -346,7 +372,13 @@ fun VaultTree(
             items(entries, key = { it.relPath }) { entry ->
                 val renaming = (pending as? PendingName.Rename)?.takeIf { it.relPath == entry.relPath }
                 if (renaming != null) {
-                    InlineNameRow(state, renaming, depth = entry.depth, onDone = { pending = null })
+                    InlineNameRow(
+                        state,
+                        renaming,
+                        depth = entry.depth,
+                        onDone = { pending = null },
+                        onRenamed = onRenamed,
+                    )
                 } else {
                     TreeRow(entry, tree, state.vaultDir, capturesCount, actions)
                 }
@@ -360,7 +392,9 @@ fun VaultTree(
     }
 
     val doomed = deleting
-    if (doomed != null) DeleteDialog(state, doomed, onClose = { deleting = null })
+    if (doomed != null) {
+        DeleteDialog(state, doomed, onClose = { deleting = null }, onDeleted = onDeleted)
+    }
 }
 
 @Composable
@@ -382,13 +416,18 @@ private fun TreeRow(
     val parentDir = if (entry.isDir) entry.relPath else entry.relPath.substringBeforeLast('/', "")
 
     ContextMenuArea(items = {
-        listOf(
-            ContextMenuItem("New note here") { actions.newNote(parentDir) },
-            ContextMenuItem("New folder here") { actions.newFolder(parentDir) },
-            ContextMenuItem("Rename") { actions.rename(entry) },
-            ContextMenuItem("Delete") { actions.delete(entry.relPath) },
-            ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) },
-        )
+        buildList {
+            // Only a note goes to the side: a pane holds documents, and a
+            // folder is not one (ADR 0014, from M+1).
+            if (!entry.isDir) {
+                add(ContextMenuItem("Open to the side") { actions.openToSide(entry.relPath) })
+            }
+            add(ContextMenuItem("New note here") { actions.newNote(parentDir) })
+            add(ContextMenuItem("New folder here") { actions.newFolder(parentDir) })
+            add(ContextMenuItem("Rename") { actions.rename(entry) })
+            add(ContextMenuItem("Delete") { actions.delete(entry.relPath) })
+            add(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
+        }
     }) {
         Row(
             Modifier
@@ -510,6 +549,7 @@ private fun InlineNameRow(
     pending: PendingName,
     depth: Int,
     onDone: () -> Unit,
+    onRenamed: (String, String) -> Unit = { _, _ -> },
 ) {
     val colours = MaterialTheme.colorScheme
     val folder = when (pending) {
@@ -530,7 +570,7 @@ private fun InlineNameRow(
                     File(folderBase(state.vaultDir, pending.parent), trimmed).mkdirs()
                     state.sync(announce = false)
                 }
-                is PendingName.Rename -> renameEntry(state, pending, trimmed)
+                is PendingName.Rename -> renameEntry(state, pending, trimmed, onRenamed)
             }
         }
         onDone()
@@ -644,11 +684,32 @@ fun createUntitledNote(vaultDir: String, parent: String): String {
 private fun folderBase(vaultDir: String, parent: String): File =
     if (parent.isEmpty()) File(vaultDir) else File(vaultDir, parent)
 
-private fun renameEntry(state: GiluneState, pending: PendingName.Rename, name: String) {
+/// A rename is reported note by note, never as the folder it may have
+/// been: a tab knows its own note's path and nothing else. Attachments
+/// move with their note's stem and no tab holds one, so they are not
+/// reported.
+private fun renameEntry(
+    state: GiluneState,
+    pending: PendingName.Rename,
+    name: String,
+    onRenamed: (String, String) -> Unit,
+) {
     val renamed = renameNote(state.vaultDir, pending.relPath, name, pending.isDir)
     if (renamed == null) {
         state.message.value = "could not rename ${pending.relPath.substringAfterLast('/')}"
         return
+    }
+    if (renamed != pending.relPath) {
+        if (pending.isDir) {
+            File(state.vaultDir, renamed).walkTopDown()
+                .filter { it.isFile && it.name.endsWith(".md") }
+                .forEach { file ->
+                    val now = file.relativeTo(File(state.vaultDir)).invariantSeparatorsPath
+                    onRenamed(pending.relPath + now.removePrefix(renamed), now)
+                }
+        } else {
+            onRenamed(pending.relPath, renamed)
+        }
     }
     state.sync(announce = false)
 }
@@ -665,7 +726,12 @@ private fun revealInExplorer(vaultDir: String, entry: VaultEntry) {
 }
 
 @Composable
-private fun DeleteDialog(state: GiluneState, relPath: String, onClose: () -> Unit) {
+private fun DeleteDialog(
+    state: GiluneState,
+    relPath: String,
+    onClose: () -> Unit,
+    onDeleted: (String) -> Unit = {},
+) {
     val isDir = File(state.vaultDir, relPath).isDirectory
     AlertDialog(
         onDismissRequest = onClose,
@@ -680,7 +746,7 @@ private fun DeleteDialog(state: GiluneState, relPath: String, onClose: () -> Uni
         },
         confirmButton = {
             Button(onClick = {
-                deleteEntry(state, relPath)
+                deleteEntry(state, relPath, onDeleted)
                 onClose()
             }) { Text("Delete") }
         },
@@ -690,19 +756,26 @@ private fun DeleteDialog(state: GiluneState, relPath: String, onClose: () -> Uni
 
 /// Delete a projected note and answer the tombstone proposal the deletion
 /// raises. The object's identity is read before the file goes, because
-/// afterwards there is nothing left to read it from.
-private fun deleteEntry(state: GiluneState, relPath: String) {
+/// afterwards there is nothing left to read it from — and so are the
+/// note paths the deletion takes with it, so a tab over any of them can
+/// be told (a folder deletion is reported note by note).
+private fun deleteEntry(state: GiluneState, relPath: String, onDeleted: (String) -> Unit = {}) {
     if (state.gilune.value == null) return
     val file = File(state.vaultDir, relPath)
-    val identities = if (file.isDirectory) {
-        file.walkTopDown().filter { it.isFile && it.name.endsWith(".md") }.mapNotNull(::noteIdentity).toList()
+    val notes = if (file.isDirectory) {
+        file.walkTopDown().filter { it.isFile && it.name.endsWith(".md") }.toList()
     } else {
-        listOfNotNull(noteIdentity(file))
+        listOf(file)
     }
+    val identities = notes.mapNotNull(::noteIdentity)
+    val removed = notes
+        .filter { it.name.endsWith(".md") }
+        .map { it.relativeTo(File(state.vaultDir)).invariantSeparatorsPath }
     if (!file.deleteRecursively()) {
         state.message.value = "could not delete $relPath"
         return
     }
+    removed.forEach(onDeleted)
     state.pluginAction("deleted $relPath") {
         it.reconcile()
         val open = it.openProposals().filter { proposal -> proposal.objectId in identities }

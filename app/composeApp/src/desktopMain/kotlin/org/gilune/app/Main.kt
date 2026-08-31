@@ -1,10 +1,15 @@
 // Desktop entry point and window scaffold (ADR 0011, amended
 // 2026-08-31): top bar with quick-open and the speech microphone, rail
-// with Files and Search panels, document pane. Capture-first is a pair
-// of gestures now, not a region: Ctrl+N makes an Untitled note ready to
-// type, the microphone makes a note from speech. Settings is a surface
-// over the window, not a dialog, because it holds the plugin panel and
-// will hold devices next.
+// with Files and Search panels, document region, status line.
+// Capture-first is a pair of gestures now, not a region: Ctrl+N makes an
+// Untitled note ready to type, the microphone makes a note from speech.
+// Settings is a surface over the window, not a dialog, because it holds
+// the plugin panel and will hold devices next.
+//
+// The document region is a host of tabbed panes (ADR 0014), so the
+// window holds a `TabsState` where it held one buffer, the status line
+// sits here rather than inside an editor, and the tab shortcuts are
+// answered above any focused field.
 
 package org.gilune.app
 
@@ -39,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -46,6 +52,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -54,6 +61,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -61,6 +69,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,6 +78,8 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import uniffi.gilune_ffi.Gilune
 import java.io.File
@@ -82,13 +93,44 @@ private fun modelFile(): File =
         "Gilune/models/ggml-tiny.bin",
     )
 
+/// How long the layout waits for the tabs to settle before it is
+/// written: a burst of opens and closes costs one preference write.
+private const val LAYOUT_SAVE_IDLE_MS = 400L
+
 /// Window-level gestures arrive as counted requests: the shortcut
 /// handler lives outside DesktopApp's state, so it bumps a counter and
-/// the app answers inside it.
+/// the app answers inside it. The tab gestures (ADR 0014) are handled up
+/// here too, so a focused text field cannot swallow them; those carrying
+/// an argument count alongside it, since pressing Ctrl+3 twice is two
+/// requests for the same tab.
 private class GestureRequests {
     var newNote by mutableStateOf(0)
     var search by mutableStateOf(0)
     var quickOpen by mutableStateOf(0)
+
+    /// Count paired with the direction: true cycles forward.
+    var cycleTab by mutableStateOf(0 to true)
+
+    /// Count paired with the tab wanted, counting from one.
+    var selectTab by mutableStateOf(0 to 0)
+
+    var closeTab by mutableStateOf(0)
+    var splitRight by mutableStateOf(0)
+}
+
+/// The row above the letters only: the numeric keypad sends keys of its
+/// own and nothing asked for them.
+private val DIGIT_KEYS = listOf(
+    Key.One, Key.Two, Key.Three, Key.Four, Key.Five, Key.Six, Key.Seven, Key.Eight, Key.Nine,
+)
+
+private fun digitOf(key: Key): Int? = DIGIT_KEYS.indexOf(key).takeIf { it >= 0 }?.plus(1)
+
+/// Closing the window is a save, not a discard (ADR 0014): the window
+/// owns the gesture and the app owns the buffers, so the app leaves the
+/// window something to run before the process ends.
+private class Shutdown {
+    var run: () -> Unit = {}
 }
 
 fun main() {
@@ -104,6 +146,7 @@ fun main() {
         var theme by remember { mutableStateOf(Prefs.theme) }
         var settingsOpen by remember { mutableStateOf(false) }
         val gestures = remember { GestureRequests() }
+        val shutdown = remember { Shutdown() }
         val probe = System.getProperty("gilune.probe")
         val dark = when (theme) {
             ThemeChoice.System -> isSystemInDarkTheme()
@@ -111,7 +154,12 @@ fun main() {
             ThemeChoice.Dark -> true
         }
         Window(
-            onCloseRequest = ::exitApplication,
+            // Nothing typed is lost to a window closing: every buffer is
+            // flushed and the layout written before the process goes.
+            onCloseRequest = {
+                shutdown.run()
+                exitApplication()
+            },
             title = if (probe == null) "Gilune" else "Gilune probe",
             icon = painterResource("gilune-logo-v2.png"),
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
@@ -130,11 +178,33 @@ fun main() {
                         gestures.quickOpen++
                         true
                     }
+                    event.isCtrlPressed && event.key == Key.Tab -> {
+                        gestures.cycleTab = gestures.cycleTab.first + 1 to !event.isShiftPressed
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.W -> {
+                        gestures.closeTab++
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.Backslash -> {
+                        gestures.splitRight++
+                        true
+                    }
                     event.key == Key.Escape && settingsOpen -> {
                         settingsOpen = false
                         true
                     }
-                    else -> false
+                    else -> {
+                        // Ctrl+1…9 selects the nth tab of the pane in
+                        // front; the digit travels with the request.
+                        val digit = if (event.isCtrlPressed) digitOf(event.key) else null
+                        if (digit != null) {
+                            gestures.selectTab = gestures.selectTab.first + 1 to digit
+                            true
+                        } else {
+                            false
+                        }
+                    }
                 }
             },
         ) {
@@ -148,6 +218,7 @@ fun main() {
                             settingsOpen = settingsOpen,
                             onSettingsOpen = { settingsOpen = it },
                             gestures = gestures,
+                            shutdown = shutdown,
                             onThemeChange = { theme = it; Prefs.theme = it },
                             onVaultChange = { Prefs.vaultDir = it; vaultDir = it },
                         )
@@ -166,32 +237,83 @@ private fun DesktopApp(
     settingsOpen: Boolean,
     onSettingsOpen: (Boolean) -> Unit,
     gestures: GestureRequests,
+    shutdown: Shutdown,
     onThemeChange: (ThemeChoice) -> Unit,
     onVaultChange: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
     val state = remember { GiluneState(vaultDir, scope) }
-    val editor = remember { EditorState() }
+    // The document region's whole state: the pane tree, its tabs and one
+    // buffer per open note, restored from where this vault was left.
+    val tabs = remember { TabsState.restore(vaultDir, Prefs.tabsLayout(vaultDir)) }
     val tree = remember { TreeState() }
     val searchFocus = remember { FocusRequester() }
     val quickOpenFocus = remember { FocusRequester() }
     val recorder = remember { DesktopAudioRecorder() }
+    val dictation = remember { DesktopAudioRecorder() }
     var recording by remember { mutableStateOf(false) }
     val colours = MaterialTheme.colorScheme
 
     fun openNote(relPath: String) {
-        tree.selectedFile = relPath
-        editor.open(state.vaultDir, relPath)
+        tabs.open(relPath)
     }
 
     fun createNote() {
-        openNote(createUntitledNote(state.vaultDir, tree.selectedDir))
-        editor.focusTitle = true
+        tabs.open(createUntitledNote(state.vaultDir, tree.selectedDir)).editor.focusTitle = true
         state.sync(announce = false)
+    }
+
+    // The rail highlights whatever is in front rather than whatever was
+    // last clicked, so the selection follows tabs and splits too
+    // (ADR 0014 consequences).
+    LaunchedEffect(Unit) {
+        snapshotFlow { tabs.activeEditor?.openRelPath }.collect { tree.selectedFile = it }
+    }
+
+    // The layout is device-local and per vault, written once the tabs
+    // stop moving; buffers are never in it — they were flushed, and a
+    // restored tab re-reads its file.
+    LaunchedEffect(Unit) {
+        snapshotFlow { tabs.serialise() }.collectLatest {
+            delay(LAYOUT_SAVE_IDLE_MS)
+            Prefs.saveTabsLayout(vaultDir, it)
+        }
+    }
+
+    DisposableEffect(tabs) {
+        val preserve = {
+            for (pane in tabs.panes()) for (tab in pane.tabs) flushEditor(vaultDir, tab.editor)
+            Prefs.saveTabsLayout(vaultDir, tabs.serialise())
+        }
+        shutdown.run = preserve
+        // Opening another vault tears this app down as surely as closing
+        // the window does, and neither may lose what is in a buffer.
+        onDispose {
+            preserve()
+            shutdown.run = {}
+        }
     }
 
     LaunchedEffect(gestures.newNote) {
         if (gestures.newNote > 0) createNote()
+    }
+    LaunchedEffect(gestures.cycleTab) {
+        if (gestures.cycleTab.first > 0) tabs.cycle(gestures.cycleTab.second)
+    }
+    LaunchedEffect(gestures.selectTab) {
+        if (gestures.selectTab.first > 0) tabs.selectIndex(gestures.selectTab.second)
+    }
+    LaunchedEffect(gestures.closeTab) {
+        // Nothing open is nothing to close; a refusal means the file
+        // changed under an edited buffer and is waiting for an answer.
+        if (gestures.closeTab > 0 && tabs.activeTab != null && !tabs.closeActive()) {
+            state.message.value = "unsaved changes over a changed file — choose which version to keep"
+        }
+    }
+    LaunchedEffect(gestures.splitRight) {
+        if (gestures.splitRight > 0 && !tabs.splitRight()) {
+            state.message.value = "a pane needs a second tab before it can split"
+        }
     }
     LaunchedEffect(gestures.search) {
         if (gestures.search > 0) {
@@ -207,21 +329,33 @@ private fun DesktopApp(
         state.openVault { gilune ->
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
-            // screen so an automated screenshot can look at it.
+            // screen so an automated screenshot can look at it. The forms
+            // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>,
+            // props:<rel>, search:<query> and split:<rel>;<rel>. View
+            // state belongs to a tab, so a probe flips it on the tab the
+            // open returned.
             when {
                 probe == null -> Unit
                 probe.startsWith("settings") -> onSettingsOpen(true)
-                probe.startsWith("note:") -> openNote(probe.removePrefix("note:"))
+                // note: takes a ;-list so a screenshot can show a strip
+                // holding several tabs, not just one.
+                probe.startsWith("note:") ->
+                    probe.removePrefix("note:").split(';')
+                        .filter { it.isNotBlank() }
+                        .forEach { openNote(it) }
                 probe.startsWith("read:") -> {
-                    editor.reading = true
-                    openNote(probe.removePrefix("read:"))
+                    tabs.open(probe.removePrefix("read:")).editor.reading = true
                 }
                 probe.startsWith("search:") -> {
                     tree.railPanel = RailPanel.SEARCH
                 }
                 probe.startsWith("props:") -> {
-                    openNote(probe.removePrefix("props:"))
-                    editor.openProperties = true
+                    tabs.open(probe.removePrefix("props:")).editor.openProperties = true
+                }
+                probe.startsWith("split:") -> {
+                    val both = probe.removePrefix("split:").split(';', limit = 2)
+                    both.firstOrNull()?.takeIf { it.isNotBlank() }?.let { tabs.open(it) }
+                    both.getOrNull(1)?.takeIf { it.isNotBlank() }?.let { tabs.openToSide(it) }
                 }
             }
         }
@@ -292,21 +426,46 @@ private fun DesktopApp(
                 searchFocus = searchFocus,
                 onOpen = ::openNote,
                 onCreateNote = { rel ->
-                    openNote(rel)
-                    editor.focusTitle = true
+                    tabs.open(rel).editor.focusTitle = true
                     state.sync(announce = false)
                 },
                 modifier = Modifier.width(240.dp).fillMaxHeight(),
                 initialSearchQuery = probe?.removePrefix("search:")?.takeIf { probe.startsWith("search:") } ?: "",
+                onOpenToSide = { tabs.openToSide(it) },
+                onRenamed = { old, new -> tabs.noteRenamed(old, new) },
+                onDeleted = { tabs.noteDeleted(it) },
             )
             Box(Modifier.width(1.dp).fillMaxHeight().background(colours.outlineVariant))
-            NoteEditor(
-                state,
-                editor,
-                Modifier.weight(1f).fillMaxHeight(),
-                recorder = DesktopAudioRecorder(),
-                onRenamed = { tree.selectedFile = it },
+            PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
+        }
+
+        // One window, one status line: it sat inside the editor while
+        // there was one of those, and moves out here now that there may
+        // be several panes (ADR 0014).
+        HorizontalDivider(color = colours.outlineVariant)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                state.message.value,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = colours.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
             )
+            val front = tabs.activeEditor
+            if (front != null) {
+                Text(
+                    if (front.dirty) "unsaved" else "saved",
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = if (front.dirty) colours.primary else colours.onSurfaceVariant,
+                )
+            }
         }
     }
 

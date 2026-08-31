@@ -14,7 +14,6 @@ import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
 import kotlinx.coroutines.CoroutineScope
@@ -52,7 +51,9 @@ class NoteEditorUiTest {
         val field = compose.onNodeWithTag("note-body")
         field.assertIsNotFocused()
         val textTop = field.fetchSemanticsNode().boundsInRoot.top
-        val paneBottom = compose.onNodeWithText("saved").fetchSemanticsNode().boundsInRoot.top
+        // The status line moved out to the window scaffold (ADR 0014), so
+        // the pane's own foot is the bottom of the composition.
+        val paneBottom = compose.onRoot().fetchSemanticsNode().boundsInRoot.bottom
         val clickY = paneBottom - 24f
         assertTrue(clickY - textTop > 200f, "the click lands far below the one line this note holds")
         assertTrue(

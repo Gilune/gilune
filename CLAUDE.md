@@ -240,6 +240,38 @@ gates promises) are ratified. **Next: application-level engineering — see
      ratified as proposed** — stage M (tabs in one pane) is the next
      shell milestone; then M+1 explicit split + layout persistence,
      M+2 drag. Probes gained search:<q> and props:<rel>.
+   - **M6 fifth pass (2026-08-31, agent team round three: model →
+     two parallel UI agents, Fable coordinating/validating;
+     screenshot-validated incl. a persistence relaunch)** — ADR 0014
+     stages M AND M+1 shipped; M+2 (drag) stays deferred. Model:
+     `Tabs.kt` (desktopMain; leaf type is `TabPane` — `Pane` was taken
+     by SettingsPane's nav) holds the pane tree, `TabsState` (open
+     dedupe, openToSide MOVES the tab, close refusal, dissolution,
+     `label()` stem disambiguation, serialise/restore), and
+     `flushEditor` — the guarded write extracted from NoteEditor so
+     deactivating a tab flushes through the same path; 23 tests.
+     Split-right on a single-tab pane is a no-op with a message (one
+     buffer per note makes split a move). UI: `Panes.kt` PaneHost +
+     tab strip (dot↔× in one fixed slot, error colour when stale,
+     middle-click close, context menu, overflow chevron); the active
+     PANE is named by a primary top rule on its front tab, drawn via
+     drawBehind because inside horizontalScroll fillMaxWidth is a
+     no-op (infinite constraints — cost one screenshot round). Shell:
+     Ctrl+Tab/Shift+Tab, Ctrl+W, Ctrl+1…9, Ctrl+\; status line moved
+     to the window scaffold; per-vault layout in Prefs
+     (`tabs-<pathhash>`, save skipped over 7500 chars); window close
+     and vault switch flush every tab then save. Tree: Open to the
+     side, rename/delete notify tabs (folder rename walks contained
+     notes so their tabs follow). Alignment seam fixed:
+     `PANE_HEADER_HEIGHT` (36.dp, Tabs.kt) pins the rail header AND
+     each strip so the divider runs unbroken (owner screenshot).
+     Probes: `note:` now takes a ;-list, `split:<a>;<b>`, and any
+     unknown probe value (e.g. `restore`) opens a probe-titled window
+     showing only the persisted layout. **Probe runs persist layout —
+     never point one at the owner's vault.** Known consequences:
+     "Save now" on a clean buffer writes nothing (single write path);
+     search results have no Open to the side yet; suite ~119 desktop
+     tests (2 UI) + 23 model.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

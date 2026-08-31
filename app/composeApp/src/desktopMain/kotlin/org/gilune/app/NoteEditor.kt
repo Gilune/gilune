@@ -187,6 +187,29 @@ fun insertAtCaret(editor: EditorState, words: String) {
     editor.dirty = true
 }
 
+/// Words go to the note that started the session, wherever it has got to
+/// (ADR 0014). A tab that has been closed since is not a reason to lose
+/// them: they go to the status line instead, where they can be read and
+/// copied. Only a pane's front tab is composed, so a tab that has fallen
+/// behind one has no autosave loop and is flushed here.
+private fun deliverDictation(state: GiluneState, tabs: TabsState, tabId: Long, words: String) {
+    val located = tabs.panes().firstNotNullOfOrNull { pane ->
+        pane.tabs.firstOrNull { it.id == tabId }?.let { pane to it }
+    }
+    if (located == null) {
+        state.message.value = "dictation finished after its note closed: $words"
+        return
+    }
+    val (pane, target) = located
+    insertAtCaret(target.editor, words)
+    if (pane.active !== target) flushEditor(tabs.vaultDir, target.editor)
+}
+
+/// The tab arguments are how a pane hands the editor its place in the
+/// document region: `tabs` and `tab` say whose buffer this is, so
+/// dictation and the unsaved dot can be spoken for elsewhere, and
+/// `onCloseTab` routes Close through the tab rather than emptying the
+/// buffer. All three default to nothing, which is the pre-tab editor.
 @Composable
 fun NoteEditor(
     state: GiluneState,
@@ -194,42 +217,21 @@ fun NoteEditor(
     modifier: Modifier = Modifier,
     recorder: AudioRecorder? = null,
     onRenamed: (String) -> Unit = {},
+    tabs: TabsState? = null,
+    tab: Tab? = null,
+    onCloseTab: (() -> Unit)? = null,
 ) {
     val colours = MaterialTheme.colorScheme
+    // The status line is the window's, not this pane's: several panes
+    // must still show one of it (ADR 0014).
     Column(modifier.fillMaxSize()) {
-        Box(Modifier.fillMaxWidth().weight(1f)) {
-            val relPath = editor.openRelPath
-            if (relPath == null) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text("select a note, or capture a thought", color = colours.onSurfaceVariant)
-                }
-            } else {
-                OpenNote(state, editor, relPath, recorder, onRenamed)
+        val relPath = editor.openRelPath
+        if (relPath == null) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("select a note, or capture a thought", color = colours.onSurfaceVariant)
             }
-        }
-        HorizontalDivider(color = colours.outlineVariant)
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            Text(
-                state.message.value,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                color = colours.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (editor.openRelPath != null) {
-                Text(
-                    if (editor.dirty) "unsaved" else "saved",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = if (editor.dirty) colours.primary else colours.onSurfaceVariant,
-                )
-            }
+        } else {
+            OpenNote(state, editor, relPath, recorder, onRenamed, tabs, tab, onCloseTab)
         }
     }
 }
@@ -241,6 +243,9 @@ private fun OpenNote(
     relPath: String,
     recorder: AudioRecorder?,
     onRenamed: (String) -> Unit,
+    tabs: TabsState?,
+    tab: Tab?,
+    onCloseTab: (() -> Unit)?,
 ) {
     val colours = MaterialTheme.colorScheme
     val file = File(state.vaultDir, relPath)
@@ -256,20 +261,29 @@ private fun OpenNote(
     var dictating by remember { mutableStateOf(false) }
     val dictationOffered =
         recorder != null && state.plugins.contributes(Slots.NOTE_ACTIONS, DICTATE_ACTION)
+    // Dictation outlives the tab it was started from being in front, so
+    // the session belongs to TabsState; without one it is this pane's.
+    val dictatingHere = if (tabs != null && tab != null) tabs.dictationTabId == tab.id else dictating
+    val dictatingElsewhere =
+        tabs != null && tabs.dictationTabId != null && tabs.dictationTabId != tab?.id
 
     fun onDiskHash(): String? = if (file.exists()) contentHash(file.readBytes()) else null
 
+    // One write path in the app: autosave, leaving a tab and closing one
+    // all go through the same guard (ADR 0012). `force` is the answer the
+    // stale-buffer banner takes, and only it may pass the guard.
     fun write(force: Boolean = false) {
-        val document = editor.document()
-        if (!force && !mayOverwrite(editor.hashAtOpen, onDiskHash())) {
-            editor.staleBuffer = true
-            state.message.value = "$relPath changed on disk; choose which version to keep"
+        if (force) {
+            val document = editor.document()
+            file.writeText(document)
+            editor.hashAtOpen = contentHash(document)
+            editor.dirty = false
+            editor.staleBuffer = false
             return
         }
-        file.writeText(document)
-        editor.hashAtOpen = contentHash(document)
-        editor.dirty = false
-        editor.staleBuffer = false
+        if (!flushEditor(state.vaultDir, editor)) {
+            state.message.value = "$relPath changed on disk; choose which version to keep"
+        }
     }
 
     // Nothing typed is ever only in memory: the buffer reaches disk after
@@ -303,32 +317,58 @@ private fun OpenNote(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (editor.dirty) {
+            // With tabs the dot rides in the tab, where it can be seen
+            // from a note that is not in front.
+            if (tabs == null && editor.dirty) {
                 Box(Modifier.size(7.dp).clip(CircleShape).background(colours.primary))
             }
             if (dictationOffered) {
+                fun begin() {
+                    try {
+                        recorder.start()
+                        if (tabs != null && tab != null) tabs.dictationTabId = tab.id else dictating = true
+                        state.message.value = "dictating… click the microphone to stop"
+                    } catch (e: Throwable) {
+                        state.message.value = "microphone unavailable: ${e.message}"
+                    }
+                }
+
+                fun end() {
+                    val target = if (tabs != null && tab != null) tab.id else null
+                    if (tabs != null) tabs.dictationTabId = null else dictating = false
+                    val audio = recorder.stop()
+                    if (tabs != null && target != null) {
+                        state.dictate(audio) { words -> deliverDictation(state, tabs, target, words) }
+                    } else {
+                        state.dictate(audio) { words -> insertAtCaret(editor, words) }
+                    }
+                }
+
                 IconButton(
                     onClick = {
-                        if (!dictating) {
-                            try {
-                                recorder.start()
-                                dictating = true
-                                state.message.value = "dictating… click the microphone to stop"
-                            } catch (e: Throwable) {
-                                state.message.value = "microphone unavailable: ${e.message}"
-                            }
-                        } else {
-                            dictating = false
-                            state.dictate(recorder.stop()) { words -> insertAtCaret(editor, words) }
+                        when {
+                            // One session at a time: the other note's
+                            // microphone is still live.
+                            dictatingElsewhere -> state.message.value = "already dictating in another note"
+                            dictatingHere -> end()
+                            else -> begin()
                         }
                     },
                     modifier = Modifier.size(28.dp),
                 ) {
                     Icon(
                         Icons.Outlined.Mic,
-                        contentDescription = if (dictating) "stop dictating" else "dictate at the cursor",
+                        contentDescription = when {
+                            dictatingElsewhere -> "dictating in another note"
+                            dictatingHere -> "stop dictating"
+                            else -> "dictate at the cursor"
+                        },
                         modifier = Modifier.size(16.dp),
-                        tint = if (dictating) colours.error else colours.onSurfaceVariant,
+                        tint = when {
+                            dictatingHere -> colours.error
+                            dictatingElsewhere -> colours.outline
+                            else -> colours.onSurfaceVariant
+                        },
                     )
                 }
             }
@@ -371,8 +411,15 @@ private fun OpenNote(
                         text = { Text("Close", fontSize = 13.sp) },
                         onClick = {
                             menuOpen = false
-                            if (editor.dirty) write()
-                            editor.close()
+                            // A tab closes through its pane, which may
+                            // refuse; without one, closing empties the
+                            // buffer as it always did.
+                            if (onCloseTab != null) {
+                                onCloseTab()
+                            } else {
+                                if (editor.dirty) write()
+                                editor.close()
+                            }
                             state.sync(announce = false)
                         },
                     )
