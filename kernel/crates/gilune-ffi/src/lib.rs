@@ -335,7 +335,16 @@ impl Gilune {
                     detail: format!("transcription is {}", state.as_str()),
                 });
             }
-            let transcriber = whisper::WhisperTranscriber::load(&model_path)
+            // The plugin's settings document owns provider choices; an
+            // explicit language skips whisper's detection pass (measured
+            // 2026-08-31: ~40% of a short clip's wall time).
+            let language = self
+                .store()
+                .plugin(whisper::PLUGIN_ID)?
+                .and_then(|p| serde_json::from_str::<serde_json::Value>(&p.settings).ok())
+                .and_then(|s| s.get("language").and_then(|v| v.as_str()).map(str::to_string))
+                .unwrap_or_else(|| "auto".to_string());
+            let transcriber = whisper::WhisperTranscriber::load(&model_path, &language)
                 .map_err(|detail| GiluneError::Invalid { detail })?;
             let mut processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
             processors.retain(|p| p.id() != transcriber.id());

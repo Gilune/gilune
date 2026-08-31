@@ -1,6 +1,6 @@
 param(
-    [string]$SourcePath = (Join-Path $PSScriptRoot "..\src\desktopMain\resources\gilune-logo.png"),
-    [string]$OutputPath = (Join-Path $PSScriptRoot "..\src\desktopMain\resources\gilune.ico")
+    [string]$SourcePath = (Join-Path $PSScriptRoot "..\src\desktopMain\resources\gilune-logo-v2.png"),
+    [string]$OutputPath = (Join-Path $PSScriptRoot "..\src\desktopMain\resources\gilune-v2.ico")
 )
 
 $ErrorActionPreference = "Stop"

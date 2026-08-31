@@ -38,13 +38,17 @@ pub fn descriptor() -> PluginDescriptor {
 
 pub struct WhisperTranscriber {
     ctx: WhisperContext,
+    /// BCP-47-ish whisper language code, or "auto". An explicit language
+    /// skips whisper's detection pass, which costs a full encoder run —
+    /// worth ~20% on short clips. Comes from the plugin's settings.
+    language: String,
 }
 
 impl WhisperTranscriber {
-    pub fn load(model_path: &str) -> Result<Self, String> {
+    pub fn load(model_path: &str, language: &str) -> Result<Self, String> {
         let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
             .map_err(|e| format!("loading whisper model {model_path}: {e}"))?;
-        Ok(Self { ctx })
+        Ok(Self { ctx, language: language.to_string() })
     }
 
     fn transcribe(&self, samples: &[f32]) -> Result<String, String> {
@@ -54,7 +58,13 @@ impl WhisperTranscriber {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        params.set_language(Some("auto"));
+        params.set_language(Some(&self.language));
+        // whisper.cpp defaults to 4 threads however many cores exist;
+        // it stops scaling usefully around 8.
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(4);
+        params.set_n_threads(threads as std::os::raw::c_int);
         state.full(params, samples).map_err(|e| e.to_string())?;
         let mut text = String::new();
         for i in 0..state.full_n_segments() {

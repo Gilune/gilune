@@ -129,3 +129,14 @@ settings is the prevailing desktop pattern.
 - Until proposals are surfaced, the tree can create state no UI can
   answer; shipping tree deletion therefore requires shipping resolution.
 - Editing behaviour is decided separately in ADR 0012.
+
+## Amendments
+
+**2026-08-31 (owner):** the desktop drops the persistent capture bar.
+Capture-first survives as gestures rather than a region: **Ctrl+N**
+creates an Untitled note ready to type (Obsidian's naming — Untitled,
+Untitled 1, …, renamed from the note's own title), and the top bar
+carries the voice-capture plugin's new-note-from-speech microphone. The
+capture bar remains the Android surface unchanged. The rail also gains a
+second panel: Files and Search behind a small toggle (VSCode's shape),
+with **Ctrl+F** focusing vault-wide search; Ctrl+P stays quick-open.

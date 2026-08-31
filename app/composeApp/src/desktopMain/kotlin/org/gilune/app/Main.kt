@@ -1,13 +1,15 @@
-// Desktop entry point and window scaffold (ADR 0011): top bar with
-// jump-to search, navigation rail, document pane, and a capture bar that
-// is always there. Settings is a surface over the window, not a dialog,
-// because it holds the plugin panel and will hold devices next.
+// Desktop entry point and window scaffold (ADR 0011, amended
+// 2026-08-31): top bar with quick-open and the speech microphone, rail
+// with Files and Search panels, document pane. Capture-first is a pair
+// of gestures now, not a region: Ctrl+N makes an Untitled note ready to
+// type, the microphone makes a note from speech. Settings is a surface
+// over the window, not a dialog, because it holds the plugin panel and
+// will hold devices next.
 
 package org.gilune.app
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
@@ -51,7 +54,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
-import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
@@ -80,6 +82,15 @@ private fun modelFile(): File =
         "Gilune/models/ggml-tiny.bin",
     )
 
+/// Window-level gestures arrive as counted requests: the shortcut
+/// handler lives outside DesktopApp's state, so it bumps a counter and
+/// the app answers inside it.
+private class GestureRequests {
+    var newNote by mutableStateOf(0)
+    var search by mutableStateOf(0)
+    var quickOpen by mutableStateOf(0)
+}
+
 fun main() {
     System.getProperty("compose.application.resources.dir")?.let { resources ->
         val existing = System.getProperty("jna.library.path")
@@ -92,8 +103,7 @@ fun main() {
         var vaultDir by remember { mutableStateOf(Prefs.vaultDir) }
         var theme by remember { mutableStateOf(Prefs.theme) }
         var settingsOpen by remember { mutableStateOf(false) }
-        val searchFocus = remember { FocusRequester() }
-        val captureFocus = remember { FocusRequester() }
+        val gestures = remember { GestureRequests() }
         val probe = System.getProperty("gilune.probe")
         val dark = when (theme) {
             ThemeChoice.System -> isSystemInDarkTheme()
@@ -103,17 +113,21 @@ fun main() {
         Window(
             onCloseRequest = ::exitApplication,
             title = if (probe == null) "Gilune" else "Gilune probe",
-            icon = painterResource("gilune-logo.png"),
+            icon = painterResource("gilune-logo-v2.png"),
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
             onPreviewKeyEvent = { event ->
                 when {
                     event.type != KeyEventType.KeyDown -> false
-                    event.isCtrlPressed && event.isShiftPressed && event.key == Key.C -> {
-                        runCatching { captureFocus.requestFocus() }
+                    event.isCtrlPressed && event.key == Key.N -> {
+                        gestures.newNote++
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.F -> {
+                        gestures.search++
                         true
                     }
                     event.isCtrlPressed && event.key == Key.P -> {
-                        runCatching { searchFocus.requestFocus() }
+                        gestures.quickOpen++
                         true
                     }
                     event.key == Key.Escape && settingsOpen -> {
@@ -133,8 +147,7 @@ fun main() {
                             probe = probe,
                             settingsOpen = settingsOpen,
                             onSettingsOpen = { settingsOpen = it },
-                            searchFocus = searchFocus,
-                            captureFocus = captureFocus,
+                            gestures = gestures,
                             onThemeChange = { theme = it; Prefs.theme = it },
                             onVaultChange = { Prefs.vaultDir = it; vaultDir = it },
                         )
@@ -152,8 +165,7 @@ private fun DesktopApp(
     probe: String?,
     settingsOpen: Boolean,
     onSettingsOpen: (Boolean) -> Unit,
-    searchFocus: FocusRequester,
-    captureFocus: FocusRequester,
+    gestures: GestureRequests,
     onThemeChange: (ThemeChoice) -> Unit,
     onVaultChange: (String) -> Unit,
 ) {
@@ -161,11 +173,34 @@ private fun DesktopApp(
     val state = remember { GiluneState(vaultDir, scope) }
     val editor = remember { EditorState() }
     val tree = remember { TreeState() }
+    val searchFocus = remember { FocusRequester() }
+    val quickOpenFocus = remember { FocusRequester() }
+    val recorder = remember { DesktopAudioRecorder() }
+    var recording by remember { mutableStateOf(false) }
     val colours = MaterialTheme.colorScheme
 
     fun openNote(relPath: String) {
         tree.selectedFile = relPath
         editor.open(state.vaultDir, relPath)
+    }
+
+    fun createNote() {
+        openNote(createUntitledNote(state.vaultDir, tree.selectedDir))
+        editor.focusTitle = true
+        state.sync(announce = false)
+    }
+
+    LaunchedEffect(gestures.newNote) {
+        if (gestures.newNote > 0) createNote()
+    }
+    LaunchedEffect(gestures.search) {
+        if (gestures.search > 0) {
+            tree.railPanel = RailPanel.SEARCH
+            runCatching { searchFocus.requestFocus() }
+        }
+    }
+    LaunchedEffect(gestures.quickOpen) {
+        if (gestures.quickOpen > 0) runCatching { quickOpenFocus.requestFocus() }
     }
 
     LaunchedEffect(Unit) {
@@ -181,9 +216,18 @@ private fun DesktopApp(
                     editor.reading = true
                     openNote(probe.removePrefix("read:"))
                 }
+                probe.startsWith("search:") -> {
+                    tree.railPanel = RailPanel.SEARCH
+                }
+                probe.startsWith("props:") -> {
+                    openNote(probe.removePrefix("props:"))
+                    editor.openProperties = true
+                }
             }
         }
     }
+
+    val micOffered = state.plugins.contributes(Slots.CAPTURE_ACTIONS, RECORD_VOICE_ACTION)
 
     Column(Modifier.fillMaxSize()) {
         Row(
@@ -191,14 +235,35 @@ private fun DesktopApp(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Image(
-                painter = painterResource("gilune-logo.png"),
-                contentDescription = "Gilune",
-                modifier = Modifier.size(22.dp),
-            )
             Text("Gilune", style = MaterialTheme.typography.titleMedium)
-            SearchBox(state, ::openNote, searchFocus, Modifier.width(280.dp))
+            QuickOpenBox(state, ::openNote, quickOpenFocus, Modifier.width(280.dp))
             Spacer(Modifier.weight(1f))
+            if (micOffered) {
+                IconButton(
+                    onClick = {
+                        if (!recording) {
+                            try {
+                                recorder.start()
+                                recording = true
+                                state.message.value = "recording a new note… click the microphone to stop"
+                            } catch (e: Throwable) {
+                                state.message.value = "microphone unavailable: ${e.message}"
+                            }
+                        } else {
+                            recording = false
+                            state.captureAudio(recorder.stop(), ::openNote)
+                        }
+                    },
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.Mic,
+                        contentDescription = if (recording) "stop recording" else "new note from speech",
+                        modifier = Modifier.size(17.dp),
+                        tint = if (recording) colours.error else colours.onSurfaceVariant,
+                    )
+                }
+            }
             IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
                 Icon(
                     Icons.Default.Refresh,
@@ -221,11 +286,18 @@ private fun DesktopApp(
         if (state.proposals.isNotEmpty()) ProposalsBanner(state)
 
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            VaultTree(
+            RailPanels(
                 state = state,
                 tree = tree,
+                searchFocus = searchFocus,
                 onOpen = ::openNote,
-                modifier = Modifier.width(230.dp).fillMaxHeight(),
+                onCreateNote = { rel ->
+                    openNote(rel)
+                    editor.focusTitle = true
+                    state.sync(announce = false)
+                },
+                modifier = Modifier.width(240.dp).fillMaxHeight(),
+                initialSearchQuery = probe?.removePrefix("search:")?.takeIf { probe.startsWith("search:") } ?: "",
             )
             Box(Modifier.width(1.dp).fillMaxHeight().background(colours.outlineVariant))
             NoteEditor(
@@ -233,18 +305,9 @@ private fun DesktopApp(
                 editor,
                 Modifier.weight(1f).fillMaxHeight(),
                 recorder = DesktopAudioRecorder(),
+                onRenamed = { tree.selectedFile = it },
             )
         }
-        HorizontalDivider(color = colours.outlineVariant)
-        CaptureBar(
-            state,
-            DesktopAudioRecorder(),
-            Modifier.fillMaxWidth(),
-            focusRequester = captureFocus,
-            showMessage = false,
-            shortcutHint = "ctrl+shift+c",
-            onOpenNote = ::openNote,
-        )
     }
 
     if (settingsOpen) {
@@ -260,10 +323,10 @@ private fun DesktopApp(
     }
 }
 
-/// Jump-to search: type a fragment of a name or path, Enter opens the
-/// best match, Escape clears. Results drop down without stealing focus.
+/// Quick-open by name (Ctrl+P): type a fragment, Enter opens the best
+/// match. Content and metadata search live in the rail's Search panel.
 @Composable
-private fun SearchBox(
+private fun QuickOpenBox(
     state: GiluneState,
     onOpen: (String) -> Unit,
     focusRequester: FocusRequester,
@@ -322,7 +385,7 @@ private fun SearchBox(
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
-                            Text("search or jump to…", fontSize = 12.sp, color = colours.onSurfaceVariant)
+                            Text("open a note…", fontSize = 12.sp, color = colours.onSurfaceVariant)
                         }
                         inner()
                     }

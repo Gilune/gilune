@@ -215,6 +215,36 @@ gates promises) are ratified. **Next: application-level engineering — see
      (matches Obsidian); deleting a note leaves its wav on disk
      unlisted (correct — preserved source); Android bindings STILL
      stale.
+   - **M6 fourth pass (2026-08-31, agent team round two)** — ADR 0011
+     amended (owner): desktop capture bar REMOVED; capture-first is
+     Ctrl+N (Untitled note, title focused/selected, Obsidian naming
+     via `untitledName`/`createUntitledNote`) + top-bar mic
+     (new-note-from-speech; still plugin-gated). Rail has Files/Search
+     panels (VSCode shape); **Ctrl+F** = vault search, Ctrl+P =
+     quick-open. `Search.kt` (jvmShared): DSL — bare terms AND,
+     "phrases", -negation, file:/path:/content:, [key:value]/[key]
+     metadata; `SearchOperators` registry is the plugin-extensibility
+     seam (proven by a registered tag: operator test); no OR yet.
+     Editor: Obsidian-style editable title (rename-on-commit via
+     `renameNote`, co-renames attachments; body field carries
+     testTag("note-body") so the title keeps real semantics);
+     properties dialog restyled to the settings idiom (field borders
+     full `outline` per owner feedback); checkbox hover shows a hand
+     cursor (`pointerHoverIcon` needs overrideDescendants=true — the
+     inner text field's I-beam wins otherwise). Whisper speed
+     (measured, release, ~14s clip): default 4 threads → 8 =
+     12.2s→7.1s; explicit language skips the detect pass = 7.1s→4.2s;
+     n_threads always set, language via transcription plugin settings
+     ("Spoken language" field on its plugin screen; default auto,
+     takes effect next launch). **ADR 0014 (tabs + split panes)
+     ratified as proposed** — stage M (tabs in one pane) is the next
+     shell milestone; then M+1 explicit split + layout persistence,
+     M+2 drag. Probes gained search:<q> and props:<rel>.
+   - **Team-coordination lesson (2026-08-31)**: agents verify against
+     the whole tree — a coordinator edit that breaks compilation
+     (Main.kt File-vs-String) cost one agent ~40 minutes of retry
+     loops. Keep the shared tree compiling at every moment agents are
+     live, or gate coordinator edits until they finish.
    - **Dev-run gotcha (machine note)**: `gradlew :composeApp:run` sets
      `compose.application.resources.dir`, and Main.kt prepends it to
      `jna.library.path` — so dev runs load

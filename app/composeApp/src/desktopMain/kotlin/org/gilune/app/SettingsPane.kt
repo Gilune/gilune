@@ -364,6 +364,11 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
         }
     }
 
+    if (plugin.pluginId == TRANSCRIPTION_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        TranscriptionSettings(state, plugin)
+    }
+
     if (!plugin.required) {
         HorizontalDivider(color = colours.outlineVariant)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -376,6 +381,45 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
                 color = colours.onSurfaceVariant,
             )
         }
+    }
+}
+
+/// The transcription provider's settings form. Bundled plugins render
+/// known fields directly; the generic schema-driven form arrives with
+/// the sandboxed runtime (ADR 0010).
+@Composable
+private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    // The settings document is JSON this same field writes; a targeted
+    // extraction avoids growing a JSON dependency for one key.
+    val saved = remember(plugin.settings) {
+        Regex("\"language\"\\s*:\\s*\"([^\"]*)\"")
+            .find(plugin.settings)?.groupValues?.get(1) ?: "auto"
+    }
+    var language by remember(plugin.settings) { mutableStateOf(saved) }
+    Text("Spoken language", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "\"auto\" detects the language but costs an extra pass (~40% slower on " +
+            "short clips). A fixed code — en, sv, de… — transcribes faster.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.OutlinedTextField(
+            value = language,
+            onValueChange = { language = it },
+            singleLine = true,
+            modifier = Modifier.width(120.dp),
+        )
+        Button(
+            onClick = {
+                state.pluginAction("transcription language set to $language — takes effect next launch") {
+                    it.setPluginSettings(plugin.pluginId, "{\"language\":\"${language.trim()}\"}")
+                }
+            },
+            enabled = language.trim().isNotEmpty() && language.trim() != saved,
+        ) { Text("Apply", fontSize = 12.sp) }
     }
 }
 

@@ -1,7 +1,8 @@
 // The rail lists what is on disk, and a collapsed folder stays closed —
 // the vault is a real folder tree that other tools also write to, so the
 // listing is never a cache of one. Captured audio is listed as its note's
-// attachment, folded away until the note is expanded.
+// attachment, folded away until the note is expanded. Creating a note
+// asks for no name, so the names it picks are a specification too.
 
 package org.gilune.app
 
@@ -91,5 +92,38 @@ class VaultTreeTest {
         File(dir, "Zebra").mkdirs()
         val listing = listVault(dir).map { it.relPath }
         assertEquals(listOf("Captures", "Projects", "Zebra", "loose.md"), listing)
+    }
+
+    @Test
+    fun theFirstNewNoteInAFolderIsSimplyUntitled() {
+        val dir = vault()
+        assertEquals("Untitled", untitledName(File(dir, "Projects/House")))
+    }
+
+    @Test
+    fun untitledNamesStepPastEveryNameAlreadyOnDisk() {
+        val dir = File(vault(), "Captures")
+        File(dir, "Untitled.md").writeText("")
+        assertEquals("Untitled 1", untitledName(dir))
+        File(dir, "Untitled 1.md").writeText("")
+        assertEquals("Untitled 2", untitledName(dir))
+    }
+
+    @Test
+    fun creatingANoteAsksForNoNameAndLeavesAnEmptyFileInTheTargetFolder() {
+        val dir = vault()
+        val relPath = createUntitledNote(dir, "Projects/House")
+        assertEquals("Projects/House/Untitled.md", relPath)
+        assertEquals("", File(dir, relPath).readText())
+    }
+
+    @Test
+    fun aSecondNewNoteNeverOverwritesTheFirst() {
+        val dir = vault()
+        val first = createUntitledNote(dir, "")
+        File(dir, first).writeText("kept")
+        val second = createUntitledNote(dir, "")
+        assertEquals(listOf("Untitled.md", "Untitled 1.md"), listOf(first, second))
+        assertEquals("kept", File(dir, first).readText())
     }
 }

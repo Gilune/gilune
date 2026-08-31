@@ -12,8 +12,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performMouseInput
@@ -47,7 +47,9 @@ class NoteEditorUiTest {
             }
         }
 
-        val field = compose.onNode(hasSetTextAction())
+        // The pane holds two editable fields (title and body); the body
+        // carries the tag, so the title keeps its real semantics.
+        val field = compose.onNodeWithTag("note-body")
         field.assertIsNotFocused()
         val textTop = field.fetchSemanticsNode().boundsInRoot.top
         val paneBottom = compose.onNodeWithText("saved").fetchSemanticsNode().boundsInRoot.top

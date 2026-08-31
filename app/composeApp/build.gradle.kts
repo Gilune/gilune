@@ -109,7 +109,7 @@ compose.desktop {
             packageVersion = "1.0.0"
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             windows {
-                iconFile.set(project.file("src/desktopMain/resources/gilune.ico"))
+                iconFile.set(project.file("src/desktopMain/resources/gilune-v2.ico"))
             }
         }
         buildTypes.release.proguard {

@@ -1,8 +1,11 @@
-// The navigation rail: the vault as folders and notes, with the creation,
-// renaming and deletion a file browser owes you. It works the vault the
-// way any third-party tool does — plain file IO, reconciled by the kernel
-// afterwards (constitution rule 13 as UI). Names are typed inline in the
-// tree, not in a modal (ADR 0011 design session).
+// The navigation rail: two panels behind a pair of tabs — the vault as
+// folders and notes, and a search across their contents — with the
+// creation, renaming and deletion a file browser owes you. It works the
+// vault the way any third-party tool does — plain file IO, reconciled by
+// the kernel afterwards (constitution rule 13 as UI). A new note is
+// never named up front: it lands as Untitled and takes its name later,
+// from whatever ends up in it. Folder names and renames are typed inline
+// in the tree, not in a modal (ADR 0011 design session).
 //
 // Captured audio sits beside its note as `<stem>.wav`; the rail treats
 // such files as the note's attachments and keeps them folded away, since
@@ -36,6 +39,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Audiotrack
@@ -45,6 +49,7 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -164,35 +169,104 @@ fun searchNotes(vaultDir: String, query: String): List<String> {
         .toList()
 }
 
+enum class RailPanel { FILES, SEARCH }
+
 class TreeState {
     val expanded = mutableStateListOf<String>()
     var selectedDir by mutableStateOf("")
     var selectedFile by mutableStateOf<String?>(null)
+
+    /// Which rail panel shows. It lives here rather than inside the rail
+    /// because the window switches to search before focusing its query
+    /// field (ctrl+f), and a focus request cannot select a panel.
+    var railPanel by mutableStateOf(RailPanel.FILES)
 
     fun toggle(relPath: String) {
         if (!expanded.remove(relPath)) expanded.add(relPath)
     }
 }
 
-/// The two gestures that put a name into the tree, both answered by the
-/// same inline row.
+/// The rail: tabs over whichever panel is showing. `searchFocus` belongs
+/// to the search panel's query field, so a window shortcut that focuses
+/// it must set `tree.railPanel` to SEARCH first — a focus request cannot
+/// switch panels. `onCreateNote` is handed a note that already exists on
+/// disk.
+@Composable
+fun RailPanels(
+    state: GiluneState,
+    tree: TreeState,
+    searchFocus: FocusRequester,
+    onOpen: (String) -> Unit,
+    onCreateNote: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    initialSearchQuery: String = "",
+) {
+    val colours = MaterialTheme.colorScheme
+    Column(modifier) {
+        Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 6.dp, top = 6.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            RailTab(Icons.Outlined.Description, "files", tree.railPanel == RailPanel.FILES) {
+                tree.railPanel = RailPanel.FILES
+            }
+            RailTab(Icons.Default.Search, "search", tree.railPanel == RailPanel.SEARCH) {
+                tree.railPanel = RailPanel.SEARCH
+            }
+        }
+        HorizontalDivider(color = colours.outlineVariant)
+        when (tree.railPanel) {
+            RailPanel.FILES -> VaultTree(state, tree, onOpen, onCreateNote, Modifier.weight(1f))
+            RailPanel.SEARCH ->
+                SearchPanel(state, searchFocus, onOpen, Modifier.weight(1f), initialSearchQuery)
+        }
+    }
+}
+
+@Composable
+private fun RailTab(icon: ImageVector, label: String, selected: Boolean, onSelect: () -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    Box(
+        Modifier
+            .size(26.dp)
+            .clip(RoundedCornerShape(5.dp))
+            .background(if (selected) colours.primaryContainer else colours.surface)
+            .clickable(onClick = onSelect),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = label,
+            modifier = Modifier.size(15.dp),
+            tint = if (selected) colours.onPrimaryContainer else colours.onSurfaceVariant,
+        )
+    }
+}
+
+/// The gestures that put a name into the tree, both answered by the same
+/// inline row. Notes are not among them — they are created untitled.
 private sealed interface PendingName {
-    data class Create(val parent: String, val folder: Boolean) : PendingName
+    data class CreateFolder(val parent: String) : PendingName
     data class Rename(val relPath: String, val isDir: Boolean) : PendingName
 }
 
 private class TreeActions(
     val open: (String) -> Unit,
-    val create: (Boolean, String) -> Unit,
+    val newNote: (String) -> Unit,
+    val newFolder: (String) -> Unit,
     val rename: (VaultEntry) -> Unit,
     val delete: (String) -> Unit,
 )
 
+/// `onCreateNote` receives an untitled note that is already on disk;
+/// opening it is the least a caller can do, so that is the default.
 @Composable
 fun VaultTree(
     state: GiluneState,
     tree: TreeState,
     onOpen: (String) -> Unit,
+    onCreateNote: (String) -> Unit = onOpen,
     modifier: Modifier = Modifier,
 ) {
     var pending by remember { mutableStateOf<PendingName?>(null) }
@@ -207,14 +281,27 @@ fun VaultTree(
     }
     val colours = MaterialTheme.colorScheme
 
-    fun startCreate(folder: Boolean, parent: String = tree.selectedDir) {
+    fun reveal(parent: String) {
         if (parent.isNotEmpty() && parent !in tree.expanded) tree.expanded.add(parent)
-        pending = PendingName.Create(parent, folder)
+    }
+
+    fun newFolder(parent: String = tree.selectedDir) {
+        reveal(parent)
+        pending = PendingName.CreateFolder(parent)
+    }
+
+    // Creating a note asks nothing: it exists the moment you ask for it,
+    // and is renamed once there is something in it worth naming.
+    fun newNote(parent: String = tree.selectedDir) {
+        reveal(parent)
+        onCreateNote(createUntitledNote(state.vaultDir, parent))
+        state.sync(announce = false)
     }
 
     val actions = TreeActions(
         open = onOpen,
-        create = ::startCreate,
+        newNote = ::newNote,
+        newFolder = ::newFolder,
         rename = { entry -> pending = PendingName.Rename(entry.relPath, entry.isDir) },
         delete = { relPath -> deleting = relPath },
     )
@@ -231,7 +318,7 @@ fun VaultTree(
                 maxLines = 1,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { startCreate(folder = true) }, modifier = Modifier.size(26.dp)) {
+            IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
                 Icon(
                     Icons.Outlined.CreateNewFolder,
                     contentDescription = "new folder",
@@ -239,7 +326,7 @@ fun VaultTree(
                     tint = colours.onSurfaceVariant,
                 )
             }
-            IconButton(onClick = { startCreate(folder = false) }, modifier = Modifier.size(26.dp)) {
+            IconButton(onClick = { newNote() }, modifier = Modifier.size(26.dp)) {
                 Icon(
                     Icons.AutoMirrored.Outlined.NoteAdd,
                     contentDescription = "new note",
@@ -250,35 +337,23 @@ fun VaultTree(
         }
 
         LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp)) {
-            val atRoot = (pending as? PendingName.Create)?.takeIf { it.parent.isEmpty() }
+            val atRoot = (pending as? PendingName.CreateFolder)?.takeIf { it.parent.isEmpty() }
             if (atRoot != null) {
                 item(key = "pending-root") {
-                    InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null }, onOpen = onOpen)
+                    InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null })
                 }
             }
             items(entries, key = { it.relPath }) { entry ->
                 val renaming = (pending as? PendingName.Rename)?.takeIf { it.relPath == entry.relPath }
                 if (renaming != null) {
-                    InlineNameRow(
-                        state,
-                        renaming,
-                        depth = entry.depth,
-                        onDone = { pending = null },
-                        onOpen = onOpen,
-                    )
+                    InlineNameRow(state, renaming, depth = entry.depth, onDone = { pending = null })
                 } else {
                     TreeRow(entry, tree, state.vaultDir, capturesCount, actions)
                 }
-                val inside = (pending as? PendingName.Create)
+                val inside = (pending as? PendingName.CreateFolder)
                     ?.takeIf { entry.isDir && it.parent == entry.relPath }
                 if (inside != null) {
-                    InlineNameRow(
-                        state,
-                        inside,
-                        depth = entry.depth + 1,
-                        onDone = { pending = null },
-                        onOpen = onOpen,
-                    )
+                    InlineNameRow(state, inside, depth = entry.depth + 1, onDone = { pending = null })
                 }
             }
         }
@@ -308,8 +383,8 @@ private fun TreeRow(
 
     ContextMenuArea(items = {
         listOf(
-            ContextMenuItem("New note here") { actions.create(false, parentDir) },
-            ContextMenuItem("New folder here") { actions.create(true, parentDir) },
+            ContextMenuItem("New note here") { actions.newNote(parentDir) },
+            ContextMenuItem("New folder here") { actions.newFolder(parentDir) },
             ContextMenuItem("Rename") { actions.rename(entry) },
             ContextMenuItem("Delete") { actions.delete(entry.relPath) },
             ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) },
@@ -427,19 +502,18 @@ private fun chevron(open: Boolean): ImageVector =
     if (open) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight
 
 /// The inline naming row, shared by both naming gestures: type, Enter
-/// commits, Escape cancels. A new note opens in the editor immediately;
-/// a rename starts with the current name selected.
+/// commits, Escape cancels. A rename starts with the current name
+/// selected.
 @Composable
 private fun InlineNameRow(
     state: GiluneState,
     pending: PendingName,
     depth: Int,
     onDone: () -> Unit,
-    onOpen: (String) -> Unit,
 ) {
     val colours = MaterialTheme.colorScheme
     val folder = when (pending) {
-        is PendingName.Create -> pending.folder
+        is PendingName.CreateFolder -> true
         is PendingName.Rename -> pending.isDir
     }
     var field by remember {
@@ -452,17 +526,8 @@ private fun InlineNameRow(
         val trimmed = field.text.trim().trimEnd('/')
         if (isSegment(trimmed)) {
             when (pending) {
-                is PendingName.Create -> {
-                    val base =
-                        if (pending.parent.isEmpty()) File(state.vaultDir)
-                        else File(state.vaultDir, pending.parent)
-                    if (pending.folder) {
-                        File(base, trimmed).mkdirs()
-                    } else {
-                        val file = File(base, if (trimmed.endsWith(".md")) trimmed else "$trimmed.md")
-                        if (!file.exists()) file.writeText("")
-                        onOpen(file.relativeTo(File(state.vaultDir)).invariantSeparatorsPath)
-                    }
+                is PendingName.CreateFolder -> {
+                    File(folderBase(state.vaultDir, pending.parent), trimmed).mkdirs()
                     state.sync(announce = false)
                 }
                 is PendingName.Rename -> renameEntry(state, pending, trimmed)
@@ -518,7 +583,7 @@ private fun InlineNameRow(
 }
 
 private fun startingName(pending: PendingName): String = when (pending) {
-    is PendingName.Create -> ""
+    is PendingName.CreateFolder -> ""
     is PendingName.Rename -> pending.relPath.substringAfterLast('/')
         .let { if (pending.isDir) it else it.removeSuffix(".md") }
 }
@@ -534,22 +599,56 @@ private fun isSegment(name: String): Boolean =
 /// its stem, so the stem has to move as one or the pairing is lost. The
 /// note moves first: an attachment left behind is merely unlisted, while
 /// a note that failed to move would have stolen its attachments' names.
-private fun renameEntry(state: GiluneState, pending: PendingName.Rename, name: String) {
-    val note = !pending.isDir && pending.relPath.endsWith(".md")
-    val source = File(state.vaultDir, pending.relPath)
+/// Returns the new rel path, or null when the rename was refused; the
+/// caller owns syncing and any open-editor bookkeeping.
+fun renameNote(vaultDir: String, relPath: String, newName: String, isDir: Boolean = false): String? {
+    if (!isSegment(newName.trim())) return null
+    val name = newName.trim()
+    val note = !isDir && relPath.endsWith(".md")
+    val source = File(vaultDir, relPath)
     val target = File(source.parentFile, if (note && !name.endsWith(".md")) "$name.md" else name)
-    if (target.name == source.name) return
+    if (target.name == source.name) return relPath
     val caseOnly = target.name.equals(source.name, ignoreCase = true)
-    if ((!caseOnly && target.exists()) || !source.renameTo(target)) {
-        state.message.value = "could not rename ${source.name}"
-        return
-    }
+    if ((!caseOnly && target.exists()) || !source.renameTo(target)) return null
     if (note) {
         val stem = source.name.removeSuffix(".md")
         val renamed = target.name.removeSuffix(".md")
         source.parentFile?.listFiles()?.filter { it.attachmentStem() == stem }?.forEach {
             it.renameTo(File(it.parentFile, renamed + it.name.removePrefix(stem)))
         }
+    }
+    return target.relativeTo(File(vaultDir)).invariantSeparatorsPath
+}
+
+/// The next free Obsidian-style name for a new note in `dir`: Untitled,
+/// then Untitled 1, Untitled 2, …
+fun untitledName(dir: File): String {
+    if (!File(dir, "Untitled.md").exists()) return "Untitled"
+    var n = 1
+    while (File(dir, "Untitled $n.md").exists()) n++
+    return "Untitled $n"
+}
+
+/// Write an empty untitled note into `parent` (vault-relative, empty for
+/// the vault root) and return its vault-relative path. The name is taken
+/// from what is already on disk, so a second new note never overwrites
+/// the first. The caller owns syncing and opening it.
+fun createUntitledNote(vaultDir: String, parent: String): String {
+    val base = folderBase(vaultDir, parent)
+    base.mkdirs()
+    val file = File(base, untitledName(base) + ".md")
+    if (!file.exists()) file.writeText("")
+    return file.relativeTo(File(vaultDir)).invariantSeparatorsPath
+}
+
+private fun folderBase(vaultDir: String, parent: String): File =
+    if (parent.isEmpty()) File(vaultDir) else File(vaultDir, parent)
+
+private fun renameEntry(state: GiluneState, pending: PendingName.Rename, name: String) {
+    val renamed = renameNote(state.vaultDir, pending.relPath, name, pending.isDir)
+    if (renamed == null) {
+        state.message.value = "could not rename ${pending.relPath.substringAfterLast('/')}"
+        return
     }
     state.sync(announce = false)
 }

@@ -18,6 +18,7 @@ technologies can be rejected without weakening the product principles.
 | [0011](0011-desktop-shell-structure-and-plugin-owned-ui.md) | Desktop shell regions and a fixed v0 slot list; all non-chrome UI is a plugin contribution; every plugin but the vault projection is removable | Accepted |
 | [0012](0012-markdown-editing-model.md) | The Markdown buffer is always the document; rich presentation renders it and never serialises back | Accepted |
 | [0013](0013-transcription-lands-in-the-note.md) | Processor outputs may revise their subject; transcription lands in the capture note; attached captures project no note | Accepted |
+| [0014](0014-tabs-and-split-panes.md) | Pane tree with per-note editor buffers: tabs, explicit splits, one buffer per note in v0 | Accepted |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or
