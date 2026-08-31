@@ -35,7 +35,7 @@ identifiers in their *values* stay `org.memory.*`.)
 ## Layout
 
 - `architecture/` — constitution, contracts (01–08), engineering
-  conventions (09), ADRs 0001–0010, spike plan, prior-art survey.
+  conventions (09), ADRs 0001–0012, spike plan, prior-art survey.
 - `sources/` — product principles (the "why").
 - `spikes/s1-kernel-boundary/` — Compose ↔ UniFFI ↔ Rust boundary spike:
   diagnostic kernel (`kernel/`, cargo test), Compose shell for desktop +
@@ -134,6 +134,19 @@ gates promises) are ratified. **Next: application-level engineering — see
      encrypted transport, op exchange; acceptance = the S4-extended
      scenarios (pair, refuse unpaired, revoke, rejoin). Threat-model
      rules apply (re-enrollment on restore, per-device quotas).
+   - **M6 desktop shell** — design session held 2026-08-31; ADR 0011
+     (shell regions, fixed five-slot list, plugin-owned UI, everything
+     but the vault projection removable) and ADR 0012 (the Markdown
+     buffer is always the document; rich presentation renders it) are
+     ratified. Order: (a) kernel plugin registry — identity, class,
+     profile, enablement, grants, settings, job cancellation on
+     removal — plus FFI and the split of voice capture from
+     transcription; (b) shell restructure — rail with a real tree and
+     creation affordances, document pane, persistent capture bar,
+     settings sections; (c) editor stage E1 (rendered read + raw edit,
+     hash guard, autosave with batched reconcile), then E2; E3 only
+     after a spike. M5 and M6 are independent; M5 remains the last
+     milestone of the vertical slice.
 3. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.
