@@ -20,6 +20,7 @@ technologies can be rejected without weakening the product principles.
 | [0013](0013-transcription-lands-in-the-note.md) | Processor outputs may revise their subject; transcription lands in the capture note; attached captures project no note | Accepted |
 | [0014](0014-tabs-and-split-panes.md) | Pane tree with per-note editor buffers: tabs, explicit splits, one buffer per note in v0 | Accepted |
 | [0015](0015-tasks-plugin.md) | Tasks plugin: `due:`/`done:` plain-text dates and a caret-anchored inline suggester, over new editor and search seams — including a `filter` block that runs the search DSL in a note behind a required `type:`, and slots a plugin may publish for others | Accepted |
+| [0016](0016-windows-distribution-and-automatic-updates.md) | Per-user Windows MSI releases from GitHub Actions with signed, user-approved automatic updates | Proposed |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or
