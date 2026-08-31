@@ -140,3 +140,9 @@ carries the voice-capture plugin's new-note-from-speech microphone. The
 capture bar remains the Android surface unchanged. The rail also gains a
 second panel: Files and Search behind a small toggle (VSCode's shape),
 with **Ctrl+F** focusing vault-wide search; Ctrl+P stays quick-open.
+
+**2026-08-31 (owner):** the rail is resizable by dragging its divider
+and collapsible — a top-bar toggle, **Ctrl+B**, or dragging the divider
+shut. Width and collapsed state are device-local facts like the theme
+and persist in the shell's preferences. A gesture that needs the rail
+(Ctrl+F) reopens it.

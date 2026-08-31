@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -53,6 +54,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -65,6 +67,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
@@ -83,6 +86,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import uniffi.gilune_ffi.Gilune
 import java.io.File
+import kotlin.math.roundToInt
 
 private const val MODEL_URL =
     "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
@@ -96,6 +100,16 @@ private fun modelFile(): File =
 /// How long the layout waits for the tabs to settle before it is
 /// written: a burst of opens and closes costs one preference write.
 private const val LAYOUT_SAVE_IDLE_MS = 400L
+
+/// The rail's travel (ADR 0011 amendment). Narrower than the minimum is
+/// not a rail; wider than the maximum is a window given over to a tree.
+/// A drag that ends inside `RAIL_SHUT_AT` of raw travel shuts the rail
+/// instead of pinning it to the minimum — VSCode's gesture — and the
+/// same drag rightwards past that mark brings it back, so the mouse
+/// alone can always recover the rail.
+private val RAIL_MIN = 170.dp
+private val RAIL_MAX = 480.dp
+private val RAIL_SHUT_AT = 120.dp
 
 /// Window-level gestures arrive as counted requests: the shortcut
 /// handler lives outside DesktopApp's state, so it bumps a counter and
@@ -116,6 +130,9 @@ private class GestureRequests {
 
     var closeTab by mutableStateOf(0)
     var splitRight by mutableStateOf(0)
+
+    /// Ctrl+B, which the top bar's toggle answers with the same flip.
+    var toggleRail by mutableStateOf(0)
 }
 
 /// The row above the letters only: the numeric keypad sends keys of its
@@ -176,6 +193,10 @@ fun main() {
                     }
                     event.isCtrlPressed && event.key == Key.P -> {
                         gestures.quickOpen++
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.B -> {
+                        gestures.toggleRail++
                         true
                     }
                     event.isCtrlPressed && event.key == Key.Tab -> {
@@ -253,6 +274,20 @@ private fun DesktopApp(
     val dictation = remember { DesktopAudioRecorder() }
     var recording by remember { mutableStateOf(false) }
     val colours = MaterialTheme.colorScheme
+    val density = LocalDensity.current
+
+    // How wide the rail stands and whether it stands at all: device-local
+    // facts, seeded from the preferences and written back as they change
+    // (ADR 0011 amendment). `railRaw` is the width the pointer is asking
+    // for with the clamp set aside, because a drag that runs past the
+    // shut threshold is answered by where the pointer went, not by where
+    // the rail was allowed to follow.
+    // A width read back from the preferences is not trusted to be one the
+    // rail may stand at.
+    var railWidth by remember { mutableStateOf(Prefs.railWidth.dp.coerceIn(RAIL_MIN, RAIL_MAX)) }
+    var railCollapsed by remember { mutableStateOf(Prefs.railCollapsed) }
+    var railRaw by remember { mutableStateOf(railWidth) }
+    var railHeld by remember { mutableStateOf(railWidth) }
 
     fun openNote(relPath: String) {
         tabs.open(relPath)
@@ -261,6 +296,11 @@ private fun DesktopApp(
     fun createNote() {
         tabs.open(createUntitledNote(state.vaultDir, tree.selectedDir)).editor.focusTitle = true
         state.sync(announce = false)
+    }
+
+    fun setRailCollapsed(value: Boolean) {
+        railCollapsed = value
+        Prefs.railCollapsed = value
     }
 
     // The rail highlights whatever is in front rather than whatever was
@@ -315,8 +355,21 @@ private fun DesktopApp(
             state.message.value = "a pane needs a second tab before it can split"
         }
     }
+    LaunchedEffect(gestures.toggleRail) {
+        if (gestures.toggleRail > 0) setRailCollapsed(!railCollapsed)
+    }
     LaunchedEffect(gestures.search) {
         if (gestures.search > 0) {
+            // A gesture that needs the rail reopens it (ADR 0011
+            // amendment). The panel does not exist while the rail is
+            // shut, and focus cannot reach a field that has not been
+            // composed yet, so the request waits for the frame that
+            // builds it.
+            if (railCollapsed) {
+                setRailCollapsed(false)
+                withFrameNanos {}
+                withFrameNanos {}
+            }
             tree.railPanel = RailPanel.SEARCH
             runCatching { searchFocus.requestFocus() }
         }
@@ -347,6 +400,9 @@ private fun DesktopApp(
                     tabs.open(probe.removePrefix("read:")).editor.reading = true
                 }
                 probe.startsWith("search:") -> {
+                    // A screenshot of the search panel needs the rail,
+                    // whatever the preferences last left it at.
+                    setRailCollapsed(false)
                     tree.railPanel = RailPanel.SEARCH
                 }
                 probe.startsWith("props:") -> {
@@ -365,10 +421,24 @@ private fun DesktopApp(
 
     Column(Modifier.fillMaxSize()) {
         Row(
-            Modifier.fillMaxWidth().padding(start = 14.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
+            Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // The rail's other switch: the same flip Ctrl+B makes, kept
+            // where the rail is so shutting it never hides its own way
+            // back (ADR 0011 amendment).
+            IconButton(
+                onClick = { setRailCollapsed(!railCollapsed) },
+                modifier = Modifier.size(30.dp),
+            ) {
+                Icon(
+                    Icons.Default.Menu,
+                    contentDescription = "toggle sidebar (ctrl+b)",
+                    modifier = Modifier.size(17.dp),
+                    tint = colours.onSurfaceVariant,
+                )
+            }
             Text("Gilune", style = MaterialTheme.typography.titleMedium)
             QuickOpenBox(state, ::openNote, quickOpenFocus, Modifier.width(280.dp))
             Spacer(Modifier.weight(1f))
@@ -420,22 +490,55 @@ private fun DesktopApp(
         if (state.proposals.isNotEmpty()) ProposalsBanner(state)
 
         Row(Modifier.fillMaxWidth().weight(1f)) {
-            RailPanels(
-                state = state,
-                tree = tree,
-                searchFocus = searchFocus,
-                onOpen = ::openNote,
-                onCreateNote = { rel ->
-                    tabs.open(rel).editor.focusTitle = true
-                    state.sync(announce = false)
+            // A shut rail is not composed at all: nothing of it is left
+            // to lay out, and the handle stands alone at the window's
+            // left edge as the way back.
+            if (!railCollapsed) {
+                RailPanels(
+                    state = state,
+                    tree = tree,
+                    searchFocus = searchFocus,
+                    onOpen = ::openNote,
+                    onCreateNote = { rel ->
+                        tabs.open(rel).editor.focusTitle = true
+                        state.sync(announce = false)
+                    },
+                    modifier = Modifier.width(railWidth).fillMaxHeight(),
+                    initialSearchQuery = probe?.removePrefix("search:")?.takeIf { probe.startsWith("search:") } ?: "",
+                    onOpenToSide = { tabs.openToSide(it) },
+                    onRenamed = { old, new -> tabs.noteRenamed(old, new) },
+                    onDeleted = { tabs.noteDeleted(it) },
+                )
+            }
+            DragDivider(
+                tag = "rail-divider",
+                // A drag starts from where the rail actually is, so a
+                // shut rail's travel is measured from nothing.
+                onStart = {
+                    railHeld = railWidth
+                    railRaw = if (railCollapsed) 0.dp else railWidth
                 },
-                modifier = Modifier.width(240.dp).fillMaxHeight(),
-                initialSearchQuery = probe?.removePrefix("search:")?.takeIf { probe.startsWith("search:") } ?: "",
-                onOpenToSide = { tabs.openToSide(it) },
-                onRenamed = { old, new -> tabs.noteRenamed(old, new) },
-                onDeleted = { tabs.noteDeleted(it) },
-            )
-            Box(Modifier.width(1.dp).fillMaxHeight().background(colours.outlineVariant))
+                onStop = {
+                    // Released inside the shut threshold, the rail
+                    // closes rather than pinning itself to its minimum;
+                    // released beyond it, it keeps the width asked for.
+                    // A drag that shuts the rail hands back the width it
+                    // started from, so the toggle reopens the rail the
+                    // user arranged rather than the sliver the gesture
+                    // passed through on its way out.
+                    val shut = railRaw < RAIL_SHUT_AT
+                    setRailCollapsed(shut)
+                    railWidth = if (shut) railHeld else railRaw.coerceIn(RAIL_MIN, RAIL_MAX)
+                    Prefs.railWidth = railWidth.value.roundToInt()
+                },
+            ) { delta ->
+                railRaw += with(density) { delta.toDp() }
+                // Rightwards past the threshold reopens as it goes, so
+                // the rail follows the pointer out rather than appearing
+                // when the button comes up.
+                if (railCollapsed && railRaw >= RAIL_SHUT_AT) setRailCollapsed(false)
+                if (!railCollapsed) railWidth = railRaw.coerceIn(RAIL_MIN, RAIL_MAX)
+            }
             PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
         }
 

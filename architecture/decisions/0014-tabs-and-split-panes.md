@@ -13,6 +13,10 @@ Amendments (owner, 2026-08-31, after stages M and M+1 shipped):
 - Drag scope gains **reordering within a strip**, which the original
   decision left unstated; the tear-out and four-edge drop grid stay
   out, as decided below.
+- Split weights are **adjustable by dragging the divider** between
+  sibling panes, clamped so no pane collapses; adjusted weights persist
+  through the existing layout serialisation. The rail divider is the
+  shell's own (ADR 0011).
 
 ## Context
 

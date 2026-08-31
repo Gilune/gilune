@@ -563,6 +563,97 @@ class TabsTest {
         assertEquals("b.md", restored.activeTab?.relPath)
     }
 
+    /// a | b | c, a pane each, at the 0.25 / 0.25 / 0.5 the two splits
+    /// that built it left behind.
+    private fun threeAcross(dir: String): TabsState {
+        listOf("a.md", "b.md", "c.md").forEach { note(dir, it) }
+        val tabs = TabsState(dir)
+        tabs.open("a.md")
+        val b = tabs.open("b.md")
+        tabs.open("c.md")
+        assertTrue(tabs.splitRight())
+        tabs.select(tabs.panes()[0], b)
+        assertTrue(tabs.splitRight())
+        return tabs
+    }
+
+    @Test
+    fun draggingADividerMovesWeightBetweenItsNeighboursAndNoOneElse() {
+        val dir = vault()
+        val tabs = threeAcross(dir)
+        val root = assertNotNull(tabs.root as? Split)
+
+        tabs.resize(root, 0, 0.05f)
+
+        assertEquals(0.30f, root.weights[0], 1e-5f)
+        assertEquals(0.20f, root.weights[1], 1e-5f)
+        assertEquals(0.50f, root.weights[2], 1e-5f, "the third pane is no part of this drag")
+        assertEquals(1f, root.weights.sum(), 1e-6f, "the split still fills itself")
+    }
+
+    @Test
+    fun aDividerHeldPastTheClampMovesAsFarAsItMay() {
+        val dir = vault()
+        val tabs = threeAcross(dir)
+        val root = assertNotNull(tabs.root as? Split)
+
+        tabs.resize(root, 0, 5f)
+
+        assertEquals(0.35f, root.weights[0], 1e-5f, "the move is applied, not refused")
+        assertEquals(MIN_PANE_WEIGHT, root.weights[1], 1e-5f)
+
+        tabs.resize(root, 0, -5f)
+
+        assertEquals(MIN_PANE_WEIGHT, root.weights[0], 1e-5f)
+        assertEquals(0.35f, root.weights[1], 1e-5f)
+        assertEquals(1f, root.weights.sum(), 1e-6f)
+    }
+
+    @Test
+    fun resizingAnInnerSplitLeavesThePaneTreeAboveItAlone() {
+        val dir = vault()
+        val tabs = TabsState(dir)
+        // Every split the shell can build is flat, so the nested tree is
+        // built by hand: `resize` reads nothing but the split it is given.
+        val inner = Split(listOf(TabPane(), TabPane()), listOf(0.5f, 0.5f))
+        val outer = Split(listOf(TabPane(), inner), listOf(0.4f, 0.6f))
+        tabs.root = outer
+
+        tabs.resize(inner, 0, 0.2f)
+
+        assertEquals(0.7f, inner.weights[0], 1e-5f)
+        assertEquals(0.3f, inner.weights[1], 1e-5f)
+        assertEquals(listOf(0.4f, 0.6f), outer.weights.toList(), "the parent is untouched")
+    }
+
+    @Test
+    fun aDividerThatIsNotThereIsNotADrag() {
+        val dir = vault()
+        val tabs = threeAcross(dir)
+        val root = assertNotNull(tabs.root as? Split)
+        val before = root.weights.toList()
+
+        listOf(-1, 2, 9).forEach { tabs.resize(root, it, 0.2f) }
+
+        assertEquals(before, root.weights.toList())
+    }
+
+    @Test
+    fun aResizedLayoutComesBackAtTheWidthsItWasLeftAt() {
+        val dir = vault()
+        val tabs = threeAcross(dir)
+        val root = assertNotNull(tabs.root as? Split)
+        tabs.resize(root, 1, 0.2f)
+
+        val restored = TabsState.restore(dir, tabs.serialise())
+
+        assertEquals(listOf(listOf("a.md"), listOf("b.md"), listOf("c.md")), shape(restored))
+        val back = assertNotNull(restored.root as? Split)
+        listOf(0.25f, 0.45f, 0.30f).forEachIndexed { i, expected ->
+            assertEquals(expected, back.weights[i], 1e-5f)
+        }
+    }
+
     @Test
     fun aLayoutRoundTripsThroughSerialisation() {
         val dir = vault()

@@ -30,6 +30,19 @@ object Prefs {
         get() = node.getBoolean("readingMode", false)
         set(value) = node.putBoolean("readingMode", value)
 
+    /// How wide the rail stands, in dp, and whether it is shut altogether
+    /// (ADR 0011 amendment). Device-local facts like the theme: a vault
+    /// opened on two machines is arranged twice. The width is remembered
+    /// through a collapse, so reopening the rail brings back the rail the
+    /// user had rather than the default one.
+    var railWidth: Int
+        get() = node.getInt("railWidth", DEFAULT_RAIL_WIDTH)
+        set(value) = node.putInt("railWidth", value)
+
+    var railCollapsed: Boolean
+        get() = node.getBoolean("railCollapsed", false)
+        set(value) = node.putBoolean("railCollapsed", value)
+
     /// The document region's layout, per vault: which notes are open, in
     /// which panes, and which is in front (ADR 0014). Device-local like
     /// theme, and never the vault's business — a vault opened on two
@@ -51,4 +64,6 @@ object Prefs {
         "tabs-" + Integer.toHexString(vaultDir.hashCode())
 
     private const val MAX_LAYOUT_CHARS = 7500
+
+    private const val DEFAULT_RAIL_WIDTH = 240
 }

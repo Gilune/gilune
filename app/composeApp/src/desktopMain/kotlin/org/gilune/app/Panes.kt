@@ -11,6 +11,9 @@ package org.gilune.app
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.hoverable
@@ -27,6 +30,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
@@ -66,9 +70,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.AwaitPointerEventScope
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
+import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.isTertiaryPressed
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -78,7 +84,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
+import java.awt.Cursor
 import kotlin.math.roundToInt
 
 /// Wide enough for a stem worth reading, narrow enough that a strip full
@@ -103,6 +111,16 @@ private const val STRIP_EDGE_STEP = 12f
 /// A pane's outer quarter splits it and gives the new half to the tab
 /// dropped there (ADR 0014).
 private const val SPLIT_ZONE = 0.25f
+
+/// A divider is a hairline to look at and a band to grab: the line keeps
+/// its 1.dp of layout so nothing shifts, and the pointer is answered this
+/// far either side of it.
+private val DIVIDER_GRAB = 9.dp
+
+/// The weight clamp backstops every drag, but 0.15 of a wide window is
+/// still a pane too narrow to read a line in, so the pointer is stopped
+/// at a real width first (ADR 0014 amendment).
+private val MIN_PANE_WIDTH = 160.dp
 
 /// Where a released tab would land. Every rect is in root coordinates,
 /// the one space panes, strips and chips share; the overlay converts.
@@ -280,8 +298,8 @@ private fun BoxScope.DragOverlay(tabs: TabsState, drag: TabDrag) {
 }
 
 /// v0 splits side by side, so a split is a row of its children with a
-/// hairline between siblings; the model carries an orientation so
-/// stacking costs a renderer rather than a new model.
+/// draggable hairline between siblings; the model carries an orientation
+/// so stacking costs a renderer rather than a new model.
 @Composable
 private fun PaneNodeView(
     state: GiluneState,
@@ -293,28 +311,109 @@ private fun PaneNodeView(
 ) {
     when (node) {
         is TabPane -> PaneView(state, tabs, node, modifier, recorder, drag)
-        is Split -> Row(modifier) {
-            val colours = MaterialTheme.colorScheme
-            node.children.forEachIndexed { index, child ->
-                if (index > 0) {
-                    Box(Modifier.width(1.dp).fillMaxHeight().background(colours.outlineVariant))
-                }
-                // A weight of zero would not lay out; a layout restored
-                // from disk is not trusted to hold sensible ones.
-                val share = node.weights.getOrElse(index) { 0f }
-                    .takeIf { it > 0f } ?: (1f / node.children.size)
-                key(child) {
-                    PaneNodeView(
-                        state,
-                        tabs,
-                        child,
-                        Modifier.weight(share).fillMaxHeight(),
-                        recorder,
-                        drag,
-                    )
+        is Split -> {
+            val density = LocalDensity.current
+            // A drag arrives in pixels and the model speaks fractions of
+            // the split, so the row reports how wide the whole of it is.
+            var extent by remember(node) { mutableStateOf(0f) }
+            Row(modifier.onGloballyPositioned { extent = it.size.width.toFloat() }) {
+                node.children.forEachIndexed { index, child ->
+                    if (index > 0) {
+                        val divider = index - 1
+                        DragDivider("split-divider") { delta ->
+                            if (extent <= 0f) return@DragDivider
+                            val floor = with(density) { MIN_PANE_WIDTH.toPx() }
+                            val moved = withinWidths(node, divider, extent, delta, floor)
+                            tabs.resize(node, divider, moved / extent)
+                        }
+                    }
+                    // A weight of zero would not lay out; a layout restored
+                    // from disk is not trusted to hold sensible ones.
+                    val share = node.weights.getOrElse(index) { 0f }
+                        .takeIf { it > 0f } ?: (1f / node.children.size)
+                    key(child) {
+                        PaneNodeView(
+                            state,
+                            tabs,
+                            child,
+                            Modifier.weight(share).fillMaxHeight(),
+                            recorder,
+                            drag,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+/// The pixel half of the clamp: a drag stops where either neighbour would
+/// fall under a readable width, and only where the two of them are wide
+/// enough between them to give both that much — on a narrow window the
+/// model's weight clamp is all there is.
+private fun withinWidths(
+    split: Split,
+    divider: Int,
+    extent: Float,
+    deltaPx: Float,
+    floorPx: Float,
+): Float {
+    val a = (split.weights.getOrElse(divider) { 0f } * extent).coerceAtLeast(0f)
+    val b = (split.weights.getOrElse(divider + 1) { 0f } * extent).coerceAtLeast(0f)
+    val floor = if (a + b >= floorPx * 2f) floorPx else 0f
+    return deltaPx.coerceIn(floor - a, b - floor)
+}
+
+/// A divider that can be dragged: the rail's (ADR 0011) and every one
+/// between sibling panes (ADR 0014). The hairline keeps exactly the 1.dp
+/// of layout it always had, so nothing shifts when the handle appears;
+/// the grab band is a child wider than its parent, which a
+/// `requiredWidth` may be without changing what the parent takes. It is
+/// lifted above its siblings so the band belongs to the divider and not
+/// to whichever pane it overlaps.
+///
+/// Live resize, not resize-on-release: the deltas arrive as they happen
+/// and the caller applies each one. `draggable` consumes what it uses, so
+/// the tab-drag machinery never sees a divider's gesture.
+@Composable
+fun DragDivider(
+    tag: String,
+    modifier: Modifier = Modifier,
+    onStart: () -> Unit = {},
+    onStop: () -> Unit = {},
+    onDelta: (Float) -> Unit,
+) {
+    val colours = MaterialTheme.colorScheme
+    var dragging by remember { mutableStateOf(false) }
+    Box(
+        modifier
+            .zIndex(1f)
+            .width(1.dp)
+            .fillMaxHeight()
+            // A divider under the hand says so, and nothing else changes:
+            // the line is a hairline whether it is being held or not.
+            .background(if (dragging) colours.primary else colours.outlineVariant),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .requiredWidth(DIVIDER_GRAB)
+                .fillMaxHeight()
+                .testTag(tag)
+                .pointerHoverIcon(PointerIcon(Cursor(Cursor.E_RESIZE_CURSOR)))
+                .draggable(
+                    state = rememberDraggableState { onDelta(it) },
+                    orientation = Orientation.Horizontal,
+                    onDragStarted = {
+                        dragging = true
+                        onStart()
+                    },
+                    onDragStopped = {
+                        dragging = false
+                        onStop()
+                    },
+                ),
+        )
     }
 }
 

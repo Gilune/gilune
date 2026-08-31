@@ -295,6 +295,28 @@ gates promises) are ratified. **Next: application-level engineering — see
      scratchpad drag.ps1 (SendInput on the "Gilune probe" window
      only) and screenshot-confirmed, incl. mid-gesture affordances.
      Tear-out and the four-edge grid remain out of scope.
+   - **Divider resize + collapsible rail (2026-08-31, one Opus
+     implementer, Fable validating live)** — ADR 0014 amendment (pane
+     weights drag) and ADR 0011 amendment (rail resize/collapse).
+     Model: `TabsState.resize(split, divider, delta)` clamps to
+     MIN_PANE_WEIGHT 0.15 with partial moves; weights already in the
+     layout codec so resizes persist for free. UI: shared
+     `DragDivider` in Panes.kt — 1.dp hairline, 9.dp grab band via
+     requiredWidth + **zIndex(1f)** (without it PaneView's
+     Initial-pass pointerInput eats the overlap), AWT E_RESIZE
+     cursor, live resize with a 160.dp px floor. Rail: width
+     170..480dp persisted (`Prefs.railWidth`), collapse via top-bar
+     Menu toggle / **Ctrl+B** / dragging shut (raw travel <120dp on
+     release; reopens live crossing 120dp outward, so the mouse alone
+     recovers it); collapse remembers the arranged width; Ctrl+F
+     un-collapses then waits two frames before focusing (field
+     doesn't exist until the rail composes). Suite 144 desktop tests;
+     validated live with scripted drags + keybd_event (scratchpad
+     key.ps1): pane resize, rail resize, toggle collapse, relaunch
+     persistence (collapsed + weights + width), Ctrl+F reopen with
+     typed query landing focused, drag-shut. Gap: stacked splits
+     would need a vertical DragDivider twin (no renderer builds them
+     yet).
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

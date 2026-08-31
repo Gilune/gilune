@@ -30,6 +30,11 @@ import java.io.File
 /// (owner-reported misalignment, 2026-08-31).
 val PANE_HEADER_HEIGHT = 36.dp
 
+/// No pane is ever dragged shut: a divider stops where its neighbour
+/// would fall below this share of the split (ADR 0014 amendment). A pane
+/// leaves by losing its last tab, never by being squeezed out of sight.
+const val MIN_PANE_WEIGHT = 0.15f
+
 /// v0 splits side by side; the tree carries the orientation so stacking
 /// costs a renderer rather than a new model (ADR 0014).
 enum class SplitOrientation { Horizontal, Vertical }
@@ -219,6 +224,37 @@ class TabsState(val vaultDir: String) {
         if (from === target && from.tabs.size < 2) return false
         splitOff(tab, from, target)
         return true
+    }
+
+    /// Dragging the divider between siblings (ADR 0014 amendment).
+    /// Divider `i` sits between children `i` and `i+1`, and `delta` is a
+    /// signed fraction of the whole split's extent: what one neighbour
+    /// gains the other gives up, and nothing else in the split moves.
+    ///
+    /// A pointer that runs past the clamp is not refused — the move is
+    /// applied as far as it may go and the divider stops there, which is
+    /// what a divider held against the end of its travel should do.
+    ///
+    /// The weights are snapshot state and are written in place, so the
+    /// panes relay out and the layout is persisted without either side
+    /// being told.
+    fun resize(split: Split, divider: Int, delta: Float) {
+        if (divider < 0 || divider + 1 >= split.children.size) return
+        if (divider + 1 >= split.weights.size) return
+        val a = split.weights[divider]
+        val b = split.weights[divider + 1]
+        val low = MIN_PANE_WEIGHT - a
+        val high = b - MIN_PANE_WEIGHT
+        // Both neighbours already under the floor: a restored layout is
+        // not trusted to hold sensible weights, and no legal move exists.
+        if (low > high) return
+        val move = delta.coerceIn(low, high)
+        if (move == 0f) return
+        // The pair's total is recomputed rather than subtracted from, so
+        // the split's shares still sum to what they summed to before.
+        val total = a + b
+        split.weights[divider] = a + move
+        split.weights[divider + 1] = total - split.weights[divider]
     }
 
     fun noteRenamed(oldRel: String, newRel: String) {
