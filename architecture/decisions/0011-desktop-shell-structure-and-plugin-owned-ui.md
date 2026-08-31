@@ -146,3 +146,17 @@ and collapsible — a top-bar toggle, **Ctrl+B**, or dragging the divider
 shut. Width and collapsed state are device-local facts like the theme
 and persist in the shell's preferences. A gesture that needs the rail
 (Ctrl+F) reopens it.
+
+**2026-08-31 (owner, via ADR 0015 acceptance):** the fixed slot list
+grows from five to nine. The four new ids are **`editor.decorations`**
+(a line recogniser, its replacement and its activation),
+**`editor.suggest`** (a trigger, its candidates, and the exact range to
+replace), **`editor.blocks`** (a fenced block rendered by its info
+string — the shell's own `filter` block is the first) and
+**`search.types`** (what a query is looking for: an extractor, a row
+renderer and the operators scoped to it). Slot ids also stop being the
+shell's alone: **a plugin may publish a slot other plugins contribute
+to**, the tasks plugin's `tasks.fields` being the first. Such a
+contribution is live only while **both** the publishing and the
+contributing plugin are enabled, so disabling or removing either takes
+the contribution out of the app and changes no byte in the vault.

@@ -1,9 +1,10 @@
 # ADR 0015: Tasks Plugin — Inline Dates and the Editor Seams They Need
 
-Status: **Proposed** (design round 2026-08-31; five original questions ratified
-by the owner 2026-08-31 — see Ratification record; the query and
-extension-point sections await ratification)  
-Validation: owner ratification for the format and the scope line; the seams are
+Status: **Accepted** (owner ratification 2026-08-31 — the five answers, then the
+query and extension-point sections including the generic `filter` form with a
+required `type:`; see Ratification record)  
+Validation: owner ratification for the format and the scope line, given
+2026-08-31; the seams are
 validated by delivery, not a spike — T1 is not done until the shipped checkbox
 slice runs through the same registry a plugin uses, and until removing the
 plugin removes every control it added and changes no byte in the vault.
@@ -62,7 +63,7 @@ later People plugin can add an `assignee` field to the tasks plugin's own menu.
   plugin does not see.
 - **Not inside a fenced code block.** The scan tracks fences, as `styleMarkdown`
   already does — still pure over the text — so a documented example, including
-  the `tasks` blocks of § 4, never becomes somebody's agenda. Obsidian excludes
+  the `filter` blocks of § 4, never becomes somebody's agenda. Obsidian excludes
   code blocks for the same reason.
 - **Done dates use the same convention**: `done:YYYY-MM-DD`, not Dataview's
   `completion`.
@@ -149,47 +150,78 @@ waits for a real People plugin, and a fixture is the weaker evidence.
 the task line under § 1's rules. Values are **unspaced** in v1 (`assignee:anna`
 is a handle, not a name); spaces and quoting are deferred, not designed.
 
-**Search follows for free.** `"operator": true` registers the key as a
-`search.operator` meaning "this line carries `key:value`", so `assignee:anna`
-works in the panel and inside a `tasks` block with no further machinery, by the
-scoping rule in § 4.
+**Search follows for free.** `"operator": true` registers the key as an operator
+scoped to `type:task`, meaning "this line carries `key:value`", so
+`assignee:anna` works in the panel and inside a `filter` block with no further
+machinery, by the rules in § 4.
 
-### 4. Queries: one grammar, in the panel and in the page
+### 4. Filters: one grammar, one engine, in the panel and in the page
 
 The owner's requirement is querying as an extension of our search, and the same
 query embeddable in a note as a live view. This overturns the draft's refusal of
-an embedded query DSL; the constraints below answer the objection that refusal
-rested on. **JavaScript in queries stays refused permanently.**
+an embedded query DSL, and the owner then generalised it: **the embedded block
+is not a tasks feature.** It is the search language, in a file, for anything the
+shell can enumerate. **JavaScript in queries stays refused permanently.**
 
-**One grammar.** The query language *is* `Search.kt`'s: bare terms ANDed by
+**One grammar.** The language *is* `Search.kt`'s: bare terms ANDed by
 whitespace, `"quoted phrases"`, `-negation`, `file:`, `path:`, `content:`,
 `[key:value]` front matter, plus whatever operators enabled plugins registered.
 No second parser, no sort/group/layout vocabulary, no boolean algebra beyond the
 existing conjunction-with-negation, no templating.
 
-**A hit is a task line.** The evaluator is handed, per candidate line, a
-`SearchedNote` whose `body` is that one line and whose name, path and front
-matter are the containing note's. Every existing operator then behaves correctly
-with no new interface: terms about text — bare terms, `content:`, the task
-operators — bind to the **line**; terms about the note — `file:`, `path:`,
-`[key:value]` — bind to the **note**. A bare term still also matches the note's
-name, as in the panel. Scanning is `searchVault`'s: whole vault, each file read
-once, no index.
+**`type:` says what a hit is, and is required in a block.** A small registry
+holds two kinds of type:
 
-**Task operators** (registered at T2). `due:` and `done:` take `YYYY-MM-DD`, or
-`today`, `overdue`, `week` (today through the next seven days), `none`. The one
-extension to value forms is `before:<date>` and `after:<date>`, because a
-project note's horizon is otherwise unsayable and the alternative is people
-typing rotting dates into prose. Obsidian's five-operator × six-field matrix and
-its `YYYY-Www`/quarter ranges are refused; `-due:none` already means "has a due
-date", so no `has`/`no` keywords are added. Relative words resolve **at
-evaluation**, the inverse of § 2 and for the same reason: `due:today` is the
+- **Note-level** — `type:note` is the shell's own: a hit is a note, which is the
+  search panel's present semantics unchanged.
+- **Line-level** — `type:task`, contributed by this plugin: a hit is a task line,
+  honouring § 1's global filter. Evaluation is the narrowed-note rule: the
+  evaluator is handed, per candidate line, a `SearchedNote` whose `body` is that
+  one line and whose name, path and front matter are the containing note's. Every
+  existing operator then behaves correctly with no new interface — terms about
+  text (bare terms, `content:`, the task operators) bind to the **line**, terms
+  about the note (`file:`, `path:`, `[key:value]`) bind to the **note**, and a
+  bare term still also matches the note's name, as in the panel.
+
+Scanning either way is `searchVault`'s: whole vault, each file read once, no
+index.
+
+**Operators are registered scoped to a type**, so `due:` is a keyword under
+`task` and prose under `note`. An operator used beneath a type that does not know
+it **degrades to a bare term**, exactly as the DSL already treats an unregistered
+keyword — a typo, or a plugin switched off, must not silently empty a result set.
+
+**No `type:`, no guess.** A block without one renders a single inline hint row
+naming the registered types. A `type:` nobody has registered is treated the same
+way, which is precisely what a disabled or removed contributor leaves behind.
+
+**The panel shares the one engine.** `type:` works there too; absent, it defaults
+to `note`, because interactive typing is a person narrowing by hand and not a
+stored file that must say what it means to a stranger.
+
+**What plugins contribute is the type, not the fence.** A `search.types`
+contribution declares an extractor (what a hit is), a row renderer, and the
+operators scoped to it. The `editor.blocks` registration for the `filter` fence
+belongs to the shell's own search machinery, so blocks keep working with every
+removable plugin gone. The People case falls out cheaply: `type:person` is most
+naturally note-level, keyed off `[gilune-type:person]` front matter, and needs
+almost nothing new.
+
+**Task operators** (registered under `task` at T2). `due:` and `done:` take
+`YYYY-MM-DD`, or `today`, `overdue`, `week` (today through the next seven days),
+`none`. The one extension to value forms is `before:<date>` and `after:<date>`,
+because a project note's horizon is otherwise unsayable and the alternative is
+people typing rotting dates into prose. Obsidian's five-operator × six-field
+matrix and its `YYYY-Www`/quarter ranges are refused; `-due:none` already means
+"has a due date", so no `has`/`no` keywords are added. Relative words resolve
+**at evaluation**, the inverse of § 2 and for the same reason: `due:today` is the
 query's meaning, not a date that rots.
 
-**Syntax in the file** — a fenced block whose info string is `tasks`:
+**Syntax in the file** — a fenced block whose info string is `filter`:
 
 ````markdown
-```tasks
+```filter
+type:task
 due:week
 -done:none
 path:Work
@@ -204,22 +236,24 @@ maintainers propose a breaking change to fix, and `searchVault` already returns
 nothing for no terms.
 
 **Degradation.** A stranger, Notepad, GitHub and Obsidian all see a legible
-fenced code block labelled `tasks` holding readable filters; nothing is hidden
-and nothing executes. The info string is a namespace we share with Obsidian
-Tasks and do not own — a debt, not a thing to dodge with a private name.
+fenced code block labelled `filter` holding readable filters, one of which says
+what it is looking for; nothing is hidden and nothing executes. No surveyed tool
+claims `filter` — Obsidian Tasks uses `tasks` — so the generalisation also walked
+us out of a namespace collision.
 
-**What renders** is the T3 panel's row, reused: the checkbox glyph, the line's
-text with its tokens styled, its dates, and the note it came from. Rows
-**navigate, they do not edit** — a click opens the note at that line. Toggling
-from a result would write to a file the user is not looking at, needing the
-stale-buffer story, and the prior art's own bug (a checkbox in a callout failing
-to write its done date) lives exactly there.
+**What renders is the type's row.** For `type:task` that is T3's agenda row: the
+checkbox glyph, the line's text with its tokens styled, its dates, and the note
+it came from. Rows **navigate, they do not edit** — a click opens the note at
+that line. Toggling from a result would write to a file the user is not looking
+at, needing the stale-buffer story, and the prior art's own bug (a checkbox in a
+callout failing to write its done date) lives exactly there.
 
-**Bounds by construction.** One order — due ascending, undated last, then path,
-then line number — because it is the only order an agenda needs and there are
-then no sort or group instructions to get wrong. **50 rows, then a `+N more`
-line.** Matching is cheap (~17,000 tasks in ~80 ms) and *rendering* results is
-what freezes an editor, so the cap is on rendering and is not optional.
+**Bounds by construction.** A type carries one order — tasks': due ascending,
+undated last, then path, then line number — because it is the only order an
+agenda needs and there are then no sort or group instructions to get wrong.
+**50 rows, then a `+N more` line.** Matching is cheap (~17,000 tasks in ~80 ms)
+and *rendering* results is what freezes an editor, so the cap is on rendering and
+is not optional.
 
 **Refresh** is on the vault tick (`GiluneState.vaultTick`) and on opening a
 note, plus buffer settle in Edit mode, reusing `AUTOSAVE_IDLE_MS`. Never per
@@ -227,10 +261,11 @@ keystroke.
 
 ### 5. The seams
 
-Four new slot ids, plus the one ADR 0011 reserved and the code never built.
-**Ratifying this ADR takes 0011's fixed five-slot list to nine, and adds the
-rule that a plugin may publish a slot of its own** (§ 3); both are written into
-0011 on acceptance, not before. `Contribution` gains an optional
+Four new slot ids — `editor.decorations`, `editor.suggest`, `editor.blocks`,
+`search.types` — plus the one ADR 0011 reserved and the code never built.
+**Accepting this ADR takes 0011's fixed five-slot list to nine and adds the rule
+that a plugin may publish a slot of its own** (§ 3); both are written into 0011
+on acceptance (done 2026-08-31). `Contribution` gains an optional
 **`config: String`** — canonical JSON, opaque to the kernel, mirroring the
 `settings` column. Three strings cannot express "a decoration matching this
 regex", and smuggling payload into `id` or `label` is not a seam.
@@ -259,8 +294,9 @@ Needs one new primitive, `replaceRange(editor, IntRange, String)`, beside
 `insertAtCaret`, which trims and auto-spaces and cannot express this.
 
 **`editor.blocks`** — a fence recogniser (the info string) plus a renderer, on
-the same shell-owned terms as `editor.decorations`. It is the block-level
-analogue of E3's caret rule:
+the same shell-owned terms as `editor.decorations`. The `filter` fence is the
+search machinery's own registration, not this plugin's (§ 4). It is the
+block-level analogue of E3's caret rule:
 
 - **Read mode needs no new block type.** `parseMarkdown` already models a fenced
   block as `MdBlock.Code(text, language)`, carrying the info string, so the seam
@@ -280,11 +316,12 @@ analogue of E3's caret rule:
   recompute on tick, not per keystroke (§ 4). It is the least elegant part of
   this design, which is why it is staged last.
 
-**`search.operator`** — the shell builds its `SearchOperators` from enabled
-plugins' contributions and passes it to `SearchPanel`, which today takes the
-empty default; everything below that line already works and is tested. Tasks
-registers `due:` and `done:`, and any `tasks.fields` contribution that asked for
-its keyword (§ 3).
+**`search.types`** — a type name, an extractor, a row renderer and the operators
+scoped to it (§ 4). The shell builds its `SearchOperators` from enabled plugins'
+registrations and passes it to `SearchPanel`, which today takes the empty
+default; everything below that line already works and is tested. Operators arrive
+*through* a type rather than loose, so switching a plugin off cannot leave a
+keyword behind meaning something nobody can answer.
 
 **`navigation`** — the dead slot becomes real: `contributionsTo(NAVIGATION)`
 renders as rail tabs beside Files and Search, `RailPanel` becomes a plugin-keyed
@@ -301,11 +338,12 @@ holds `BUILT_INS + extra`, so the seam demonstrably carries two producers and th
 plugin is not a special case bolted beside a hard-coded one.
 
 **Removal** takes away the `/` menu, the token styling, the done-date stamp, the
-keywords, the rail tab and the live rendering of `tasks` blocks, and changes no
-byte: `- [x] file the return due:2026-09-01 done:2026-08-30` still renders as a
-checkbox, still reads in Notepad, still greps, and the query block goes back to
-being a code block that says what it wanted. No kernel object is created, so
-removal has nothing to orphan.
+`task` type and its keywords, and the rail tab, and changes no byte:
+`- [x] file the return due:2026-09-01 done:2026-08-30` still renders as a
+checkbox, still reads in Notepad, still greps. `filter` blocks keep rendering,
+because the fence is the shell's; a block that asked for `type:task` shows the
+hint row of § 4, which is the honest answer — the type it wanted is gone. No
+kernel object is created, so removal has nothing to orphan.
 
 ### 6. Scope
 
@@ -315,9 +353,10 @@ removal has nothing to orphan.
   `tasks.fields` registry with `due` as its only entry, read by the suggest's
   stage one; the global-filter setting; the descriptor, registration, settings
   entry and removal. Nothing in the rail, nothing in search.
-- **T2 — done date on toggle** through the activation chain; the
-  `search.operator` wiring that makes `due:`/`done:` live keywords with § 4's
-  value forms; and **`tasks.fields` published as a cross-plugin slot** — other
+- **T2 — done date on toggle** through the activation chain; **`search.types`**
+  with the shell's `note`, this plugin's `task`, and `due:`/`done:` scoped to it
+  with § 4's value forms, so `type:` works in the search panel before any block
+  exists; and **`tasks.fields` published as a cross-plugin slot** — other
   plugins' contributions read, both-enabled gating enforced, paired operator
   registered, proven by a fixture. The hook ships here so the owner's
   requirement is real rather than notional, whenever a second plugin arrives.
@@ -326,9 +365,11 @@ removal has nothing to orphan.
   queries. **A plugin setting turns the panel off**; while it is off the shell
   does not compose the tab, the same shape as every other `contributes(…)` gate,
   one condition further in.
-- **T4 — embedded `tasks` blocks**: the `editor.blocks` seam, the Read-mode
-  renderer table, the Edit-mode overlay and the 50-row cap. Last because it
-  reuses T3's rows and T2's operators wholesale and adds only rendering.
+- **T4 — embedded `filter` blocks**: the `editor.blocks` seam, the shell's
+  registration of the `filter` fence, the Read-mode renderer table, the Edit-mode
+  overlay, the hint row and the 50-row cap. Last because it reuses T3's rows and
+  T2's types wholesale and adds only rendering — and note that half of it is
+  shell work this plugin merely proves.
 - **Recurrence is deferred**, by name. It is the one advanced feature the
   research says earns its keep, and also where scope crept — a natural-language
   grammar, line-spawning on completion, a reference-date rule, `when done`
@@ -436,6 +477,16 @@ the block holds the query the search panel already takes, with no sort, group or
 layout vocabulary — the result set is capped where the measured cost is, and the
 escape hatch that ended in a security retreat is refused permanently.
 
+### A `tasks` fence owned by the tasks plugin
+
+This ADR's own previous revision, and what the prior art does. Replaced by the
+owner's generalisation on 2026-08-31: a plugin-owned fence means every future
+queryable thing brings its own info string and its own block registration, and
+the file and the search panel drift into two languages saying the same thing. One
+`filter` fence with a required `type:` keeps the count at one and makes the
+question the block must answer — what am I looking at — explicit in the text
+rather than implied by the fence's name.
+
 ### A contributing plugin registers with `editor.suggest` directly
 
 A People plugin could declare its own `editor.suggest` registration and offer
@@ -471,9 +522,11 @@ one producer — which is how the `settings.form` declaration ended up decorativ
   and its first overlay aligned to a span of the text buffer.
 - `Contribution`/`PluginContribution` gain `config` — a kernel schema migration
   and an FFI change, the only kernel work here, teaching it nothing about tasks.
-- ADR 0011's slot list grows to nine and gains plugin-published slots; the
-  navigation slot stops being a claim the code contradicts (T3) and
-  `SearchOperators` stops being a registry nothing registers into (T2).
+- ADR 0011's slot list grows to nine and gains plugin-published slots (amended
+  2026-08-31); the navigation slot stops being a claim the code contradicts (T3)
+  and `SearchOperators` stops being a registry nothing registers into (T2).
+- The search panel gains `type:` and keeps `note` as its default, so nothing a
+  person has already typed changes meaning.
 - `MarkdownBody`'s `Code` branch consults a renderer table; `MdBlock` stays
   sealed and its `when` exhaustive. The draft's open consequence is resolved
   without unsealing anything, because a fenced block is already parsed and
@@ -484,7 +537,7 @@ one producer — which is how the `settings.form` declaration ended up decorativ
   note carrying several pays several passes. The tick-not-keystroke rule and the
   row cap keep that honest; an index plugin (`05-plugin-system.md`) is where the
   answer goes when they stop doing.
-- We take a dependency on a fence info string another product also claims.
+- The shell takes a fence info string, `filter`, in a namespace nobody owns.
 - Nothing touches capture, sync or projection, so the crash matrix, convergence
   harness and boundary suite are unaffected.
 
@@ -513,9 +566,9 @@ Surfaced, not fixed, and none absorbed into this plugin's scope:
    FFI. Neither blocks T1–T4; both block the wasm version of this plugin.
 8. `editor.blocks` is renderer-only: a plugin may render a **fenced** block, never
    add block syntax. Anything that is not a fence stays shell-parsed.
-9. The `tasks` info string is a namespace shared with Obsidian Tasks and owned by
-   neither. Legibility to a reader was chosen over safety from a collision;
-   revisit if round-tripping through that plugin becomes a real workflow.
+9. Fence info strings are a namespace nobody owns. `filter` collides with nothing
+   in the survey — the generalisation away from `tasks` avoided the one known
+   clash — but a generic word is a generic word, and a future tool may claim it.
 10. Plugin-published slots have no registry of publishers: the shell knows
     `tasks.fields` belongs to `org.memory.tasks` because it is written in shell
     code. The both-enabled gate is therefore a shell rule, and a second host
@@ -533,8 +586,16 @@ Owner review round, 2026-08-31. The draft's five open questions, answered:
 | 4 | Is every checkbox a task | A **global filter** setting. Default-empty — every GFM checkbox is a task — is the coordinator's reading of an answer that did not name a default, recorded in § 1 | 2026-08-31 |
 | 5 | Trigger | `/` at a word boundary on task lines, as recommended (§ 2) | 2026-08-31 |
 
-Two requirements were added in the same round and are designed in above:
-**task queries, in search and embedded in notes** (§ 4, `editor.blocks` in § 5,
-T4), which overturns the draft's refusal of an embedded query DSL; and **an
-extension point on the tasks plugin** (§ 3, T2), which makes publishing a slot a
-plugin's privilege and not only the shell's. Both await ratification.
+Two requirements were added in the same round and designed in above: **task
+queries, in search and embedded in notes** (§ 4, `editor.blocks` in § 5, T4),
+which overturns the draft's refusal of an embedded query DSL; and **an extension
+point on the tasks plugin** (§ 3, T2), which makes publishing a slot a plugin's
+privilege and not only the shell's. Both were then ratified:
+
+| Section | Ratified | Date |
+|---|---|---|
+| Queries and the extension point, as revised | Accepted | 2026-08-31 |
+| **Generalised** to the `filter` fence with a **required `type:`**, a two-kind type registry, operators scoped to a type, and `search.types` as what plugins contribute — the block language is the search DSL for everything, not a tasks feature (owner direction, then explicit agreement with the coordinator's recommendations) | Accepted | 2026-08-31 |
+
+The ADR is Accepted and moves to build. ADR 0011 was amended the same day with
+the four new slot ids and the plugin-published-slot rule.
