@@ -255,6 +255,22 @@ fn derived_id(input: &str) -> String {
 /// harness; the real provider ships with the application.
 pub struct FakeTranscriber;
 
+/// `FakeTranscriber` as a plugin declaration, for hosts that carry it.
+pub fn fake_transcriber_descriptor() -> crate::plugins::PluginDescriptor {
+    crate::plugins::PluginDescriptor {
+        plugin_id: "org.memory.fake-transcription".to_string(),
+        name: "Stand-in transcription (development)".to_string(),
+        class: crate::plugins::PluginClass::Provider,
+        profile: crate::plugins::PluginProfile::Bundled,
+        required: false,
+        processor_id: Some("transcribe".to_string()),
+        subscribes: Some(crate::capture::SOURCE_READY_EVENT.to_string()),
+        emits: vec!["org.memory.transcript-ready".to_string()],
+        capabilities: vec!["blobs.read".to_string(), "objects.write".to_string()],
+        contributions: Vec::new(),
+    }
+}
+
 impl Processor for FakeTranscriber {
     fn id(&self) -> &str {
         "transcribe"

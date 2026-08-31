@@ -8,6 +8,7 @@ pub mod crashpoints;
 pub mod fs;
 pub mod ids;
 pub mod jobs;
+pub mod plugins;
 pub mod processor;
 pub mod query;
 pub mod store;
@@ -32,6 +33,14 @@ pub enum KernelError {
     SchemaTooNew { found: i64, supported: i64 },
     #[error("no such job: {job_id}")]
     NoSuchJob { job_id: String },
+    #[error("no such plugin: {plugin_id}")]
+    NoSuchPlugin { plugin_id: String },
+    #[error("{plugin_id} is required and cannot be removed")]
+    PluginRequired { plugin_id: String },
+    #[error("{plugin_id} does not declare the capability {capability}")]
+    UndeclaredCapability { plugin_id: String, capability: String },
+    #[error("local state is corrupt: {detail}")]
+    Corrupt { detail: String },
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

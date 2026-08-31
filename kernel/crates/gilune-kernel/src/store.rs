@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -289,6 +289,30 @@ const MIGRATIONS: &[&str] = &[
          relation TEXT NOT NULL,
          processor_id TEXT,
          PRIMARY KEY (object_id, target_id, relation)
+     );",
+    // v3 -> v4: the plugin registry (ADR 0011). Vault state, not device
+    // state, so the app, the CLI and the agent agree on what may run.
+    // A removed plugin keeps its row as a tombstone: re-registering a
+    // bundled implementation on the next launch must not resurrect what
+    // someone deliberately took away. Grants live in their own table so
+    // an update that declares a new capability cannot inherit consent.
+    "CREATE TABLE plugins (
+         plugin_id TEXT PRIMARY KEY,
+         name TEXT NOT NULL,
+         class TEXT NOT NULL,
+         profile TEXT NOT NULL,
+         required INTEGER NOT NULL DEFAULT 0,
+         processor_id TEXT,
+         manifest TEXT NOT NULL,
+         settings TEXT NOT NULL DEFAULT '{}',
+         state TEXT NOT NULL CHECK (state IN ('enabled','disabled','removed')),
+         installed_ms INTEGER NOT NULL
+     );
+     CREATE TABLE plugin_grants (
+         plugin_id TEXT NOT NULL REFERENCES plugins(plugin_id),
+         capability TEXT NOT NULL,
+         granted_ms INTEGER NOT NULL,
+         PRIMARY KEY (plugin_id, capability)
      );",
 ];
 

@@ -49,6 +49,24 @@ struct Head {
     conflicted: bool,
 }
 
+/// This projection as a plugin declaration (ADR 0011). It lives beside
+/// the implementation so every host declares the same thing, and it is
+/// `required`: the vault is the product surface, not an optional view.
+pub fn plugin_descriptor() -> crate::plugins::PluginDescriptor {
+    crate::plugins::PluginDescriptor {
+        plugin_id: "org.memory.vault".to_string(),
+        name: "Markdown vault".to_string(),
+        class: crate::plugins::PluginClass::Projection,
+        profile: crate::plugins::PluginProfile::Bundled,
+        required: true,
+        processor_id: None,
+        subscribes: None,
+        emits: Vec::new(),
+        capabilities: Vec::new(),
+        contributions: Vec::new(),
+    }
+}
+
 impl Store {
     /// Project every live object into the vault. Idempotent and safe to
     /// run at any time: a file that differs from what the kernel last

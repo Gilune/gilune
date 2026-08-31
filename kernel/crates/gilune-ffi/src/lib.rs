@@ -29,8 +29,11 @@ impl From<gilune_kernel::KernelError> for GiluneError {
         match e {
             K::VaultUnusable { .. } => GiluneError::VaultUnusable { detail: e.to_string() },
             K::SchemaTooNew { .. } => GiluneError::Incompatible { detail: e.to_string() },
-            K::NoSuchJob { .. } => GiluneError::Invalid { detail: e.to_string() },
-            K::Storage(_) | K::Io { .. } | K::Encoding(_) => {
+            K::NoSuchJob { .. }
+            | K::NoSuchPlugin { .. }
+            | K::PluginRequired { .. }
+            | K::UndeclaredCapability { .. } => GiluneError::Invalid { detail: e.to_string() },
+            K::Storage(_) | K::Io { .. } | K::Encoding(_) | K::Corrupt { .. } => {
                 GiluneError::Storage { detail: e.to_string() }
             }
         }
@@ -109,6 +112,133 @@ pub struct TombstoneProposal {
 #[cfg(feature = "whisper")]
 mod whisper;
 
+/// A plugin as the settings surface sees it (ADR 0011): what it is, what
+/// it declares, what it has actually been granted, and what it adds to
+/// the app. `ungranted` is what a person has still to agree to.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PluginInfo {
+    pub plugin_id: String,
+    pub name: String,
+    pub class: String,
+    pub profile: String,
+    pub required: bool,
+    pub state: String,
+    pub processor_id: Option<String>,
+    pub subscribes: Option<String>,
+    pub emits: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub granted: Vec<String>,
+    pub ungranted: Vec<String>,
+    pub contributions: Vec<PluginContribution>,
+    pub settings: String,
+}
+
+/// One control a plugin adds to a host surface. Slot names are the
+/// contract with the shell: `capture.actions`, `note.actions`,
+/// `navigation`, `command.palette`, `settings.form`.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PluginContribution {
+    pub slot: String,
+    pub id: String,
+    pub label: String,
+}
+
+/// What a host declares when it registers an implementation it carries.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PluginDeclaration {
+    pub plugin_id: String,
+    pub name: String,
+    /// `domain`, `provider`, `adapter`, `projection` or `index`.
+    pub class: String,
+    /// `bundled` or `sandboxed`.
+    pub profile: String,
+    pub required: bool,
+    pub processor_id: Option<String>,
+    pub subscribes: Option<String>,
+    pub emits: Vec<String>,
+    pub capabilities: Vec<String>,
+    pub contributions: Vec<PluginContribution>,
+}
+
+impl From<gilune_kernel::plugins::InstalledPlugin> for PluginInfo {
+    fn from(p: gilune_kernel::plugins::InstalledPlugin) -> Self {
+        PluginInfo {
+            plugin_id: p.descriptor.plugin_id.clone(),
+            name: p.descriptor.name.clone(),
+            class: p.descriptor.class.as_str().to_string(),
+            profile: p.descriptor.profile.as_str().to_string(),
+            required: p.descriptor.required,
+            state: p.state.as_str().to_string(),
+            processor_id: p.descriptor.processor_id.clone(),
+            subscribes: p.descriptor.subscribes.clone(),
+            emits: p.descriptor.emits.clone(),
+            capabilities: p.descriptor.capabilities.clone(),
+            ungranted: p.ungranted(),
+            granted: p.granted.clone(),
+            contributions: p
+                .descriptor
+                .contributions
+                .iter()
+                .map(|c| PluginContribution {
+                    slot: c.slot.clone(),
+                    id: c.id.clone(),
+                    label: c.label.clone(),
+                })
+                .collect(),
+            settings: p.settings,
+        }
+    }
+}
+
+impl TryFrom<PluginDeclaration> for gilune_kernel::plugins::PluginDescriptor {
+    type Error = GiluneError;
+
+    fn try_from(d: PluginDeclaration) -> Result<Self, GiluneError> {
+        use gilune_kernel::plugins::{PluginClass, PluginProfile};
+        let class = match d.class.as_str() {
+            "domain" => PluginClass::Domain,
+            "provider" => PluginClass::Provider,
+            "adapter" => PluginClass::Adapter,
+            "projection" => PluginClass::Projection,
+            "index" => PluginClass::Index,
+            other => {
+                return Err(GiluneError::Invalid {
+                    detail: format!("{other} is not a plugin class"),
+                })
+            }
+        };
+        let profile = match d.profile.as_str() {
+            "bundled" => PluginProfile::Bundled,
+            "sandboxed" => PluginProfile::Sandboxed,
+            other => {
+                return Err(GiluneError::Invalid {
+                    detail: format!("{other} is not an execution profile"),
+                })
+            }
+        };
+        Ok(gilune_kernel::plugins::PluginDescriptor {
+            plugin_id: d.plugin_id,
+            name: d.name,
+            class,
+            profile,
+            required: d.required,
+            processor_id: d.processor_id,
+            subscribes: d.subscribes,
+            emits: d.emits,
+            capabilities: d.capabilities,
+            contributions: d
+                .contributions
+                .into_iter()
+                .map(|c| gilune_kernel::plugins::Contribution {
+                    slot: c.slot,
+                    id: c.id,
+                    label: c.label,
+                })
+                .collect(),
+        })
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct ProcessingSummary {
     pub completed: i64,
@@ -129,6 +259,30 @@ impl Gilune {
         // is transactional, so continuing is safe and loses nothing.
         self.store.lock().unwrap_or_else(|e| e.into_inner())
     }
+
+    /// Stop running a processor in this process. Job claiming is already
+    /// gated on the plugin's state, so this only releases what the
+    /// implementation holds — a loaded model, for instance.
+    fn unload_processor(&self, plugin_id: &str) -> FfiResult<()> {
+        let Some(plugin) = self.store().plugin(plugin_id)? else { return Ok(()) };
+        let Some(processor_id) = plugin.descriptor.processor_id else { return Ok(()) };
+        self.processors
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|p| p.id() != processor_id);
+        Ok(())
+    }
+}
+
+/// The plugins this binary carries. Registered on every open: declaration
+/// only, idempotent, and never resurrecting one the user removed. Which
+/// implementations exist here is a build fact — a plugin's availability
+/// varies by platform (ADR 0006) — so absence from this list is honest.
+fn register_builtins(store: &gilune_kernel::store::Store) -> gilune_kernel::Result<()> {
+    store.register_plugin(&gilune_kernel::vault::plugin_descriptor())?;
+    #[cfg(feature = "whisper")]
+    store.register_plugin(&whisper::descriptor())?;
+    Ok(())
 }
 
 #[uniffi::export]
@@ -138,26 +292,37 @@ impl Gilune {
     #[uniffi::constructor]
     pub fn open(dir: String) -> FfiResult<Arc<Self>> {
         let store = gilune_kernel::store::Store::open(dir)?;
+        register_builtins(&store)?;
         Ok(Arc::new(Self {
             store: Mutex::new(store),
             processors: Mutex::new(Vec::new()),
         }))
     }
 
-    /// Enable local speech-to-text with a Whisper model file. Desktop
-    /// builds only (`whisper` feature); Android v0 captures and lets a
-    /// paired coordinator transcribe (threat-model decision 1).
+    /// Load the local speech-to-text model. Desktop builds only
+    /// (`whisper` feature); Android v0 captures and lets a paired
+    /// coordinator transcribe (threat-model decision 1). Refused while
+    /// the transcription plugin is disabled or removed — the registry,
+    /// not the caller, decides what may run.
     pub fn enable_whisper(&self, model_path: String) -> FfiResult<()> {
         #[cfg(feature = "whisper")]
         {
+            use gilune_kernel::plugins::PluginState;
+            let state = self
+                .store()
+                .plugin(whisper::PLUGIN_ID)?
+                .map(|p| p.state)
+                .unwrap_or(PluginState::Removed);
+            if state != PluginState::Enabled {
+                return Err(GiluneError::Invalid {
+                    detail: format!("transcription is {}", state.as_str()),
+                });
+            }
             let transcriber = whisper::WhisperTranscriber::load(&model_path)
                 .map_err(|detail| GiluneError::Invalid { detail })?;
-            self.store()
-                .subscribe("transcribe", gilune_kernel::capture::SOURCE_READY_EVENT)?;
-            self.processors
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push(Box::new(transcriber));
+            let mut processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
+            processors.retain(|p| p.id() != transcriber.id());
+            processors.push(Box::new(transcriber));
             Ok(())
         }
         #[cfg(not(feature = "whisper"))]
@@ -272,6 +437,61 @@ impl Gilune {
 
     pub fn resolve_tombstone(&self, proposal_id: String, accept: bool) -> FfiResult<()> {
         Ok(self.store().resolve_tombstone(&proposal_id, accept)?)
+    }
+
+    /// Declare an implementation this host carries — a platform adapter,
+    /// for instance, whose code lives in the shell rather than here.
+    /// Idempotent; returns the plugin's state, which is `removed` if the
+    /// user removed it, so a caller knows not to initialise it.
+    pub fn register_plugin(&self, declaration: PluginDeclaration) -> FfiResult<String> {
+        let descriptor = gilune_kernel::plugins::PluginDescriptor::try_from(declaration)?;
+        Ok(self.store().register_plugin(&descriptor)?.as_str().to_string())
+    }
+
+    pub fn plugins(&self) -> FfiResult<Vec<PluginInfo>> {
+        Ok(self.store().installed_plugins()?.into_iter().map(Into::into).collect())
+    }
+
+    /// Turn a plugin off or on. Waiting work is parked, not destroyed.
+    pub fn set_plugin_enabled(&self, plugin_id: String, enabled: bool) -> FfiResult<()> {
+        self.store().set_plugin_enabled(&plugin_id, enabled)?;
+        if !enabled {
+            self.unload_processor(&plugin_id)?;
+        }
+        Ok(())
+    }
+
+    /// Remove a plugin: grants and settings go, waiting work is parked,
+    /// and everything it created stays in the vault. Device-local assets
+    /// it downloaded are the caller's to delete.
+    pub fn remove_plugin(&self, plugin_id: String) -> FfiResult<()> {
+        self.unload_processor(&plugin_id)?;
+        Ok(self.store().remove_plugin(&plugin_id)?)
+    }
+
+    /// Re-install a removed plugin. Grants start empty again.
+    pub fn reinstall_plugin(&self, plugin_id: String) -> FfiResult<()> {
+        Ok(self.store().reinstall_plugin(&plugin_id)?)
+    }
+
+    /// Record consent to a capability the plugin declares. Granting one it
+    /// does not declare is refused.
+    pub fn grant_capability(&self, plugin_id: String, capability: String) -> FfiResult<()> {
+        Ok(self.store().grant_capability(&plugin_id, &capability)?)
+    }
+
+    pub fn revoke_capability(&self, plugin_id: String, capability: String) -> FfiResult<()> {
+        Ok(self.store().revoke_capability(&plugin_id, &capability)?)
+    }
+
+    /// Whether a plugin may do something now. False for a disabled or
+    /// removed plugin whatever it was granted, so hosts ask only this.
+    pub fn is_granted(&self, plugin_id: String, capability: String) -> FfiResult<bool> {
+        Ok(self.store().is_granted(&plugin_id, &capability)?)
+    }
+
+    pub fn set_plugin_settings(&self, plugin_id: String, settings: String) -> FfiResult<()> {
+        Ok(self.store().set_plugin_settings(&plugin_id, &settings)?)
     }
 }
 

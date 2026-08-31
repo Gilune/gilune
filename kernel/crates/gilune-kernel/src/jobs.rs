@@ -24,9 +24,10 @@ pub struct Job {
 
 impl Store {
     /// Register interest in an event type. Jobs are created only for
-    /// events committed while a subscription exists and is enabled;
-    /// backfill for re-enabled subscriptions arrives with the plugin
-    /// lifecycle (M4).
+    /// events committed while a subscription exists, and claimed only
+    /// while it is enabled — disabling parks waiting jobs rather than
+    /// destroying them, so re-enabling resumes where work stopped. Events
+    /// that passed while no subscription existed are not backfilled.
     pub fn subscribe(&self, subscription_id: &str, event_type: &str) -> Result<()> {
         self.conn().execute(
             "INSERT OR REPLACE INTO subscriptions (subscription_id, event_type, enabled)
@@ -46,9 +47,12 @@ impl Store {
                 .query_row(
                     "SELECT j.job_id, j.subscription_id, j.event_id, j.attempts,
                             e.event_type, e.subject_id, e.payload
-                     FROM jobs j JOIN events e ON e.event_id = j.event_id
-                     WHERE (j.state = 'pending' AND j.not_before_ms <= ?1)
-                        OR (j.state = 'leased' AND j.lease_until_ms <= ?1)
+                     FROM jobs j
+                     JOIN events e ON e.event_id = j.event_id
+                     JOIN subscriptions s ON s.subscription_id = j.subscription_id
+                     WHERE s.enabled = 1
+                       AND ((j.state = 'pending' AND j.not_before_ms <= ?1)
+                            OR (j.state = 'leased' AND j.lease_until_ms <= ?1))
                      ORDER BY e.created_ms
                      LIMIT 1",
                     [now_ms],

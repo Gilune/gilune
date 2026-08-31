@@ -138,10 +138,18 @@ gates promises) are ratified. **Next: application-level engineering — see
      (shell regions, fixed five-slot list, plugin-owned UI, everything
      but the vault projection removable) and ADR 0012 (the Markdown
      buffer is always the document; rich presentation renders it) are
-     ratified. Order: (a) kernel plugin registry — identity, class,
-     profile, enablement, grants, settings, job cancellation on
-     removal — plus FFI and the split of voice capture from
-     transcription; (b) shell restructure — rail with a real tree and
+     ratified. Order: ~~(a) kernel plugin registry~~ — done
+     2026-08-31: schema v4 (`plugins`, `plugin_grants`), declarations
+     live beside their implementations
+     (`vault::plugin_descriptor`, `whisper::descriptor`), job delivery
+     gated on plugin state, removal keeps a tombstone so bundling is
+     not consent, grants never inherited across an update or a
+     removal, FFI surface (`plugins`, `register_plugin`,
+     `set_plugin_enabled`, `remove_plugin`, `grant_capability`, …)
+     and `gilune-cli plugins`. Off means nothing is queued and waiting
+     jobs are parked; switching on resumes them but never backfills.
+     Still to do in (a): declare voice capture as a shell-side adapter
+     and gate the mic on its contribution; (b) shell restructure — rail with a real tree and
      creation affordances, document pane, persistent capture bar,
      settings sections; (c) editor stage E1 (rendered read + raw edit,
      hash guard, autosave with batched reconcile), then E2; E3 only

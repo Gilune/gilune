@@ -20,12 +20,18 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut args = args.iter().map(String::as_str);
 
-    let usage =
-        "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|project|reconcile|status|verify>";
+    let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|project|\
+                 reconcile|status|verify|plugins [enable|disable|remove <id>]>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
     let store = Store::open(vault).map_err(|e| e.to_string())?;
+    // Every host of this kernel carries the vault projection, so every
+    // host declares it — the app, this tool and the agent then agree on
+    // what is installed (ADR 0011).
+    store
+        .register_plugin(&gilune_kernel::vault::plugin_descriptor())
+        .map_err(|e| e.to_string())?;
 
     match args.next() {
         Some("init") => {
@@ -80,9 +86,11 @@ fn run() -> Result<(), String> {
         }
         Some("work") => {
             // Dev tool: runs the deterministic stand-in transcriber, the
-            // same one the crash harness aborts mid-commit.
+            // same one the crash harness aborts mid-commit. Registering it
+            // is what subscribes it, so disabling it here behaves exactly
+            // as disabling a real provider in the app does.
             store
-                .subscribe("transcribe", gilune_kernel::capture::SOURCE_READY_EVENT)
+                .register_plugin(&gilune_kernel::processor::fake_transcriber_descriptor())
                 .map_err(|e| e.to_string())?;
             let s = store
                 .run_pending_jobs(
@@ -126,6 +134,41 @@ fn run() -> Result<(), String> {
                     "quarantined": r.quarantined,
                 })
             );
+            Ok(())
+        }
+        Some("plugins") => {
+            match (args.next(), args.next()) {
+                (None, _) => {}
+                (Some("enable"), Some(id)) => {
+                    store.set_plugin_enabled(id, true).map_err(|e| e.to_string())?
+                }
+                (Some("disable"), Some(id)) => {
+                    store.set_plugin_enabled(id, false).map_err(|e| e.to_string())?
+                }
+                (Some("remove"), Some(id)) => {
+                    store.remove_plugin(id).map_err(|e| e.to_string())?
+                }
+                _ => return Err(usage.to_string()),
+            }
+            let listed: Vec<_> = store
+                .installed_plugins()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "plugin_id": p.descriptor.plugin_id,
+                        "name": p.descriptor.name,
+                        "class": p.descriptor.class.as_str(),
+                        "profile": p.descriptor.profile.as_str(),
+                        "state": p.state.as_str(),
+                        "required": p.descriptor.required,
+                        "subscribes": p.descriptor.subscribes,
+                        "granted": p.granted,
+                        "ungranted": p.ungranted(),
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::json!({ "plugins": listed }));
             Ok(())
         }
         Some("verify") => {

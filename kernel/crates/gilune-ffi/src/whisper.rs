@@ -4,8 +4,37 @@
 //! anything else fails the job visibly rather than guessing.
 
 use gilune_kernel::jobs::Job;
+use gilune_kernel::plugins::{Contribution, PluginClass, PluginDescriptor, PluginProfile};
 use gilune_kernel::processor::{Processor, ProcessorCtx, ProposedOutput};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+pub const PLUGIN_ID: &str = "org.memory.transcription";
+
+/// What this provider declares about itself. The model download is a
+/// declared `network.request`, so a person sees and consents to it
+/// instead of a first launch quietly fetching 75 MiB (ADR 0011).
+pub fn descriptor() -> PluginDescriptor {
+    PluginDescriptor {
+        plugin_id: PLUGIN_ID.to_string(),
+        name: "Local transcription".to_string(),
+        class: PluginClass::Provider,
+        profile: PluginProfile::Bundled,
+        required: false,
+        processor_id: Some("transcribe".to_string()),
+        subscribes: Some(gilune_kernel::capture::SOURCE_READY_EVENT.to_string()),
+        emits: vec!["org.memory.transcript-ready".to_string()],
+        capabilities: vec![
+            "blobs.read".to_string(),
+            "objects.write".to_string(),
+            "network.request".to_string(),
+        ],
+        contributions: vec![Contribution {
+            slot: "settings.form".to_string(),
+            id: "transcription-model".to_string(),
+            label: "Model and language".to_string(),
+        }],
+    }
+}
 
 pub struct WhisperTranscriber {
     ctx: WhisperContext,

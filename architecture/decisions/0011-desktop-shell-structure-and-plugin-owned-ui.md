@@ -54,8 +54,13 @@ slots require real first-party pressure and an amendment here (ADR 0006).
 - Every plugin except the Markdown vault projection can be disabled and
   removed. The projection is required: the vault is the product surface.
 - Removal deletes the plugin's settings, grants and downloaded assets,
-  cancels its waiting jobs, and **retains every object it created** as
+  parks its waiting jobs, and **retains every object it created** as
   ordinary user data (plugin lifecycle step 10).
+- While a plugin is off — disabled or removed — nothing new is queued for
+  it, and jobs already waiting are claimable by nobody. Switching it on
+  resumes the work that was waiting; it does not re-run what happened
+  while it was off. Backfill stays a deliberate action, which is what a
+  re-run action such as `Transcribe again` is for.
 - Network use is disclosed and consented in this section before it
   happens. The transcription model download is the first case and is
   currently silent; that is a defect this decision closes.
@@ -114,8 +119,8 @@ settings is the prevailing desktop pattern.
 ## Consequences
 
 - The kernel gains a plugin registry — identity, class, profile,
-  enablement, grants, settings — plus job cancellation on removal. This is
-  a schema migration and the prerequisite for everything else here.
+  enablement, grants, settings — and gates job delivery on it. This is a
+  schema migration and the prerequisite for everything else here.
 - The FFI grows plugin listing, enablement and removal; the shell stops
   calling `enable_whisper` directly.
 - The capture panel is shared with Android, so the microphone becomes a
