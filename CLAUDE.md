@@ -426,6 +426,19 @@ gates promises) are ratified. **Next: application-level engineering — see
      raw-line exception follows a caret someone can see. Coordinator
      fix; two seam tests rewritten to the new contract; live-proven
      (fresh open shows all glyphs, first click stamps done:).
+     **Second owner report same evening**: ticking tasks with the
+     agenda open didn't update the panel — vaultTick existed and the
+     panel listened, but the editor's own writes never raised it
+     (autosave wrote silently; recorded T3 gap). Fix: `write()` calls
+     `state.noteSaved()` (vaultTick++) after any successful save, and
+     checkbox activation now calls `write()` directly (§ 1
+     write-on-action — no 1.2 s autosave wait). Panel, search and
+     filter blocks all refresh off the same tick; kernel ingestion
+     still waits for sync (display fact, not history). Remaining
+     edge: a dirty buffer flushed by tab DEACTIVATION (flushEditor in
+     Tabs.kt has no state handle) is still silent until the next
+     tick. Live-proven: ticked a task from the open panel — its
+     "today" group vanished without reload.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

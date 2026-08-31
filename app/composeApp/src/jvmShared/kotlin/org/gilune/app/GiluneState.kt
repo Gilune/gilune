@@ -62,6 +62,16 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         }
     }
 
+    /// The editor's own writes announce themselves: the agenda panel,
+    /// the search panel and every filter block read the vault off
+    /// `vaultTick`, and a save nobody hears about leaves them showing a
+    /// task that is already done (owner report, 2026-08-31). Kernel
+    /// ingestion still waits for sync — this is a display fact, not a
+    /// history one.
+    fun noteSaved() {
+        vaultTick.value += 1
+    }
+
     fun refresh() {
         val g = gilune.value ?: return
         val sources = g.recentSources(100u)

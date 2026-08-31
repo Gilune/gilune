@@ -304,6 +304,10 @@ private fun OpenNote(
     // One write path in the app: autosave, leaving a tab and closing one
     // all go through the same guard (ADR 0012). `force` is the answer the
     // stale-buffer banner takes, and only it may pass the guard.
+    //
+    // A write announces itself: panels and filter blocks read the vault
+    // off `vaultTick`, and a save nobody hears about is an agenda that
+    // only catches up on reload (owner report, 2026-08-31).
     fun write(force: Boolean = false) {
         if (force) {
             val document = editor.document()
@@ -311,10 +315,14 @@ private fun OpenNote(
             editor.hashAtOpen = contentHash(document)
             editor.dirty = false
             editor.staleBuffer = false
+            state.noteSaved()
             return
         }
+        val wasDirty = editor.dirty
         if (!flushEditor(state.vaultDir, editor)) {
             state.message.value = "$relPath changed on disk; choose which version to keep"
+        } else if (wasDirty) {
+            state.noteSaved()
         }
     }
 
@@ -590,6 +598,10 @@ private fun OpenNote(
                     ),
                 )
                 editor.dirty = true
+                // § 1: toggling writes at the toggle. A click is an action,
+                // not typing — it does not wait out the autosave idle, so
+                // the agenda drops the task the moment it is ticked.
+                write()
             }
 
             // The input surface is the pane, not the text: a short note
