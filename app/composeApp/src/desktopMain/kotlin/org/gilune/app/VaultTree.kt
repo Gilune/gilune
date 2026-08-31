@@ -44,8 +44,10 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Audiotrack
+import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Extension
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material3.AlertDialog
@@ -170,7 +172,17 @@ fun searchNotes(vaultDir: String, query: String): List<String> {
         .toList()
 }
 
-enum class RailPanel { FILES, SEARCH }
+/// Which panel the rail shows — **a plugin-keyed value, not a two-case
+/// enum** (ADR 0015 § 5, T3). The shell owns [FILES] and [SEARCH]; every
+/// other key belongs to a `navigation` contribution, so a plugin adds a
+/// destination without this type growing a case and removing it takes the
+/// destination away again.
+data class RailPanel(val key: String) {
+    companion object {
+        val FILES = RailPanel("files")
+        val SEARCH = RailPanel("search")
+    }
+}
 
 class TreeState {
     val expanded = mutableStateListOf<String>()
@@ -209,6 +221,18 @@ fun RailPanels(
     onDeleted: (String) -> Unit = {},
 ) {
     val colours = MaterialTheme.colorScheme
+    // The rail's upper region as ADR 0011 always described it: a declared
+    // navigation slot. Read per composition from the live plugin list, so
+    // a tab appears and disappears with the plugin behind it and with the
+    // plugin's own panel switch (ADR 0015 § 6, T3).
+    val destinations = navigationPanels(state.plugins)
+    // A destination that has just gone — switched off, disabled, removed —
+    // leaves the rail looking at nothing, so the rail falls back to the
+    // files it always has. Held as a value rather than written back:
+    // composition reads state, it does not edit it.
+    val shellOwned = tree.railPanel == RailPanel.FILES || tree.railPanel == RailPanel.SEARCH
+    val active =
+        if (shellOwned || destinations.any { it.key == tree.railPanel.key }) tree.railPanel else RailPanel.FILES
     Column(modifier) {
         // Exactly as tall as a pane's tab strip, so the divider below it
         // runs unbroken across the seam (owner-reported misalignment,
@@ -218,16 +242,30 @@ fun RailPanels(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(3.dp),
         ) {
-            RailTab(Icons.Outlined.Description, "files", tree.railPanel == RailPanel.FILES) {
+            RailTab(Icons.Outlined.Description, "files", active == RailPanel.FILES) {
                 tree.railPanel = RailPanel.FILES
             }
-            RailTab(Icons.Default.Search, "search", tree.railPanel == RailPanel.SEARCH) {
+            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH) {
                 tree.railPanel = RailPanel.SEARCH
+            }
+            for (destination in destinations) {
+                // The label is the contribution's own, verbatim: it is
+                // what the plugin calls its destination, and the shell is
+                // not the one to reword it.
+                RailTab(navigationIcon(destination.key), destination.label, active.key == destination.key) {
+                    tree.railPanel = RailPanel(destination.key)
+                }
             }
         }
         HorizontalDivider(color = colours.outlineVariant)
-        when (tree.railPanel) {
-            RailPanel.FILES -> VaultTree(
+        when (active.key) {
+            RailPanel.SEARCH.key ->
+                SearchPanel(state, searchFocus, onOpen, Modifier.weight(1f), initialSearchQuery)
+            TASKS_RAIL_PANEL -> TasksPanel(state, onOpen, Modifier.weight(1f))
+            // FILES, and — defensively — a key some contribution named
+            // that this host has no panel for. A rail always shows
+            // something, and the tree is what it shows.
+            else -> VaultTree(
                 state,
                 tree,
                 onOpen,
@@ -237,10 +275,19 @@ fun RailPanels(
                 onRenamed = onRenamed,
                 onDeleted = onDeleted,
             )
-            RailPanel.SEARCH ->
-                SearchPanel(state, searchFocus, onOpen, Modifier.weight(1f), initialSearchQuery)
         }
     }
+}
+
+/// A contributed destination's tab icon. Keyed rather than declared: an
+/// icon name in `config` would be a string the shell has to resolve into
+/// this same table, and the honest v1 position (§ 7) is that the
+/// behaviour behind a slot id is Kotlin here. A key this host does not
+/// know gets the plugin glyph, so an unrecognised destination still looks
+/// like what it is.
+private fun navigationIcon(key: String): ImageVector = when (key) {
+    TASKS_RAIL_PANEL -> Icons.Outlined.CheckBox
+    else -> Icons.Outlined.Extension
 }
 
 @Composable

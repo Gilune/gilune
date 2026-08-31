@@ -429,12 +429,17 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
 }
 
 /// The tasks plugin's settings: § 1's global filter, the one setting the
-/// recognisers, the `/` menu and — later — the panel and queries all read,
-/// so the vault can never disagree with itself about what a task is.
+/// recognisers, the `/` menu, the panel and queries all read, so the
+/// vault can never disagree with itself about what a task is — and § 6's
+/// switch over the agenda panel itself.
+///
+/// Both are keys of one settings document, so every write here sends both
+/// (`tasksSettingsDocument`): changing one must never drop the other.
 @Composable
 private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
     val saved = remember(plugin.settings) { listOf(plugin).tasksFilter() }
+    val panelOn = remember(plugin.settings) { listOf(plugin).tasksPanelEnabled() }
     var filter by remember(plugin.settings) { mutableStateOf(saved) }
     Text("Global filter", style = MaterialTheme.typography.titleSmall)
     Text(
@@ -466,12 +471,37 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
                     } else {
                         "only checkbox lines containing $wanted are tasks"
                     },
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn)) }
             },
             // An empty filter is a legitimate value — the shipped default
             // — so only "no change" disables the button.
             enabled = filter.trim() != saved,
         ) { Text("Apply", fontSize = 12.sp) }
+    }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Agenda panel", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "A tab in the rail listing what is open: overdue, today, the next " +
+            "seven days, and tasks with no date. Switched off, the tab is not " +
+            "added at all — the plugin keeps styling dates and offering the " +
+            "/ menu. Nothing in your vault changes either way.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Switch(
+            checked = panelOn,
+            // The filter travels with the write, so toggling the panel
+            // cannot quietly reset what a person set it to.
+            onCheckedChange = { show ->
+                state.pluginAction(
+                    if (show) "the agenda panel is in the rail" else "the agenda panel is off",
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show)) }
+            },
+        )
+        Text("Show the agenda panel", fontSize = 13.sp)
     }
 }
 

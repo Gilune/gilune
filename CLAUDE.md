@@ -367,8 +367,26 @@ gates promises) are ratified. **Next: application-level engineering — see
      suggest's trailing space + stamp's leading space = double space
      before done:; validation lesson — scratch-vault PLUGIN STATE
      persists (a disabled test plugin stays disabled next probe).
-     **Remaining: T3 (agenda panel + off switch, navigation slot),
-     T4 (filter-block rendering).**
+     **T3 SHIPPED (2026-08-31, one agent)**: `RailPanel` is a
+     plugin-keyed value (FILES/SEARCH companions); the `navigation`
+     slot is real — `navigationPanels(plugins)` reads contributions
+     whose config names a panel (nameless ones dropped), the tasks tab
+     gated additionally on `tasksPanelEnabled()` (settings key
+     "panel", absent=true; one JSON document with the filter,
+     read-modify-write both keys); TasksPanel = one
+     `searchVault("type:task", maxLines=200)` per vaultTick →
+     `taskRows` → pure `agenda()` partition: checked excluded,
+     overdue < today, today, today+1..+7 (deliberately NOT the
+     due:week window so views never overlap), undated collapsed;
+     50-row cap per group with +N more; rows NAVIGATE only. Probe
+     `panel:<key>`. Suite 308. Live-proven: four groups with correct
+     colours; done task in no view. Gaps: panel staleness = search's
+     (vaultTick; buffer edits arrive at next tick, ADR's
+     settle-refresh not implemented); rows open the note, not the
+     line; tasks due past today+7 appear in no view (bounded by
+     design — search answers them); `navigationPanels` knows the
+     tasks panel by id in shell code (debt 10). **Remaining: T4
+     (filter-block rendering in notes).**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

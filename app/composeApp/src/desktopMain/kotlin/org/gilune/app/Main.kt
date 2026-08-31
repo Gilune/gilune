@@ -384,9 +384,9 @@ private fun DesktopApp(
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
             // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>,
-            // props:<rel>, search:<query> and split:<rel>;<rel>. View
-            // state belongs to a tab, so a probe flips it on the tab the
-            // open returned.
+            // props:<rel>, search:<query>, panel:<key> and
+            // split:<rel>;<rel>. View state belongs to a tab, so a probe
+            // flips it on the tab the open returned.
             when {
                 probe == null -> Unit
                 probe.startsWith("settings") -> onSettingsOpen(true)
@@ -404,6 +404,13 @@ private fun DesktopApp(
                     // whatever the preferences last left it at.
                     setRailCollapsed(false)
                     tree.railPanel = RailPanel.SEARCH
+                }
+                // Any rail panel by key, contributed ones included
+                // (`panel:tasks`). A key nothing contributes composes the
+                // tree, exactly as it does when a plugin goes away.
+                probe.startsWith("panel:") -> {
+                    setRailCollapsed(false)
+                    tree.railPanel = RailPanel(probe.removePrefix("panel:"))
                 }
                 probe.startsWith("props:") -> {
                     tabs.open(probe.removePrefix("props:")).editor.openProperties = true

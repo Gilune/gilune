@@ -89,6 +89,39 @@ fun List<PluginInfo>.contributes(slot: String, id: String): Boolean =
 fun List<PluginInfo>.pluginContributes(pluginId: String, slot: String): Boolean =
     any { it.pluginId == pluginId && it.state == "enabled" && it.contributions.any { c -> c.slot == slot } }
 
+/// One live rail destination: the [RailPanel] key the contribution's
+/// `config` names, and the label the tab announces itself by.
+data class NavigationPanel(val key: String, val label: String)
+
+/// The `navigation` slot ADR 0011 declared and no code ever read
+/// (ADR 0015 § 5, T3): what the rail should show tabs for, right now.
+///
+/// A contribution names its panel in `config` — `{"panel":"tasks"}` —
+/// because three fixed strings cannot carry a payload and smuggling one
+/// into `id` is not a seam. One that names none is dropped rather than
+/// offered as a tab that goes nowhere.
+///
+/// **The tasks panel carries a second condition** (§ 6, T3): its own
+/// settings switch. Off, and the tab is not contributed at all — the same
+/// shape as every other `contributes(…)` gate, one condition further in.
+/// The condition is written here, in the shell, for the reason § 7 gives:
+/// in v1 the behaviour behind a slot id is Kotlin the shell owns, so the
+/// shell is what knows whose panel this is (debt 10).
+fun navigationPanels(plugins: List<PluginInfo>): List<NavigationPanel> =
+    plugins.filter { it.state == "enabled" }.flatMap { plugin ->
+        val muted = plugin.pluginId == TASKS_PLUGIN && !plugins.tasksPanelEnabled()
+        if (muted) {
+            emptyList()
+        } else {
+            plugin.contributions
+                .filter { it.slot == Slots.NAVIGATION }
+                .mapNotNull { contribution ->
+                    jsonString(contribution.config, PANEL_KEY)
+                        ?.let { NavigationPanel(it, contribution.label) }
+                }
+        }
+    }
+
 // ---------------------------------------------------------------------
 // The tasks plugin (ADR 0015). A bundled Kotlin shell plugin on the
 // voice-capture precedent: no processor, no subscription, no emitted
@@ -105,6 +138,14 @@ const val TASKS_PLUGIN = "org.memory.tasks"
 const val TASKS_DUE_FIELD = "due"
 const val TASKS_DECORATIONS_CONTRIBUTION = "task-dates"
 const val TASKS_SUGGEST_CONTRIBUTION = "slash-menu"
+const val TASKS_NAVIGATION_CONTRIBUTION = "tasks"
+
+/// The rail panel the navigation contribution names, and so the key the
+/// shell's `RailPanel` carries while the agenda is showing. Equal to the
+/// contribution's id here, and not by rule: the id names the contribution
+/// among this plugin's, the `config` names the destination, and a second
+/// panel from the same plugin would part them.
+const val TASKS_RAIL_PANEL = "tasks"
 
 /// Declared here for the same reason the microphone is: the behaviour
 /// behind these ids is shell Kotlin in v1, so the shell is what declares
@@ -154,6 +195,16 @@ fun tasksDeclaration(): PluginDeclaration =
                 id = "task",
                 label = "type:task in search and filters",
                 config = """{"type":"task","operators":["due","done"]}""",
+            ),
+            // The dead slot becomes real (§ 5, T3). The `config` names the
+            // panel, so the shell routes to it by key rather than by
+            // knowing which plugin asked — the shape a declarative host
+            // will read unchanged.
+            PluginContribution(
+                slot = Slots.NAVIGATION,
+                id = TASKS_NAVIGATION_CONTRIBUTION,
+                label = "Tasks",
+                config = """{"$PANEL_KEY":"$TASKS_RAIL_PANEL"}""",
             ),
         ),
     )
@@ -315,11 +366,31 @@ fun taskFields(plugins: List<PluginInfo>): List<SuggestField> {
 /// read it are gated instead, and the plugin's own settings screen must
 /// show what is stored even while it is switched off.
 fun List<PluginInfo>.tasksFilter(): String =
-    firstOrNull { it.pluginId == TASKS_PLUGIN }?.let { jsonString(it.settings, "filter") }.orEmpty()
+    firstOrNull { it.pluginId == TASKS_PLUGIN }?.let { jsonString(it.settings, FILTER_KEY) }.orEmpty()
+
+/// The agenda panel's off switch (§ 6, T3): "a plugin setting turns the
+/// panel off; while it is off the shell does not compose the tab".
+///
+/// **Absent means on.** The panel ships with the plugin, so a settings
+/// document written before this key existed — or none at all — must read
+/// as the shipped default rather than as a switch nobody has ever seen
+/// silently holding a feature back.
+///
+/// Not gated on the plugin's state, for [tasksFilter]'s reason: the
+/// plugin's own settings screen must show what is stored even while it is
+/// switched off, and the rail is what gates.
+fun List<PluginInfo>.tasksPanelEnabled(): Boolean =
+    firstOrNull { it.pluginId == TASKS_PLUGIN }?.let { jsonBoolean(it.settings, PANEL_KEY) } ?: true
 
 /// The settings document the tasks plugin stores, written here so the
-/// writer and [tasksFilter] cannot drift apart.
-fun tasksSettingsDocument(filter: String): String = """{"filter":"${escapeJsonString(filter)}"}"""
+/// writer, [tasksFilter] and [tasksPanelEnabled] cannot drift apart. Both
+/// keys are written every time: a caller changing one holds the other,
+/// so toggling the panel can never drop the filter someone set.
+fun tasksSettingsDocument(filter: String, panel: Boolean = true): String =
+    """{"$FILTER_KEY":"${escapeJsonString(filter)}","$PANEL_KEY":$panel}"""
+
+private const val FILTER_KEY = "filter"
+private const val PANEL_KEY = "panel"
 
 /// One string value out of a flat JSON document, escapes handled. Plugin
 /// settings and contribution configs are opaque strings with no schema
@@ -329,6 +400,13 @@ fun tasksSettingsDocument(filter: String): String = """{"filter":"${escapeJsonSt
 private fun jsonString(document: String, key: String): String? =
     Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
         .find(document)?.groupValues?.get(1)?.let(::unescapeJsonString)
+
+/// The same targeted extraction for a boolean. Absent — or anything that
+/// is not `true`/`false` — is null, so every caller states its own default
+/// rather than inheriting one from a parse failure.
+private fun jsonBoolean(document: String, key: String): Boolean? =
+    Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*(true|false)\\b")
+        .find(document)?.groupValues?.get(1)?.toBooleanStrictOrNull()
 
 private fun unescapeJsonString(raw: String): String = buildString(raw.length) {
     var index = 0

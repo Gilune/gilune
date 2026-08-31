@@ -76,7 +76,7 @@ class TasksPluginTest {
     }
 
     @Test
-    fun theDeclarationCoversTheFourSlotsTheShippedStagesNeed() {
+    fun theDeclarationCoversTheFiveSlotsTheShippedStagesNeed() {
         val slots = tasksDeclaration().contributions.associate { it.slot to it.id }
         assertEquals(
             mapOf(
@@ -84,9 +84,95 @@ class TasksPluginTest {
                 Slots.EDITOR_DECORATIONS to TASKS_DECORATIONS_CONTRIBUTION,
                 Slots.EDITOR_SUGGEST to TASKS_SUGGEST_CONTRIBUTION,
                 Slots.SEARCH_TYPES to "task",
+                Slots.NAVIGATION to TASKS_NAVIGATION_CONTRIBUTION,
             ),
             slots,
         )
+    }
+
+    // ------------------------------------------------------------------
+    // The navigation slot and the panel's off switch (§ 5, § 6 T3)
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theNavigationContributionNamesThePanelTheRailShows() {
+        val panels = navigationPanels(listOf(installedTasksPlugin()))
+        assertEquals(listOf(TASKS_RAIL_PANEL), panels.map { it.key })
+        assertEquals("Tasks", panels[0].label, "the tab announces itself by the plugin's own label")
+    }
+
+    @Test
+    fun aDisabledOrRemovedPluginContributesNoRailTab() {
+        for (state in listOf("disabled", "removed")) {
+            assertTrue(
+                navigationPanels(listOf(installedTasksPlugin(state = state))).isEmpty(),
+                "state <$state> should contribute no destination",
+            )
+        }
+        assertTrue(navigationPanels(emptyList()).isEmpty(), "and a vault without the plugin has none")
+    }
+
+    @Test
+    fun theShippedPanelSettingIsOnSoTheTabIsThereWithoutAnyoneAskingForIt() {
+        assertTrue(listOf(installedTasksPlugin()).tasksPanelEnabled(), "absent means on")
+        assertTrue(
+            listOf(installedTasksPlugin(settings = """{"filter":"#task"}""")).tasksPanelEnabled(),
+            "a settings document written before the key existed still reads as on",
+        )
+        assertTrue(emptyList<PluginInfo>().tasksPanelEnabled(), "and so does a vault without the plugin")
+    }
+
+    @Test
+    fun switchingThePanelOffMeansTheRailTabIsNotContributed() {
+        val off = installedTasksPlugin(settings = tasksSettingsDocument("", panel = false))
+        assertTrue(!listOf(off).tasksPanelEnabled())
+        assertTrue(
+            navigationPanels(listOf(off)).isEmpty(),
+            "§ 6: while it is off the shell does not compose the tab",
+        )
+        // Everything else the plugin contributes is untouched: the switch
+        // is over the panel, not over the plugin.
+        assertEquals(listOf("due"), taskFields(listOf(off)).map { it.key })
+    }
+
+    @Test
+    fun theTwoSettingsAreOneDocumentAndNeitherWriteDropsTheOther() {
+        val both = tasksSettingsDocument("#task", panel = false)
+        assertEquals("#task", listOf(installedTasksPlugin(settings = both)).tasksFilter())
+        assertTrue(!listOf(installedTasksPlugin(settings = both)).tasksPanelEnabled())
+        // What each control in the settings screen writes: the value it
+        // owns, and the stored value of the one it does not.
+        val panelToggledBackOn = tasksSettingsDocument("#task", panel = true)
+        assertEquals("#task", listOf(installedTasksPlugin(settings = panelToggledBackOn)).tasksFilter())
+        val filterCleared = tasksSettingsDocument("", panel = false)
+        assertTrue(!listOf(installedTasksPlugin(settings = filterCleared)).tasksPanelEnabled())
+    }
+
+    @Test
+    fun thePanelSettingIsReadableWhileThePluginIsOff() {
+        val off = installedTasksPlugin(state = "disabled", settings = tasksSettingsDocument("", panel = false))
+        assertTrue(!listOf(off).tasksPanelEnabled(), "its own screen shows what is stored; the rail is what gates")
+    }
+
+    @Test
+    fun anotherPluginsNavigationContributionIsReadThroughTheSameSlot() {
+        val other = installedPlugin(
+            "org.example.calendar",
+            contributions = listOf(
+                PluginContribution(Slots.NAVIGATION, "calendar", "Calendar", """{"panel":"calendar"}"""),
+            ),
+        )
+        assertEquals(
+            listOf(TASKS_RAIL_PANEL, "calendar"),
+            navigationPanels(listOf(installedTasksPlugin(), other)).map { it.key },
+        )
+        // …and one naming no panel is dropped rather than offered as a tab
+        // that goes nowhere.
+        val nameless = installedPlugin(
+            "org.example.broken",
+            contributions = listOf(PluginContribution(Slots.NAVIGATION, "x", "X", "{}")),
+        )
+        assertTrue(navigationPanels(listOf(nameless)).isEmpty())
     }
 
     // ------------------------------------------------------------------
