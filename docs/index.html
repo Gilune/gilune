@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gilune — capture a thought, keep it in plain files</title>
+<meta name="description" content="Gilune is a capture-first notebook for Windows that keeps every note as a plain Markdown file on your own machine.">
+<link rel="icon" href="assets/gilune-logo.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="index.html"><img src="assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="guide/notes.html">Notes</a>
+      <a href="guide/capture.html">Capture</a>
+      <a href="guide/tasks.html">Tasks</a>
+      <a href="guide/search.html">Search</a>
+      <a href="guide/workspace.html">Workspace</a>
+      <a href="guide/plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <div class="hero">
+    <img class="mark" src="assets/gilune-logo.png" alt="The Gilune logo">
+    <h1>Gilune</h1>
+    <p class="tagline">Capture a thought. Keep it in plain files.</p>
+  </div>
+
+  <p class="lede">Gilune is a notebook for the things you want to remember. You write
+  or you speak, and what you keep is saved as an ordinary Markdown file in a folder
+  you chose — readable today, readable in ten years, and readable by any other editor
+  you care to point at it.</p>
+
+  <p>Everything runs on your own machine. There is no account to make, nothing to
+  sign in to, and nothing is sent anywhere unless you ask for it. Speech is
+  transcribed locally. Features arrive as plugins you can switch off or remove, and
+  removing one takes away its buttons and never touches a word you wrote. The name
+  comes from the globe gilia, a flower whose many small blooms cluster into a single
+  head — small fragments of thought gathered into something whole.</p>
+
+  <figure>
+    <img src="assets/hero-editor.png" alt="The Gilune desktop app: a file tree on the left, a note open in the editor, and a status line along the foot.">
+  </figure>
+
+  <h2>What it does</h2>
+
+  <h3>Capture, by typing or by speaking</h3>
+  <p>Press <kbd>Ctrl</kbd> + <kbd>N</kbd> and a new note opens with the title selected,
+  ready to be named. Or press the microphone in the top bar, talk, and press it again:
+  Gilune saves the recording, transcribes it on your machine, and opens the note it
+  made. Inside a note, a second microphone dictates straight at your cursor. The
+  recording is always saved first and kept as an ordinary audio file beside the note,
+  so a transcription that goes wrong costs you nothing.</p>
+  <p><a href="guide/capture.html">More about capture and voice →</a></p>
+
+  <h3>Your notes are plain files</h3>
+  <p>A note is a Markdown file. Gilune styles it as you type — headings, emphasis,
+  links, checkboxes — but the buffer you edit is always the real text of the file, so
+  what you see and what is on disk never drift apart. There is no save button; your
+  work is written as you go. Keep the folder in Obsidian, in a text editor, in version
+  control, or in all three at once.</p>
+  <figure>
+    <img src="assets/simple-note.png" alt="A note open in Gilune showing headings, body text and a checklist in the editor.">
+  </figure>
+  <p><a href="guide/notes.html">More about writing notes →</a></p>
+
+  <h3>Tasks, with dates you can type in words</h3>
+  <p>Any checkbox is a task. To give one a due date, type <code>/</code> on the task
+  line, press <kbd>Enter</kbd>, and type something like <em>tomorrow</em> or
+  <em>friday</em>. Gilune writes the real date into the line — a plain
+  <code>due:2026-09-04</code> that any other editor can read — and colours it so
+  your eye can find it. Tick a task and the day you finished it is stamped alongside.</p>
+  <figure>
+    <img src="assets/inline-date.png" alt="The slash menu open on a task line, offering natural-language dates such as today and tomorrow.">
+  </figure>
+  <p><a href="guide/tasks.html">More about tasks →</a></p>
+
+  <h3>An agenda that reads your own notes</h3>
+  <p>The agenda gathers every open task in the vault into four short lists: overdue,
+  today, the next seven days, and anything with no date at all. Ticked tasks drop out
+  of it. Nothing is stored twice — each row is a line that already lives in one of
+  your notes, and clicking it opens that note. If you would rather not have it, one
+  switch takes the whole panel away.</p>
+  <figure>
+    <img src="assets/agenda-panel.png" alt="The agenda panel in the sidebar, grouping open tasks under overdue, today and next seven days headings.">
+  </figure>
+  <p><a href="guide/tasks.html#agenda">More about the agenda →</a></p>
+
+  <h3>Search that understands what you are looking for</h3>
+  <p>Press <kbd>Ctrl</kbd> + <kbd>F</kbd> and type. Bare words all have to match;
+  quotes hold a phrase together; a leading <code>-</code> excludes. Beyond that there
+  is a small set of keywords — <code>file:</code>, <code>path:</code>,
+  <code>content:</code>, and, for tasks, <code>due:</code>, <code>done:</code> and
+  <code>is:</code>. A query like <code>type:task due:overdue is:open</code> says
+  exactly what it means. Mistype a keyword and it is simply treated as a word to look
+  for, so a typo never silently empties your results.</p>
+  <figure>
+    <img src="assets/search-tasks.png" alt="The search panel showing results for a task query, with matching lines listed under each note.">
+  </figure>
+  <p><a href="guide/search.html">The full query reference →</a></p>
+
+  <h3>Live lists inside a note</h3>
+  <p>Write a fenced code block labelled <code>filter</code>, put a query inside it,
+  and the note shows a live list of everything that matches. It is the same query
+  language as the search panel, one filter per line. To anyone else — Obsidian,
+  Notepad, GitHub — it is a perfectly ordinary code block, so the note stays legible
+  wherever it is opened.</p>
+  <figure>
+    <img src="assets/filter-block.png" alt="A note containing a filter code block, rendered below as a live list of matching tasks.">
+  </figure>
+  <p><a href="guide/tasks.html#filter-blocks">More about filter blocks →</a></p>
+
+  <h3>Tabs and split panes</h3>
+  <p>Notes open in tabs. <kbd>Ctrl</kbd> + <kbd>\</kbd> puts the current note in a
+  pane of its own beside the one you are in, so you can write in one and read in the
+  other. Drag the divider to rebalance them, drag a tab from one pane to the other,
+  and collapse the sidebar with <kbd>Ctrl</kbd> + <kbd>B</kbd> when you want the
+  words and nothing else. The layout is remembered per vault.</p>
+  <figure>
+    <img src="assets/split-panes.png" alt="Two notes open side by side in split panes, each with its own tab strip.">
+  </figure>
+  <p><a href="guide/workspace.html">More about tabs, panes and shortcuts →</a></p>
+
+  <h3>Plugins you can trust</h3>
+  <p>Transcription, tasks — these are plugins, and each has its own settings screen
+  listing what it may do, what it listens to and what it adds to the app. Anything it
+  wants that reaches outside your machine has to be allowed by you, by name, before it
+  happens; nothing downloads on a first launch. Switch a plugin off and its buttons
+  and menus go. Remove it and its settings and permissions go with it — everything it
+  ever wrote into your vault stays exactly where it is.</p>
+  <figure>
+    <img src="assets/plugin-settings.png" alt="A plugin's settings screen listing its permissions, the events it listens to, and what it adds to the app.">
+  </figure>
+  <p><a href="guide/plugins.html">More about plugins →</a></p>
+
+  <h2>Where the project is today</h2>
+  <div class="note">
+    <p><strong>Windows desktop</strong> is the app that exists and works today: writing,
+    voice capture with local transcription, tasks, search, tabs and split panes.</p>
+    <p><strong>An Android app</strong> is in development and not ready to use.</p>
+    <p><strong>Syncing between devices</strong> is being designed and is not built yet.
+    Until it is, your vault is just a folder — put it wherever you already back things
+    up, and copy it like any other folder.</p>
+    <p><strong>There are no downloads yet.</strong> Getting Gilune today means building
+    it from the repository, which is what the next section is for.</p>
+  </div>
+
+  <h2 id="build">Getting Gilune</h2>
+  <p>There is no installer to download at this stage of the project. To run Gilune on
+  Windows you will need <strong>JDK 17 or newer</strong>, a <strong>Rust
+  toolchain</strong> (1.98 or newer), and — because the transcription engine compiles
+  from C++ — <strong>LLVM and CMake</strong>, most easily installed with
+  <code>scoop install llvm cmake</code>, with <code>LIBCLANG_PATH</code> pointing at
+  the LLVM <code>bin</code> folder.</p>
+
+  <p>From a clone of the repository:</p>
+<pre><code>cd kernel
+cargo build --release -p gilune-ffi --features whisper
+
+cargo run -p gilune-ffi --bin uniffi-bindgen -- generate ^
+  --library target/release/gilune_ffi.dll --language kotlin ^
+  --out-dir ../app/composeApp/src/desktopMain/generated
+
+copy target\release\gilune_ffi.dll ..\app\composeApp\resources\windows-x64\
+
+cd ../app
+gradlew :composeApp:createReleaseDistributable</code></pre>
+
+  <p>The app is then at
+  <code>app/composeApp/build/compose/binaries/main-release/app/Gilune/Gilune.exe</code>.
+  On first run, choose a folder for your vault in Settings — an empty one is fine.</p>
+
+  <p>If you want voice notes, the transcription plugin needs a speech model of about
+  75 MiB. It is <em>not</em> fetched on first launch: open <strong>Settings ▸
+  Plugins</strong>, open the transcription plugin, and allow it network access. Only
+  then does the model download, once, and everything after that happens offline.</p>
+
+  <h2>The guide</h2>
+  <ul class="cards">
+    <li><a href="guide/notes.html"><strong>Notes</strong><span>Creating, editing, Markdown, checkboxes, properties and attachments.</span></a></li>
+    <li><a href="guide/capture.html"><strong>Capture &amp; voice</strong><span>Notes from speech, dictating at the cursor, and the language setting.</span></a></li>
+    <li><a href="guide/tasks.html"><strong>Tasks</strong><span>Due dates from the <code>/</code> menu, the agenda, and filter blocks.</span></a></li>
+    <li><a href="guide/search.html"><strong>Search</strong><span>The complete query language, with an example for every keyword.</span></a></li>
+    <li><a href="guide/workspace.html"><strong>Workspace</strong><span>Tabs, split panes, the sidebar, and every keyboard shortcut.</span></a></li>
+    <li><a href="guide/plugins.html"><strong>Plugins</strong><span>What they are, what they may do, and what happens when you remove one.</span></a></li>
+  </ul>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

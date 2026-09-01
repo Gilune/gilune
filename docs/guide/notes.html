@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notes — Gilune guide</title>
+<meta name="description" content="Creating, naming and editing notes in Gilune: Markdown styling, checkboxes, autosave, properties and attachments.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a class="here" href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Notes</h1>
+  <p class="lede">Every note is one Markdown file in your vault folder. Gilune is a
+  comfortable way to write them, not a place they are locked up.</p>
+
+  <h2>Making a note</h2>
+
+  <p>Press <kbd>Ctrl</kbd> + <kbd>N</kbd>. A note called <em>Untitled</em> appears with
+  its name already selected, so you can simply type the real name over it and carry on
+  into the body. If a folder is selected in the sidebar, the note is made there;
+  otherwise it goes to the top of the vault.</p>
+
+  <p>You can also use the <strong>new note</strong> button at the top of the sidebar,
+  or right-click a folder and choose <strong>New note here</strong>. To make a folder,
+  use the <strong>new folder</strong> button beside it or <strong>New folder
+  here</strong>; you then type the name straight into the tree, with
+  <kbd>Enter</kbd> to confirm and <kbd>Esc</kbd> to back out.</p>
+
+  <h2>Naming and renaming</h2>
+
+  <p>The note's name is the large field at the top of the page — it <em>is</em> the
+  file name, so editing it renames the file. Press <kbd>Enter</kbd> to commit, or just
+  click away. <kbd>Esc</kbd> puts the old name back. If the note has attachments, they
+  are renamed to match so they stay together.</p>
+
+  <p>You can also rename from the sidebar: right-click the note, choose
+  <strong>Rename</strong>, and type into the tree.</p>
+
+  <h2>Writing</h2>
+
+  <figure>
+    <img src="../assets/simple-note.png" alt="A note open for editing, with a heading, body text and a checklist styled in place.">
+  </figure>
+
+  <p>At the top of the page is a two-way switch, <strong>Edit</strong> and
+  <strong>Read</strong>. Notes open in Edit, where Gilune styles your Markdown as you
+  type — headings look like headings, emphasis is emphasised, checkboxes are drawn as
+  boxes. Read shows the same note fully laid out, without a cursor in it.</p>
+
+  <div class="note">
+    <p>Styling never changes a single byte. What you are editing is the literal text of
+    the file, dressed up — which is why you can put a note through Gilune, Obsidian and
+    a plain text editor in any order and always get the same file back.</p>
+  </div>
+
+  <p>You can set which mode notes open in under <strong>Settings ▸ Appearance ▸ Notes
+  open</strong>.</p>
+
+  <h3>Checkboxes</h3>
+
+  <p>Type <code>- [ ] something to do</code> and it becomes a checkbox you can click.
+  Clicking one ticks or unticks it and writes the change straight away, without moving
+  your cursor. Put the cursor on a checkbox line and that line shows its plain Markdown
+  again, so you can edit the raw text whenever you want it.</p>
+
+  <p>Checkboxes are also how tasks work — <a href="tasks.html">see the tasks page</a>
+  for due dates and the agenda.</p>
+
+  <h2>Saving</h2>
+
+  <p><strong>There is no save button, and you never need one.</strong> Gilune writes
+  the note about a second after you stop typing. Ticking a checkbox saves immediately,
+  and so does switching to another tab or closing one. The right-hand end of the status
+  bar says <code>saved</code> or <code>unsaved</code> so you always know where you
+  stand. If you want to force it, the <strong>⋯</strong> menu at the top of the page
+  has <strong>Save now</strong>.</p>
+
+  <h3>If the file changes underneath you</h3>
+
+  <p>Because your vault is an ordinary folder, something else may edit a note while you
+  have it open. If that happens to a note with unsaved changes, a banner appears across
+  the top of the page: <em>This note changed on disk while you were editing it.</em>
+  You choose <strong>Use the disk version</strong>, which takes the other version and
+  drops yours, or <strong>Keep mine</strong>, which writes yours over it. Nothing is
+  decided for you, and the tab will not close until you answer. If the note had no
+  unsaved changes, Gilune just quietly picks up the new version.</p>
+
+  <h2>Properties</h2>
+
+  <p>Notes can carry properties — the <code>key: value</code> lines at the very top of
+  the file. When a note has any, a small strip sits above the body; click it to see
+  them all.</p>
+
+  <p>To change them, open the <strong>⋯</strong> menu and choose
+  <strong>Properties…</strong>. Each property is a pair of fields you can edit, with a
+  button to remove it and a blank row at the bottom for adding a new one.
+  <strong>Apply</strong> keeps your changes, <strong>Cancel</strong> throws them away.</p>
+
+  <p>Gilune's own properties — the ones whose names begin <code>gilune-</code> — are
+  shown with a padlock and cannot be edited. They are how a note is tied to its
+  original recording and its history, so the app looks after them. Everything else in
+  there is yours.</p>
+
+  <h2>Attachments</h2>
+
+  <p>When a note has files beside it sharing its name — a voice note's audio recording,
+  for instance — a small arrow appears next to it in the sidebar. Click the arrow to
+  show them; click the note's name as usual to open it. Attachments are listed rather
+  than opened in Gilune: right-click one and choose <strong>Reveal in Explorer</strong>
+  to get at the file itself.</p>
+
+  <h2>Deleting</h2>
+
+  <p>Right-click a note in the sidebar and choose <strong>Delete</strong>. You will be
+  asked to confirm. The note is removed from your vault — but its earlier versions and,
+  if it came from a recording, the original audio, are kept. Deleting what you can see
+  never destroys what it was made from.</p>
+
+  <p>If a note is deleted by something <em>other</em> than Gilune, a banner appears at
+  the top of the window asking whether to keep its history or let it go, with
+  <strong>Restore</strong> and <strong>Delete</strong> to answer it.</p>
+
+  <h2>Using other apps on the same folder</h2>
+
+  <p>This is expected, not merely tolerated. Point Obsidian at your vault folder, edit
+  a note in Notepad, keep the whole thing in version control — all fine. Gilune picks
+  up outside changes and shows them; the refresh button in the top bar asks it to look
+  again straight away.</p>
+
+  <p>The one thing worth knowing is the guard described above: if you edit the same
+  note in two places at once, Gilune will stop and ask you which version to keep rather
+  than silently choosing.</p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

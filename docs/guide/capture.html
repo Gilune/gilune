@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capture &amp; voice — Gilune guide</title>
+<meta name="description" content="Making notes by speaking, dictating at the cursor, and how local transcription works in Gilune.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a class="here" href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Capture &amp; voice</h1>
+  <p class="lede">The quickest way into Gilune is to say the thing out loud. Your
+  words are turned into text on your own machine, and the recording itself is kept.</p>
+
+  <h2>A new note from speech</h2>
+
+  <p>The microphone button sits towards the right-hand end of the top bar, beside the
+  refresh and settings buttons.</p>
+
+  <ol>
+    <li>Click it. The status bar confirms it is recording, and the microphone turns
+    red.</li>
+    <li>Say what you want to keep.</li>
+    <li>Click it again to stop.</li>
+  </ol>
+
+  <p>Gilune saves the recording, transcribes it, and opens the note it made. The words
+  are the body of the note and the audio stays beside it as an attachment, so you can
+  always go back to what you actually said. Fix the text however you like — it is just
+  a note from that point on.</p>
+
+  <h2>Dictating into a note you already have</h2>
+
+  <p>Open a note and look at the row along the top of the page, next to the
+  <strong>Edit</strong> / <strong>Read</strong> switch: there is a second microphone
+  there. This one types for you.</p>
+
+  <p>Put your cursor where the words should go, click the microphone, speak, and click
+  it again. The text is inserted at the cursor — with a space in front of it if one is
+  needed — and the cursor ends up after it, ready for you to keep typing. If you had
+  text selected, the dictated words replace it.</p>
+
+  <p>You can only dictate into one note at a time; if you try to start a second one,
+  Gilune says so and leaves the first alone. And if you close the note before the
+  transcription comes back, the words are not lost — they appear in the status bar so
+  you can copy them.</p>
+
+  <div class="note">
+    <p><strong>The recording is always saved before anything else happens.</strong>
+    Transcription is a convenience laid on top. If the microphone fails, or the
+    transcription is unavailable, or the text comes out wrong, the audio you recorded is
+    already safely on disk.</p>
+  </div>
+
+  <h2>Transcription runs on your machine</h2>
+
+  <p>Your speech is not sent anywhere. Gilune uses a speech model that lives on your
+  computer, and once it is in place everything happens offline.</p>
+
+  <p>That model is about 75 MiB, and it is <strong>not</strong> fetched behind your
+  back. Nothing downloads until you open <strong>Settings ▸ Plugins</strong>, open the
+  transcription plugin, and allow it network access. Until you do, the status bar tells
+  you plainly that transcription is waiting for permission — and everything else in the
+  app carries on working. Once the model is there, the download never happens again.</p>
+
+  <h3>Setting the spoken language</h3>
+
+  <p>On the transcription plugin's own settings screen there is a <strong>Spoken
+  language</strong> field. Left at <code>auto</code>, Gilune works out the language
+  first, which costs an extra pass over the audio and is noticeably slower on short
+  clips. Set it to a language code you actually speak — <code>en</code>,
+  <code>sv</code>, <code>de</code> and so on — and transcription is quicker. The change
+  takes effect the next time you start Gilune.</p>
+
+  <h2>Catching up on recordings that were missed</h2>
+
+  <p>If you recorded something while transcription was switched off, or before you had
+  installed it, those recordings are still sitting in your vault untranscribed — they
+  were saved, they simply were not processed.</p>
+
+  <p>To deal with them, go to <strong>Settings ▸ Plugins</strong> and press
+  <strong>Catch up missed captures</strong>. It works through anything that was
+  recorded before a plugin was available or while it was off. It is safe to press more
+  than once; it will not transcribe the same recording twice.</p>
+
+  <h2>Where recordings live</h2>
+
+  <p>Notes made from speech land in a <strong>Captures</strong> folder in your vault,
+  and the sidebar shows a count beside it so you can see what has come in and not yet
+  been filed. Move them wherever you like — they are ordinary notes.</p>
+
+  <p>The audio file sits next to its note and shows up under it in the sidebar when you
+  click the little arrow. Deleting a note leaves its recording on disk deliberately:
+  the recording is the original, and Gilune does not throw originals away.</p>
+
+  <h2>If the microphone button is not there</h2>
+
+  <p>The microphone is contributed by the transcription plugin. If it has been switched
+  off or removed, the button is not drawn at all — which is the honest thing to do,
+  since nothing would be listening. Turn it back on under <strong>Settings ▸
+  Plugins</strong>. <a href="plugins.html">More about plugins →</a></p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

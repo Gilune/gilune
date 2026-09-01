@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workspace — Gilune guide</title>
+<meta name="description" content="Tabs, split panes, the sidebar and the complete list of keyboard shortcuts in Gilune.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a href="search.html">Search</a>
+      <a class="here" href="workspace.html">Workspace</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Workspace</h1>
+  <p class="lede">Notes open in tabs, tabs live in panes, and panes sit side by side.
+  You can arrange all of it with the mouse or the keyboard.</p>
+
+  <figure>
+    <img src="../assets/split-panes.png" alt="Gilune with two panes open side by side, each with its own strip of tabs, and the file tree in the sidebar.">
+  </figure>
+
+  <h2>Tabs</h2>
+
+  <p>Opening a note gives it a tab. Click a tab to bring it forward;
+  <kbd>Ctrl</kbd> + <kbd>Tab</kbd> and <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
+  <kbd>Tab</kbd> cycle through them, and <kbd>Ctrl</kbd> + <kbd>1</kbd> to
+  <kbd>Ctrl</kbd> + <kbd>9</kbd> jump straight to a tab in whichever pane you are
+  working in.</p>
+
+  <p><strong>To close a tab</strong>, press <kbd>Ctrl</kbd> + <kbd>W</kbd>, click the
+  <strong>×</strong> that appears when you hover it, middle-click it, or right-click and
+  choose <strong>Close</strong>. Anything unsaved is written first, so closing a tab
+  never loses work.</p>
+
+  <p>Where the × sits when you are not hovering, a small dot appears instead: it means
+  the note has changes not yet written. A red dot means that note is waiting for you to
+  decide something — the file changed on disk while you were editing it — and that tab
+  will not close until you answer. <a href="notes.html">More on that here →</a></p>
+
+  <p>If there are more tabs than fit, a chevron at the end of the strip lists them all
+  so you can pick one.</p>
+
+  <h3>Reordering and moving tabs</h3>
+
+  <p><strong>To reorder</strong>, drag a tab along its own strip. A vertical line shows
+  where it will land.</p>
+
+  <p><strong>To move a tab to the other pane</strong>, drag it onto that pane's tab
+  strip. The note moves across and comes to the front there. Notes are never open twice
+  — a note lives in one tab, and moving it takes your place in it along too.</p>
+
+  <h2>Splitting the window</h2>
+
+  <p>There are four ways to get a second pane, whichever suits your hands:</p>
+
+  <ul>
+    <li>Press <kbd>Ctrl</kbd> + <kbd>\</kbd> to send the current note into a new pane on
+    the right.</li>
+    <li>Right-click a tab and choose <strong>Split right</strong>.</li>
+    <li>Drag a tab into the <strong>right-hand quarter</strong> of a pane. That area
+    lights up as you hover it, and letting go opens a new pane there.</li>
+    <li>Right-click a note in the sidebar and choose <strong>Open to the side</strong>.</li>
+  </ul>
+
+  <div class="note">
+    <p>A pane needs a second tab before it can split — otherwise it would be handing
+    over its only note and leaving itself empty. If you try, Gilune says so in the
+    status bar. Open another note first, or drag the tab across instead.</p>
+  </div>
+
+  <p>Panes sit side by side. <strong>To resize them</strong>, drag the divider between
+  them; the panes follow as you drag. Neither can be squeezed shut — there is a minimum
+  width, and the divider simply stops there.</p>
+
+  <p><strong>To get rid of a pane</strong>, close its tabs. When the last one goes the
+  pane goes with it and its space returns to its neighbour. The final pane always stays,
+  empty, waiting for you to open something.</p>
+
+  <h2>The sidebar</h2>
+
+  <p><kbd>Ctrl</kbd> + <kbd>B</kbd> shows and hides the sidebar, as does the button at
+  the very top left. Drag its right-hand edge to make it wider or narrower; drag it far
+  enough to the left and it closes, and dragging back out from the edge brings it
+  back.</p>
+
+  <p>It holds the file tree, the search panel — <kbd>Ctrl</kbd> + <kbd>F</kbd> brings
+  that up, reopening the sidebar if it was shut — and the agenda, when the tasks plugin
+  is switched on.</p>
+
+  <p>In the file tree, click a folder to open it and to make it the place new notes are
+  created; the heading above the tree tells you which folder that currently is.
+  Right-clicking gives you <strong>Open to the side</strong>, <strong>New note
+  here</strong>, <strong>New folder here</strong>, <strong>Rename</strong>,
+  <strong>Delete</strong> and <strong>Reveal in Explorer</strong>.</p>
+
+  <h2>Your layout is remembered</h2>
+
+  <p>Gilune saves how you left things for each vault: which panes were open, how wide
+  they were, the tabs in each and which one was in front. Reopen the app and it comes
+  back as it was. Notes that have since been deleted are quietly dropped from it.</p>
+
+  <p>Closing the window saves every open note first — quitting is never a way of losing
+  what you typed.</p>
+
+  <h2>All the keyboard shortcuts</h2>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Shortcut</th><th>What it does</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>N</kbd></td><td>New note, with the name selected and ready to type over.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>P</kbd></td><td>Open a note by name — jumps to the box in the top bar.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>F</kbd></td><td>Search inside your notes, in the sidebar.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>B</kbd></td><td>Show or hide the sidebar.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd></td><td>Next tab.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd></td><td>Previous tab.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>1</kbd> … <kbd>9</kbd></td><td>Go to that tab in the pane you are working in. (The number row, not the keypad.)</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>W</kbd></td><td>Close the current tab.</td></tr>
+      <tr><td><kbd>Ctrl</kbd> + <kbd>\</kbd></td><td>Split, putting the current note in a new pane to the right.</td></tr>
+      <tr><td><kbd>Esc</kbd></td><td>Close settings; dismiss the <code>/</code> menu; clear a search box; or put back a name you were part-way through changing.</td></tr>
+      <tr><td><kbd>Enter</kbd></td><td>In a search box, opens the first result. In a name field, commits the name.</td></tr>
+    </tbody>
+  </table>
+  </div>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

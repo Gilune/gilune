@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search — Gilune guide</title>
+<meta name="description" content="How to search your Gilune vault, and the complete query language with an example for every keyword.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a class="here" href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Search</h1>
+  <p class="lede">Gilune has two ways of finding things: one for when you know the
+  note's name, and one for when you know something that is written inside it.</p>
+
+  <h2>Two boxes, two jobs</h2>
+
+  <p><strong>To open a note you can name</strong>, press <kbd>Ctrl</kbd> +
+  <kbd>P</kbd>. This is the box in the top bar. Type any part of the name, and
+  <kbd>Enter</kbd> opens the best match — or click one of the suggestions underneath.
+  It looks at names only, which is what makes it quick.</p>
+
+  <p><strong>To search what your notes say</strong>, press <kbd>Ctrl</kbd> +
+  <kbd>F</kbd>. This opens the Search panel in the sidebar, and it is where the query
+  language below applies. If the sidebar is collapsed, the shortcut reopens it for
+  you.</p>
+
+  <figure>
+    <img src="../assets/search-tasks.png" alt="The search panel in the sidebar, showing results grouped by note with the matching lines quoted underneath.">
+    <figcaption>Results are grouped by note, with the matching lines quoted underneath.</figcaption>
+  </figure>
+
+  <p>Each note that matches shows up to five of its matching lines. If there are more
+  than five, the rest are counted rather than listed. Notes found only by their name or
+  by their properties are real results with no line to quote. Notes whose name matched
+  come first, then notes with the most matches, and clicking any result opens that
+  note.</p>
+
+  <h2>The query language</h2>
+
+  <p>The rules are short. <strong>Every term has to match</strong> — putting two words
+  in the box means "both of these", not "either of these". Everything is
+  case-insensitive.</p>
+
+  <h3>The basics</h3>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>You type</th><th>What it means</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>harbour</code></td>
+        <td>Notes whose text <em>or</em> name contains <em>harbour</em>.</td>
+      </tr>
+      <tr>
+        <td><code>harbour ferry</code></td>
+        <td>Notes containing <em>both</em> words, anywhere, in any order.</td>
+      </tr>
+      <tr>
+        <td><code>"harbour ferry"</code></td>
+        <td>The two words next to each other, as a phrase.</td>
+      </tr>
+      <tr>
+        <td><code>harbour -ferry</code></td>
+        <td><em>harbour</em>, but not in notes that also mention <em>ferry</em>. A
+        leading <code>-</code> excludes, and it works on any term below too.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Narrowing by name, path or body</h3>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Keyword</th><th>What it does</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>file:</code></td>
+        <td>The note's <strong>name</strong> contains this.</td>
+        <td><code>file:meeting</code></td>
+      </tr>
+      <tr>
+        <td><code>path:</code></td>
+        <td>The note's <strong>folder path</strong> contains this.</td>
+        <td><code>path:Projects/</code></td>
+      </tr>
+      <tr>
+        <td><code>content:</code></td>
+        <td>The note's <strong>body text</strong> contains this — useful when you want
+        to match the words but not the name.</td>
+        <td><code>content:invoice</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Properties</h3>
+
+  <p>Properties are the <code>key: value</code> pairs at the top of a note. Plain
+  words do not look at them; square brackets do.</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>You type</th><th>What it means</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>[tags:home]</code></td>
+        <td>Notes with a <code>tags</code> property whose value contains
+        <em>home</em> — so this also finds a note tagged <em>home, chores</em>.</td>
+      </tr>
+      <tr>
+        <td><code>[project]</code></td>
+        <td>Notes that carry a <code>project</code> property at all, whatever it
+        says.</td>
+      </tr>
+      <tr>
+        <td><code>-[project]</code></td>
+        <td>Notes with no <code>project</code> property.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2 id="tasks">Searching tasks</h2>
+
+  <p>By default a result is a whole note. <code>type:task</code> changes what a result
+  <em>is</em>: each result becomes a single task line. That also brings three more
+  keywords into play — <code>due:</code>, <code>done:</code> and <code>is:</code> —
+  which only mean anything alongside <code>type:task</code>.</p>
+
+  <div class="note">
+    <p>The <code>task</code> type comes from the tasks plugin. Switch that plugin off
+    and <code>type:task</code> finds nothing, and <code>due:</code> goes back to being
+    an ordinary word to search for. Nothing in your notes changes either way.</p>
+  </div>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>You type</th><th>What it means</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>type:note</code></td>
+        <td>Each result is a note. This is what you get without saying anything.</td>
+      </tr>
+      <tr>
+        <td><code>type:task</code></td>
+        <td>Each result is a task line. On its own, it lists every task in the
+        vault.</td>
+      </tr>
+      <tr>
+        <td><code>type:task invoice</code></td>
+        <td>Tasks whose line contains <em>invoice</em>.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Due and done dates</h3>
+
+  <p><code>due:</code> and <code>done:</code> take exactly the same set of values.
+  <code>due:</code> is the date you set on a task; <code>done:</code> is the date it
+  was ticked.</p>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Value</th><th>What it matches</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>2026-09-04</code></td>
+        <td>That exact day.</td>
+        <td><code>type:task due:2026-09-04</code></td>
+      </tr>
+      <tr>
+        <td><code>today</code></td>
+        <td>Today, worked out each time you run the search — so a saved query never
+        goes stale.</td>
+        <td><code>type:task due:today</code></td>
+      </tr>
+      <tr>
+        <td><code>overdue</code></td>
+        <td>Strictly before today. Something due today is not overdue.</td>
+        <td><code>type:task due:overdue</code></td>
+      </tr>
+      <tr>
+        <td><code>week</code></td>
+        <td>Today and the six days after it — seven days counting today.</td>
+        <td><code>type:task due:week</code></td>
+      </tr>
+      <tr>
+        <td><code>none</code></td>
+        <td>No date at all. So <code>-due:none</code> is how you say "has a due
+        date".</td>
+        <td><code>type:task due:none</code></td>
+      </tr>
+      <tr>
+        <td><code>before:…</code></td>
+        <td>Earlier than that day, <em>not</em> including it.</td>
+        <td><code>type:task due:before:2026-10-01</code></td>
+      </tr>
+      <tr>
+        <td><code>after:…</code></td>
+        <td>Later than that day, <em>not</em> including it.</td>
+        <td><code>type:task due:after:today</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>After <code>before:</code> and <code>after:</code> you can write a date as
+  <code>YYYY-MM-DD</code>, or use <code>today</code>, <code>tomorrow</code>, or a
+  weekday name such as <code>monday</code>. A weekday always means its <em>next</em>
+  occurrence and never today. Two-word phrases will not work here, because a space
+  starts a new term — <code>due:after:next week</code> is not a query, but
+  <code>due:after:monday</code> is.</p>
+
+  <h3>Ticked or not</h3>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>You type</th><th>What it matches</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>is:open</code></td>
+        <td>Tasks that are not ticked — <code>- [ ]</code>.</td>
+      </tr>
+      <tr>
+        <td><code>is:done</code></td>
+        <td>Tasks that are ticked — <code>- [x]</code>.</td>
+      </tr>
+      <tr>
+        <td><code>-is:done</code></td>
+        <td>The same as <code>is:open</code>, since a task is one or the other.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>Some queries worth stealing</h3>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Query</th><th>Answers</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>type:task is:open due:overdue</code></td>
+        <td>What have I let slip?</td>
+      </tr>
+      <tr>
+        <td><code>type:task is:open due:week</code></td>
+        <td>What is coming up this week?</td>
+      </tr>
+      <tr>
+        <td><code>type:task is:open -due:none path:Work/</code></td>
+        <td>Open work tasks that have a date on them.</td>
+      </tr>
+      <tr>
+        <td><code>type:task done:week</code></td>
+        <td>What did I actually finish?</td>
+      </tr>
+      <tr>
+        <td><code>type:task is:open due:none [project]</code></td>
+        <td>Undated tasks in notes belonging to a project.</td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h2>When a query does not do what you expected</h2>
+
+  <ul>
+    <li><strong>A keyword nobody recognises becomes an ordinary search.</strong> Type
+    <code>colour:blue</code> and Gilune looks for the text <em>colour:blue</em> rather
+    than throwing your results away. A typo costs you nothing.</li>
+    <li><strong>But a bad value inside a real date keyword matches nothing.</strong>
+    <code>due:soonish</code> has asked a date question that cannot be answered, so it
+    returns no results rather than quietly searching for the word. The same goes for
+    a date that does not exist, like <code>due:2026-02-30</code>.</li>
+    <li><strong>There is no <em>or</em>, and no brackets for grouping.</strong> Every
+    term has to match. To ask an either/or question, run two searches.</li>
+    <li><strong>Plain words do not search properties.</strong> Use
+    <code>[key:value]</code> for those.</li>
+    <li><strong>You cannot search for a quotation mark</strong>, because quotes are how
+    a phrase is marked out.</li>
+    <li><strong>Say <code>type:</code> once.</strong> If a query names it twice, the
+    first one wins.</li>
+    <li>Only Markdown notes are searched, and folders whose name begins with a dot are
+    skipped.</li>
+  </ul>
+
+  <h2>Using a query inside a note</h2>
+
+  <p>The same language works in a <code>filter</code> block, which turns a query into
+  a live list embedded in one of your notes.
+  <a href="tasks.html#filter-blocks">That is covered on the tasks page →</a></p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

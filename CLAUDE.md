@@ -439,6 +439,19 @@ gates promises) are ratified. **Next: application-level engineering — see
      Tabs.kt has no state handle) is still silent until the next
      tick. Live-proven: ticked a task from the open panel — its
      "today" group vanished without reload.
+   - **User docs site + README (2026-09-01, one agent + coordinator
+     validation via headless Chrome)** — `docs/` is a hand-authored
+     static site (no build step; `.nojekyll`; relative links only —
+     it serves from https://gilune.github.io/gilune/ once the owner
+     flips Pages to main/docs): landing + six guides (notes, capture,
+     tasks, search — the canonical user DSL reference, workspace,
+     plugins), app-palette styling, 8 cropped probe screenshots +
+     512px logo in docs/assets/. README.md rewritten product-first
+     (centred logo/name, honest status, verified build-from-source
+     block incl. the uniffi-bindgen step, licence preserved). RULE:
+     user docs never use internal vocabulary (kernel/slots/ADR/
+     seams); when features change, update the relevant guide page
+     and reshoot its screenshot via the probe tooling.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Plugins — Gilune guide</title>
+<meta name="description" content="What plugins are in Gilune, the permissions they ask for, and what happens when you switch one off or remove it.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a class="here" href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Plugins</h1>
+  <p class="lede">Almost everything in Gilune beyond writing a note is a plugin —
+  including transcription and tasks. That means you can see exactly what each one does,
+  and take it away if you do not want it.</p>
+
+  <h2>Finding them</h2>
+
+  <p>Open <strong>Settings</strong> from the top bar and choose <strong>Plugins</strong>.
+  You get a list of what is installed, each with a switch. Clicking a row — or picking
+  its name from the list down the left — opens that plugin's own screen.</p>
+
+  <figure>
+    <img src="../assets/plugin-settings.png" alt="A plugin's settings screen showing its permissions with allow and revoke controls, the events it listens to, and what it adds to the app.">
+  </figure>
+
+  <p>A plugin's screen tells you four things:</p>
+
+  <ul>
+    <li><strong>Permissions</strong> — what it is allowed to do, each one shown as
+    <em>allowed</em> or <em>not allowed</em>, with a button to change your mind either
+    way.</li>
+    <li><strong>Events</strong> — what it listens for and what it announces. This is how
+    you can tell that transcription reacts to new recordings, for example.</li>
+    <li><strong>Adds to the app</strong> — the buttons, panels and menu entries it
+    contributes. If you have ever wondered where something in the interface came from,
+    this is where it says so.</li>
+    <li><strong>Its own settings</strong>, if it has any — the spoken language for
+    transcription, the global filter and agenda switch for tasks.</li>
+  </ul>
+
+  <p>Some plugins are marked <strong>required</strong> and have no switch. Those are the
+  parts Gilune cannot sensibly be without — writing your notes into your vault as files,
+  for one.</p>
+
+  <h2>Permissions</h2>
+
+  <p><strong>Nothing reaches outside your machine without your say-so.</strong> If a
+  plugin wants to use the network, it has to be allowed by name, by you, before it can.
+  It does not ask once and keep the answer forever, and it cannot borrow another
+  plugin's permission.</p>
+
+  <p>The clearest example is transcription. It needs a speech model of about 75 MiB, and
+  on a fresh install it simply will not fetch it: the status bar tells you it is waiting
+  for permission, and the plugin's row in the list says it needs reviewing. Go to its
+  screen, press <strong>Allow</strong> next to the network permission, and the download
+  happens — once. Everything after that is offline.</p>
+
+  <p>You can press <strong>Revoke</strong> at any time. Nothing re-grants itself: not on
+  an update, not on a reinstall, not after you removed the plugin and put it back. If it
+  needs the permission again, it has to ask you again.</p>
+
+  <h2>Switching one off</h2>
+
+  <p>Flip its switch and the plugin stops. Its buttons, panels and menu entries
+  disappear from the app — turn off transcription and the microphone buttons are simply
+  not drawn, because nothing would be listening.</p>
+
+  <p>Work that was queued up for it is <strong>parked, not thrown away</strong>. Turn it
+  back on and it picks up where it left off. It will not, however, go back and process
+  everything that happened while it was off — for that, use <strong>Catch up missed
+  captures</strong> at the bottom of the plugins list, which works through recordings
+  made before a plugin was there or while it was switched off.</p>
+
+  <h2>Removing one</h2>
+
+  <p>On a plugin's screen, at the bottom, is a <strong>Remove</strong> button. Removing
+  a plugin takes away its settings and its permissions.</p>
+
+  <div class="note">
+    <p><strong>It does not touch your notes.</strong> Everything the plugin ever wrote
+    into your vault stays exactly where it is. Remove transcription and your voice notes
+    keep their words and their audio. Remove tasks and your checkboxes are still
+    checkboxes — the dates already in your notes are just text, and they sit there
+    unchanged until you decide otherwise.</p>
+  </div>
+
+  <p>This is the whole point of keeping everything in plain files. A plugin can add
+  something to your vault, but it never owns it, and it cannot take it away on its way
+  out.</p>
+
+  <h2>What you cannot do yet</h2>
+
+  <p>Gilune currently runs only the plugins that ship with it. Being able to find,
+  download and install plugins written by other people is planned — and the permission
+  system on this page is the groundwork for it — but it is not built yet, so there is
+  nothing to install today.</p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

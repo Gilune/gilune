@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tasks — Gilune guide</title>
+<meta name="description" content="Tasks in Gilune: due dates from the slash menu, done dates, the agenda panel, and live filter blocks inside a note.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a class="here" href="tasks.html">Tasks</a>
+      <a href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Tasks</h1>
+  <p class="lede">A task in Gilune is just a checkbox in a note. There is no separate
+  task list holding your work hostage — the tasks <em>are</em> the lines you wrote.</p>
+
+  <h2>Making a task</h2>
+
+  <p>Type a checklist item anywhere in any note:</p>
+
+<pre><code>- [ ] ring the plumber
+- [ ] send the photos to Mum</code></pre>
+
+  <p>That is all it takes. The line becomes a checkbox you can click, and it counts as
+  a task everywhere else in the app — the agenda, search, filter blocks. You can indent
+  them under other lines, and <code>-</code>, <code>*</code> and <code>+</code> all
+  work as the bullet.</p>
+
+  <p>The space inside the brackets matters: <code>- [ ]</code> is a task and
+  <code>- []</code> is not. This is the same rule Obsidian uses.</p>
+
+  <h2 id="due-dates">Giving a task a due date</h2>
+
+  <p>You do not have to remember a date format. Type <code>/</code> on the task line
+  and tell Gilune in words.</p>
+
+  <figure>
+    <img src="../assets/inline-date.png" alt="The slash menu open on a task line, listing today, tomorrow and the days of the week with the date each one means.">
+  </figure>
+
+  <ol>
+    <li>Put your cursor on the task line and type <code>/</code>. It has to be at the
+    start of the line or after a space — so a <code>/</code> in the middle of a word
+    stays an ordinary slash.</li>
+    <li>A small menu appears offering <strong>Due date</strong>. Press
+    <kbd>Enter</kbd>.</li>
+    <li>Type a phrase — <em>today</em>, <em>tomorrow</em>, <em>friday</em>, <em>next
+    week</em>, <em>in a week</em> — or type a date as <code>2026-09-04</code>. The list
+    narrows as you type and shows the real date beside each option.</li>
+    <li>Use <kbd>↑</kbd> and <kbd>↓</kbd> if you want a different one, and press
+    <kbd>Enter</kbd>.</li>
+  </ol>
+
+  <p>The line then reads:</p>
+
+<pre><code>- [ ] ring the plumber due:2026-09-04</code></pre>
+
+  <div class="note">
+    <p><strong>Words are for typing; the file gets a real date.</strong> Nothing stores
+    "tomorrow", because tomorrow moves. The date is worked out at the moment you press
+    <kbd>Enter</kbd> and written in full, so the note still means the same thing in six
+    months, and so any other editor can read it.</p>
+  </div>
+
+  <p>A few details worth knowing:</p>
+  <ul>
+    <li>A weekday always means its <strong>next</strong> occurrence and never today —
+    say <em>tuesday</em> on a Tuesday and you get the Tuesday a week away. Today is
+    already one keystroke away as <em>today</em>.</li>
+    <li><kbd>Esc</kbd> closes the menu and leaves everything you typed exactly where it
+    was. The menu never removes your characters; accepting a date is what replaces
+    them.</li>
+    <li>If you are halfway through typing a date, <kbd>Enter</kbd> does nothing until it
+    is a date Gilune can actually resolve. Nothing half-finished gets written.</li>
+  </ul>
+
+  <h2>Ticking things off</h2>
+
+  <p>Click the checkbox. As well as ticking it, Gilune adds the day you finished it:</p>
+
+<pre><code>- [x] ring the plumber due:2026-09-04 done:2026-09-02</code></pre>
+
+  <p>Untick it and the <code>done:</code> date comes off again. Ticked tasks drop out
+  of the agenda, and you can find them later with a search like
+  <code>type:task done:week</code>.</p>
+
+  <h2 id="global-filter">Choosing which checkboxes count</h2>
+
+  <p>By default <em>every</em> checklist item in your vault is a task. If you use
+  checkboxes for other things — packing lists, shopping, a table of contents — you can
+  narrow it down.</p>
+
+  <p>Go to <strong>Settings ▸ Plugins</strong>, open the tasks plugin, and fill in
+  <strong>Global filter</strong>. Set it to something like <code>#task</code> and only
+  checkbox lines containing that text get the <code>/</code> menu, the coloured dates,
+  the agenda and <code>type:task</code>. Everything else stays an ordinary checkbox you
+  can still tick.</p>
+
+  <p>Nothing in your vault is rewritten either way, and the change takes effect as soon
+  as you apply it.</p>
+
+  <h2 id="agenda">The agenda</h2>
+
+  <figure>
+    <img src="../assets/agenda-panel.png" alt="The agenda panel in the sidebar with tasks grouped under overdue, today and next seven days, each row showing its note and due date.">
+  </figure>
+
+  <p>The tasks plugin adds a panel to the sidebar that gathers every open task in the
+  vault into four short lists:</p>
+
+  <ul>
+    <li><strong>overdue</strong> — due before today.</li>
+    <li><strong>today</strong> — due today.</li>
+    <li><strong>next seven days</strong> — tomorrow through a week from today.</li>
+    <li><strong>undated</strong> — no due date at all. This one starts folded up, since
+    it tends to be the longest and the least urgent.</li>
+  </ul>
+
+  <p>Click a heading to fold or unfold a list. Each row shows the task, the note it
+  came from, and its date, coloured by how close it is. <strong>Clicking a row opens
+  that note</strong> — the agenda only ever reads your notes, it never edits them, so
+  you tick things off where you wrote them.</p>
+
+  <p>Ticked tasks are not listed; an agenda is about what is still open. Neither is
+  anything due more than a week out — four short lists are the point, and a query like
+  <code>type:task due:after:…</code> is the right way to look further ahead. If a list
+  is very long it shows the first fifty and counts the rest.</p>
+
+  <p>To turn the panel off entirely, use the <strong>Agenda panel</strong> switch on
+  the tasks plugin's settings screen. The plugin keeps colouring your dates and
+  offering the <code>/</code> menu; only the panel goes.</p>
+
+  <h2 id="filter-blocks">Live lists inside a note</h2>
+
+  <p>Sometimes the list belongs in a note rather than in a panel — everything for one
+  project, on that project's page. Write a fenced code block labelled
+  <code>filter</code>:</p>
+
+<pre><code>```filter
+type:task
+is:open
+path:Projects/Kitchen
+```</code></pre>
+
+  <p>Gilune renders that as a live list of everything matching, right there in the
+  note. Clicking a row opens the note the task lives in.</p>
+
+  <figure>
+    <img src="../assets/filter-block.png" alt="A note containing a filter code block, shown rendered as a live list of matching task rows.">
+  </figure>
+
+  <p>The rules are small:</p>
+  <ul>
+    <li><strong>One filter per line</strong>, and they all have to match. It is the
+    same <a href="search.html">query language the search panel uses</a> — the lines are
+    simply joined together. Blank lines are ignored.</li>
+    <li><strong>Every block must say <code>type:</code></strong> —
+    <code>type:task</code> for task lines, <code>type:note</code> for whole notes.
+    Gilune will not guess what you meant.</li>
+    <li>A block shows at most fifty rows and counts anything past that.</li>
+    <li>Task lines written <em>inside</em> a code block are never treated as real
+    tasks, so the examples on this page could never end up in somebody's agenda.</li>
+  </ul>
+
+  <p>If a block cannot be run, it says so in one quiet line rather than sitting there
+  looking broken: an empty block tells you an empty filter matches nothing; a block with
+  no <code>type:</code> tells you to name one and lists the ones available; and a block
+  naming a type that no longer exists asks whether its plugin is switched on. A block
+  that ran and found nothing simply says so.</p>
+
+  <p>Because it is an ordinary fenced code block, Obsidian, GitHub and Notepad all show
+  it as a perfectly legible little block of text. Nothing about the note becomes
+  unreadable elsewhere.</p>
+
+  <h2>If you remove the tasks plugin</h2>
+
+  <p>Your checkboxes stay checkboxes and still tick. What goes is the extra: the
+  <code>/</code> menu, the coloured dates, the agenda panel, and
+  <code>type:task</code> in searches. Any <code>due:</code> and <code>done:</code> dates
+  already written into your notes stay exactly as they are — they are just text — and
+  come back to life if you switch the plugin on again.</p>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT OR Apache-2.0 · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>
