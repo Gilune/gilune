@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+The widget's colours. A home-screen widget is drawn by the launcher, not
+by Compose, so `Palette.kt` cannot reach it: these are the same values,
+restated in the one language RemoteViews speaks. Light here, dark in
+values-night — both in full, on the palette's rule.
+-->
+<resources>
+    <color name="gilune_widget_surface">#FFFDFDFE</color>
+    <color name="gilune_widget_cell">#FFF1F2F5</color>
+    <color name="gilune_widget_on">#FF1A1C20</color>
+    <color name="gilune_widget_muted">#FF5C626D</color>
+    <color name="gilune_widget_accent">#FF3F5B8B</color>
+    <color name="gilune_widget_recording">#FFB3261E</color>
+</resources>

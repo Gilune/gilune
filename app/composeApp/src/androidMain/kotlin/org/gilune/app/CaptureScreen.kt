@@ -48,6 +48,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
@@ -127,6 +129,8 @@ fun CaptureScreen(
     onCommit: () -> Unit,
     onOpenNote: (String) -> Unit,
     modifier: Modifier = Modifier,
+    focusNonce: Int = 0,
+    micNonce: Int = 0,
 ) {
     // The feed is not on the path to a typable caret (§ 1), so it waits
     // for the frame that made the caret exist.
@@ -137,7 +141,7 @@ fun CaptureScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (feedComposed) CaptureFeed(state, onOpenNote)
         }
-        Composer(state, draft, onDraftChange, onCommit)
+        Composer(state, draft, onDraftChange, onCommit, focusNonce, micNonce)
     }
 }
 
@@ -150,6 +154,8 @@ private fun Composer(
     draft: String,
     onDraftChange: (String) -> Unit,
     onCommit: () -> Unit,
+    focusNonce: Int = 0,
+    micNonce: Int = 0,
 ) {
     val colours = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -165,6 +171,36 @@ private fun Composer(
     val askForMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         micGranted = granted
         if (!granted) state.message.value = "the microphone permission was declined"
+    }
+
+    // The widget's Record cell before the microphone has been granted
+    // (§ 4). A widget cannot ask, so it sent the ask here; a yes starts
+    // the same foreground service the widget would have started, so there
+    // is one recording path and not two. The notification permission is
+    // asked for in the same breath, because the recording notification is
+    // mandatory and a hidden one helps nobody.
+    val askAndRecord = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { granted ->
+        micGranted = granted[Manifest.permission.RECORD_AUDIO] ?: micGranted
+        if (micGranted) {
+            ContextCompat.startForegroundService(context, RecordService.startIntent(context, SOURCE_APP))
+        } else {
+            state.message.value = "the microphone permission was declined"
+        }
+    }
+
+    val composerFocus = remember { FocusRequester() }
+    LaunchedEffect(focusNonce) {
+        if (focusNonce > 0) runCatching { composerFocus.requestFocus() }
+    }
+    LaunchedEffect(micNonce) {
+        if (micNonce == 0) return@LaunchedEffect
+        if (micGranted) {
+            ContextCompat.startForegroundService(context, RecordService.startIntent(context, SOURCE_APP))
+        } else {
+            askAndRecord.launch(recordingPermissions())
+        }
     }
     // The shared gate (ADR 0011): the mic is drawn only while a plugin
     // contributes it, so removing the voice adapter removes the button.
@@ -198,6 +234,7 @@ private fun Composer(
                     value = draft,
                     onValueChange = onDraftChange,
                     modifier = Modifier.weight(1f).heightIn(min = TouchTarget, max = 180.dp)
+                        .focusRequester(composerFocus)
                         .testTag("composer"),
                     placeholder = { Text("What's on your mind?") },
                     // Multi-line, and the action key is a newline: commit
@@ -334,13 +371,15 @@ private fun Modifier.clickableRow(onClick: () -> Unit): Modifier =
     this.clickable(onClickLabel = "open note", onClick = onClick)
 
 /// The header is all that is needed, and a recording can be long, so only
-/// the front of the file is read.
+/// the front of the file is read. The file's own length goes with it, so
+/// a widget-streamed recording — whose header cannot know its size —
+/// still shows a true duration rather than none.
 private fun readWavDuration(file: File): Long? = runCatching {
     if (!file.isFile) return null
     file.inputStream().use { stream ->
         val head = ByteArray(WAV_HEADER_PROBE)
         val read = stream.read(head)
-        if (read <= 0) null else wavDurationMs(head.copyOf(read))
+        if (read <= 0) null else wavDurationMs(head.copyOf(read), file.length())
     }
 }.getOrNull()
 

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The widget when the system is dark, from `GiluneDark`. -->
+<resources>
+    <color name="gilune_widget_surface">#FF15171B</color>
+    <color name="gilune_widget_cell">#FF21252B</color>
+    <color name="gilune_widget_on">#FFE5E7EC</color>
+    <color name="gilune_widget_muted">#FFA3AAB6</color>
+    <color name="gilune_widget_accent">#FFA6BCE4</color>
+    <color name="gilune_widget_recording">#FFF2B8B5</color>
+</resources>

@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+The Record widget (ADR 0017 § 4). Four cells: Record, New note, Search,
+and the inbox count. RemoteViews rather than Glance — Glance would add a
+dependency for a layout this shape does not need.
+
+The whole point of this file is that none of it is the app: tapping
+Record never composes a frame of Gilune.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/widget_surface"
+    android:padding="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/widget_record"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_cell"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:contentDescription="@string/gilune_widget_label">
+            <ImageView
+                android:id="@+id/widget_record_icon"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:src="@drawable/ic_widget_mic"
+                android:contentDescription="@null" />
+            <TextView
+                android:id="@+id/widget_record_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Record"
+                android:textSize="13sp"
+                android:textColor="@color/gilune_widget_on" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_new_note"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_cell"
+            android:gravity="center"
+            android:orientation="vertical">
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:src="@drawable/ic_widget_new_note"
+                android:contentDescription="@null" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="New note"
+                android:textSize="13sp"
+                android:textColor="@color/gilune_widget_on" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:id="@+id/widget_search"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_cell"
+            android:gravity="center"
+            android:orientation="vertical">
+            <ImageView
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:src="@drawable/ic_widget_search"
+                android:contentDescription="@null" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Search"
+                android:textSize="13sp"
+                android:textColor="@color/gilune_widget_on" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_inbox"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:layout_margin="3dp"
+            android:background="@drawable/widget_cell"
+            android:gravity="center"
+            android:orientation="vertical">
+            <ImageView
+                android:layout_width="20dp"
+                android:layout_height="20dp"
+                android:src="@drawable/ic_widget_inbox"
+                android:contentDescription="@null" />
+            <TextView
+                android:id="@+id/widget_inbox_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="0"
+                android:textSize="20sp"
+                android:textColor="@color/gilune_widget_on" />
+            <TextView
+                android:id="@+id/widget_inbox_label"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="captures in inbox"
+                android:gravity="center"
+                android:maxLines="2"
+                android:textSize="11sp"
+                android:textColor="@color/gilune_widget_muted" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>

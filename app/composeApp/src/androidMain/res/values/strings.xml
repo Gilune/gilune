@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="gilune_widget_label">Gilune capture</string>
+    <string name="gilune_widget_description">Record, write or search without opening the app.</string>
+    <string name="gilune_tile_new_note">New note</string>
+</resources>

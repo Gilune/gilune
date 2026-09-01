@@ -76,7 +76,14 @@ fun toggleTaskAtLine(
 ///
 /// Defensive by contract — a truncated or non-PCM file answers null and
 /// the row simply shows no duration rather than a wrong one.
-fun wavDurationMs(bytes: ByteArray): Long? {
+///
+/// `totalBytes` is the whole file's length, and it is consulted for one
+/// case only: a recording the Record widget streamed, whose `data` chunk
+/// declares [WAV_SIZE_UNKNOWN] because a stream cannot know its own
+/// length (see `wavStreamHeader`). Then the file itself is the answer.
+/// Omit it and an unknown size stays unknown, which is the old
+/// behaviour and still the honest one.
+fun wavDurationMs(bytes: ByteArray, totalBytes: Long? = null): Long? {
     if (bytes.size < 12) return null
     if (!bytes.matches(0, "RIFF") || !bytes.matches(8, "WAVE")) return null
     var byteRate = 0L
@@ -84,17 +91,20 @@ fun wavDurationMs(bytes: ByteArray): Long? {
     while (cursor + 8 <= bytes.size) {
         val id = String(bytes, cursor, 4, Charsets.US_ASCII)
         val size = bytes.littleEndianInt(cursor + 4)
-        if (size < 0) return null
         val bodyStart = cursor + 8
-        when (id) {
-            "fmt " -> {
-                if (bodyStart + 12 > bytes.size) return null
-                byteRate = bytes.littleEndianInt(bodyStart + 8).toLong() and 0xFFFFFFFFL
+        if (id == "data") {
+            if (byteRate <= 0) return null
+            val dataBytes = when {
+                size >= 0 -> size.toLong()
+                size == WAV_SIZE_UNKNOWN && totalBytes != null -> totalBytes - bodyStart
+                else -> return null
             }
-            "data" -> {
-                if (byteRate <= 0) return null
-                return size.toLong() * 1000L / byteRate
-            }
+            return if (dataBytes < 0) null else dataBytes * 1000L / byteRate
+        }
+        if (size < 0) return null
+        if (id == "fmt ") {
+            if (bodyStart + 12 > bytes.size) return null
+            byteRate = bytes.littleEndianInt(bodyStart + 8).toLong() and 0xFFFFFFFFL
         }
         cursor = bodyStart + size + (size and 1)
     }

@@ -1,17 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- The widget's Record cell (ADR 0017 § 4). The microphone
+         foreground service type is declared here AND passed to
+         startForeground, and it must also be declared in Play Console. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- The recording notification is mandatory; on Android 13+ showing
+         it needs the user's yes, which the app asks for beside the mic. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:label="Gilune"
         android:theme="@style/Theme.Gilune">
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:launchMode="singleTop"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Not exported, and with no intent filter: the only ways in are
+             the widget's PendingIntent, its notification's Stop action,
+             and the app itself. There is deliberately no boot receiver and
+             no scheduler anywhere in this manifest (§ 4). -->
+        <service
+            android:name=".RecordService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <receiver
+            android:name=".GiluneWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="org.gilune.app.action.REFRESH_WIDGET" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/gilune_widget_info" />
+        </receiver>
+
+        <!-- New note only. No microphone: a tile is not a documented
+             exemption, so v1 ships the one action that needs none. -->
+        <service
+            android:name=".NewNoteTile"
+            android:exported="true"
+            android:icon="@drawable/ic_widget_new_note"
+            android:label="@string/gilune_tile_new_note"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+        </service>
     </application>
 </manifest>

@@ -540,7 +540,29 @@ gates promises) are ratified. **Next: application-level engineering — see
      Read (MB3), transcribing-row over-claim window until
      enableWhisper wires (MB2), tertiary palette family undefined,
      timer lifecycle untested by a real cycle, still x86_64-only.
-     **Next: Record widget + FGS (closes MB1), then MS1/MB2.**
+     **Record widget DONE (closes MB1)**: RemoteViews 4-cell widget
+     (Record/New note/Search→Notes-until-MB3/inbox count = Captures
+     *.md dir read, refreshed on vaultTick + service broadcast);
+     RecordService = mic FGS (manifest+startForeground MICROPHONE
+     type; own second Gilune.open — multi-instance is the sanctioned
+     shape; recorder thread → 64KiB ChunkedSink → beginCapture,
+     header first with 0xFFFFFFFF sizes — a stream can't know its
+     length, content-addressed blobs can't be patched; whisper.rs
+     reads fixed offsets so safe; device test proved a chunk crossed
+     BEFORE stop); notification Stop → "Recorded m:ss · tap to
+     open"; New-note QS tile only (mic tile withheld per ADR). API-36
+     trap encoded: a FGS that declines via stopSelf() still crashes
+     (ForegroundServiceDidNotStartInTime) — refuse() goes foreground
+     for the instant it takes to withdraw. Suites: desktop 394/0,
+     instrumented 350/0. Gaps: emulator mic = silence (no speech
+     through the path; transcription unwired until MB2 — whisper IS
+     in the .so, nothing calls enable_whisper yet); lock-survival
+     asserted not exercised; Play Console FGS declaration = owner
+     action; revoke-between-draw-and-tap window unhandled;
+     MediaPlayer playback of 0xFFFFFFFF-size wavs untested; widget
+     never placed on a real launcher. **Next: MS1 IME spike
+     (emulator-scope: InputConnection matrix; physical-device
+     Gboard/Samsung matrix stays assumed), then MB2.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

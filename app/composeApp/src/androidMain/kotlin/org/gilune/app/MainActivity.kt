@@ -9,6 +9,7 @@
 
 package org.gilune.app
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -49,6 +50,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,18 +71,39 @@ import kotlinx.coroutines.withContext
 import java.time.LocalDate
 
 class MainActivity : ComponentActivity() {
+    /// What the intent that opened (or re-opened) this activity asks for.
+    /// The widget, its notification and the Quick Settings tile all arrive
+    /// here, and a second tap of the same cell is a second request — hence
+    /// the nonce (see [LaunchRequest]).
+    private val request = mutableStateOf<LaunchRequest?>(null)
+    private var nonce = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // Edge-to-edge, or the IME insets never arrive (§ 2, constraints T8).
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        val vaultDir = filesDir.resolve("vault").absolutePath
-        setContent { GiluneMobileApp(vaultDir) }
+        val vaultDir = vaultDir(this)
+        accept(intent)
+        setContent { GiluneMobileApp(vaultDir, request) }
+    }
+
+    /// `singleTop`, so a widget tap reaches the running app here rather
+    /// than stacking a second copy of it.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        accept(intent)
+    }
+
+    private fun accept(intent: Intent?) {
+        nonce += 1
+        request.value = LaunchRequest(nonce, launchFrom(intent))
     }
 }
 
 /// The shell's destinations. Search and Agenda arrive with MB3; the bar
 /// renders what exists rather than a row of coming-soon tabs.
-private enum class Destination(val label: String) { Capture("Capture"), Notes("Notes") }
+enum class Destination(val label: String) { Capture("Capture"), Notes("Notes") }
 
 private sealed interface Screen {
     data object Home : Screen
@@ -90,7 +113,7 @@ private sealed interface Screen {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun GiluneMobileApp(vaultDir: String) {
+fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = remember { mutableStateOf(null) }) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val prefs = remember { MobilePrefs(context) }
@@ -109,6 +132,25 @@ fun GiluneMobileApp(vaultDir: String) {
     var destination by remember { mutableStateOf(Destination.Capture) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var draft by remember { mutableStateOf("") }
+
+    // What the widget, the recording notification and the QS tile ask for
+    // (§ 4). The decision is `launchFor`, which is pure and tested; all
+    // that happens here is obeying it.
+    var focusComposer by remember { mutableStateOf(0) }
+    var askForMic by remember { mutableStateOf(0) }
+    val request = launchRequest.value
+    LaunchedEffect(request) {
+        val asked = request ?: return@LaunchedEffect
+        destination = asked.launch.tab
+        screen = asked.launch.openNote?.let { Screen.Read(it) } ?: Screen.Home
+        if (asked.launch.focusComposer) focusComposer += 1
+        if (asked.launch.askForMic) askForMic += 1
+    }
+
+    // The widget's inbox count follows the vault. `vaultTick` is bumped by
+    // every refresh, so this is "updated on app refresh" with nothing new
+    // to remember to call.
+    LaunchedEffect(state.vaultTick.value) { refreshWidgets(context) }
 
     // The idle timer (§ 1). The composer's own text is the only state it
     // governs, and expiry commits rather than discards.
@@ -185,6 +227,8 @@ fun GiluneMobileApp(vaultDir: String) {
                                     }
                                 },
                                 onOpenNote = { screen = Screen.Read(it) },
+                                focusNonce = focusComposer,
+                                micNonce = askForMic,
                             )
                             Destination.Notes ->
                                 NotesScreen(state, onOpenNote = { screen = Screen.Read(it) })
