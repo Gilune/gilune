@@ -616,6 +616,241 @@ class MarkdownEditingTest {
         )
     }
 
+    // ---------------------------------------------------------------
+    // The block-scoped kind (owner, 2026-09-01): a `filter` block behaves
+    // like a checkbox — rendered until the caret is placed within it. The
+    // whole risk is the offset mapping across a fence that is not there,
+    // so most of what follows is arithmetic.
+    // ---------------------------------------------------------------
+
+    /// Three lines of fence with prose either side.
+    private val blockDoc = "intro\n```filter\ntype:task\n```\nafter\n"
+
+    /// A registration claiming one info string and reserving a fixed
+    /// number of lines: the shape the shell's `filter` renderer has, with
+    /// no vault behind it, so this suite stays pure.
+    private fun claiming(id: String, info: String, lines: Int) =
+        EditorBlockDecoration(id) { fenceInfo, _ -> if (fenceInfo == info) lines else null }
+
+    private fun transformBlocks(
+        source: String,
+        caretLine: Int?,
+        blocks: List<EditorBlockDecoration>,
+    ): TransformedText =
+        MarkdownEditTransformation(palette, caretLine, builtInDecorations(), blocks)
+            .filter(AnnotatedString(source))
+
+    @Test
+    fun fencedBlocksReadsAClosedFenceAndLeavesAnUnterminatedOneAlone() {
+        val fence = fencedBlocks(blockDoc).single()
+        assertEquals("filter", fence.info)
+        assertEquals("type:task", fence.body)
+        assertEquals("```filter\ntype:task\n```", blockDoc.substring(fence.range.first, fence.range.last + 1))
+        assertEquals(1..3, fence.lines, "the delimiters are the block's own lines")
+        assertTrue(
+            fencedBlocks("intro\n```filter\ntype:task\n").isEmpty(),
+            "an unterminated fence has no end, so there is nothing to collapse",
+        )
+        assertTrue(fencedBlocks("no fences here").isEmpty())
+        val two = fencedBlocks("```a\n1\n```\n\n```\n2\n```")
+        assertEquals(listOf("a", ""), two.map { it.info }, "the info string is whatever follows the ticks")
+        assertEquals(listOf("1", "2"), two.map { it.body })
+    }
+
+    @Test
+    fun aClaimedBlockCollapsesToExactlyTheLinesItReserved() {
+        for (lines in 1..5) {
+            val result = transformBlocks(blockDoc, caretLine = 0, blocks = listOf(claiming("f", "filter", lines)))
+            assertEquals(
+                "intro\n" + "\n".repeat(lines - 1) + "\nafter\n",
+                result.text.text,
+                "$lines reserved lines",
+            )
+        }
+        // Three lines of fence for three lines of placeholder: nothing
+        // below the block moved up or down the page.
+        val same = transformBlocks(blockDoc, caretLine = 0, blocks = listOf(claiming("f", "filter", 3)))
+        assertEquals(blockDoc.count { it == '\n' }, same.text.text.count { it == '\n' })
+    }
+
+    @Test
+    fun theCaretOnAnyLineOfTheBlockShowsTheWholeFenceRaw() {
+        val blocks = listOf(claiming("f", "filter", 3))
+        for (caret in 1..3) {
+            assertEquals(
+                blockDoc,
+                transformBlocks(blockDoc, caret, blocks).text.text,
+                "the caret on line $caret is inside the block, delimiters included",
+            )
+        }
+        for (caret in listOf(0, 4)) {
+            assertEquals(
+                "intro\n\n\n\nafter\n",
+                transformBlocks(blockDoc, caret, blocks).text.text,
+                "the caret on line $caret is outside it",
+            )
+        }
+        assertEquals(
+            "intro\n\n\n\nafter\n",
+            transformBlocks(blockDoc, null, blocks).text.text,
+            "an unfocused buffer has no caret at all, so the block renders",
+        )
+    }
+
+    @Test
+    fun anInfoStringNoRegistrationClaimsIsLeftExactlyAsItWas() {
+        val sql = "intro\n```sql\nselect 1\n```\nafter\n"
+        assertEquals(sql, transformBlocks(sql, 0, listOf(claiming("f", "filter", 3))).text.text)
+        assertEquals(blockDoc, transformBlocks(blockDoc, 0, emptyList()).text.text, "and E3 is what it was")
+    }
+
+    @Test
+    fun nothingElseClaimsGroundInsideACollapsedBlock() {
+        val source = "```filter\n- [ ] quoted\n```\n"
+        val blocks = listOf(claiming("f", "filter", 1))
+        assertEquals("\n", transformBlocks(source, caretLine = null, blocks = blocks).text.text)
+        // With the caret inside it the fence is raw again, and the
+        // checkbox draws there exactly as § 1 has always had it.
+        assertEquals(
+            "```filter\n- $unchecked quoted\n```\n",
+            transformBlocks(source, caretLine = 0, blocks = blocks).text.text,
+        )
+    }
+
+    @Test
+    fun everyOffsetRoundTripsAcrossACollapsedBlock() {
+        val blocks = listOf(claiming("f", "filter", 2))
+        val result = transformBlocks(blockDoc, 0, blocks)
+        assertMappingIsSound(blockDoc, result)
+
+        val fence = fencedBlocks(blockDoc).single()
+        val mapping = result.offsetMapping
+        val start = fence.range.first
+        val end = fence.range.last + 1
+        val delta = 1 - (end - start) // one newline of placeholder for the fence
+        for (offset in 0..start) {
+            assertEquals(offset, mapping.originalToTransformed(offset), "offset $offset is before the block")
+            assertEquals(offset, mapping.transformedToOriginal(offset))
+        }
+        for (offset in end..blockDoc.length) {
+            assertEquals(offset + delta, mapping.originalToTransformed(offset), "offset $offset is after the block")
+            assertEquals(offset, mapping.transformedToOriginal(offset + delta), "and comes back exactly")
+        }
+        // Both edges are exact, which is what lets a caret sit either side
+        // of a block that is not there.
+        assertEquals(start, mapping.transformedToOriginal(mapping.originalToTransformed(start)))
+        assertEquals(end, mapping.transformedToOriginal(mapping.originalToTransformed(end)))
+    }
+
+    @Test
+    fun everyPlaceholderPositionComesBackInsideTheFenceSoArrowingIntoItRevealsIt() {
+        val blocks = listOf(claiming("f", "filter", 4))
+        val result = transformBlocks(blockDoc, 0, blocks)
+        val block = collapsedBlocks(blockDoc, 0, blocks = blocks).single()
+        // Down-arrow and a click both hand the field a transformed offset
+        // on one of the placeholder's lines. Every one of them maps back
+        // into the fence, which is the whole of "moving into a block
+        // reveals it" — there is nowhere else for the caret to land.
+        for (offset in block.transformedStart until block.transformedStart + block.lines) {
+            val source = result.offsetMapping.transformedToOriginal(offset)
+            assertTrue(
+                caretLine(blockDoc, source) in block.fence.lines,
+                "transformed $offset came back to line ${caretLine(blockDoc, source)}, outside the block",
+            )
+        }
+    }
+
+    @Test
+    fun editingAtEitherEdgeOfACollapsedBlockChangesTheSourceTheUserCanSee() {
+        val result = transformBlocks(blockDoc, 0, listOf(claiming("f", "filter", 2)))
+        val mapping = result.offsetMapping
+        val transformed = result.text.text
+
+        // Backspace at the end of the line above the block deletes the
+        // character it looks like it deletes.
+        val above = mapping.transformedToOriginal(transformed.indexOf('\n'))
+        assertEquals(blockDoc.indexOf('\n'), above)
+        assertEquals("intr\n```filter\ntype:task\n```\nafter\n", blockDoc.removeRange(above - 1, above))
+
+        // And typing at the start of the line below reaches that line, not
+        // the fence hiding under it.
+        val below = mapping.transformedToOriginal(transformed.indexOf("after"))
+        assertEquals(blockDoc.indexOf("after"), below)
+        assertEquals(
+            "intro\n```filter\ntype:task\n```\nXafter\n",
+            blockDoc.substring(0, below) + "X" + blockDoc.substring(below),
+        )
+    }
+
+    @Test
+    fun decorationsAfterACollapsedBlockStillLandOnTheirGlyphs() {
+        val source = "```filter\ntype:task\n```\n- [ ] one\n- [x] two"
+        val blocks = listOf(claiming("f", "filter", 2))
+        val result = transformBlocks(source, caretLine = 4, blocks = blocks)
+        assertEquals("\n\n- $unchecked one\n- [x] two", result.text.text)
+        assertMappingIsSound(source, result)
+
+        // The click path is asked with the same blocks, so the offset the
+        // layout would report is the offset the seam answers.
+        val glyph = result.text.text.indexOf(unchecked)
+        val marker = source.indexOf("[ ]")
+        val hit = assertNotNull(
+            decorationAt(source, glyph, caretLine = 4, decorations = builtInDecorations(), blocks = blocks),
+        )
+        assertEquals(marker until marker + 3, hit.range)
+        assertNull(
+            decorationAt(source, glyph, caretLine = 4),
+            "the same offset in the uncollapsed document is not the glyph — which is why the seam takes the blocks",
+        )
+    }
+
+    @Test
+    fun collapsedBlocksReportsWhereEachPlaceholderLanded() {
+        val blocks = listOf(claiming("f", "filter", 3))
+        val reported = collapsedBlocks(blockDoc, caretLine = 0, blocks = blocks).single()
+        assertEquals("f", reported.id)
+        assertEquals("type:task", reported.fence.body)
+        assertEquals(3, reported.lines)
+        assertEquals(
+            blockDoc.indexOf("```"),
+            reported.transformedStart,
+            "nothing before the block moved, so it starts where the fence did",
+        )
+        assertEquals(
+            '\n',
+            transformBlocks(blockDoc, 0, blocks).text.text[reported.transformedStart],
+            "and the placeholder's first line is blank",
+        )
+        assertTrue(
+            collapsedBlocks(blockDoc, caretLine = 2, blocks = blocks).isEmpty(),
+            "a block showing its raw fence has no box to draw over",
+        )
+        assertTrue(collapsedBlocks(blockDoc, caretLine = 0, blocks = emptyList()).isEmpty())
+    }
+
+    @Test
+    fun theFirstRegistrationToClaimAFenceTakesIt() {
+        val two = listOf(claiming("first", "filter", 1), claiming("second", "filter", 4))
+        val taken = collapsedBlocks(blockDoc, 0, blocks = two).single()
+        assertEquals("first", taken.id, "declaration order decides a block exactly as it decides a line")
+        assertEquals(1, taken.lines)
+    }
+
+    @Test
+    fun aBlockAtEitherEndOfTheDocumentMapsSoundlyToo() {
+        val sources = listOf(
+            "```filter\nq\n```",
+            "```filter\nq\n```\ntail",
+            "head\n\n```filter\nq\n```",
+            "```filter\nq\n```\n```filter\nr\n```\n- [ ] after both",
+        )
+        for (source in sources) {
+            for (caret in listOf(null, 0, 1, 2, 3)) {
+                assertMappingIsSound(source, transformBlocks(source, caret, listOf(claiming("f", "filter", 4))))
+            }
+        }
+    }
+
     @Test
     fun theDueTokenRidesTheSeamBesideTheCheckbox() {
         val decorations = builtInDecorations() + dueDecoration

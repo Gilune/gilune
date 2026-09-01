@@ -611,9 +611,16 @@ Post-delivery amendments (owner, 2026-08-31, after all four stages shipped):
   checkbox marker itself off the line's bytes — the one fact about a task that
   is not a date, and what "not done" actually means. `done:none` remains the
   date-token question.
-- T4's Edit-mode rendering shipped as the raw fence rather than the
-  caret-outside overlay (rendered rows do not sit on the editor's line grid;
-  the composed offset table would thread back through checkbox activation,
-  hover and the popup anchor; a covered block cannot be clicked into). Read
-  mode renders; no evaluation runs in Edit mode. Deviation pinned by test,
-  pending either owner acceptance as final or a future overlay round.
+- T4's Edit-mode rendering first shipped as the raw fence. **The owner
+  declined that fallback (2026-09-01)**: a block "behaves like a checkbox —
+  renders until the caret is placed within it". § 5's caret rule is
+  therefore **block-scoped**: the caret on any line of the fence, delimiters
+  included, shows the whole block raw; anywhere else it collapses, through
+  the same offset table, to blank lines an overlay draws the rows into —
+  anchored and sized from the layout's own line boxes, so nothing below it
+  mis-sits. Rows still navigate; a click that is not on one is **not
+  consumed**, so the field lands the caret inside and that reveals the
+  fence — which is how a covered block is edited. Edit mode caps at
+  **8 rows** then `+N more` (Read mode keeps 50), and evaluates on the tick
+  and on buffer settle, never per keystroke and never while the caret is
+  inside the block.

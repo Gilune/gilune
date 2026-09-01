@@ -26,8 +26,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -45,9 +47,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
@@ -352,6 +357,151 @@ fun filterBlockRegistration(
     onOpen: ((String) -> Unit)? = null,
 ): BlockRegistration = BlockRegistration(FILTER_FENCE) { block ->
     FilterBlockView(vaultDir, tick, plugins, block.text, onOpen)
+}
+
+/// The id the shell's **Edit-mode** registration answers to.
+const val FILTER_BLOCK_DECORATION = "gilune.filter"
+
+/// The shell's Edit-mode registration of the same fence: the block-scoped
+/// twin of [filterBlockRegistration] (owner, 2026-09-01 — a block "behaves
+/// like a checkbox", rendered until the caret is placed within it).
+///
+/// It claims a fence **only where it already has a result** for that
+/// block's text, which is what keeps the reservation honest: a block
+/// nobody has evaluated yet reserves nothing and shows its raw fence, and
+/// the lines it does reserve are the rows it is about to draw.
+fun filterBlockDecoration(results: Map<String, FilterResult>): EditorBlockDecoration =
+    EditorBlockDecoration(FILTER_BLOCK_DECORATION) { info, body ->
+        if (!info.equals(FILTER_FENCE, ignoreCase = true)) null else results[body]?.let(::filterBlockLines)
+    }
+
+/// A collapsed block's rows, **one editor line each** — the Edit-mode face
+/// of [FilterBlockView], sharing its result and its reading of it but not
+/// its geometry: here the block sits on the editor's line grid, so a row
+/// is one line high and [filterBlockLines] counts them.
+///
+/// Every row **wraps its content** rather than filling the width. That is
+/// not styling: the space beside a row is where a click falls through to
+/// the field underneath, landing the caret inside the block and revealing
+/// the fence — which is how a covered block is edited. Rows themselves
+/// still navigate and never edit (§ 4).
+@Composable
+fun FilterBlockLines(
+    result: FilterResult,
+    today: LocalDate,
+    onOpen: ((String) -> Unit)?,
+    rowHeight: Dp,
+    maxRowWidth: Dp,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        when (result) {
+            is FilterResult.Hint -> FilterTextLine(result.text, rowHeight, italic = true)
+            is FilterResult.Tasks -> {
+                if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
+                for (row in result.rows) TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth)
+                if (result.more > 0) FilterTextLine("+${result.more} more", rowHeight, italic = false)
+            }
+            is FilterResult.Notes -> {
+                if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
+                for (row in result.rows) NoteHitLine(row, onOpen, rowHeight, maxRowWidth)
+                if (result.more > 0) FilterTextLine("+${result.more} more", rowHeight, italic = false)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TaskHitLine(
+    hit: TaskHit,
+    today: LocalDate,
+    onOpen: ((String) -> Unit)?,
+    rowHeight: Dp,
+    maxWidth: Dp,
+) {
+    val colours = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .height(rowHeight)
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(4.dp))
+            .background(colours.surface)
+            .let { if (onOpen == null) it else it.clickable { onOpen(hit.relPath) }.pointerHoverIcon(PointerIcon.Hand) }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            taskLabel(hit.text),
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = colours.onSurface,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        val due = hit.due
+        if (due != null) {
+            Text(
+                due.toString(),
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                color = dueColour(due, today),
+            )
+        }
+    }
+}
+
+@Composable
+private fun NoteHitLine(row: NoteRow, onOpen: ((String) -> Unit)?, rowHeight: Dp, maxWidth: Dp) {
+    val colours = MaterialTheme.colorScheme
+    Row(
+        Modifier
+            .height(rowHeight)
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(4.dp))
+            .background(colours.surface)
+            .let { if (onOpen == null) it else it.clickable { onOpen(row.relPath) }.pointerHoverIcon(PointerIcon.Hand) }
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            row.name,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = colours.onSurface,
+            modifier = Modifier.weight(1f, fill = false),
+        )
+        Text(
+            row.relPath,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            color = colours.onSurfaceVariant,
+        )
+    }
+}
+
+/// A line the block says something in rather than lists something in: a
+/// hint, an answered question with no matches, or the footer. Never
+/// clickable, so it is click-through like the space beside a row.
+@Composable
+private fun FilterTextLine(text: String, rowHeight: Dp, italic: Boolean) {
+    Row(
+        Modifier.height(rowHeight).padding(horizontal = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text,
+            fontSize = 11.sp,
+            fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
 }
 
 /// A `filter` block as a live list. Group-less — a block asked one

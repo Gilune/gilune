@@ -248,6 +248,39 @@ class FilterBlockTest {
     }
 
     // ------------------------------------------------------------------
+    // Edit mode (owner, 2026-09-01): the block renders there too, on the
+    // editor's own line grid — so it has its own cap, and a count of the
+    // lines it needs that the transformation can reserve
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theEditModeCapIsEightRowsAndTheRestAreCounted() {
+        val root = Files.createTempDirectory("gilune-filter-edit-cap").toFile()
+        File(root, "many.md").writeText((1..20).joinToString("\n") { "- [ ] task $it due:2026-09-05" })
+        val result = evaluateFilterBlock(
+            root.absolutePath,
+            "type:task",
+            types,
+            today,
+            FILTER_EDIT_ROW_CAP,
+        ) as FilterResult.Tasks
+        assertEquals(8, FILTER_EDIT_ROW_CAP, "a block must not eat the note it is written in")
+        assertEquals(8, result.rows.size)
+        assertEquals(12, result.more)
+        assertEquals(9, filterBlockLines(result), "eight rows, and the line that counts the rest")
+    }
+
+    @Test
+    fun aBlockReservesOneLinePerRowItDraws() {
+        assertEquals(1, filterBlockLines(FilterResult.Hint("anything")))
+        assertEquals(1, filterBlockLines(FilterResult.Tasks(emptyList(), 0)), "no matches is still a line saying so")
+        assertEquals(1, filterBlockLines(FilterResult.Notes(emptyList(), 0)))
+        assertEquals(2, filterBlockLines(run("type:task\ndue:week")), "two rows, two lines")
+        assertEquals(1, filterBlockLines(run("type:note\nmilk")))
+        assertEquals(4, filterBlockLines(FilterResult.Notes(List(3) { NoteRow("n", "n.md") }, 2)))
+    }
+
+    // ------------------------------------------------------------------
     // The three degenerate blocks, and the words they say
     // ------------------------------------------------------------------
 

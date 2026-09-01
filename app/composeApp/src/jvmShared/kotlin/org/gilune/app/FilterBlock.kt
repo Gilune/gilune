@@ -27,6 +27,25 @@ const val FILTER_FENCE = "filter"
 /// and the rest are counted.
 const val FILTER_ROW_CAP = 50
 
+/// The same cap in **Edit mode** (owner, 2026-09-01). A block there sits
+/// in the editor's own line grid and pushes the note it is written in down
+/// the page, so a big query must not eat the document: eight rows, then
+/// the `+N more` the reader already knows how to read. Read mode, where
+/// the block is the whole page, keeps [FILTER_ROW_CAP].
+const val FILTER_EDIT_ROW_CAP = 8
+
+/// How many editor lines a collapsed block reserves: **one per row it
+/// draws**, one more for a `+N more` footer, and never fewer than one —
+/// a block with no matches still says so. The transformation reserves
+/// exactly this many blank lines and the overlay draws exactly this many
+/// rows into them, so the two cannot disagree and nothing below the block
+/// mis-sits.
+fun filterBlockLines(result: FilterResult): Int = when (result) {
+    is FilterResult.Hint -> 1
+    is FilterResult.Tasks -> maxOf(result.rows.size, 1) + if (result.more > 0) 1 else 0
+    is FilterResult.Notes -> maxOf(result.rows.size, 1) + if (result.more > 0) 1 else 0
+}
+
 /// How many candidate lines one note may contribute before the engine
 /// stops quoting them. A block wants every task in a note, not the five a
 /// search panel quotes, and this is well past the rendering cap — what it

@@ -14,6 +14,14 @@
 // enforced against a producer: the shell filters the caret's line before
 // asking anyone, folds every match into one offset table, resolves
 // overlaps, and never lets rendering change a byte.
+//
+// The seam has a second, **block-scoped** kind (owner, 2026-09-01: a
+// `filter` block "behaves like a checkbox — renders until the caret is
+// placed within it"). A registration claims a whole closed fence and says
+// how many lines it needs; the fence collapses into that many blank lines
+// through the same offset table, and the shell draws over them. The caret
+// rule is the checkbox's rule one scope up: the caret on *any* line of the
+// block, delimiters included, shows the raw fence.
 
 package org.gilune.app
 
@@ -90,6 +98,99 @@ data class DecorationHit(
     val lineRange: IntRange,
 )
 
+/// A closed fenced block as it stands in the buffer: its info string, the
+/// body between the delimiters, the half-open source range of the whole
+/// fence — both delimiter lines included, the trailing newline not — and
+/// the 0-based lines it covers.
+data class FencedBlock(
+    val info: String,
+    val body: String,
+    val range: IntRange,
+    val lines: IntRange,
+)
+
+/// A **block-scoped** registration into the `editor.blocks` seam: the
+/// Edit-mode half of what `BlockRegistration` does for Read mode.
+///
+/// `claim` is asked of a closed fence's info string and body and answers
+/// with the number of **lines** the collapsed block reserves, or null to
+/// decline it. Declining is a real answer, not a failure: a renderer that
+/// has no result for this block yet leaves the raw fence showing, so the
+/// transformation can never reserve a box nobody can fill.
+class EditorBlockDecoration(
+    val id: String,
+    val claim: (info: String, body: String) -> Int?,
+)
+
+/// Where a collapsed block landed: the registration that took it, the
+/// fence it stands for, and the offset and line count of the placeholder
+/// reserving its box in the **transformed** text. An overlay anchors on
+/// [transformedStart] and covers [lines] of the layout's lines, which is
+/// how its height comes out exactly the height the fence gave up.
+data class CollapsedBlock(
+    val id: String,
+    val fence: FencedBlock,
+    val transformedStart: Int,
+    val lines: Int,
+)
+
+/// Every closed fence in `source`, in document order. An **unterminated**
+/// fence is not one: it has no end, so there is nothing to collapse and it
+/// stays the raw text it is.
+fun fencedBlocks(source: String): List<FencedBlock> {
+    val found = mutableListOf<FencedBlock>()
+    val body = mutableListOf<String>()
+    var openStart = -1
+    var openLine = -1
+    var info = ""
+    var offset = 0
+    for ((index, line) in source.split('\n').withIndex()) {
+        val start = offset
+        offset += line.length + 1
+        val delimiter = line.trim().startsWith("```")
+        if (openStart < 0) {
+            if (!delimiter) continue
+            openStart = start
+            openLine = index
+            info = line.trim().removePrefix("```").trim()
+            body.clear()
+            continue
+        }
+        if (!delimiter) {
+            body += line
+            continue
+        }
+        found += FencedBlock(
+            info = info,
+            body = body.joinToString("\n"),
+            range = openStart until start + line.length,
+            lines = openLine..index,
+        )
+        openStart = -1
+    }
+    return found
+}
+
+/// The blocks a buffer collapses, in the coordinates an overlay needs.
+/// Same inputs as [MarkdownEditTransformation], so what is drawn and what
+/// was reserved cannot disagree: this asks the same composition the same
+/// question rather than repeating its arithmetic.
+fun collapsedBlocks(
+    source: String,
+    caretLine: Int?,
+    decorations: List<EditorDecoration> = builtInDecorations(),
+    blocks: List<EditorBlockDecoration> = emptyList(),
+): List<CollapsedBlock> {
+    if (blocks.isEmpty()) return emptyList()
+    val placed = decorate(source, caretLine, decorations, blocks)
+    val starts = transformedStarts(placed)
+    return placed.mapIndexedNotNull { index, span ->
+        val id = span.blockId ?: return@mapIndexedNotNull null
+        val fence = span.fence ?: return@mapIndexedNotNull null
+        CollapsedBlock(id, fence, starts[index], span.replacement.count { it == '\n' } + 1)
+    }
+}
+
 /// The shell's own registrations, ahead of every plugin's (§ 5: overlaps go
 /// to the first registration, built-ins first). One entry today — the E3
 /// checkbox slice, re-expressed so the seam carries the same shape a plugin
@@ -112,10 +213,11 @@ class MarkdownEditTransformation(
     private val palette: MarkdownPalette,
     private val caretLine: Int? = null,
     private val decorations: List<EditorDecoration> = builtInDecorations(),
+    private val blocks: List<EditorBlockDecoration> = emptyList(),
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val source = text.text
-        val placed = decorate(source, caretLine, decorations)
+        val placed = decorate(source, caretLine, decorations, blocks)
         if (placed.isEmpty()) {
             return TransformedText(styleMarkdown(source, palette), OffsetMapping.Identity)
         }
@@ -159,22 +261,28 @@ fun activateLine(line: String, decorations: List<EditorDecoration> = builtInDeco
 /// The offset is a cursor position, so a hit on a glyph's right half arrives
 /// as the boundary just past it; a span ending exactly there answers, but
 /// only once no span actually covering the offset has.
+///
+/// `blocks` is taken for the same reason the transformation takes it: a
+/// collapsed block moves every offset behind it, so an answer computed
+/// without one would be read off the wrong place in the layout.
 fun decorationAt(
     text: String,
     transformedOffset: Int,
     caretLine: Int?,
     decorations: List<EditorDecoration> = builtInDecorations(),
+    blocks: List<EditorBlockDecoration> = emptyList(),
 ): DecorationHit? {
-    val placed = decorate(text, caretLine, decorations)
+    val placed = decorate(text, caretLine, decorations, blocks)
     if (placed.isEmpty()) return null
     val starts = transformedStarts(placed)
     var onEdge: DecorationHit? = null
     for ((index, span) in placed.withIndex()) {
-        if (span.decoration.activate == null) continue
+        val hit = span.hit() ?: continue
+        if (span.decoration?.activate == null) continue
         val start = starts[index]
         val end = start + span.replacement.length
-        if (transformedOffset in start until end) return span.hit()
-        if (transformedOffset == end && onEdge == null) onEdge = span.hit()
+        if (transformedOffset in start until end) return hit
+        if (transformedOffset == end && onEdge == null) onEdge = hit
     }
     return onEdge
 }
@@ -251,16 +359,24 @@ private val BUILT_IN_DECORATIONS = listOf(CHECKBOX_DECORATION)
 /// One accepted match, placed in the source: what renders where, who owns
 /// it, and the line it sits on. `replacement` is the source text itself for
 /// a style-only span, so replacement and mapping are one uniform pass.
+///
+/// A **collapsed block** is the same thing one scope up: it carries the
+/// registration's id and the fence it swallowed instead of a line
+/// recogniser, so one table, one mapping and one styling pass serve both
+/// kinds. It bears no [EditorDecoration], which is exactly why it can
+/// never be activated by a click.
 private class PlacedDecoration(
     val start: Int,
     val sourceLength: Int,
     val replacement: String,
     val role: DecorationRole,
-    val decoration: EditorDecoration,
+    val decoration: EditorDecoration?,
     val lineRange: IntRange,
+    val blockId: String? = null,
+    val fence: FencedBlock? = null,
 ) {
-    fun hit(): DecorationHit =
-        DecorationHit(decoration, start until start + sourceLength, lineRange)
+    fun hit(): DecorationHit? =
+        decoration?.let { DecorationHit(it, start until start + sourceLength, lineRange) }
 }
 
 /// Composition, and the whole of what § 5 reserves to the shell: the caret's
@@ -272,8 +388,11 @@ private fun decorate(
     source: String,
     caretLine: Int?,
     decorations: List<EditorDecoration>,
+    blocks: List<EditorBlockDecoration> = emptyList(),
 ): List<PlacedDecoration> {
-    if (decorations.isEmpty()) return emptyList()
+    val collapsed = collapse(source, caretLine, blocks)
+    if (decorations.isEmpty()) return collapsed
+    val hidden = collapsed.mapNotNull { it.fence?.lines }
     val placed = mutableListOf<PlacedDecoration>()
     var offset = 0
     var inFence = false
@@ -286,6 +405,10 @@ private fun decorate(
         val fenced = inFence || delimiter
         if (delimiter) inFence = !inFence
         if (index == caretLine) continue
+        // A collapsed block's lines are not in the transformed text at
+        // all: the block replaced them whole, so nothing may also claim
+        // ground inside one.
+        if (hidden.any { index in it }) continue
 
         val claimed = mutableListOf<IntRange>()
         val onLine = mutableListOf<PlacedDecoration>()
@@ -314,6 +437,44 @@ private fun decorate(
         // Declaration order decides overlaps; document order decides the
         // table, and one registration may claim later ground than the next.
         placed += onLine.sortedBy { it.start }
+    }
+    // Blocks and lines are disjoint by construction — a collapsed block's
+    // lines were skipped above — so merging by start is all the table's
+    // sorted, non-overlapping contract needs.
+    return if (collapsed.isEmpty()) placed else (collapsed + placed).sortedBy { it.start }
+}
+
+/// The block-scoped half of composition, and the same three rules: the
+/// caret's **block** is filtered out before any registration is asked, the
+/// first registration to claim a fence takes it, and a claim reserves
+/// lines rather than writing anything. `caretLine == null` — an unfocused
+/// buffer — collapses every claimed block, so a note opens showing its
+/// blocks exactly as it opens showing its checkboxes.
+private fun collapse(
+    source: String,
+    caretLine: Int?,
+    blocks: List<EditorBlockDecoration>,
+): List<PlacedDecoration> {
+    if (blocks.isEmpty()) return emptyList()
+    val placed = mutableListOf<PlacedDecoration>()
+    for (fence in fencedBlocks(source)) {
+        if (caretLine != null && caretLine in fence.lines) continue
+        for (block in blocks) {
+            val lines = block.claim(fence.info, fence.body) ?: continue
+            placed += PlacedDecoration(
+                start = fence.range.first,
+                sourceLength = fence.range.last + 1 - fence.range.first,
+                // The placeholder: as many blank lines as were claimed, so
+                // the box the fence gave up is exactly the box reserved.
+                replacement = "\n".repeat(lines.coerceAtLeast(1) - 1),
+                role = DecorationRole.NONE,
+                decoration = null,
+                lineRange = fence.range,
+                blockId = block.id,
+                fence = fence,
+            )
+            break
+        }
     }
     return placed
 }

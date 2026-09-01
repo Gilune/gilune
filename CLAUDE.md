@@ -474,6 +474,29 @@ gates promises) are ratified. **Next: application-level engineering — see
      vcvars64.bat env + `CMAKE_GENERATOR="NMake Makefiles"`; and
      NMake try-compiles die (U1052 build.make not found) beyond
      ~MAX_PATH — build from a SHORT path, never the scratchpad.
+   - **Mobile design ratified + filter blocks render in Edit
+     (2026-09-01)** — ADR 0017 (mobile app) **Accepted**: capture-first
+     shell, live preview under a no-reflow law, always-glyph
+     checkboxes, LOCAL on-device transcription (the coordinator story
+     was an M4b build artefact, corrected pre-ratification), staged
+     MB0–MB3 behind MS1 (IME) and MS2 (ARM64 whisper) spikes; five
+     answers in its Ratification record — note #3: desktop KEEPS
+     raw-on-the-caret-line, the shells deliberately differ. Research
+     notes in architecture/research/2026-09-01-*. Separately, the
+     owner overturned ADR 0015's T4 edit-mode fallback: a `filter`
+     block now "behaves like a checkbox — renders until the caret is
+     placed within it". Seam grew `EditorBlockDecoration` (block-
+     scoped claims collapse a closed fence to reserved lines through
+     the one offset table; overlay anchored from getLineTop/Bottom so
+     height IS the reserved lines); caret on any fence line reveals
+     the whole block; non-row clicks fall through to place the caret
+     inside (reveal); rows navigate; edit cap 8 rows + more (Read
+     keeps 50); no evaluation while the caret is inside; unterminated
+     fences never collapse. Suite **381**. Screen-validated (render +
+     click-through reveal). Coordinator confession: broke the
+     no-PowerShell-regex rule on decisions/README, mojibaked an
+     em-dash, caught it in the diff pre-commit — the rule stands.
+     **Next: MB0 on the owner's word.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

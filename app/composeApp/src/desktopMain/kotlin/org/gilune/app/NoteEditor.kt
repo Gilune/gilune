@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -81,6 +82,7 @@ import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -91,6 +93,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.IntSize
@@ -105,6 +108,11 @@ import java.io.File
 import java.time.LocalDate
 
 private const val AUTOSAVE_IDLE_MS = 1200L
+
+/// The body field's inset. Named because a collapsed block's overlay is
+/// placed in the *text's* coordinates and has to add it back: the layout
+/// measures from inside this padding, the overlay is a sibling outside it.
+private val EDITOR_PADDING = 14.dp
 
 /// ADR 0015 § 1's fence rule, asked **here** because the `/` menu's
 /// machine is line-scoped: [SuggestSession] sees one line and cannot know
@@ -547,8 +555,47 @@ private fun OpenNote(
             var bodyFocused by remember { mutableStateOf(false) }
             val line =
                 if (bodyFocused) caretLine(editor.text.text, editor.text.selection.start) else null
-            val transformation = remember(palette, line, decorations) {
-                MarkdownEditTransformation(palette, line, decorations)
+
+            // T4 in Edit mode (owner, 2026-09-01): a `filter` block behaves
+            // like a checkbox — rendered until the caret is placed within
+            // it. Its cadence is § 4's, not a keystroke's: the buffer as
+            // **settled**, so a block recomputes once typing stops, and the
+            // opened buffer seeds it so a note opens with its blocks drawn.
+            var settled by remember(relPath) { mutableStateOf(editor.text.text) }
+            LaunchedEffect(editor.text.text) {
+                delay(AUTOSAVE_IDLE_MS)
+                settled = editor.text.text
+            }
+            // The caret's own block is never evaluated: it is showing its
+            // raw fence, and a query nobody can see is not worth a pass
+            // over the vault (§ 4).
+            val wanted = remember(settled, line) {
+                val fences = fencedBlocks(settled)
+                val caretBody = fences.firstOrNull { line != null && line in it.lines }?.body
+                fences.filter { it.info.equals(FILTER_FENCE, ignoreCase = true) }
+                    .map { it.body }
+                    .distinct()
+                    .filterNot { it == caretBody }
+            }
+            val evaluated = remember(state.vaultDir, state.vaultTick.value, wanted, plugins, filter) {
+                val day = LocalDate.now()
+                val types = searchTypesFor(plugins)
+                day to wanted.associateWith { body ->
+                    evaluateFilterBlock(state.vaultDir, body, types, day, FILTER_EDIT_ROW_CAP)
+                }
+            }
+            val blockDay = evaluated.first
+            val results = evaluated.second
+            val blockDecorations = remember(results) { listOf(filterBlockDecoration(results)) }
+
+            val transformation = remember(palette, line, decorations, blockDecorations) {
+                MarkdownEditTransformation(palette, line, decorations, blockDecorations)
+            }
+            // Where each collapsed block's placeholder landed, asked of the
+            // same composition the field is showing, so what is drawn and
+            // what was reserved cannot drift apart.
+            val collapsed = remember(editor.text.text, line, decorations, blockDecorations) {
+                collapsedBlocks(editor.text.text, line, decorations, blockDecorations)
             }
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
             var hoveringActivation by remember { mutableStateOf(false) }
@@ -572,7 +619,13 @@ private fun OpenNote(
                 val text = editor.text.text
                 val caret =
                     if (bodyFocused) caretLine(text, editor.text.selection.start) else null
-                return decorationAt(text, placed.getOffsetForPosition(position), caret, decorations)
+                return decorationAt(
+                    text,
+                    placed.getOffsetForPosition(position),
+                    caret,
+                    decorations,
+                    blockDecorations,
+                )
             }
 
             /// Activation is the only route by which a decoration may
@@ -608,7 +661,12 @@ private fun OpenNote(
             // still fills it, so a click anywhere lands the caret.
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val paneHeight = maxHeight
-                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                val blockWidth = maxWidth - EDITOR_PADDING * 2
+                // A box rather than a column because the field is not the
+                // only thing in it: a collapsed block draws over the lines
+                // the field reserved for it, and being its sibling here is
+                // what makes it scroll with the text it covers.
+                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     BasicTextField(
                         value = editor.text,
                         onValueChange = {
@@ -641,7 +699,7 @@ private fun OpenNote(
                         modifier = Modifier
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = paneHeight)
-                            .padding(14.dp)
+                            .padding(EDITOR_PADDING)
                             // Window coordinates for the caret popup: the
                             // layout gives a rectangle in the field's own
                             // space, and this is what puts it on screen.
@@ -748,6 +806,19 @@ private fun OpenNote(
                         cursorBrush = SolidColor(colours.primary),
                         visualTransformation = transformation,
                     )
+
+                    // The blocks the transformation collapsed, drawn into
+                    // the blank lines it left for them. A block whose
+                    // result has gone since draws nothing rather than a
+                    // stale list — but it cannot: the registration only
+                    // claims a fence it has a result for.
+                    val laidOut = layout
+                    if (laidOut != null) {
+                        for (block in collapsed) {
+                            val result = results[block.fence.body] ?: continue
+                            CollapsedFilterBlock(block, laidOut, result, blockDay, openRow, blockWidth)
+                        }
+                    }
                 }
 
                 // The caret-anchored menu (ADR 0015 § 2). The session's
@@ -785,6 +856,50 @@ private fun OpenNote(
                 editor.applyProperties(entries)
             },
         )
+    }
+}
+
+/// One collapsed `filter` block, drawn over the blank lines the
+/// transformation reserved for it (owner, 2026-09-01).
+///
+/// The box is anchored and sized **from the layout itself** — the top of
+/// the placeholder's first line to the bottom of its last — so it tracks
+/// scrolling, re-wrapping and any change of metrics with no second source
+/// of truth, and its rows are those lines exactly.
+///
+/// **Nothing here consumes a pointer event except a row.** A click beside
+/// one reaches the field underneath, which lands the caret in the
+/// placeholder — and a caret inside the block is what brings the raw fence
+/// back. That is the answer to how a covered block is edited.
+@Composable
+private fun CollapsedFilterBlock(
+    block: CollapsedBlock,
+    layout: TextLayoutResult,
+    result: FilterResult,
+    today: LocalDate,
+    onOpen: ((String) -> Unit)?,
+    width: Dp,
+) {
+    // The layout is one frame behind a buffer that has just changed, so
+    // every read of it is asked for rather than assumed.
+    val bounds = runCatching {
+        val first = layout.getLineForOffset(block.transformedStart)
+        val last = (first + block.lines - 1).coerceAtMost(layout.lineCount - 1)
+        layout.getLineTop(first) to layout.getLineBottom(last)
+    }.getOrNull() ?: return
+    val density = LocalDensity.current
+    val top = with(density) { bounds.first.toDp() }
+    val height = with(density) { (bounds.second - bounds.first).toDp() }
+    if (height <= 0.dp || width <= 0.dp) return
+    Box(
+        Modifier
+            .offset(x = EDITOR_PADDING, y = EDITOR_PADDING + top)
+            .width(width)
+            .height(height)
+            .clip(RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        FilterBlockLines(result, today, onOpen, height / block.lines, width)
     }
 }
 
