@@ -227,6 +227,32 @@ class RecordService : Service() {
                 val receipt = writer.finish()
                 duration = sink.emitted * 1000L / WAV_BYTE_RATE
                 gilune.project()
+
+                // The recording is committed, projected and durable —
+                // and only now is a processor asked anything (§ 4:
+                // transcription is "never on the capture path"). A
+                // widget recording is a recording like any other, so it
+                // gets transcribed like any other; without this the
+                // capture path that skips the app was also the one that
+                // skipped its words.
+                //
+                // This is a second handle on the vault, so it enables
+                // whisper on its own — and it never downloads (see
+                // `enableTranscriptionForService`). Jobs are
+                // at-least-once with idempotent handlers and outputs
+                // carry derived IDs, so the app running the same job
+                // again later costs a retry and never a second
+                // transcript.
+                runCatching {
+                    if (enableTranscriptionForService(this@RecordService, gilune)) {
+                        gilune.runProcessing()
+                        // ADR 0013 revises the capture note in place, so
+                        // the transcript reaches the file through a
+                        // second projection.
+                        gilune.project()
+                    }
+                }.onFailure { Log.w(TAG, "the recording committed but was not transcribed", it) }
+
                 landed = gilune.recentSources(20u)
                     .firstOrNull { it.objectId == receipt.sourceId }
                     ?.projectionRelPath

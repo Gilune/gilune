@@ -601,9 +601,38 @@ gates promises) are ratified. **Next: application-level engineering — see
      note → Read glyphs → Edit with styled tokens + toolbar. Gaps:
      glyph long-press eats platform selection start; title rename
      loses on back-without-commit (desktop parity); row scrolls
-     under ~384dp width; perf unmeasured on long notes. **Next:
-     transcription wiring + dictation (enable_whisper on Android,
-     model consent, tiny-q5_1 default), then MB3.**
+     under ~384dp width; perf unmeasured on long notes.
+   - **Mobile transcription + dictation DONE (2026-09-01)** —
+     **WHISPER'S FIRST ANDROID EXECUTION**: 2 s silence → transcript
+     in 5.34–5.57 s (x86_64 emulator, tiny-q5_1, 3 runs, outputs=1
+     failed=0; NOT a phone number — MS2 stands). Phone default
+     tiny-q5_1 implemented at the READ SITE (`transcriptionModelKey()`
+     returns the unresolved key — the only shared change, pinned from
+     both sides so editing the shared default fails tests). One
+     enable/download call site (LaunchedEffect keyed
+     state|granted|settings; consent = POSITIVE grant — empty lists
+     fail toward not fetching; .part rename; a second racing call
+     site in openVault was removed). Pending states:
+     `TranscriptionPhase`, only Ready earns "transcribing…"; third
+     wording "downloading the transcription model…" added beyond §4's
+     two (an in-flight download must not read as "needs"). Dictation
+     = note.actions row gated contribution AND Ready; minimal
+     BufferEdit at the caret; blank transcripts write nothing.
+     WIDGET GAP FOUND: RecordService never ran processing — now
+     enableTranscriptionForService + runProcessing + re-project on
+     its own handle (enable_whisper is PER-HANDLE, kernel-confirmed;
+     service never downloads — a home-screen tap is no place for
+     consent; idempotent jobs make double-processing safe); ON_START
+     refresh so widget notes stop reading "transcribing…" forever.
+     INTERNET added to the manifest (S5/Play surface, like the mic
+     FGS type). Suites: instrumented 454/0/0-skipped (the whisper
+     test genuinely ran), desktop 394/0. Gaps: download flow never
+     exercised end-to-end (model seeded via adb); **[BLANK_AUDIO]
+     wart — whisper's silence marker lands as a real note body
+     (desktop shares this; owner decision pending)**; runtime not
+     persisted across process death; widget pays a model load per
+     recording. **Next: MB3 (Search + Agenda + remaining widget
+     cells) closes the ratified staging.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

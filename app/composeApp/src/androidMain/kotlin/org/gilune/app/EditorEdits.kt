@@ -212,6 +212,38 @@ fun linkEdit(text: String, selection: TextRange): BufferEdit {
     return BufferEdit(from, to, written, TextRange(caret))
 }
 
+/// Dictation at the cursor (ADR 0017 § 4, ADR 0013's second verb): the
+/// words the kernel transcribed, landing at the caret **as an ordinary
+/// edit**.
+///
+/// It is a [BufferEdit] like every other action here, and that is the
+/// point rather than a convenience: replacing the whole document would
+/// collapse the undo history and restart the IME's composing session, and
+/// dictation is exactly the moment a keyboard is mid-thought. Speaking
+/// into a note is one undo step, and `Ctrl`-less phones have only the
+/// toolbar's undo to get back.
+///
+/// Spacing is the one judgement it makes. Whisper returns a trimmed
+/// phrase with no leading space, so dictating twice in a row would
+/// otherwise weld two sentences together; a single space is inserted when
+/// the caret is not already at a boundary. Nothing is added at the start
+/// of a line or after existing whitespace, so dictating into an empty note
+/// does not begin it with a space.
+///
+/// A selection is replaced, which is what selecting-then-speaking means
+/// everywhere else on the platform. Blank words change nothing at all:
+/// silence is not an edit, and a failed transcription must never be a
+/// buffer write.
+fun dictationEdit(text: String, selection: TextRange, words: String): BufferEdit? {
+    val spoken = words.trim()
+    if (spoken.isEmpty()) return null
+    val from = selection.min.coerceIn(0, text.length)
+    val to = selection.max.coerceIn(from, text.length)
+    val needsSpace = from > 0 && !text[from - 1].isWhitespace()
+    val written = if (needsSpace) " $spoken" else spoken
+    return BufferEdit(from, to, written, TextRange(from + written.length))
+}
+
 private const val INDENT = "  "
 
 /// Rewrites every line the selection touches and reports one replacement

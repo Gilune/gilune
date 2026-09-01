@@ -37,10 +37,15 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -311,6 +316,14 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
         }
     }
 
+    // A bundled plugin's known fields, rendered directly; the generic
+    // schema-driven form arrives with the sandboxed runtime (ADR 0010).
+    // Same idiom as the desktop's, with the wording adapted to a phone.
+    if (plugin.pluginId == TRANSCRIPTION_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        TranscriptionSettings(state, plugin)
+    }
+
     val events = buildList {
         plugin.subscribes?.let { add("listens to $it") }
         plugin.emits.forEach { add("emits $it") }
@@ -349,6 +362,132 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
             color = colours.onSurfaceVariant,
         )
     }
+}
+
+/// The transcription provider's settings on a phone (ADR 0017 § 4, § 7).
+///
+/// The desktop's form, with two differences that are both the ADR's:
+///
+///  - **The recommendation is different.** `base-q5_1` is recommended on
+///    a desktop because it hears trade words and £ amounts for about a
+///    second more. On a phone the CPU is 2–4× slower and the ADR pencils
+///    `tiny-q5_1` (§ Ratification 5), so that is what is marked — and it
+///    is marked as *pencilled*, because MS2 has not run and no figure in
+///    this repo has ever come off ARM64.
+///  - **Sizes matter more.** A 142 MiB download onto a metered phone
+///    connection is a different proposition, so every row shows its cost
+///    and the catalogue's own labels carry it.
+///
+/// Both keys are one settings document, so every write sends both
+/// (`transcriptionSettingsDocument`) on the tasks precedent: changing one
+/// must never drop the other.
+@Composable
+private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    val saved = remember(plugin.settings) { listOf(plugin).transcriptionLanguage() }
+    // The phone's default, resolved at the read site — the desktop's
+    // `transcriptionModel()` still answers base-q5_1, which is what keeps
+    // the two shells' defaults a decision rather than drift.
+    val savedModel = remember(plugin.settings) { listOf(plugin).androidTranscriptionModel() }
+    var language by remember(plugin.settings) { mutableStateOf(saved) }
+
+    Text("Spoken language", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "\"auto\" detects the language but costs an extra pass, which is " +
+            "about 40% longer on a short clip. A fixed code — en, sv, de… — " +
+            "transcribes faster.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        OutlinedTextField(
+            value = language,
+            onValueChange = { language = it },
+            singleLine = true,
+            modifier = Modifier.weight(1f).testTag("language"),
+        )
+        Button(
+            onClick = {
+                val wanted = language.trim()
+                // The model travels with the write, so setting a language
+                // cannot quietly revert the model somebody chose.
+                state.pluginAction("spoken language set to $wanted — takes effect next launch") {
+                    it.setPluginSettings(
+                        plugin.pluginId,
+                        transcriptionSettingsDocument(wanted, savedModel.key),
+                    )
+                }
+            },
+            enabled = language.trim().isNotEmpty() && language.trim() != saved,
+            modifier = Modifier.heightIn(min = TouchTarget),
+        ) { Text("Apply") }
+    }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Transcription model", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Bigger models hear better and take longer, and on a phone that " +
+            "trade is sharper than on a desktop: the same clip is expected to " +
+            "take two to four times as long, and transcription competes for " +
+            "battery. tiny-q5_1 is the phone recommendation — the smallest " +
+            "download and the fastest measured model — but it is pencilled in " +
+            "rather than measured: no figure here has yet come off a real " +
+            "phone. The quantised models (q5_1) transcribe the same words as " +
+            "their full siblings from a smaller download.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+    for (option in WHISPER_MODELS) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = TouchTarget)
+                .clickable {
+                    // The language travels with the write for the same
+                    // reason the model does above — and the stored one,
+                    // not whatever is half-typed in the field.
+                    state.pluginAction("transcription model set to ${option.key}") {
+                        it.setPluginSettings(
+                            plugin.pluginId,
+                            transcriptionSettingsDocument(saved, option.key),
+                        )
+                    }
+                }
+                .testTag("model-option"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            RadioButton(selected = option.key == savedModel.key, onClick = null)
+            Text(
+                phoneModelLabel(option),
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.padding(start = 8.dp),
+            )
+        }
+    }
+    Text(
+        "A model you have not chosen before is downloaded once, with the " +
+            "network permission above. Models already downloaded are kept, so " +
+            "switching back costs nothing. Recordings made before a model " +
+            "arrives are never lost — they wait, and Catch up missed captures " +
+            "collects any made while the plugin was off.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+}
+
+/// The catalogue's own label, with the desktop's recommendation swapped
+/// for the phone's. The shared `WhisperModel.note` says "recommended" of
+/// `base-q5_1` because the shared catalogue is written from the desktop
+/// benchmark; on a phone that word belongs to a different row, and saying
+/// so here rather than editing the catalogue is what keeps one shell's
+/// advice out of the other's.
+fun phoneModelLabel(model: WhisperModel): String = when (model.key) {
+    ANDROID_DEFAULT_WHISPER_MODEL -> "${model.key} — recommended on phones, ${model.size}"
+    DEFAULT_WHISPER_MODEL -> "${model.key} — hears more, ${model.size}"
+    else -> "${model.key} — ${model.size}"
 }
 
 @Composable

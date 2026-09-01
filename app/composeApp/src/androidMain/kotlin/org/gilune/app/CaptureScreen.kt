@@ -74,7 +74,7 @@ private val AUDIO_EXTENSIONS = listOf(".wav", ".m4a", ".mp3", ".ogg", ".opus")
 /// What the kernel knows about a recording's words, which is all the row
 /// is allowed to claim (§ 4: "the pending state is shown and is never
 /// written to the file").
-enum class Transcription { Absent, Pending, Done }
+enum class Transcription { Absent, Downloading, Pending, Done }
 
 /// Read off kernel state and nothing else. `preview` carries the source's
 /// words once a processor has landed them (ADR 0013 puts the transcript
@@ -82,30 +82,49 @@ enum class Transcription { Absent, Pending, Done }
 /// yet — and whether any are coming is the question the row must answer
 /// honestly.
 ///
-/// **Enabled is not the same as able.** The transcription plugin is
-/// bundled and switched on, but its ~75 MiB model download is gated by
-/// `network.request`, which always waits for an explicit yes (§ 4). Until
-/// that consent is given there is no model, so nothing is transcribing
-/// and saying otherwise would be the row lying about the one thing it
-/// exists to report. An outstanding capability is exactly § 4's "before
-/// consent" state, and its words are "needs the transcription model".
-fun transcriptionState(preview: String, plugins: List<PluginInfo>): Transcription {
+/// **Enabled is not the same as able, and consented is not the same as
+/// able either.** The transcription plugin is bundled and switched on,
+/// but its model download is gated by `network.request`, which always
+/// waits for an explicit yes (§ 4) — and even after that yes there is a
+/// stretch of tens of megabytes during which nothing can run. So the
+/// question is asked at the only level that answers it: has
+/// `enableWhisper` succeeded on this handle ([TranscriptionPhase.Ready])?
+/// Nothing short of that may render "transcribing…", because a job that
+/// cannot run is not running.
+fun transcriptionState(
+    preview: String,
+    plugins: List<PluginInfo>,
+    phase: TranscriptionPhase,
+): Transcription {
     if (preview.isNotBlank()) return Transcription.Done
     val transcriber = plugins.firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }
-    val able = transcriber != null && transcriber.state == "enabled" && transcriber.ungranted.isEmpty()
-    return if (able) Transcription.Pending else Transcription.Absent
+    val switchedOn = transcriber != null && transcriber.state == "enabled"
+    if (!switchedOn) return Transcription.Absent
+    return when (phase) {
+        TranscriptionPhase.Ready -> Transcription.Pending
+        TranscriptionPhase.Downloading -> Transcription.Downloading
+        else -> Transcription.Absent
+    }
 }
 
 /// The § 4 wording, exactly: *recorded · 0:42 · transcribing…* while a
 /// job runs, *recorded · 0:42 · needs the transcription model* before
 /// there is anything to run it. A recording whose header could not be
 /// read says so by omitting the duration rather than inventing one.
+///
+/// The third line is this shell's addition and it is deliberate. § 4
+/// names two states because it is describing a decision, not enumerating
+/// a UI; between the yes and the model there is a real third situation
+/// lasting tens of megabytes, and calling it "needs the transcription
+/// model" when the model is at that moment arriving would be the row
+/// lying in the same way the other two wordings exist to prevent.
 fun voiceStatus(durationMs: Long?, transcription: Transcription): String {
     val parts = mutableListOf("recorded")
     durationMs?.let { parts += formatDuration(it) }
     when (transcription) {
         Transcription.Done -> return ""
         Transcription.Pending -> parts += "transcribing…"
+        Transcription.Downloading -> parts += "downloading the transcription model…"
         Transcription.Absent -> parts += "needs the transcription model"
     }
     return parts.joinToString(" · ")
@@ -131,6 +150,7 @@ fun CaptureScreen(
     modifier: Modifier = Modifier,
     focusNonce: Int = 0,
     micNonce: Int = 0,
+    transcription: TranscriptionRuntime = remember { TranscriptionRuntime() },
 ) {
     // The feed is not on the path to a typable caret (§ 1), so it waits
     // for the frame that made the caret exist.
@@ -139,7 +159,7 @@ fun CaptureScreen(
 
     Column(modifier.fillMaxSize()) {
         Box(Modifier.weight(1f).fillMaxWidth()) {
-            if (feedComposed) CaptureFeed(state, onOpenNote)
+            if (feedComposed) CaptureFeed(state, onOpenNote, transcription)
         }
         Composer(state, draft, onDraftChange, onCommit, focusNonce, micNonce)
     }
@@ -289,7 +309,11 @@ private fun Composer(
 /// The recent-capture feed. Newest first, because the thing you just said
 /// is the thing you are looking for.
 @Composable
-private fun CaptureFeed(state: GiluneState, onOpenNote: (String) -> Unit) {
+private fun CaptureFeed(
+    state: GiluneState,
+    onOpenNote: (String) -> Unit,
+    transcription: TranscriptionRuntime,
+) {
     val colours = MaterialTheme.colorScheme
     val player = remember { AudioPlayback() }
     DisposableEffect(Unit) { onDispose { player.release() } }
@@ -309,7 +333,7 @@ private fun CaptureFeed(state: GiluneState, onOpenNote: (String) -> Unit) {
         contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         items(state.recent, key = { it.objectId }) { source ->
-            CaptureRow(state, source, player, onOpenNote)
+            CaptureRow(state, source, player, onOpenNote, transcription)
             HorizontalDivider(color = colours.outlineVariant)
         }
     }
@@ -321,6 +345,7 @@ private fun CaptureRow(
     source: SourceSummary,
     player: AudioPlayback,
     onOpenNote: (String) -> Unit,
+    transcription: TranscriptionRuntime,
 ) {
     val colours = MaterialTheme.colorScheme
     val recording = source.blobRelPath?.takeIf { isRecording(it) }
@@ -356,7 +381,10 @@ private fun CaptureRow(
                 ""
             } else {
                 val duration = remember(recording) { readWavDuration(File(state.vaultDir, recording)) }
-                voiceStatus(duration, transcriptionState(source.preview, state.plugins))
+                voiceStatus(
+                    duration,
+                    transcriptionState(source.preview, state.plugins, transcription.phase),
+                )
             }
             Text(
                 listOf(status, captureStamp(source.createdMs)).filter { it.isNotEmpty() }.joinToString(" · "),

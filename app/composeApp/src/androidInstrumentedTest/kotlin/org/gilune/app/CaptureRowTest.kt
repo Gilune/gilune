@@ -12,7 +12,12 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class CaptureRowTest {
-    private fun plugin(id: String, state: String, ungranted: List<String> = emptyList()) = PluginInfo(
+    private fun plugin(
+        id: String,
+        state: String,
+        ungranted: List<String> = emptyList(),
+        granted: List<String> = emptyList(),
+    ) = PluginInfo(
         pluginId = id,
         name = id,
         `class` = "provider",
@@ -22,8 +27,8 @@ class CaptureRowTest {
         processorId = null,
         subscribes = null,
         emits = emptyList(),
-        capabilities = emptyList(),
-        granted = emptyList(),
+        capabilities = granted + ungranted,
+        granted = granted,
         ungranted = ungranted,
         contributions = emptyList<PluginContribution>(),
         settings = "",
@@ -69,12 +74,16 @@ class CaptureRowTest {
         val none = emptyList<PluginInfo>()
         val off = listOf(plugin(TRANSCRIPTION_PLUGIN, "disabled"))
         val on = listOf(plugin(TRANSCRIPTION_PLUGIN, "enabled"))
-        assertEquals(Transcription.Absent, transcriptionState("", none))
-        assertEquals(Transcription.Absent, transcriptionState("", off), "an off plugin will never transcribe it")
-        assertEquals(Transcription.Pending, transcriptionState("", on))
+        assertEquals(Transcription.Absent, transcriptionState("", none, TranscriptionPhase.Ready))
+        assertEquals(
+            Transcription.Absent,
+            transcriptionState("", off, TranscriptionPhase.Ready),
+            "an off plugin will never transcribe it",
+        )
+        assertEquals(Transcription.Pending, transcriptionState("", on, TranscriptionPhase.Ready))
         assertEquals(
             Transcription.Done,
-            transcriptionState("the words", none),
+            transcriptionState("the words", none, TranscriptionPhase.Absent),
             "words already landed are words, whatever the plugin does now",
         )
     }
@@ -86,16 +95,50 @@ class CaptureRowTest {
         // emulator (2026-09-01): the row claimed "transcribing…" when
         // nothing could possibly transcribe.
         val awaitingConsent = listOf(plugin(TRANSCRIPTION_PLUGIN, "enabled", listOf(NETWORK_CAPABILITY)))
-        assertEquals(Transcription.Absent, transcriptionState("", awaitingConsent))
+        assertEquals(Transcription.Absent, transcriptionState("", awaitingConsent, TranscriptionPhase.Absent))
         assertEquals(
             "recorded · 0:42 · needs the transcription model",
-            voiceStatus(42_000, transcriptionState("", awaitingConsent)),
+            voiceStatus(42_000, transcriptionState("", awaitingConsent, TranscriptionPhase.Absent)),
+        )
+    }
+
+    @Test
+    fun consentedIsNotTheSameAsAbleEither() {
+        // The gate one level deeper (ADR 0017 § 4). Between the yes and a
+        // loaded model there are tens of megabytes, and for all of it the
+        // plugin is enabled AND granted AND nothing can run. Only
+        // `enableWhisper` returning earns "transcribing…".
+        val granted = listOf(
+            plugin(TRANSCRIPTION_PLUGIN, "enabled", granted = listOf(NETWORK_CAPABILITY)),
+        )
+        assertEquals(
+            Transcription.Absent,
+            transcriptionState("", granted, TranscriptionPhase.Unknown),
+            "a granted plugin with no model loaded is not transcribing anything",
+        )
+        assertEquals(
+            Transcription.Downloading,
+            transcriptionState("", granted, TranscriptionPhase.Downloading),
+        )
+        assertEquals(
+            Transcription.Absent,
+            transcriptionState("", granted, TranscriptionPhase.Failed),
+            "a failed load must not read as work in progress",
+        )
+        assertEquals(Transcription.Pending, transcriptionState("", granted, TranscriptionPhase.Ready))
+    }
+
+    @Test
+    fun aDownloadSaysSoRatherThanClaimingToNeedWhatIsArriving() {
+        assertEquals(
+            "recorded · 0:42 · downloading the transcription model…",
+            voiceStatus(42_000, Transcription.Downloading),
         )
     }
 
     @Test
     fun aWhitespaceOnlyPreviewIsNotATranscript() {
-        assertEquals(Transcription.Absent, transcriptionState("   \n ", emptyList()))
+        assertEquals(Transcription.Absent, transcriptionState("   \n ", emptyList(), TranscriptionPhase.Ready))
     }
 
     @Test

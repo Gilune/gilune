@@ -479,13 +479,26 @@ fun whisperModel(key: String?): WhisperModel =
     WHISPER_MODELS.firstOrNull { it.key == key?.trim() }
         ?: WHISPER_MODELS.first { it.key == DEFAULT_WHISPER_MODEL }
 
+/// The model key as stored, **unresolved** — null when nobody has chosen
+/// one. The one thing [transcriptionModel] cannot tell a caller apart:
+/// once resolved, "absent" and "explicitly the default" are the same
+/// answer.
+///
+/// It exists because the model is the *shell's* read (see this section's
+/// header) and there are now two shells with different defaults. ADR 0017
+/// § Ratification 5 puts `tiny-q5_1` on the phone and leaves `base-q5_1`
+/// on the desktop, and the ADR is explicit that this is a read-site
+/// difference: [DEFAULT_WHISPER_MODEL] stays the desktop's, and the
+/// Android shell resolves this key against its own default instead. A
+/// shared default that knew about platforms would be the shared set
+/// learning what a phone is.
+fun List<PluginInfo>.transcriptionModelKey(): String? =
+    firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonString(it.settings, MODEL_KEY) }
+
 /// The model the transcription plugin's settings name. Not gated on the
 /// plugin's state, for [tasksFilter]'s reason: its own settings screen
 /// must show what is stored even while it is switched off.
-fun List<PluginInfo>.transcriptionModel(): WhisperModel =
-    whisperModel(
-        firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonString(it.settings, MODEL_KEY) },
-    )
+fun List<PluginInfo>.transcriptionModel(): WhisperModel = whisperModel(transcriptionModelKey())
 
 /// The spoken language the same document holds. Absent means whisper
 /// detects it, which is the shipped behaviour and costs an extra pass.

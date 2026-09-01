@@ -10,6 +10,14 @@
          it needs the user's yes, which the app asks for beside the mic. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- The one thing the app ever fetches: the transcription model
+         (ADR 0017 § 4). Holding the Android permission is not consent —
+         the download waits on the plugin's own `network.request` grant,
+         which always needs an explicit yes, and nothing is fetched
+         because the app opened. Capture, projection, editing and search
+         never touch the network at all. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
     <application
         android:label="Gilune"
         android:theme="@style/Theme.Gilune">

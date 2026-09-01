@@ -47,10 +47,15 @@
 
 package org.gilune.app
 
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -58,6 +63,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
@@ -68,6 +74,11 @@ import androidx.compose.foundation.text.input.TextFieldBuffer
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -77,9 +88,14 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import kotlinx.coroutines.launch
+import uniffi.gilune_ffi.PluginInfo
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -392,6 +408,7 @@ fun EditScreen(
     // takes an `EditorState`: a test that asks where the caret went after
     // a tap has to be holding the thing that knows.
     editor: MobileEditorState = remember(relPath) { MobileEditorState() },
+    transcription: TranscriptionRuntime = remember { TranscriptionRuntime() },
 ) {
     LaunchedEffect(relPath) { editor.open(state.vaultDir, relPath) }
 
@@ -470,6 +487,11 @@ fun EditScreen(
                 onReload = { editor.open(state.vaultDir, relPath) },
             )
         }
+        // Dictation is a note action, not a row slot (§ 3), so it lives
+        // here rather than in the accessory row: `note.actions` already
+        // gates it, and removing the transcription plugin takes the
+        // button rather than leaving a dead key in a fixed row.
+        NoteActions(state = state, editor = editor, transcription = transcription)
         Column(
             Modifier
                 .weight(1f)
@@ -513,6 +535,111 @@ fun EditScreen(
             onSession = { session = it },
             onAction = { save() },
         )
+    }
+}
+
+/// Should the editor draw a dictation mic at all (ADR 0017 § 3, § 4)?
+///
+/// Two conditions, and the second is the ADR's line rather than a
+/// refinement of the first: **"never a mic that produces nothing"**.
+///
+///  - A plugin must contribute the action. That is the shared gate every
+///    slot uses, so removing the voice adapter removes the button.
+///  - A transcriber must actually be able to run. Dictation is not
+///    recording — an attached capture that nobody transcribes produces no
+///    words to insert, so the button would be a control that does
+///    nothing. Recording a *note* still works in that state, from the
+///    capture screen, which is the honest place for audio with no
+///    transcript.
+///
+/// Kept pure and separate from the composable so the matrix is testable
+/// without a microphone.
+fun dictationOffered(plugins: List<PluginInfo>, phase: TranscriptionPhase): Boolean =
+    plugins.contributes(Slots.NOTE_ACTIONS, DICTATE_ACTION) && phase == TranscriptionPhase.Ready
+
+/// The note action row above the buffer. One action in v1 — the mic —
+/// and the row is absent entirely when nothing fills it, which is
+/// ADR 0011's "renders nothing while empty" applied to a slot rather than
+/// a region.
+@Composable
+private fun NoteActions(
+    state: GiluneState,
+    editor: MobileEditorState,
+    transcription: TranscriptionRuntime,
+) {
+    val colours = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    if (!dictationOffered(state.plugins.toList(), transcription.phase)) return
+
+    var recording by remember { mutableStateOf(false) }
+    val recorder = remember { AndroidAudioRecorder() }
+    var micGranted by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    val askForMic = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        micGranted = granted
+        if (!granted) state.message.value = "the microphone permission was declined"
+    }
+
+    /// The words arrive on the main thread from `dictate`'s callback and
+    /// land through the one write path the editor has. The caret is read
+    /// **now**, not when recording started: a user who tapped elsewhere
+    /// while speaking means the new place.
+    fun insert(words: String) {
+        val text = editor.body.text.toString()
+        val edit = dictationEdit(text, editor.body.selection, words)
+        if (edit == null) {
+            state.message.value = "no words recognised"
+            return
+        }
+        editor.body.applyEdit(edit)
+    }
+
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .testTag("note-actions"),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(
+            onClick = {
+                if (!micGranted) {
+                    askForMic.launch(Manifest.permission.RECORD_AUDIO)
+                } else if (!recording) {
+                    runCatching { recorder.start() }
+                        .onSuccess {
+                            recording = true
+                            state.message.value = "dictating… tap the microphone to stop"
+                        }
+                        .onFailure { state.message.value = "microphone unavailable: ${it.message}" }
+                } else {
+                    recording = false
+                    // `dictate` commits an attached capture — durable,
+                    // transcribed in the kernel, never a note of its own
+                    // — and hands the words back. A crash between the two
+                    // loses nothing: the audio and its transcript stay in
+                    // the kernel (ADR 0013).
+                    // `dictate` calls back on its IO dispatcher; the
+                    // buffer is edited on the composition's, which is
+                    // the main thread.
+                    state.dictate(recorder.stop()) { words -> scope.launch { insert(words) } }
+                }
+            },
+            enabled = state.gilune.value != null,
+            modifier = Modifier.size(TouchTarget).testTag("dictate"),
+        ) {
+            Icon(
+                if (recording) Icons.Outlined.Stop else Icons.Outlined.Mic,
+                contentDescription = if (recording) "stop dictating" else "dictate at the cursor",
+                tint = if (recording) colours.error else colours.onSurfaceVariant,
+            )
+        }
     }
 }
 

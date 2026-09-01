@@ -134,7 +134,27 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     }
 
     val state = remember { GiluneState(vaultDir, scope) }
+
     LaunchedEffect(Unit) { state.openVault() }
+
+    // Local transcription (§ 4). The model is fetched and handed to the
+    // kernel off the capture path entirely — nothing here is on the way
+    // to a typable caret, and a capture never waits on any of it.
+    //
+    // **One call site, deliberately.** This is keyed on exactly the
+    // inputs the plan reads, so it runs when the vault first produces a
+    // registry and again whenever the answer would change: allowing
+    // `network.request`, switching the plugin on, or choosing another
+    // model. A second call site — the obvious one being `openVault`'s own
+    // callback — would race this one and could start two downloads into
+    // the same partial file.
+    val transcription = remember { TranscriptionRuntime() }
+    val transcriptionKey = state.plugins.firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }
+        ?.let { "${it.state}|${it.granted.sorted().joinToString(",")}|${it.settings}" }
+    LaunchedEffect(transcriptionKey) {
+        val gilune = state.gilune.value ?: return@LaunchedEffect
+        withContext(Dispatchers.IO) { startTranscription(context, state, gilune, transcription) }
+    }
 
     var destination by remember { mutableStateOf(Destination.Capture) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
@@ -175,6 +195,16 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                         state.captureText(text)
                     }
                     backgroundedAt = null
+                    // The widget's recording service commits and now
+                    // transcribes through a Gilune handle of its own
+                    // (§ 4), so what it produced is invisible to this
+                    // one's cached feed until something asks again.
+                    // Coming back to the app is that moment — otherwise
+                    // a note spoken into the widget reads as
+                    // "transcribing…" for as long as the app stays open.
+                    if (state.gilune.value != null) {
+                        scope.launch(Dispatchers.IO) { runCatching { state.refresh() } }
+                    }
                 }
                 else -> Unit
             }
@@ -242,6 +272,7 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                                 onOpenNote = { screen = Screen.Read(it) },
                                 focusNonce = focusComposer,
                                 micNonce = askForMic,
+                                transcription = transcription,
                             )
                             Destination.Notes ->
                                 NotesScreen(state, onOpenNote = { screen = Screen.Read(it) })
@@ -254,6 +285,7 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                             // buffer, so the screen follows it rather
                             // than holding a path nothing answers.
                             onRenamed = { renamed -> screen = Screen.Edit(renamed) },
+                            transcription = transcription,
                         )
                         is Screen.Settings -> SettingsScreen(
                             state = state,
