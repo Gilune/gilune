@@ -1,6 +1,7 @@
 # ADR 0017: The Mobile App
 
-Status: **Proposed** (design round 2026-09-01; owner ratification pending)  
+Status: **Accepted** (owner ratification 2026-09-01 — all five open
+questions answered; see Ratification record)  
 Validation: two spikes in § 8. The live-preview editor is gated on **MS1**, the
 IME spike — composing regions and autocorrect over the shared offset mapping —
 exactly as ADR 0012 gated E3. On-device transcription's *enablement* is gated
@@ -435,7 +436,7 @@ a phone editor can least afford.
 
 ### Reserve the width but paint the markers transparent
 
-The strongest rival, and the one worth the owner's attention (open question 2).
+The strongest rival, put to the owner and declined (Ratification record, 2).
 Markers occupy their width invisibly and are painted on reveal: layout still
 never moves, and away from the caret the text looks fully rendered. Not chosen
 because an invisible marker still costs its width, so `**bold**` reads as a
@@ -489,7 +490,7 @@ the capture loop wait on a sync milestone that is not built. It survives as the
 - `MarkdownEditing.kt` gains one per-registration flag so a decoration can
   survive the caret's line, and `Theme.kt`'s colour schemes move to the shared
   set with typography left per-platform. Both are additive; desktop behaviour
-  changes only if the owner asks (open question 3).
+  is unchanged — the owner ratified keeping it (Ratification record, 3).
 - `EditorState` is promoted alone, as ADR 0014 permits, and a device-local
   preference store on DataStore arrives with it.
 - The kernel is untouched by everything in this ADR except the vault-location
@@ -510,18 +511,18 @@ the capture loop wait on a sync milestone that is not built. It survives as the
 - Play Console gains a declared microphone FGS type, which is a store-review
   surface and belongs in the S5 matrix.
 
-## Open questions for the owner
+## Ratification record
 
-1. Idle-timer default of **five minutes**, and expiry **committing** the
-   pending composer rather than discarding it — *recommended as stated*.
-2. Quiet-dimmed markers, or invisible markers with their width reserved —
-   *recommend quiet-dimmed for v1; the change is a colour table, not a rewrite*.
-3. Should the desktop adopt always-glyph checkboxes so both shells agree, or
-   keep its caret-line-raw rule — *recommend adopting, in a later desktop pass*.
-4. The phone vault stays app-private for v1, with Export a copy as the escape
-   and user-visible storage recorded as its own ADR plus a kernel-boundary
-   spike — *recommended as stated*.
-5. Does the transcription plugin ship **enabled with the tiny model on every
-   device**, or default off below a device class until MS2 has ARM64 numbers —
-   *recommend enabled everywhere: a slow transcript is a background job, a
-   withheld one is the promise this revision exists to restore*.
+Owner review, 2026-09-01. The five open questions, answered:
+
+| # | Question | Answer | Date |
+|---|---|---|---|
+| 1 | Composer idle timer | Five minutes, expiry **commits** the pending text as a capture, as recommended (§ 1) | 2026-09-01 |
+| 2 | Unrevealed markers | **Quiet-dimmed**, as recommended (§ 2); the invisible-width-reserved rival declined | 2026-09-01 |
+| 3 | Desktop checkbox rule | **Against the recommendation**: the desktop keeps raw-on-the-caret-line while typing — "as it is now is fine". The shells deliberately differ here, and that difference is a decision, not drift | 2026-09-01 |
+| 4 | Phone vault | App-private for v1 with **Export a copy**; user-visible storage stays its own future ADR + kernel-boundary spike — "sounds reasonable to start" | 2026-09-01 |
+| 5 | Transcription enablement | **Enabled on every device**. Same day's desktop benchmark made the model a plugin setting: base-q5_1 is the desktop default, tiny-q5_1 (31 MiB, the measured fastest) pencilled as the phone default pending MS2 | 2026-09-01 |
+
+The ADR is Accepted. MB0 — the toolchain stage everything queues behind —
+starts on the owner's word; MS1 (IME) and MS2 (ARM64 whisper) remain the
+gates they were.
