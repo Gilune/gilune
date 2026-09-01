@@ -56,6 +56,10 @@ kotlin {
                 implementation(kotlin("test"))
                 implementation("androidx.test:runner:1.6.2")
                 implementation("androidx.test:core:1.6.1")
+                // Compose UI tests on device, the counterpart of the desktop
+                // suite's compose.desktop.uiTestJUnit4. Android had no UI-test
+                // net before ADR 0017 MB0; MB1's tests need this.
+                implementation("androidx.compose.ui:ui-test-junit4-android:1.7.6")
             }
         }
     }
@@ -83,6 +87,12 @@ android {
             jniLibs.srcDir("src/androidMain/jniLibs")
         }
     }
+}
+
+dependencies {
+    // Supplies the empty activity createComposeRule launches into. It must be
+    // a debug dependency: it merges an activity into the test APK's manifest.
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.7.6")
 }
 
 compose.desktop {

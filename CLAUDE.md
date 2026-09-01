@@ -496,7 +496,28 @@ gates promises) are ratified. **Next: application-level engineering — see
      click-through reveal). Coordinator confession: broke the
      no-PowerShell-regex rule on decisions/README, mojibaked an
      em-dash, caught it in the diff pre-commit — the rule stands.
-     **Next: MB0 on the owner's word.**
+     **MB0 DONE (2026-09-01, one agent)**: gilune-ffi cross-compiled
+     for arm64-v8a + x86_64 WITH whisper (5.70/5.73 MB per ABI vs the
+     15 MB budget; +libc++_shared.so — whisper links the NDK STL);
+     incantation is `kernel/scripts/build-android.ps1` (auto-discovers
+     SDK/NDK/make/libclang, overrides the stale ANDROID_HOME,
+     -NoWhisper/-Abi flags, short build cache C:\gilune-android; the
+     ABI bridge toolchain file MUST stay named android.toolchain.cmake
+     or cmake-rs stops recognising the cross-build). Four encoded
+     traps: no VS/ninja → Unix Makefiles + msys2 make; ANDROID_ABI
+     must be set (CMAKE_ANDROID_ARCH_ABI does NOT substitute);
+     whisper-rs-sys 0.15 applies HOST-Windows flags to Android
+     (/utf-8 suppressed via CMAKE_*_FLAGS, -ladvapi32 stubbed);
+     stale CMakeCache pins the wrong ABI (script wipes on mismatch).
+     Bindings regenerated from the Android binary came out
+     BYTE-IDENTICAL to desktop's — 07-compatibility's target-dependent
+     checksum rationale did not hold (rule kept; owner may revisit).
+     androidMain compiles with ZERO source changes; instrumented suite
+     280/0 on gilune-s1 (jvmSharedTest rides along); desktop 381
+     unregressed. Gaps: whisper built+loaded but never EXECUTED on
+     Android (arm64 never run at all — MS2); model-cache pathing
+     waits for a caller (MB1/MB2); AGP strip warning (no ndkVersion)
+     cosmetic. **Next: MB1 capture-first shell.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry
