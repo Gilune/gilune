@@ -88,13 +88,14 @@ import uniffi.gilune_ffi.Gilune
 import java.io.File
 import kotlin.math.roundToInt
 
-private const val MODEL_URL =
-    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
-
-private fun modelFile(): File =
+/// Where a downloaded model lands. One file per catalogue entry, so
+/// changing the setting downloads the new model beside the old one rather
+/// than over it: the previous file is left alone, and switching back is
+/// not another download.
+private fun modelFile(model: WhisperModel): File =
     File(
         System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"),
-        "Gilune/models/ggml-tiny.bin",
+        "Gilune/models/${model.fileName}",
     )
 
 /// How long the layout waits for the tabs to settle before it is
@@ -728,9 +729,15 @@ private fun ProposalsBanner(state: GiluneState) {
     HorizontalDivider(color = colours.outlineVariant)
 }
 
-/// Bring up local transcription, off the capture path by design. The
-/// model download is a declared capability, so it waits for consent
-/// rather than fetching 75 MiB on someone's first launch (ADR 0011).
+/// Bring up local transcription, off the capture path by design. Which
+/// model is a plugin setting (owner decision, 2026-09-01), so this reads
+/// the choice back and downloads that one; a key nobody recognises falls
+/// back to the shipped default rather than leaving speech untranscribed.
+///
+/// The download is a declared capability either way, so it waits for
+/// consent rather than fetching tens of megabytes on someone's first
+/// launch (ADR 0011) — including when the setting changes to a model that
+/// is not on disk yet.
 private fun startTranscription(state: GiluneState, gilune: Gilune) {
     try {
         val installed = gilune.plugins().firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }
@@ -738,17 +745,19 @@ private fun startTranscription(state: GiluneState, gilune: Gilune) {
             state.message.value = "vault: ${gilune.vaultPath()}"
             return
         }
-        val model = modelFile()
+        val chosen = listOf(installed).transcriptionModel()
+        val model = modelFile(chosen)
         if (!model.exists()) {
             if (!gilune.isGranted(TRANSCRIPTION_PLUGIN, NETWORK_CAPABILITY)) {
                 state.message.value =
                     "transcription needs permission to download its model — Settings ▸ Plugins"
                 return
             }
-            state.message.value = "downloading transcription model (~75 MiB, one-time)…"
+            state.message.value =
+                "downloading the ${chosen.key} transcription model (~${chosen.size}, one-time)…"
             model.parentFile.mkdirs()
             val partial = File(model.parentFile, "${model.name}.part")
-            java.net.URI(MODEL_URL).toURL().openStream().use { input ->
+            java.net.URI(chosen.url).toURL().openStream().use { input ->
                 partial.outputStream().use { output -> input.copyTo(output) }
             }
             partial.renameTo(model)

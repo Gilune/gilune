@@ -453,6 +453,27 @@ gates promises) are ratified. **Next: application-level engineering — see
      user docs never use internal vocabulary (kernel/slots/ADR/
      seams); when features change, update the relevant guide page
      and reshoot its screenshot via the probe tooling.
+   - **Whisper model benchmark + model setting (2026-09-01, owner
+     ratified "sounds good")** — measured on this machine (21.5 s TTS
+     clip, 8 threads, language set, greedy, throwaway harness in
+     %TEMP%\wb): tiny 632 ms / tiny-q5_1 553 ms / base-q5_1 1019 ms /
+     base 1190 ms. Quantised ≈ full siblings' accuracy and slightly
+     FASTER; base-class fixes ring-main/£/plasterer-class errors but
+     regressed "surveyor" on this clip; "Gilune" defeats every model.
+     Shipped: model is a transcription-plugin setting (radio column
+     beside Spoken language, one settings JSON `{language, model}`,
+     kernel reads only `language` so `model` is inert to it);
+     catalogue in Plugins.kt (`WHISPER_MODELS`, fastest first),
+     **default now base-q5_1** (57 MiB < tiny's 75); per-model files
+     in %LOCALAPPDATA%\Gilune\models so switching back is instant;
+     absent/unknown key falls back to default. tiny-q5_1 (31 MiB) is
+     the pencilled phone default pending MS2. MACHINE NOTES for any
+     fresh whisper-rs build (MB0 will hit all of these): scoop CMake
+     4.x needs `CMAKE_POLICY_VERSION_MINIMUM=3.5`; its VS-generator
+     detection fails against the 2019 Build Tools → import
+     vcvars64.bat env + `CMAKE_GENERATOR="NMake Makefiles"`; and
+     NMake try-compiles die (U1052 build.make not found) beyond
+     ~MAX_PATH — build from a SHORT path, never the scratchpad.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

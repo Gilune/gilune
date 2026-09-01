@@ -408,6 +408,98 @@ fun tasksSettingsDocument(filter: String, panel: Boolean = true): String =
 private const val FILTER_KEY = "filter"
 private const val PANEL_KEY = "panel"
 
+// ---------------------------------------------------------------------
+// The transcription provider's settings. Its two keys — the spoken
+// language and the model — are one document on the tasks precedent, and
+// for the same reason: a write that carries one key must carry the other,
+// or setting a language silently reverts the model somebody chose.
+//
+// The kernel reads `language` out of this document itself
+// (`enableWhisper`); the model is the shell's read, because the shell is
+// what puts the file on disk.
+// ---------------------------------------------------------------------
+
+private const val LANGUAGE_KEY = "language"
+private const val MODEL_KEY = "model"
+
+/// Whisper's own detection pass — what the field means when nobody has
+/// set a language.
+const val DEFAULT_TRANSCRIPTION_LANGUAGE = "auto"
+
+/// Where the ggml models are published. One base, so a catalogue entry
+/// carries a file name rather than a URL somebody has to keep in step.
+private const val WHISPER_MODEL_BASE_URL =
+    "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/"
+
+/// One downloadable whisper model as data: what it is called upstream and
+/// on disk, how big the download is, and the word the settings screen
+/// puts beside it. Nothing here decides anything — [whisperModel] and the
+/// settings screen read this list, and Main.kt turns an entry into a file
+/// and a URL.
+data class WhisperModel(
+    val key: String,
+    val fileName: String,
+    val size: String,
+    val note: String = "",
+) {
+    val url: String get() = WHISPER_MODEL_BASE_URL + fileName
+
+    /// "base-q5_1 — recommended, 57 MiB": the key a person chose by, then
+    /// what choosing it costs.
+    val label: String get() = if (note.isEmpty()) "$key — $size" else "$key — $note, $size"
+}
+
+/// The models the desktop app offers, fastest first (owner benchmark,
+/// 2026-09-01, 21.5 s clip, 8 threads, language set: 553 / 632 / 1019 /
+/// 1190 ms in this order).
+///
+/// The quantised variants are the interesting rows: measured against
+/// their full siblings they transcribe the same words, so `base-q5_1`
+/// buys base-class accuracy — ring mains, £ amounts, trade words tiny
+/// mangles — for a download *smaller* than tiny's and about a second of
+/// wall time on a twenty-second clip. Hence the default.
+val WHISPER_MODELS: List<WhisperModel> = listOf(
+    WhisperModel("tiny-q5_1", "ggml-tiny-q5_1.bin", "31 MiB", "fastest"),
+    WhisperModel("tiny", "ggml-tiny.bin", "75 MiB"),
+    WhisperModel("base-q5_1", "ggml-base-q5_1.bin", "57 MiB", "recommended"),
+    WhisperModel("base", "ggml-base.bin", "142 MiB"),
+)
+
+/// The desktop default (owner decision, 2026-09-01). The phone's will not
+/// be this one — `tiny-q5_1` is pencilled in there — which is the whole
+/// reason the model is a setting rather than a constant in the download.
+const val DEFAULT_WHISPER_MODEL = "base-q5_1"
+
+/// A stored key resolved against the catalogue. Absent, blank, or a key
+/// this build has never heard of — a vault written by a later version, a
+/// hand-edited settings document — all fall back to the default rather
+/// than failing: an unreadable setting must never be what stops speech
+/// being transcribed.
+fun whisperModel(key: String?): WhisperModel =
+    WHISPER_MODELS.firstOrNull { it.key == key?.trim() }
+        ?: WHISPER_MODELS.first { it.key == DEFAULT_WHISPER_MODEL }
+
+/// The model the transcription plugin's settings name. Not gated on the
+/// plugin's state, for [tasksFilter]'s reason: its own settings screen
+/// must show what is stored even while it is switched off.
+fun List<PluginInfo>.transcriptionModel(): WhisperModel =
+    whisperModel(
+        firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonString(it.settings, MODEL_KEY) },
+    )
+
+/// The spoken language the same document holds. Absent means whisper
+/// detects it, which is the shipped behaviour and costs an extra pass.
+fun List<PluginInfo>.transcriptionLanguage(): String =
+    firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonString(it.settings, LANGUAGE_KEY) }
+        ?: DEFAULT_TRANSCRIPTION_LANGUAGE
+
+/// The settings document the transcription plugin stores, written here so
+/// the writer, [transcriptionLanguage] and [transcriptionModel] cannot
+/// drift apart. Both keys go every time: whichever control a person
+/// touched, the other's stored value travels with the write.
+fun transcriptionSettingsDocument(language: String, model: String): String =
+    """{"$LANGUAGE_KEY":"${escapeJsonString(language)}","$MODEL_KEY":"${escapeJsonString(model)}"}"""
+
 /// One string value out of a flat JSON document, escapes handled. Plugin
 /// settings and contribution configs are opaque strings with no schema
 /// (a debt ADR 0015 names), and the shell reads a handful of known keys

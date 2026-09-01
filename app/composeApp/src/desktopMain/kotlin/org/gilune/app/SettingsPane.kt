@@ -392,15 +392,15 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
 /// The transcription provider's settings form. Bundled plugins render
 /// known fields directly; the generic schema-driven form arrives with
 /// the sandboxed runtime (ADR 0010).
+///
+/// The language and the model are keys of one settings document, so every
+/// write here sends both (`transcriptionSettingsDocument`) on the tasks
+/// precedent: changing one must never drop the other.
 @Composable
 private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
-    // The settings document is JSON this same field writes; a targeted
-    // extraction avoids growing a JSON dependency for one key.
-    val saved = remember(plugin.settings) {
-        Regex("\"language\"\\s*:\\s*\"([^\"]*)\"")
-            .find(plugin.settings)?.groupValues?.get(1) ?: "auto"
-    }
+    val saved = remember(plugin.settings) { listOf(plugin).transcriptionLanguage() }
+    val savedModel = remember(plugin.settings) { listOf(plugin).transcriptionModel() }
     var language by remember(plugin.settings) { mutableStateOf(saved) }
     Text("Spoken language", style = MaterialTheme.typography.titleSmall)
     Text(
@@ -419,13 +419,60 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
         )
         Button(
             onClick = {
-                state.pluginAction("transcription language set to $language — takes effect next launch") {
-                    it.setPluginSettings(plugin.pluginId, "{\"language\":\"${language.trim()}\"}")
+                val wanted = language.trim()
+                // The model travels with the write, so setting a language
+                // cannot quietly revert the model somebody chose.
+                state.pluginAction("transcription language set to $wanted — takes effect next launch") {
+                    it.setPluginSettings(
+                        plugin.pluginId,
+                        transcriptionSettingsDocument(wanted, savedModel.key),
+                    )
                 }
             },
             enabled = language.trim().isNotEmpty() && language.trim() != saved,
         ) { Text("Apply", fontSize = 12.sp) }
     }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Transcription model", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Bigger models hear better and take longer. Measured on this machine " +
+            "over a 21-second clip: tiny-q5_1 0.6 s, tiny 0.6 s, base-q5_1 " +
+            "1.0 s, base 1.2 s — and the base-class models are the ones that " +
+            "get trade words, £ amounts and names right. A quantised model " +
+            "(q5_1) transcribes the same words as its full sibling from a " +
+            "smaller download, which is why base-q5_1 is the recommendation.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    for (option in WHISPER_MODELS) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            RadioButton(
+                selected = option.key == savedModel.key,
+                // The language travels with the write for the same reason
+                // the model does above — and the stored one, not whatever
+                // is half-typed in the field.
+                onClick = {
+                    state.pluginAction("transcription model set to ${option.key} — takes effect next launch") {
+                        it.setPluginSettings(
+                            plugin.pluginId,
+                            transcriptionSettingsDocument(saved, option.key),
+                        )
+                    }
+                },
+            )
+            Text(option.label, fontSize = 13.sp)
+        }
+    }
+    Text(
+        "A model you have not used before is downloaded on the next launch " +
+            "(one time, with the network permission above). Models already " +
+            "downloaded are kept, so switching back is instant.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
 }
 
 /// The tasks plugin's settings: § 1's global filter, the one setting the
