@@ -3,4 +3,12 @@
     <string name="gilune_widget_label">Gilune capture</string>
     <string name="gilune_widget_description">Record, write or search without opening the app.</string>
     <string name="gilune_tile_new_note">New note</string>
+    <!-- Launcher shortcuts. The short label is what fits under an icon;
+         the long one is what the launcher shows when it has the room. -->
+    <string name="gilune_shortcut_record_short">Record</string>
+    <string name="gilune_shortcut_record_long">Record a voice capture</string>
+    <string name="gilune_shortcut_new_note_short">New note</string>
+    <string name="gilune_shortcut_new_note_long">Write a new capture</string>
+    <string name="gilune_shortcut_search_short">Search</string>
+    <string name="gilune_shortcut_search_long">Search your vault</string>
 </resources>

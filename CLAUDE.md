@@ -631,8 +631,30 @@ gates promises) are ratified. **Next: application-level engineering — see
      wart — whisper's silence marker lands as a real note body
      (desktop shares this; owner decision pending)**; runtime not
      persisted across process death; widget pays a model load per
-     recording. **Next: MB3 (Search + Agenda + remaining widget
-     cells) closes the ratified staging.**
+     recording.
+   - **MB3 DONE (2026-09-01)** — the ratified staging is complete.
+     Search tab (panel DSL, live operators/types, empty-query hint);
+     Agenda via the NAVIGATION SLOT as data (shell three + take(2)
+     contributed; appears/leaves with the tasks plugin + its setting;
+     vanished selection resolves to the shell tab as a VALUE, no
+     write-back; M3 nav merges icon descriptions when labelled —
+     tests address by label); agenda rows TOGGLE on mobile (§8; the
+     desktop panel deliberately doesn't — both sides recorded in
+     AgendaScreen) via toggleTaskLine guarded on exact line text;
+     agenda() moved to jvmShared/Agenda.kt (pure, zero desktop
+     change — TasksPanelTest untouched green); filter fences render
+     in mobile Read; widget Search cell routed; launcher shortcuts
+     (static XML, widget drawables not adaptive icons). Suites:
+     desktop 394/0; instrumented 482/1 — the 1 is an MS1 CONTROL
+     (no transformation) flaking on cold `-no-snapshot` AVD boots
+     (3 runs failed 6/3/1 different members; the spike's 5 green
+     runs were warm-snapshot). RIG NOTE: boot the AVD from snapshot
+     for MS1 runs. Found in passing: READ-VIEW TICKING doesn't stamp
+     done: (builtInDecorations only, contradicting VaultFiles' own
+     comment) — folded into the Enter-continuation round. Search is
+     per-keystroke unindexed on mobile (inherited); no OR
+     (inherited). **Next: Enter-continues-checkbox (both editors) +
+     the Read-stamp fix, then the mobile delivery summary.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

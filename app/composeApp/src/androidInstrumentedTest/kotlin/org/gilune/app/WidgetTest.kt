@@ -76,9 +76,9 @@ class WidgetTest {
         assertEquals(Destination.Capture, launchFor(Routes.CAPTURE).tab)
         assertTrue(launchFor(Routes.CAPTURE).focusComposer, "New note focuses the composer")
         assertEquals(Destination.Notes, launchFor(Routes.NOTES).tab)
-        // Search has no destination until MB3, so the cell goes to the
-        // nearest true thing rather than to an apology.
-        assertEquals(Destination.Notes, launchFor(Routes.SEARCH).tab)
+        // The Search cell landed on Notes until MB3 built the destination
+        // it always meant; now it goes there.
+        assertEquals(Destination.Search, launchFor(Routes.SEARCH).tab)
         assertTrue(launchFor(Routes.RECORD).askForMic)
         // A plain launcher tap is home, which is capture.
         assertEquals(Destination.Capture, launchFor(null).tab)

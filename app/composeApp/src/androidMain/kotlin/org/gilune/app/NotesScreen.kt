@@ -82,10 +82,15 @@ fun NotesScreen(
 /// Reading one note. The title is the file name; the body is the shared
 /// renderer over the shared block model, at mobile type — which is what
 /// gets `filter` blocks and every other registered renderer for free.
+///
+/// `onOpenNote` is where a row inside a rendered block sends a tap. It
+/// defaults to nothing, so a Read view hosted with nowhere to navigate
+/// draws the same rows, inert, rather than refusing to compose.
 @Composable
 fun ReadScreen(
     state: GiluneState,
     relPath: String,
+    onOpenNote: (String) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colours = MaterialTheme.colorScheme
@@ -104,6 +109,17 @@ fun ReadScreen(
 
     val body = remember(content) { splitNoteRaw(content).second }
     val blocks = remember(body) { parseMarkdown(body) }
+
+    // The `editor.blocks` seam (ADR 0017 § 7, read-only). The shell
+    // registers the `filter` fence and nothing else; every other info
+    // string falls through to the code box it has always been, which is
+    // also the removal story. Rebuilt when the plugin list changes, since
+    // that is what decides whether `type:task` is a type at all.
+    val plugins = state.plugins.toList()
+    val tick = state.vaultTick.value
+    val renderers = remember(state.vaultDir, tick, plugins) {
+        BlockRenderers(listOf(mobileFilterBlockRegistration(state.vaultDir, tick, plugins, onOpenNote)))
+    }
 
     fun toggle(line: Int) {
         val onDisk = runCatching { file.readText() }.getOrNull()
@@ -148,6 +164,7 @@ fun ReadScreen(
             MarkdownBody(
                 blocks,
                 modifier = Modifier.fillMaxWidth().testTag("note-body"),
+                renderers = renderers,
                 onToggleTask = { line -> toggle(line) },
                 checkboxTarget = TouchTarget,
             )

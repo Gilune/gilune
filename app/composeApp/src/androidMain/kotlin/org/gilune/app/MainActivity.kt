@@ -19,6 +19,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.Row
@@ -35,8 +36,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
@@ -60,6 +64,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -102,9 +107,35 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-/// The shell's destinations. Search and Agenda arrive with MB3; the bar
-/// renders what exists rather than a row of coming-soon tabs.
-enum class Destination(val label: String) { Capture("Capture"), Notes("Notes") }
+/// The shell's own destinations — three, and there will not be a fourth
+/// (ADR 0017 § 1). Agenda is **not** here: it is a plugin's contribution
+/// to the `navigation` slot and lives beside these on the bar, never
+/// among them.
+enum class Destination(val label: String) { Capture("Capture"), Notes("Notes"), Search("Search") }
+
+/// § 1's cap on contributed destinations. Android's guidance is 3–5
+/// same-level destinations in a bar and a drawer beyond that; three shell
+/// destinations plus two is the ceiling that keeps the bar a bar. Overflow
+/// renders nowhere — a bar does not scroll — so a third contribution is
+/// simply not drawn.
+const val MOBILE_NAV_PANELS = 2
+
+/// What the bar should show beside the shell's own destinations, right
+/// now: the `navigation` slot's live contributions under § 1's cap.
+///
+/// `navigationPanels` is shared with the desktop rail and is where both
+/// conditions live — the plugin enabled, and (for the tasks agenda) its
+/// own panel switch on. Nothing here knows what a tasks plugin is.
+fun mobileNavigationPanels(plugins: List<uniffi.gilune_ffi.PluginInfo>): List<NavigationPanel> =
+    navigationPanels(plugins).take(MOBILE_NAV_PANELS)
+
+/// Which contributed destination is showing, given what is selected and
+/// what is contributed. A selection whose contribution has gone —
+/// switched off, disabled, removed — answers null, and the shell
+/// destination underneath is what shows. A value, never a write:
+/// composition reads state, it does not edit it.
+fun activeNavigationPanel(panels: List<NavigationPanel>, selectedKey: String?): NavigationPanel? =
+    panels.firstOrNull { it.key == selectedKey }
 
 private sealed interface Screen {
     data object Home : Screen
@@ -157,8 +188,21 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     }
 
     var destination by remember { mutableStateOf(Destination.Capture) }
+    // Which contributed destination is selected, by the key its
+    // contribution named — null means one of the shell's own is. Held as a
+    // key rather than as a panel object so a plugin list that changed
+    // under it cannot leave a stale label on the bar.
+    var panelKey by remember { mutableStateOf<String?>(null) }
     var screen by remember { mutableStateOf<Screen>(Screen.Home) }
     var draft by remember { mutableStateOf("") }
+
+    // The `navigation` slot, read per composition from the live plugin
+    // list (ADR 0015 § 5; ADR 0017 § 1, § 7). A tab appears and disappears
+    // with the plugin behind it and with that plugin's own panel switch —
+    // `navigationPanels` is where both conditions live, shared with the
+    // desktop rail.
+    val panels = mobileNavigationPanels(state.plugins)
+    val activePanel = activeNavigationPanel(panels, panelKey)
 
     // What the widget, the recording notification and the QS tile ask for
     // (§ 4). The decision is `launchFor`, which is pure and tested; all
@@ -169,6 +213,10 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     LaunchedEffect(request) {
         val asked = request ?: return@LaunchedEffect
         destination = asked.launch.tab
+        // Everything that arrives from outside asks for a shell
+        // destination — a widget cell, a shortcut, a tile — so a
+        // contributed panel is never what a launch lands on.
+        panelKey = null
         screen = asked.launch.openNote?.let { Screen.Read(it) } ?: Screen.Home
         if (asked.launch.focusComposer) focusComposer += 1
         if (asked.launch.askForMic) askForMic += 1
@@ -244,7 +292,10 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
             ) {
                 TopBar(
                     screen = screen,
-                    destination = destination,
+                    // What Home is called is what is selected, and a
+                    // contributed destination announces itself by the
+                    // label its own contribution carries, verbatim.
+                    homeLabel = activePanel?.label ?: destination.label,
                     onBack = { screen = backFrom(screen) },
                     onSettings = { screen = Screen.Settings(SettingsRoute.Index) },
                     // One honest gesture each way: the pencil opens the
@@ -257,27 +308,45 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(Modifier.weight(1f).fillMaxWidth()) {
                     when (val open = screen) {
-                        Screen.Home -> when (destination) {
-                            Destination.Capture -> CaptureScreen(
+                        // A contributed destination wins over the shell's
+                        // own while one is selected; when its plugin goes,
+                        // `activePanel` is null again and the shell
+                        // destination underneath is what shows.
+                        Screen.Home -> if (activePanel != null) {
+                            NavigationPanelScreen(
+                                key = activePanel.key,
                                 state = state,
-                                draft = draft,
-                                onDraftChange = { draft = it },
-                                onCommit = {
-                                    val text = draft.trim()
-                                    if (text.isNotEmpty()) {
-                                        draft = ""
-                                        state.captureText(text)
-                                    }
-                                },
                                 onOpenNote = { screen = Screen.Read(it) },
-                                focusNonce = focusComposer,
-                                micNonce = askForMic,
-                                transcription = transcription,
                             )
-                            Destination.Notes ->
-                                NotesScreen(state, onOpenNote = { screen = Screen.Read(it) })
+                        } else {
+                            when (destination) {
+                                Destination.Capture -> CaptureScreen(
+                                    state = state,
+                                    draft = draft,
+                                    onDraftChange = { draft = it },
+                                    onCommit = {
+                                        val text = draft.trim()
+                                        if (text.isNotEmpty()) {
+                                            draft = ""
+                                            state.captureText(text)
+                                        }
+                                    },
+                                    onOpenNote = { screen = Screen.Read(it) },
+                                    focusNonce = focusComposer,
+                                    micNonce = askForMic,
+                                    transcription = transcription,
+                                )
+                                Destination.Notes ->
+                                    NotesScreen(state, onOpenNote = { screen = Screen.Read(it) })
+                                Destination.Search ->
+                                    SearchScreen(state, onOpenNote = { screen = Screen.Read(it) })
+                            }
                         }
-                        is Screen.Read -> ReadScreen(state, open.relPath)
+                        is Screen.Read -> ReadScreen(
+                            state,
+                            open.relPath,
+                            onOpenNote = { screen = Screen.Read(it) },
+                        )
                         is Screen.Edit -> EditScreen(
                             state = state,
                             relPath = open.relPath,
@@ -303,7 +372,16 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                 // the keyboard is up the composer owns the bottom of the
                 // screen and the bar stands aside.
                 if (screen is Screen.Home && !WindowInsets.isImeVisible) {
-                    BottomBar(destination) { destination = it }
+                    BottomBar(
+                        destination = destination,
+                        panels = panels,
+                        activePanelKey = activePanel?.key,
+                        onSelectDestination = {
+                            destination = it
+                            panelKey = null
+                        },
+                        onSelectPanel = { panelKey = it },
+                    )
                 }
             }
 
@@ -331,7 +409,7 @@ private fun backFrom(screen: Screen): Screen = when (screen) {
 @Composable
 private fun TopBar(
     screen: Screen,
-    destination: Destination,
+    homeLabel: String,
     onBack: () -> Unit,
     onSettings: () -> Unit,
     onEdit: (String) -> Unit = {},
@@ -356,7 +434,7 @@ private fun TopBar(
         }
         Text(
             when (screen) {
-                Screen.Home -> destination.label
+                Screen.Home -> homeLabel
                 is Screen.Read -> noteTitle(screen.relPath)
                 // The editor shows the note's name in its own title
                 // field, where it can be typed over, so the bar names
@@ -391,23 +469,76 @@ private fun TopBar(
     }
 }
 
-/// Capture and Notes today. Search and Agenda arrive with MB3 — the bar
-/// renders the destinations that exist, and `navigation` contributions
-/// are read but render no panel yet, so nothing here is a promise.
+/// The bar (ADR 0017 § 1): three shell destinations, then whatever the
+/// `navigation` slot contributes, capped at [MOBILE_NAV_PANELS].
+///
+/// The contributed half is **data**, not a hard-coded Agenda tab: the
+/// panels come from the live plugin list, their labels are their own
+/// contributions' verbatim, and a plugin switched off, removed, or with
+/// its panel setting off contributes nothing — so the tab is simply not
+/// drawn. That is the whole of "Agenda leaves the bar with the tasks
+/// plugin".
+///
+/// A shell destination is selected iff no contributed one is, which is why
+/// `activePanelKey` is consulted before `current`: selecting Agenda must
+/// not leave Capture looking selected too.
 @Composable
-private fun BottomBar(current: Destination, onSelect: (Destination) -> Unit) {
+internal fun BottomBar(
+    destination: Destination,
+    panels: List<NavigationPanel>,
+    activePanelKey: String?,
+    onSelectDestination: (Destination) -> Unit,
+    onSelectPanel: (String) -> Unit,
+) {
     NavigationBar(Modifier.testTag("nav")) {
         for (entry in Destination.entries) {
             NavigationBarItem(
-                selected = entry == current,
-                onClick = { onSelect(entry) },
-                icon = {
-                    Icon(
-                        if (entry == Destination.Capture) Icons.Outlined.Edit else Icons.Outlined.Description,
-                        contentDescription = entry.label,
-                    )
-                },
+                selected = activePanelKey == null && entry == destination,
+                onClick = { onSelectDestination(entry) },
+                icon = { Icon(destinationIcon(entry), contentDescription = entry.label) },
                 label = { Text(entry.label) },
+            )
+        }
+        for (panel in panels) {
+            NavigationBarItem(
+                selected = panel.key == activePanelKey,
+                onClick = { onSelectPanel(panel.key) },
+                icon = { Icon(navigationIcon(panel.key), contentDescription = panel.label) },
+                label = { Text(panel.label) },
+            )
+        }
+    }
+}
+
+private fun destinationIcon(destination: Destination): ImageVector = when (destination) {
+    Destination.Capture -> Icons.Outlined.Edit
+    Destination.Notes -> Icons.Outlined.Description
+    Destination.Search -> Icons.Outlined.Search
+}
+
+/// A contributed destination's icon. Keyed rather than declared, exactly
+/// as the desktop rail keys it (§ 7: in v1 the behaviour behind a slot id
+/// is Kotlin the shell owns). A key this host does not know gets the
+/// plugin glyph, so an unrecognised destination still looks like what it
+/// is.
+private fun navigationIcon(key: String): ImageVector = when (key) {
+    TASKS_RAIL_PANEL -> Icons.Outlined.CheckBox
+    else -> Icons.Outlined.Extension
+}
+
+/// What a contributed destination draws. One key is known to this host in
+/// v1 — the tasks agenda — and anything else is a destination the plugin
+/// named and this shell has no screen for, which is said plainly rather
+/// than shown as a blank page.
+@Composable
+internal fun NavigationPanelScreen(key: String, state: GiluneState, onOpenNote: (String) -> Unit) {
+    when (key) {
+        TASKS_RAIL_PANEL -> AgendaScreen(state, onOpenNote)
+        else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "This shell has no screen for “$key”.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
     }

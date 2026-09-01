@@ -30,6 +30,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- Launcher long-press shortcuts (§ 4's entry points that are
+                 not the app, MB3). The shortcut intents are explicit, so
+                 they need no filter of their own; the route travels as the
+                 intent's action and `routeForAction` reads it. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Not exported, and with no intent filter: the only ways in are

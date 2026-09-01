@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Launcher long-press shortcuts (ADR 0017 § 8, MB3): the same three verbs
+  the widget offers, for a home screen with no widget on it. Record first,
+  because the product's P0 is tap → speak → done and this is one of the two
+  paths that gets there without composing a screen first.
+
+  Static, not dynamic: there is nothing to compute — no recent notes, no
+  per-device state — and a static list is drawn by the launcher without the
+  app being started to supply it.
+
+  The intents are explicit and carry no extras, because a static shortcut
+  cannot carry one. The route travels as the action instead, and
+  `routeForAction` in AppIntents.kt is the other half.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="record"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_mic"
+        android:shortcutShortLabel="@string/gilune_shortcut_record_short"
+        android:shortcutLongLabel="@string/gilune_shortcut_record_long">
+        <intent
+            android:action="org.gilune.app.action.SHORTCUT_RECORD"
+            android:targetPackage="org.gilune.app"
+            android:targetClass="org.gilune.app.MainActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="new-note"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_new_note"
+        android:shortcutShortLabel="@string/gilune_shortcut_new_note_short"
+        android:shortcutLongLabel="@string/gilune_shortcut_new_note_long">
+        <intent
+            android:action="org.gilune.app.action.SHORTCUT_NEW_NOTE"
+            android:targetPackage="org.gilune.app"
+            android:targetClass="org.gilune.app.MainActivity" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="search"
+        android:enabled="true"
+        android:icon="@drawable/ic_widget_search"
+        android:shortcutShortLabel="@string/gilune_shortcut_search_short"
+        android:shortcutLongLabel="@string/gilune_shortcut_search_long">
+        <intent
+            android:action="org.gilune.app.action.SHORTCUT_SEARCH"
+            android:targetPackage="org.gilune.app"
+            android:targetClass="org.gilune.app.MainActivity" />
+    </shortcut>
+</shortcuts>

@@ -70,6 +70,40 @@ fun toggleTaskAtLine(
     return assembleNote(frontMatter, updated.joinToString("\n"))
 }
 
+/// Ticking a box from the **agenda** (ADR 0017 § 8, MB3), where the note
+/// was never opened and so no whole-file hash was ever taken.
+///
+/// The guard is therefore the line itself: the row carries the text the
+/// search engine read, and this refuses unless that exact text is still on
+/// that exact line. That is stricter than [toggleTaskAtLine]'s whole-file
+/// comparison in the way that matters here — an agenda row makes a claim
+/// about one line, and an unrelated edit elsewhere in the note is no
+/// reason to refuse the tick — and it is never looser: a line that moved,
+/// changed or went is a line this declines to write.
+///
+/// `bodyLine` is **body-relative and 0-based**, like [toggleTaskAtLine]'s.
+/// `TaskHit.line` is body-relative and **1-based** (`MatchedLine.number`),
+/// so its caller subtracts one; that off-by-one is the whole reason this
+/// takes the expected text as well.
+///
+/// Returns the new file text, or null when it declined. Declining is the
+/// safe answer — a stale tap must never write.
+fun toggleTaskLine(
+    current: String,
+    bodyLine: Int,
+    expected: String,
+    decorations: List<EditorDecoration> = builtInDecorations(),
+): String? {
+    val (frontMatter, body) = splitNoteRaw(current)
+    val lines = body.split('\n')
+    if (bodyLine < 0 || bodyLine >= lines.size) return null
+    if (lines[bodyLine] != expected) return null
+    val rewritten = activateLine(lines[bodyLine], decorations) ?: return null
+    if (rewritten == lines[bodyLine]) return null
+    val updated = lines.toMutableList().also { it[bodyLine] = rewritten }
+    return assembleNote(frontMatter, updated.joinToString("\n"))
+}
+
 /// Renaming a note from the editor's title field (ADR 0017 § 8's "title
 /// rename"), taking the note's attachments with it.
 ///
