@@ -74,7 +74,115 @@ impl WhisperTranscriber {
                 text.push(' ');
             }
         }
-        Ok(text.trim().to_string())
+        Ok(clean_transcript(&text))
+    }
+}
+
+/// Whisper narrates silence: a recording with no speech transcribes as
+/// `[BLANK_AUDIO]`, and other non-speech is marked the same way
+/// (`[MUSIC]`, `(SILENCE)`). Under ADR 0013 a transcript becomes the
+/// note's own body, so left alone the model's stage direction would be
+/// what a person finds written in their note. Nobody said those words;
+/// a silent recording keeps an empty transcript (owner, 2026-09-01).
+///
+/// Deliberately conservative — this deletes a person's words if it is
+/// wrong. A bracketed or parenthesised run is dropped only when it
+/// stands alone (string edge or whitespace on both sides) and wraps
+/// nothing but uppercase letters, underscores and spaces. Anything a
+/// person might actually have said in brackets survives untouched:
+/// `[sic]`, `(see below)`, `[Chapter 3]` all carry lowercase or digits
+/// and are therefore prose, not markers.
+fn clean_transcript(raw: &str) -> String {
+    let mut kept = String::with_capacity(raw.len());
+    let mut rest = raw;
+    // The start of the string is a token boundary, as whitespace is.
+    let mut at_boundary = true;
+    while let Some(ch) = rest.chars().next() {
+        if at_boundary {
+            if let Some(len) = marker_len(rest) {
+                // Leave a separator behind so the words either side of a
+                // dropped marker cannot fuse into one.
+                kept.push(' ');
+                rest = &rest[len..];
+                continue;
+            }
+        }
+        kept.push(ch);
+        rest = &rest[ch.len_utf8()..];
+        at_boundary = ch.is_whitespace();
+    }
+    kept.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The byte length of the standalone non-speech marker `text` starts
+/// with, if it starts with one at all.
+fn marker_len(text: &str) -> Option<usize> {
+    let close = match text.as_bytes().first()? {
+        b'[' => ']',
+        b'(' => ')',
+        _ => return None,
+    };
+    let end = text.find(close)?;
+    let inner = &text[1..end];
+    if inner.is_empty()
+        || !inner.chars().all(|c| c.is_ascii_uppercase() || c == '_' || c == ' ')
+    {
+        return None;
+    }
+    let after = end + close.len_utf8();
+    match text[after..].chars().next() {
+        // A marker owns its whole token: trailing punctuation or a letter
+        // means this is something else, and something else is speech.
+        None => Some(after),
+        Some(next) if next.is_whitespace() => Some(after),
+        Some(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_transcript;
+
+    #[test]
+    fn silence_transcribes_to_nothing_at_all() {
+        assert_eq!(clean_transcript("[BLANK_AUDIO]"), "");
+        assert_eq!(clean_transcript("  [BLANK_AUDIO]  "), "");
+        assert_eq!(clean_transcript("[BLANK_AUDIO] [BLANK_AUDIO]"), "");
+    }
+
+    #[test]
+    fn a_marker_beside_speech_costs_only_the_marker() {
+        assert_eq!(clean_transcript("[BLANK_AUDIO] Remember the milk."), "Remember the milk.");
+        assert_eq!(clean_transcript("Remember the milk. [BLANK_AUDIO]"), "Remember the milk.");
+        assert_eq!(
+            clean_transcript("Remember the milk. [MUSIC] And the eggs."),
+            "Remember the milk. And the eggs.",
+            "words either side of a dropped marker must not fuse"
+        );
+        assert_eq!(clean_transcript("(SILENCE) Hello"), "Hello");
+        assert_eq!(clean_transcript("[MUSIC PLAYING] Hello"), "Hello", "markers may be phrases");
+    }
+
+    #[test]
+    fn brackets_a_person_might_have_spoken_survive() {
+        // Lowercase, mixed case and digits are prose. `[sic]` is a word
+        // someone dictated; deleting it would be the worse failure.
+        let sic = "He wrote sunk [sic] in the letter";
+        assert_eq!(clean_transcript(sic), sic);
+        assert_eq!(clean_transcript("(see below) matters"), "(see below) matters");
+        assert_eq!(clean_transcript("[Chapter 3] is the one"), "[Chapter 3] is the one");
+        assert_eq!(clean_transcript("[BLANK_AUDIO]s are a thing"), "[BLANK_AUDIO]s are a thing",
+            "not standalone: the marker is part of a longer word");
+        assert_eq!(clean_transcript("the array x[I] holds it"), "the array x[I] holds it",
+            "not standalone: no whitespace before the bracket");
+        assert_eq!(clean_transcript("[]"), "[]", "an empty bracket is not a marker");
+    }
+
+    #[test]
+    fn whitespace_is_collapsed_and_nothing_in_is_nothing_out() {
+        assert_eq!(clean_transcript(""), "");
+        assert_eq!(clean_transcript("   "), "");
+        assert_eq!(clean_transcript("  two   words  "), "two words");
     }
 }
 

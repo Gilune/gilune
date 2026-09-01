@@ -245,7 +245,8 @@ foreach ($name in $Abi) {
 
     # whisper links c++_shared, so the STL must travel with it (note 6). The
     # NDK ships it unstripped (~9 MB of debug info); AGP would strip it at
-    # packaging time, but it is committed to the repo, so strip it here.
+    # packaging time, but jniLibs is a gitignored staging dir developers
+    # carry locally, so strip it here and keep every checkout small.
     $stl = Join-Path $toolchain "sysroot\usr\lib\$($abis[$name].SysLib)\libc++_shared.so"
     if (Test-Path $stl) {
         $staged = Join-Path $dest 'libc++_shared.so'
