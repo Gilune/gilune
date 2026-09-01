@@ -13,7 +13,7 @@ technologies can be rejected without weakening the product principles.
 | [0006](0006-mobile-plugin-and-ui-profile.md) | Bundled mobile execution and declarative third-party UI | Accepted for v0 |
 | [0007](0007-markdown-vault-projection.md) | Markdown vault projection over the kernel store; the vault is the export | Accepted for v0 |
 | [0008](0008-headless-sync-agent-and-lan-first-sync.md) | Headless desktop sync agent and LAN-first device sync | Proposed |
-| [0009](0009-licensing.md) | MIT OR Apache-2.0 repository-wide, DCO | Accepted |
+| [0009](0009-licensing.md) | MIT repository-wide (single licence, amended 2026-09-01), DCO | Accepted |
 | [0010](0010-downloadable-plugins-on-store-builds.md) | Downloadable store plugins via the sandboxed wasm runtime under the VM/interpreter carve-outs; bundled stays v0; test submission before promising | Accepted |
 | [0011](0011-desktop-shell-structure-and-plugin-owned-ui.md) | Desktop shell regions and a fixed v0 slot list; all non-chrome UI is a plugin contribution; every plugin but the vault projection is removable | Accepted |
 | [0012](0012-markdown-editing-model.md) | The Markdown buffer is always the document; rich presentation renders it and never serialises back | Accepted |

@@ -70,7 +70,8 @@ sources. Spike S1 (ADR 0001, the Compose/Kotlin ↔ Rust boundary) is
 green on an x86_64 emulator (fault list, instrumented suite,
 symbolication, packaging, dual-ABI build); ADR 0001 accepted for v0 with
 the mid-range-device budgets and first ARM64 execution **assumed until
-the owner acquires a device**. ADR 0009 (MIT OR Apache-2.0) and ADR 0010
+the owner acquires a device**. ADR 0009 (licensing; MIT-only since
+2026-09-01) and ADR 0010
 (downloadable store plugins via the sandboxed runtime; test submission
 gates promises) are ratified. **Next: application-level engineering — see
 `architecture/09-engineering-conventions.md` and the vertical slice.**

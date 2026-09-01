@@ -2,7 +2,7 @@
 
 The public, versioned contracts third parties build against: WIT
 packages, manifest and payload schemas, the vault format, and protocol
-test vectors. Everything here is dual-licensed MIT OR Apache-2.0
+test vectors. Everything here is MIT-licensed
 (ADR 0009) and versioned per `architecture/07-compatibility.md`.
 
 Two standing rules:

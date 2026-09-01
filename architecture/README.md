@@ -86,7 +86,7 @@ should be read as Gilune.
 | Declarative third-party UI contributions | Accepted for v0 | Plugin spike |
 | Markdown vault projection; the vault is the export | Accepted for v0 | Capture/recovery spike |
 | Headless sync agent with LAN-first device sync | Proposed | Kernel and sync spikes |
-| MIT OR Apache-2.0 licensing repository-wide | Accepted | Owner ratification (2026-08-30) |
+| MIT licensing repository-wide (single licence since 2026-09-01) | Accepted | Owner ratification (2026-08-30, amended 2026-09-01) |
 | Downloadable store plugins via the sandboxed runtime | Accepted (direction; store test submission gates promises) | S5 research + future test submission |
 
 ## What is intentionally not selected yet

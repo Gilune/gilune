@@ -1,6 +1,7 @@
 # ADR 0009: Licensing
 
-Status: **Accepted** (owner ratification 2026-08-30, amending the draft)  
+Status: **Accepted** (owner ratification 2026-08-30, amending the draft;
+amended 2026-09-01 — single licence, MIT)  
 Validation: owner ratification — this is a product decision, not a spike;
 the draft existed so the choice was made deliberately rather than by
 default.
@@ -101,3 +102,14 @@ to enable.
 - Tightening the licence later, after external contributions arrive under
   MIT OR Apache-2.0, is effectively impossible without those contributors
   — by design (DCO, inbound = outbound).
+
+## Amendments
+
+**2026-09-01 (owner):** one licence, not a pair — **MIT**, repository-wide,
+chosen as the most open of the two. The dual form existed for Apache-2.0's
+explicit patent grant; giving the pair up gives that grant up too, knowingly
+— MIT's simplicity is the point, and nothing about the project's patent
+posture warranted the extra licence surface. No contribution had yet been
+accepted under the pair, so the simplification rewrites nothing anyone
+relied on. DCO and the trademark note stand unchanged. Root `LICENSE-MIT`
+becomes plain `LICENSE`; `LICENSE-APACHE` is removed.
