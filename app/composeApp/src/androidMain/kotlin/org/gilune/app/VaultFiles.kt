@@ -70,6 +70,63 @@ fun toggleTaskAtLine(
     return assembleNote(frontMatter, updated.joinToString("\n"))
 }
 
+/// Renaming a note from the editor's title field (ADR 0017 § 8's "title
+/// rename"), taking the note's attachments with it.
+///
+/// The kernel tracks a note by its front-matter id, so the note's own
+/// history survives any name; an attachment is bound to its note only by
+/// sharing its stem, so the stem has to move as one or the pairing is
+/// lost — a voice note would keep its audio on disk and lose the link to
+/// it. The note moves first: an attachment left behind is merely unlisted,
+/// while a note that failed to move would have stolen its attachments'
+/// names.
+///
+/// Returns the new vault-relative path, the old one when the name did not
+/// change, or null when the rename was refused. The caller owns syncing
+/// and any open-buffer bookkeeping.
+///
+/// This is the desktop `VaultTree.renameNote`'s contract, written again
+/// rather than shared: that one lives in `desktopMain` beside the tree
+/// that calls it, and promoting it would move file I/O into the pure
+/// shared set for one caller. If a third shell ever needs it, that is the
+/// moment to promote it.
+fun renameNote(vaultDir: String, relPath: String, newName: String): String? {
+    val name = newName.trim()
+    if (!isNameSegment(name)) return null
+    val source = File(vaultDir, relPath)
+    val note = relPath.endsWith(".md")
+    val target = File(source.parentFile, if (note && !name.endsWith(".md")) "$name.md" else name)
+    if (target.name == source.name) return relPath
+    // A case-only rename is the same file on a case-insensitive volume,
+    // so `exists()` is not the refusal it looks like.
+    val caseOnly = target.name.equals(source.name, ignoreCase = true)
+    if ((!caseOnly && target.exists()) || !source.renameTo(target)) return null
+    if (note) {
+        val stem = source.name.removeSuffix(".md")
+        val renamed = target.name.removeSuffix(".md")
+        source.parentFile?.listFiles()?.filter { it.attachmentStem() == stem }?.forEach {
+            it.renameTo(File(it.parentFile, renamed + it.name.removePrefix(stem)))
+        }
+    }
+    return target.relativeTo(File(vaultDir)).invariantSeparatorsPath
+}
+
+/// A name the editor may write: one segment, never a path and never
+/// traversal.
+private fun isNameSegment(name: String): Boolean =
+    name.isNotEmpty() && !name.contains("..") && !name.contains('/') && !name.contains('\\')
+
+/// A non-markdown file belongs to the sibling note that shares its stem:
+/// `kitchen.wav` is an attachment of `kitchen.md`. Sharing the stem is the
+/// whole of the binding — nothing records it — which is why renaming a
+/// note has to take its attachments with it.
+private fun File.attachmentStem(): String? =
+    if (isFile && !name.startsWith(".") && !name.endsWith(".md")) {
+        name.substringBeforeLast('.')
+    } else {
+        null
+    }
+
 /// How long a captured WAV runs, from its own header. Whisper is not
 /// involved and neither is the kernel: the duration is a fact about the
 /// preserved bytes, so it is read off them.

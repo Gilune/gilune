@@ -560,9 +560,50 @@ gates promises) are ratified. **Next: application-level engineering — see
      asserted not exercised; Play Console FGS declaration = owner
      action; revoke-between-draw-and-tap window unhandled;
      MediaPlayer playback of 0xFFFFFFFF-size wavs untested; widget
-     never placed on a real launcher. **Next: MS1 IME spike
-     (emulator-scope: InputConnection matrix; physical-device
-     Gboard/Samsung matrix stays assumed), then MB2.**
+     never placed on a real launcher.
+   - **MS1 IME SPIKE DONE (2026-09-01): PASS-WITH-CONDITIONS**
+     (spikes/ms1-ime/README.md; 39 tests stay as regression; real
+     InputConnection via onCreateInputConnection, NOT
+     performTextInput). Mapping held everywhere (straddling regions,
+     autocorrect, CJK, surrogates, both caret rules); but Compose's
+     LEGACY BasicTextField(TextFieldValue) corrupts unbatched
+     composing after a commit (prefixes accumulate; 3 controls put
+     the fault in the field, not our decoration; restartInput no
+     cure). CONDITIONS: MB2 uses TextFieldState+OutputTransformation
+     (retires manual mapping; ADR 0012's invariant becomes a
+     type-system fact; undoState free; the IME sees DECORATED text so
+     glyphs stay delimited); no length-delta decoration inside a
+     word; physical-device matrix ASSUMED. Latent: the DESKTOP editor
+     sits on the same legacy field — AWT/CJK composing untested
+     there.
+   - **MB2 DONE (2026-09-01, one agent + coordinator on-device
+     validation)**: Android live-preview editor on
+     TextFieldState+OutputTransformation per MS1. KEY CLASSPATH
+     FINDING: Foundation 1.7.6's TextFieldBuffer has NO styling API —
+     so the transformation changes ONLY the checkbox bytes (caret
+     never consulted; offset table shape-stable) and styling is a
+     sibling BasicText painting METRIC-NEUTRAL spans over a
+     transparent-text field (colour/underline/strike only; layout
+     agreement asserted by test at every line top and wrap point).
+     COST RECORDED: heading size / bold weight / italic slant
+     unrendered in Edit until a toolkit bump (Read renders all
+     three; headings take the accent colour). Checkbox tap = 48dp
+     boxes from the field's own layout, consumed on Initial pass
+     only inside a box, selection restored, haptic, immediate write.
+     mobileEditorDecorations() enforces MS1's whitespace-delimited
+     rule over the whole registry (TASK_MARKER alone would let
+     `- [ ]milk` glyph inside a word). Toolbar row + 232dp panel via
+     pure BufferEdits through state.edit{} (whole-buffer rewrites
+     would collapse undo + restart composing); / drives the shared
+     SuggestSession by typing the trigger; undo = undoState, proven
+     against a real InputConnection commit. Suites: instrumented
+     425/0, desktop 394/0. Coordinator drove it live: capture →
+     note → Read glyphs → Edit with styled tokens + toolbar. Gaps:
+     glyph long-press eats platform selection start; title rename
+     loses on back-without-commit (desktop parity); row scrolls
+     under ~384dp width; perf unmeasured on long notes. **Next:
+     transcription wiring + dictation (enable_whisper on Android,
+     model consent, tiny-q5_1 default), then MB3.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

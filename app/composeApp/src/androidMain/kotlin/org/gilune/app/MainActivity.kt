@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Settings
@@ -108,6 +109,12 @@ enum class Destination(val label: String) { Capture("Capture"), Notes("Notes") }
 private sealed interface Screen {
     data object Home : Screen
     data class Read(val relPath: String) : Screen
+
+    /// The live-preview editor (ADR 0017 § 2, MB2). Read and Edit are two
+    /// screens rather than one with a mode, because on a phone the bottom
+    /// is mode-swapped: Read has the nav bar under it, Edit has the
+    /// accessory row.
+    data class Edit(val relPath: String) : Screen
     data class Settings(val route: SettingsRoute) : Screen
 }
 
@@ -210,6 +217,12 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                     destination = destination,
                     onBack = { screen = backFrom(screen) },
                     onSettings = { screen = Screen.Settings(SettingsRoute.Index) },
+                    // One honest gesture each way: the pencil opens the
+                    // editor on the note being read, and the tick closes
+                    // it — which saves, because leaving the editor is a
+                    // save (ADR 0012).
+                    onEdit = { relPath -> screen = Screen.Edit(relPath) },
+                    onDone = { relPath -> screen = Screen.Read(relPath) },
                 )
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Column(Modifier.weight(1f).fillMaxWidth()) {
@@ -234,6 +247,14 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                                 NotesScreen(state, onOpenNote = { screen = Screen.Read(it) })
                         }
                         is Screen.Read -> ReadScreen(state, open.relPath)
+                        is Screen.Edit -> EditScreen(
+                            state = state,
+                            relPath = open.relPath,
+                            // A rename moves the file under the open
+                            // buffer, so the screen follows it rather
+                            // than holding a path nothing answers.
+                            onRenamed = { renamed -> screen = Screen.Edit(renamed) },
+                        )
                         is Screen.Settings -> SettingsScreen(
                             state = state,
                             route = open.route,
@@ -269,6 +290,9 @@ private fun backFrom(screen: Screen): Screen = when (screen) {
     } else {
         Screen.Settings(SettingsRoute.Index)
     }
+    // Back out of the editor is back to the note, not out of the note.
+    // The buffer is saved on the way, by the editor's own dispose.
+    is Screen.Edit -> Screen.Read(screen.relPath)
     else -> Screen.Home
 }
 
@@ -278,6 +302,8 @@ private fun TopBar(
     destination: Destination,
     onBack: () -> Unit,
     onSettings: () -> Unit,
+    onEdit: (String) -> Unit = {},
+    onDone: (String) -> Unit = {},
 ) {
     val colours = MaterialTheme.colorScheme
     Row(
@@ -300,12 +326,31 @@ private fun TopBar(
             when (screen) {
                 Screen.Home -> destination.label
                 is Screen.Read -> noteTitle(screen.relPath)
+                // The editor shows the note's name in its own title
+                // field, where it can be typed over, so the bar names
+                // the mode instead of repeating it.
+                is Screen.Edit -> "Editing"
                 is Screen.Settings -> "Settings"
             },
             style = MaterialTheme.typography.titleMedium,
             maxLines = 1,
             modifier = Modifier.weight(1f).padding(start = 4.dp),
         )
+        when (screen) {
+            is Screen.Read -> IconButton(
+                onClick = { onEdit(screen.relPath) },
+                modifier = Modifier.testTag("edit"),
+            ) {
+                Icon(Icons.Outlined.Edit, contentDescription = "edit", tint = colours.onSurfaceVariant)
+            }
+            is Screen.Edit -> IconButton(
+                onClick = { onDone(screen.relPath) },
+                modifier = Modifier.testTag("done"),
+            ) {
+                Icon(Icons.Outlined.Check, contentDescription = "done", tint = colours.primary)
+            }
+            else -> Unit
+        }
         if (screen !is Screen.Settings) {
             IconButton(onClick = onSettings, modifier = Modifier.testTag("settings")) {
                 Icon(Icons.Outlined.Settings, contentDescription = "settings", tint = colours.onSurfaceVariant)
