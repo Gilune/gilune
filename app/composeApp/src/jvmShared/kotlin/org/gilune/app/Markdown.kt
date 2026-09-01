@@ -42,51 +42,119 @@ fun splitNote(text: String): Note {
 data class Span(val text: String, val bold: Boolean = false, val italic: Boolean = false,
                 val code: Boolean = false, val strike: Boolean = false, val link: String? = null)
 
+/// Every block carries the **0-based line of `body` it starts on**
+/// (ADR 0017 § 8: ticking a box from Read ships before the editor does).
+///
+/// A rendered surface has no caret and no offset table, so the only
+/// honest way back from something drawn to the bytes behind it is a line
+/// index the parser knew and kept. The alternative — matching rendered
+/// text against source lines — guesses, and a guess that misses writes
+/// to the wrong line. `line` is -1 only for a block built by hand.
 sealed interface MdBlock {
-    data class Heading(val level: Int, val spans: List<Span>) : MdBlock
-    data class Paragraph(val spans: List<Span>) : MdBlock
-    data class ListItem(val marker: String, val spans: List<Span>) : MdBlock
-    data class Quote(val spans: List<Span>) : MdBlock
-    data class Code(val text: String, val language: String?) : MdBlock
-    data object Rule : MdBlock
+    val line: Int
+
+    data class Heading(val level: Int, val spans: List<Span>, override val line: Int = -1) : MdBlock
+    data class Paragraph(val spans: List<Span>, override val line: Int = -1) : MdBlock
+
+    /// `task` is null on an ordinary bullet, false on `[ ]` and true on
+    /// `[x]`. It is read off the **source line** with the same recogniser
+    /// `activateLine` uses, not off the parse tree, so what a reader taps
+    /// and what the toggle rewrites cannot disagree.
+    data class ListItem(
+        val marker: String,
+        val spans: List<Span>,
+        override val line: Int = -1,
+        val task: Boolean? = null,
+    ) : MdBlock
+
+    data class Quote(val spans: List<Span>, override val line: Int = -1) : MdBlock
+    data class Code(val text: String, val language: String?, override val line: Int = -1) : MdBlock
+    data class Rule(override val line: Int = -1) : MdBlock
 
     /// An Obsidian-style embed, which is how a capture points at its
     /// original bytes. Rendered as a reference, never as a rewrite.
-    data class Embed(val target: String) : MdBlock
+    data class Embed(val target: String, override val line: Int = -1) : MdBlock
 }
 
 private val EMBED = Regex("""^!\[\[(.+?)]]$""")
 
+/// The `[ ]` a GFM parser may or may not have handed back as text. It is
+/// stripped from the rendered spans because the glyph replaces it; the
+/// bytes are untouched, which is the whole point of rendering.
+private val LEADING_TASK_MARKER = Regex("""^\[[ xX]]\s*""")
+
+/// A task marker directly after a bullet, optionally indented — the same
+/// shape `MarkdownEditing.kt` and the tasks plugin recognise.
+private val TASK_LINE = Regex("""^([ \t]*)([-*+])([ \t]+)\[([ xX])]""")
+
 fun parseMarkdown(body: String): List<MdBlock> {
     val tree = MarkdownParser(GFMFlavourDescriptor()).buildMarkdownTreeFromString(body)
     val blocks = mutableListOf<MdBlock>()
-    for (node in tree.children) collectBlock(node, body, blocks, marker = null)
+    val lines = SourceLines(body)
+    for (node in tree.children) collectBlock(node, body, blocks, marker = null, lines = lines)
     return blocks
 }
 
-private fun collectBlock(node: ASTNode, src: String, out: MutableList<MdBlock>, marker: String?) {
+/// Offset-to-line for one parse, computed once. Counting newlines per
+/// block would be quadratic on a long note for a number every block
+/// needs.
+private class SourceLines(source: String) {
+    private val starts: IntArray = buildList {
+        add(0)
+        source.forEachIndexed { index, char -> if (char == '\n') add(index + 1) }
+    }.toIntArray()
+
+    private val text = source
+
+    fun lineAt(offset: Int): Int {
+        val bounded = offset.coerceIn(0, text.length)
+        var low = 0
+        var high = starts.size - 1
+        while (low < high) {
+            val mid = (low + high + 1) / 2
+            if (starts[mid] <= bounded) low = mid else high = mid - 1
+        }
+        return low
+    }
+
+    fun textOf(line: Int): String {
+        if (line < 0 || line >= starts.size) return ""
+        val start = starts[line]
+        val end = if (line + 1 < starts.size) starts[line + 1] - 1 else text.length
+        return text.substring(start, end.coerceAtLeast(start))
+    }
+}
+
+private fun collectBlock(
+    node: ASTNode,
+    src: String,
+    out: MutableList<MdBlock>,
+    marker: String?,
+    lines: SourceLines,
+) {
+    val line = lines.lineAt(node.startOffset)
     when (node.type) {
-        MarkdownElementTypes.ATX_1 -> out.add(MdBlock.Heading(1, headingSpans(node, src)))
-        MarkdownElementTypes.ATX_2 -> out.add(MdBlock.Heading(2, headingSpans(node, src)))
-        MarkdownElementTypes.ATX_3 -> out.add(MdBlock.Heading(3, headingSpans(node, src)))
-        MarkdownElementTypes.ATX_4 -> out.add(MdBlock.Heading(4, headingSpans(node, src)))
-        MarkdownElementTypes.ATX_5 -> out.add(MdBlock.Heading(5, headingSpans(node, src)))
-        MarkdownElementTypes.ATX_6 -> out.add(MdBlock.Heading(6, headingSpans(node, src)))
-        MarkdownElementTypes.SETEXT_1 -> out.add(MdBlock.Heading(1, inlineSpans(node, src)))
-        MarkdownElementTypes.SETEXT_2 -> out.add(MdBlock.Heading(2, inlineSpans(node, src)))
+        MarkdownElementTypes.ATX_1 -> out.add(MdBlock.Heading(1, headingSpans(node, src), line))
+        MarkdownElementTypes.ATX_2 -> out.add(MdBlock.Heading(2, headingSpans(node, src), line))
+        MarkdownElementTypes.ATX_3 -> out.add(MdBlock.Heading(3, headingSpans(node, src), line))
+        MarkdownElementTypes.ATX_4 -> out.add(MdBlock.Heading(4, headingSpans(node, src), line))
+        MarkdownElementTypes.ATX_5 -> out.add(MdBlock.Heading(5, headingSpans(node, src), line))
+        MarkdownElementTypes.ATX_6 -> out.add(MdBlock.Heading(6, headingSpans(node, src), line))
+        MarkdownElementTypes.SETEXT_1 -> out.add(MdBlock.Heading(1, inlineSpans(node, src), line))
+        MarkdownElementTypes.SETEXT_2 -> out.add(MdBlock.Heading(2, inlineSpans(node, src), line))
         MarkdownElementTypes.PARAGRAPH -> {
             val raw = node.getTextInNode(src).toString().trim()
             val embed = EMBED.find(raw)
             when {
-                embed != null -> out.add(MdBlock.Embed(embed.groupValues[1]))
-                marker != null -> out.add(MdBlock.ListItem(marker, inlineSpans(node, src)))
-                else -> out.add(MdBlock.Paragraph(inlineSpans(node, src)))
+                embed != null -> out.add(MdBlock.Embed(embed.groupValues[1], line))
+                marker != null -> out.add(listItem(marker, inlineSpans(node, src), line, lines))
+                else -> out.add(MdBlock.Paragraph(inlineSpans(node, src), line))
             }
         }
         MarkdownElementTypes.BLOCK_QUOTE ->
-            out.add(MdBlock.Quote(inlineSpans(node, src)))
+            out.add(MdBlock.Quote(inlineSpans(node, src), line))
         MarkdownElementTypes.UNORDERED_LIST, MarkdownElementTypes.ORDERED_LIST ->
-            for (item in node.children) collectBlock(item, src, out, marker)
+            for (item in node.children) collectBlock(item, src, out, marker, lines)
         MarkdownElementTypes.LIST_ITEM -> {
             val bullet = node.children
                 .firstOrNull {
@@ -97,26 +165,38 @@ private fun collectBlock(node: ASTNode, src: String, out: MutableList<MdBlock>, 
             var emitted = false
             for (child in node.children) {
                 val before = out.size
-                collectBlock(child, src, out, marker = if (emitted) "" else bullet)
+                collectBlock(child, src, out, marker = if (emitted) "" else bullet, lines = lines)
                 if (out.size > before) emitted = true
             }
         }
-        MarkdownElementTypes.CODE_FENCE -> out.add(codeFence(node, src))
+        MarkdownElementTypes.CODE_FENCE -> out.add(codeFence(node, src, line))
         MarkdownElementTypes.CODE_BLOCK ->
-            out.add(MdBlock.Code(node.getTextInNode(src).toString().trimEnd(), null))
-        MarkdownTokenTypes.HORIZONTAL_RULE -> out.add(MdBlock.Rule)
+            out.add(MdBlock.Code(node.getTextInNode(src).toString().trimEnd(), null, line))
+        MarkdownTokenTypes.HORIZONTAL_RULE -> out.add(MdBlock.Rule(line))
         else -> Unit // whitespace, line breaks, link definitions
     }
 }
 
-private fun codeFence(node: ASTNode, src: String): MdBlock.Code {
+/// A list item, told whether its source line is a GFM task. The marker
+/// characters are dropped from the spans — the glyph stands for them —
+/// while the source keeps them, exactly as emphasis markers are dropped.
+private fun listItem(marker: String, spans: List<Span>, line: Int, lines: SourceLines): MdBlock.ListItem {
+    val state = TASK_LINE.find(lines.textOf(line))?.groupValues?.get(4)
+        ?: return MdBlock.ListItem(marker, spans, line)
+    val stripped = spans.mapIndexed { index, span ->
+        if (index == 0) span.copy(text = span.text.replaceFirst(LEADING_TASK_MARKER, "")) else span
+    }.filter { it.text.isNotEmpty() }
+    return MdBlock.ListItem(marker, stripped, line, task = state != " ")
+}
+
+private fun codeFence(node: ASTNode, src: String, line: Int): MdBlock.Code {
     val language = node.children
         .firstOrNull { it.type == MarkdownTokenTypes.FENCE_LANG }
         ?.getTextInNode(src)?.toString()?.trim()
     val text = node.children
         .filter { it.type == MarkdownTokenTypes.CODE_FENCE_CONTENT || it.type == MarkdownTokenTypes.EOL }
         .joinToString("") { it.getTextInNode(src) }
-    return MdBlock.Code(text.trim('\n'), language?.ifEmpty { null })
+    return MdBlock.Code(text.trim('\n'), language?.ifEmpty { null }, line)
 }
 
 private fun headingSpans(node: ASTNode, src: String): List<Span> {

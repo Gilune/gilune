@@ -517,7 +517,30 @@ gates promises) are ratified. **Next: application-level engineering — see
      unregressed. Gaps: whisper built+loaded but never EXECUTED on
      Android (arm64 never run at all — MS2); model-cache pathing
      waits for a caller (MB1/MB2); AGP strip warning (no ndkVersion)
-     cosmetic. **Next: MB1 capture-first shell.**
+     cosmetic. **MB1 DONE (2026-09-01, one agent + coordinator
+     emulator validation)**: MainActivity is the ADR shell —
+     edge-to-edge, adjustResize, DayNight, composer-first home (IME
+     action = newline, commit ✓), feed after first frame, voice rows
+     with §4 pending wording ("enabled ≠ able" bug caught by eye),
+     idle timer (pure-tested; expiry COMMITS), Capture/Notes nav
+     (mode-swapped under IME), notes list + Read view with 48dp
+     tap-to-tick (parser now carries source lines — MdBlock.line +
+     ListItem.task; desktop Read shows glyphs too, inert), settings
+     (vault truth + Export-a-copy zip via SAF + plugins/consent +
+     appearance), DataStore prefs, Theme schemes moved to
+     jvmShared/Palette.kt (ThemeChoice moved from Prefs.kt;
+     secondaryContainer family added — stock-purple nav leak;
+     CaptureBar.kt DELETED, one caller), espresso-core 3.7 pinned
+     (3.6 reflects on an API-36-removed method). Suites: instrumented
+     330/0, desktop 385/0. Coordinator live proof on emulator:
+     first-run vault dialog, typed capture → "captured" → feed row.
+     ADB lesson: `adb exec-out > file` in PowerShell mangles binary
+     — screencap to /sdcard + pull. Gaps: navigation slot unread
+     (no Agenda tab yet — MB3), filter fences = code box in mobile
+     Read (MB3), transcribing-row over-claim window until
+     enableWhisper wires (MB2), tertiary palette family undefined,
+     timer lifecycle untested by a real cycle, still x86_64-only.
+     **Next: Record widget + FGS (closes MB1), then MS1/MB2.**
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

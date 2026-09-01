@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+The window theme, which is what paints before Compose does. It carries
+the palette's background so launching in dark mode never flashes white,
+and it hands the system bars to the app (ADR 0017 § 2: edge-to-edge, or
+the IME insets never arrive at all).
+-->
+<resources>
+    <color name="gilune_window_background">#FFFFFFFF</color>
+
+    <style name="Theme.Gilune" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/gilune_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
+    </style>
+</resources>

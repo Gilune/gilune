@@ -70,4 +70,52 @@ class MarkdownTest {
         assertEquals("kotlin", code.language)
         assertEquals("val x = 1", code.text)
     }
+
+    // ---- source lines ----------------------------------------------------
+    // A rendered surface has no caret, so the only honest route from
+    // something drawn back to the bytes behind it is the line the parser
+    // kept (ADR 0017 § 8). These pin that number down.
+
+    @Test
+    fun everyBlockKnowsTheLineItStartsOn() {
+        val body = "# Title\n\nprose\n\n- one\n- two\n\n```sh\nls\n```\n\n---\n"
+        val blocks = parseMarkdown(body)
+        assertEquals(0, blocks.filterIsInstance<MdBlock.Heading>().single().line)
+        assertEquals(2, blocks.filterIsInstance<MdBlock.Paragraph>().single().line)
+        assertEquals(listOf(4, 5), blocks.filterIsInstance<MdBlock.ListItem>().map { it.line })
+        assertEquals(7, blocks.filterIsInstance<MdBlock.Code>().single().line)
+        assertEquals(11, blocks.filterIsInstance<MdBlock.Rule>().single().line)
+    }
+
+    @Test
+    fun aTaskItemCarriesItsStateAndItsMarkerStaysOutOfTheReading() {
+        val blocks = parseMarkdown("- [ ] milk\n- [x] bread\n- plain\n")
+            .filterIsInstance<MdBlock.ListItem>()
+        assertEquals(listOf(false, true, null), blocks.map { it.task })
+        assertEquals(
+            listOf("milk", "bread", "plain"),
+            blocks.map { item -> item.spans.joinToString("") { it.text } },
+            "the glyph stands for the brackets; the source keeps them",
+        )
+        assertEquals(listOf(0, 1, 2), blocks.map { it.line })
+    }
+
+    @Test
+    fun theLineIsTheOneTheTaskMarkerIsOn() {
+        val body = "---\nnot front matter here\n---\n\n- [ ] first\n- [ ] second\n"
+        val items = parseMarkdown(body).filterIsInstance<MdBlock.ListItem>()
+        for (item in items) {
+            assertTrue(
+                body.split('\n')[item.line].contains("[ ]"),
+                "line ${item.line} is ${body.split('\n')[item.line]}",
+            )
+        }
+    }
+
+    @Test
+    fun bracketsThatAreNotATaskMarkerAreNotOne() {
+        val items = parseMarkdown("- see [ ] in the middle\n").filterIsInstance<MdBlock.ListItem>()
+        assertEquals(null, items.single().task)
+        assertTrue(items.single().spans.joinToString("") { it.text }.contains("[ ]"))
+    }
 }

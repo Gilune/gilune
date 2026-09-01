@@ -48,6 +48,10 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
                 implementation("org.jetbrains:markdown:0.7.3")
                 implementation("net.java.dev.jna:jna:5.14.0@aar")
+                // Device-local preferences (ADR 0017 § 6). `Prefs` does not
+                // port — `java.util.prefs` is unusable on Android — and the
+                // ADR names DataStore as the replacement.
+                implementation("androidx.datastore:datastore-preferences:1.1.1")
             }
         }
         val androidInstrumentedTest by getting {
@@ -60,6 +64,12 @@ kotlin {
                 // suite's compose.desktop.uiTestJUnit4. Android had no UI-test
                 // net before ADR 0017 MB0; MB1's tests need this.
                 implementation("androidx.compose.ui:ui-test-junit4-android:1.7.6")
+                // Compose's test rule syncs through Espresso's `onIdle`,
+                // which reflected on a framework method that Android 16
+                // removed: every UI test failed on the API 36 emulator
+                // with NoSuchMethodException InputManager.getInstance.
+                // 3.7.0 is the release that stopped doing that.
+                implementation("androidx.test.espresso:espresso-core:3.7.0")
             }
         }
     }
@@ -85,6 +95,10 @@ android {
         getByName("main") {
             manifest.srcFile("src/androidMain/AndroidManifest.xml")
             jniLibs.srcDir("src/androidMain/jniLibs")
+            // The window theme lives here (ADR 0017 § 2): the hard-coded
+            // light theme went, so dark mode follows the system from the
+            // very first frame rather than from Compose's first paint.
+            res.srcDir("src/androidMain/res")
         }
     }
 }

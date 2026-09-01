@@ -16,6 +16,7 @@
 package org.gilune.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -33,8 +35,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -43,6 +50,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -69,11 +77,22 @@ class BlockRenderers(registrations: List<BlockRegistration> = emptyList()) {
         info?.trim()?.lowercase()?.let(byInfo::get)
 }
 
+/// `onToggleTask` is the Read view's checkbox tap (ADR 0017 § 8): it is
+/// handed the **source line** of the item, and the surface that owns the
+/// bytes does the guarded write through `activateLine`. Null — the
+/// desktop's reading pane — draws the same glyph, inert: reading a note
+/// must never change it unless a person asks (ADR 0012).
+///
+/// `checkboxTarget` is the tap target the glyph sits in the middle of.
+/// Android's floor is 48dp; a pointer needs no such thing, so the default
+/// is the marker column the bullet has always had.
 @Composable
 fun MarkdownBody(
     blocks: List<MdBlock>,
     modifier: Modifier = Modifier,
     renderers: BlockRenderers = BlockRenderers(),
+    onToggleTask: ((line: Int) -> Unit)? = null,
+    checkboxTarget: Dp = 22.dp,
 ) {
     val colours = MaterialTheme.colorScheme
     Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -88,15 +107,19 @@ fun MarkdownBody(
                     annotate(block.spans, colours.primary),
                     lineHeight = 22.sp,
                 )
-                is MdBlock.ListItem -> Row {
-                    Text(
-                        when (block.marker) {
-                            "-", "*", "+" -> "•"
-                            else -> block.marker.ifEmpty { " " }
-                        },
-                        modifier = Modifier.width(22.dp),
-                        color = colours.onSurfaceVariant,
-                    )
+                is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (block.task == null) {
+                        Text(
+                            when (block.marker) {
+                                "-", "*", "+" -> "•"
+                                else -> block.marker.ifEmpty { " " }
+                            },
+                            modifier = Modifier.width(22.dp),
+                            color = colours.onSurfaceVariant,
+                        )
+                    } else {
+                        TaskGlyph(block.task, block.line, onToggleTask, checkboxTarget)
+                    }
                     Text(annotate(block.spans, colours.primary), lineHeight = 22.sp)
                 }
                 is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
@@ -126,11 +149,54 @@ fun MarkdownBody(
                         .background(colours.surfaceVariant)
                         .padding(10.dp),
                 )
-                MdBlock.Rule -> HorizontalDivider()
+                is MdBlock.Rule -> HorizontalDivider()
             }
         }
     }
 }
+
+/// The checkbox as a reader sees it. The glyph is drawn whether or not it
+/// can be tapped, because ☐ is what `- [ ]` *means* and a reading surface
+/// should say so; only the tap is conditional.
+///
+/// Confirmation is haptic. There is no hover and no cursor on a phone,
+/// and the desktop's implementation of the same call is a no-op, so this
+/// costs the pointer shell nothing.
+@Composable
+private fun TaskGlyph(
+    checked: Boolean,
+    line: Int,
+    onToggle: ((line: Int) -> Unit)?,
+    target: Dp,
+) {
+    val colours = MaterialTheme.colorScheme
+    val haptics = LocalHapticFeedback.current
+    val description = if (checked) "task done" else "task not done"
+    Box(
+        Modifier
+            .size(target)
+            .let { base ->
+                if (onToggle == null) {
+                    base
+                } else {
+                    base.clickable(onClickLabel = "toggle task") {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggle(line)
+                    }
+                }
+            }
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            if (checked) CHECKED_GLYPH else UNCHECKED_GLYPH,
+            color = if (checked) colours.primary else colours.onSurfaceVariant,
+        )
+    }
+}
+
+private const val UNCHECKED_GLYPH = "☐" // BALLOT BOX
+private const val CHECKED_GLYPH = "☑" // BALLOT BOX WITH CHECK
 
 /// The monospace box, unchanged and moved only so the `Code` branch can
 /// fall through to it. **This is the removal story for a block renderer**

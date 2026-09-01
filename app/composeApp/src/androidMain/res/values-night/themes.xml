@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The same theme when the system is dark. Both halves are defined in
+     full, on `Palette.kt`'s rule: dark mode is never a half-applied
+     afterthought. -->
+<resources>
+    <color name="gilune_window_background">#FF101215</color>
+
+    <style name="Theme.Gilune" parent="@android:style/Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/gilune_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

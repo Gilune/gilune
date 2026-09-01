@@ -7,7 +7,9 @@ package org.gilune.app
 
 import java.util.prefs.Preferences
 
-enum class ThemeChoice { System, Light, Dark }
+// `ThemeChoice` moved to `Palette.kt` with the colour schemes (ADR 0017
+// § 2): both shells store the same three choices, so the enum is shared
+// even though where it is stored is not.
 
 object Prefs {
     private val node: Preferences = Preferences.userRoot().node("org/gilune/app")

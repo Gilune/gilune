@@ -15,6 +15,10 @@ import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.SourceSummary
 import uniffi.gilune_ffi.TombstoneProposal
 
+/// How much of a recording crosses the boundary at a time. Streamed
+/// capture is chunk-by-chunk so a process kill loses only the tail.
+const val CAPTURE_CHUNK = 64 * 1024
+
 class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     val gilune = mutableStateOf<Gilune?>(null)
     val message = mutableStateOf("opening vault…")
