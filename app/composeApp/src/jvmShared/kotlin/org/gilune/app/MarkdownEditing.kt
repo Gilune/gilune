@@ -321,6 +321,135 @@ fun toggleCheckbox(text: String, marker: IntRange): String {
     return text.substring(0, start) + flipped + text.substring(start + MARKER_LENGTH)
 }
 
+// ------------------------------------------------------ list continuation
+
+/// What pressing Return on a list line does next (owner rule, 2026-09-01).
+sealed interface ListContinuation {
+    /// The list goes on: [prefix] — the item's own indentation and bullet,
+    /// plus a fresh **unchecked** marker when it was a task — is inserted
+    /// at the caret. A ticked item continues unticked, because the next
+    /// thing you write down is not already done.
+    data class Continue(val prefix: String) : ListContinuation
+
+    /// The list lets go: the half-open source [range] is deleted. It
+    /// covers the empty item's own text *and* the newline that was just
+    /// typed, so the caret comes back onto a line that is now blank —
+    /// Return on an empty item clears the marker rather than leaving a
+    /// stray blank line above the one you land on.
+    data class Unwrap(val range: IntRange) : ListContinuation
+}
+
+/// The one place both editors decide what Return does to a list, taken
+/// over the buffer **as it stands with the newline already in it**:
+/// `text[caretAfterNewline - 1]` is that newline, and the line above it is
+/// the item being continued.
+///
+/// Reading the buffer after the break rather than before is what makes the
+/// mid-item case fall out instead of being a case of its own. Return in
+/// the middle of `- [ ] milk and bread` has already carried `and bread`
+/// down, so inserting the prefix at the caret leaves that text after the
+/// new marker — which is what Obsidian does with the same keystroke.
+///
+/// An item counts as **empty** only when nothing but whitespace follows
+/// its marker on *either* side of the break: the marker line's own
+/// remainder, and the text the break carried down. That is the whole item
+/// rather than the half above the caret, so Return with the caret parked
+/// at `- [ ] |milk` continues (the empty marker stays behind, `milk` moves
+/// down under a new one) and only a genuinely empty item unwraps.
+///
+/// Ordered lists are out of scope exactly as they are for the checkbox
+/// (see [TASK_MARKER]), and a list quoted inside a fence is text: writing
+/// a marker into somebody's example would be the rendering rule's mistake
+/// made with real bytes.
+fun listContinuation(text: CharSequence, caretAfterNewline: Int): ListContinuation? {
+    if (caretAfterNewline <= 0 || caretAfterNewline > text.length) return null
+    val previousEnd = caretAfterNewline - 1
+    if (text[previousEnd] != '\n') return null
+
+    // Walk down to the previous line, tracking fences as `decorate` does —
+    // delimiters counted into the block, so the ``` line is inside too.
+    var lineStart = 0
+    var inFence = false
+    while (true) {
+        val lineEnd = lineEndFor(text, lineStart)
+        if (lineEnd >= previousEnd) break
+        if (fenceDelimiter(text, lineStart, lineEnd)) inFence = !inFence
+        lineStart = lineEnd + 1
+    }
+    if (inFence) return null
+
+    val previous = text.substring(lineStart, previousEnd)
+    val bullet = LIST_ITEM.find(previous) ?: return null
+    val task = TASK_MARKER.find(previous)
+    val marker = task ?: bullet
+    // Whitespace either side of the break: the marker line's remainder and
+    // what the break carried down are one item between them.
+    val carried = text.substring(caretAfterNewline, lineEndFor(text, caretAfterNewline))
+    if (previous.substring(marker.value.length).isBlank() && carried.isBlank()) {
+        return ListContinuation.Unwrap(lineStart until caretAfterNewline)
+    }
+    val prefix = if (task != null) {
+        // Groups 1–3 are the indentation, the bullet and the space between
+        // it and the marker; the marker itself is written fresh and empty.
+        task.groupValues[1] + task.groupValues[2] + task.groupValues[3] + "[ ] "
+    } else {
+        bullet.value
+    }
+    return ListContinuation.Continue(prefix)
+}
+
+/// The buffer a [ListContinuation] produces, for a caller that assigns a
+/// whole value — the desktop's `TextFieldValue`. A caller that must edit
+/// in place instead (the phone, where a whole-buffer rewrite would restart
+/// the IME's composing session) reads the decision and makes the one
+/// targeted edit itself; the arithmetic is here so both agree about it.
+data class ContinuedBuffer(val text: String, val caret: Int)
+
+fun ListContinuation.applyTo(text: CharSequence, caret: Int): ContinuedBuffer = when (this) {
+    is ListContinuation.Continue -> ContinuedBuffer(
+        text.substring(0, caret) + prefix + text.substring(caret, text.length),
+        caret + prefix.length,
+    )
+    is ListContinuation.Unwrap -> ContinuedBuffer(
+        text.substring(0, range.first) + text.substring(range.last + 1, text.length),
+        range.first,
+    )
+}
+
+/// Whether the step from one buffer to the next was **one newline typed**:
+/// nothing else inserted, nothing else removed, and the caret left
+/// standing just past it.
+///
+/// This is what the continuation is hung on, on both platforms, instead of
+/// a key handler. A keystroke can be intercepted, but an IME's commit
+/// cannot be read off one — so the editors watch for the transition the
+/// keyboard actually produced and never see the key at all. A pasted
+/// newline is that same transition and continues the list; a multi-line
+/// paste is not one and is left exactly as it was pasted.
+fun insertedNewline(
+    before: CharSequence,
+    selectionStart: Int,
+    selectionEnd: Int,
+    after: CharSequence,
+    caret: Int,
+): Boolean {
+    val from = minOf(selectionStart, selectionEnd).coerceIn(0, before.length)
+    val to = maxOf(selectionStart, selectionEnd).coerceIn(from, before.length)
+    if (caret != from + 1 || caret > after.length) return false
+    if (after.length != before.length - (to - from) + 1) return false
+    if (after[caret - 1] != '\n') return false
+    return before.regionMatches(0, after, 0, from) &&
+        before.regionMatches(to, after, caret, before.length - to)
+}
+
+/// `line.trim().startsWith("```")`, asked of a range rather than of a
+/// string, so walking a document costs no allocation per line.
+private fun fenceDelimiter(text: CharSequence, start: Int, end: Int): Boolean {
+    var index = start
+    while (index < end && text[index].isWhitespace()) index++
+    return end - index >= 3 && text[index] == '`' && text[index + 1] == '`' && text[index + 2] == '`'
+}
+
 private const val MARKER_LENGTH = 3
 private const val MARKER_GROUP = 4
 private const val UNCHECKED_GLYPH = "☐" // BALLOT BOX
@@ -329,6 +458,11 @@ private const val CHECKED_GLYPH = "☑" // BALLOT BOX WITH CHECK
 /// A task marker directly after a bullet, optionally indented. `\d+.`
 /// ordered lists are deliberately out of scope for E3.
 private val TASK_MARKER = Regex("""^([ \t]*)([-*+])([ \t]+)(\[[ xX]])""")
+
+/// The bullet [TASK_MARKER] stands on, without the marker: the same three
+/// groups, so a plain list item and a task item are the same shape read to
+/// different depths. `\d+.` ordered lists are out of scope here too.
+private val LIST_ITEM = Regex("""^([ \t]*)([-*+])([ \t]+)""")
 
 private fun taskMarkerIn(line: String): IntRange? =
     TASK_MARKER.find(line)?.groups?.get(MARKER_GROUP)?.let { it.range.first until it.range.first + MARKER_LENGTH }
@@ -525,13 +659,13 @@ private fun DecorationRole.spanStyle(palette: MarkdownPalette): SpanStyle? = whe
     DecorationRole.CODE -> SpanStyle(color = palette.code, background = palette.codeBackground)
 }
 
-private fun lineStartFor(text: String, offset: Int): Int {
+private fun lineStartFor(text: CharSequence, offset: Int): Int {
     var index = offset
     while (index > 0 && text[index - 1] != '\n') index--
     return index
 }
 
-private fun lineEndFor(text: String, offset: Int): Int {
+private fun lineEndFor(text: CharSequence, offset: Int): Int {
     var index = offset
     while (index < text.length && text[index] != '\n') index++
     return index

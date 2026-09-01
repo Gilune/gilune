@@ -26,7 +26,9 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.time.LocalDate
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MobileShellUiTest {
@@ -86,7 +88,33 @@ class MobileShellUiTest {
         assertTrue(after.contains("- [x] milk"), after)
         assertTrue(after.contains("- [ ] bread"), "only the tapped line moved")
         assertTrue(after.startsWith("---\ngilune-id: abc\n---\n"), "front matter survived the tick")
+        assertFalse(after.contains("done:"), "no plugin, no stamp — the flip is all the shell does")
         rule.onNodeWithContentDescription("task done").assertExists()
+    }
+
+    /// The other half of that gate, and the bug MB3 found: with the tasks
+    /// plugin on, a tick from **Read** must stamp `done:` exactly as a
+    /// tick in either editor does. Read used to take the default chain and
+    /// write the flip alone, so the same box ticked one screen along
+    /// produced different bytes.
+    @Test
+    fun aTickFromReadStampsDoneWhenTheTasksPluginIsOn() {
+        val state = GiluneState(scratchVault(), scope)
+        state.plugins.add(installedTasksPlugin())
+        val note = File(state.vaultDir, "list.md")
+        note.parentFile?.mkdirs()
+        note.writeText("---\ngilune-id: abc\n---\n# Shopping\n\n- [ ] milk\n- [ ] bread\n")
+
+        rule.setContent { GiluneTheme(dark = false) { ReadScreen(state, "list.md") } }
+
+        rule.onNodeWithText("Shopping").assertExists()
+        rule.onAllNodes(hasContentDescription("task not done"))[0].performClick()
+
+        val today = LocalDate.now().toString()
+        rule.waitUntil(WAIT) { note.readText().contains("done:") }
+        val after = note.readText()
+        assertTrue(after.contains("- [x] milk done:$today"), after)
+        assertTrue(after.contains("- [ ] bread"), "only the tapped line moved")
     }
 
     @Test

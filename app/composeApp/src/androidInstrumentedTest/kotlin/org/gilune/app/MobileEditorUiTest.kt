@@ -194,6 +194,73 @@ class MobileEditorUiTest {
         assertEquals("milk\n", editor.body.text.toString(), "undo restored the document")
     }
 
+    /// Return continues a list (owner rule, 2026-09-01), sent the way a
+    /// soft keyboard sends it: a committed newline through a real
+    /// `InputConnection`, inside a batch, because that is the shape MS1
+    /// measured and the only one that exercises the input transformation
+    /// the rule is hung on.
+    ///
+    /// The caret assertion is the mobile-specific half. The keyboard is
+    /// working in the **transformed** coordinates the glyph leaves behind
+    /// — `- ☐ milk` — while the continuation writes source bytes, so
+    /// where the caret ends up is a claim worth making rather than
+    /// assuming.
+    @Test
+    fun returnAfterATaskLineOpensAFreshUncheckedTask() {
+        val (state, note) = vaultWith("- [ ] milk\n")
+        val editor = MobileEditorState()
+        show(state, editor)
+        rule.waitUntil(WAIT) { editor.body.text.toString().isNotEmpty() }
+        focusBody()
+        caretAt(editor, 10)
+
+        typeReturn()
+
+        assertEquals("- [ ] milk\n- [ ] \n", editor.body.text.toString())
+        assertEquals(TextRange(17), editor.body.selection, "the caret is past the new marker")
+        rule.waitUntil(WAIT) { note.readText().contains("- [ ] milk\n- [ ] ") }
+    }
+
+    @Test
+    fun returnOnAnEmptyItemLetsGoOfTheList() {
+        val (state, _) = vaultWith("- [ ] milk\n- [ ] \n")
+        val editor = MobileEditorState()
+        show(state, editor)
+        rule.waitUntil(WAIT) { editor.body.text.toString().isNotEmpty() }
+        focusBody()
+        caretAt(editor, 17)
+
+        typeReturn()
+
+        // The marker went and left no blank line where it had been; the
+        // note's own trailing newline is untouched.
+        assertEquals("- [ ] milk\n\n", editor.body.text.toString())
+        assertEquals(TextRange(11), editor.body.selection, "the caret came back onto the freed line")
+    }
+
+    /// What undo owes the phone, where there is no Ctrl-Z and the toolbar
+    /// button is the only way back. The continuation is written inside the
+    /// keystroke's own input transformation rather than as a second edit
+    /// after it, so the buffer never records two steps: one undo takes
+    /// back the newline and the marker together.
+    @Test
+    fun oneUndoTakesBackTheReturnAndTheMarkerItWrote() {
+        val (state, _) = vaultWith("- [ ] milk\n")
+        val editor = MobileEditorState()
+        show(state, editor)
+        rule.waitUntil(WAIT) { editor.body.text.toString().isNotEmpty() }
+        focusBody()
+        caretAt(editor, 10)
+
+        typeReturn()
+        assertEquals("- [ ] milk\n- [ ] \n", editor.body.text.toString())
+        assertTrue(editor.body.undoState.canUndo, "the keystroke entered the undo history")
+
+        rule.onNodeWithTag("undo").performClick()
+        rule.waitForIdle()
+        assertEquals("- [ ] milk\n", editor.body.text.toString(), "one step back, marker and all")
+    }
+
     @Test
     fun theRowOutlivesTheKeyboardAndMoreOpensThePanel() {
         val (state, _) = vaultWith("milk\n")
@@ -301,6 +368,35 @@ class MobileEditorUiTest {
             }
         }
         rule.waitForIdle()
+    }
+
+    /// Focus the buffer and wait until the framework has actually handed
+    /// out an input connection for it — the field is not typeable the
+    /// instant it is focused.
+    private fun focusBody() {
+        rule.onNodeWithTag("note-body").performSemanticsAction(SemanticsActions.RequestFocus)
+        rule.waitForIdle()
+        rule.waitUntil(WAIT) {
+            rule.runOnUiThread { imeConnection(resumedDecorView(), EditorInfo()) != null }
+        }
+    }
+
+    /// The caret in **source** coordinates, set the way the shell itself
+    /// sets one. Deliberately not through the connection: the IME's
+    /// offsets are the transformed ones, and a test that placed the caret
+    /// in them would be asserting about its own arithmetic.
+    private fun caretAt(editor: MobileEditorState, offset: Int) {
+        rule.runOnUiThread { editor.body.edit { selection = TextRange(offset) } }
+        rule.waitForIdle()
+    }
+
+    /// Return, as a keyboard sends it: a committed newline inside a batch.
+    private fun typeReturn() {
+        ime {
+            beginBatchEdit()
+            commitText("\n", 1)
+            endBatchEdit()
+        }
     }
 
     private fun <R> ime(block: InputConnection.() -> R): R {

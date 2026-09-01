@@ -131,6 +131,25 @@ internal fun caretIsInsideCodeFence(text: String, caret: Int): Boolean {
     return open
 }
 
+/// The list-continuation rule as the desktop field meets it: two buffers,
+/// the one before the keystroke and the one the field just produced.
+/// Answers the value to assign instead, or null to assign what was typed.
+///
+/// The shared rule owns every judgement — whether this was a typed newline
+/// at all, whether the line above it is an item, and what to write. All
+/// that is desktop here is the pair of `TextFieldValue`s, and the fresh
+/// value it builds: the composition is dropped rather than carried, since
+/// a buffer with new text in it can have no composing region left over.
+private fun continued(before: TextFieldValue, typed: TextFieldValue): TextFieldValue? {
+    if (!typed.selection.collapsed) return null
+    val caret = typed.selection.start
+    if (!insertedNewline(before.text, before.selection.min, before.selection.max, typed.text, caret)) {
+        return null
+    }
+    val written = listContinuation(typed.text, caret)?.applyTo(typed.text, caret) ?: return null
+    return TextFieldValue(written.text, TextRange(written.caret))
+}
+
 class EditorState {
     var openRelPath by mutableStateOf<String?>(null)
 
@@ -669,12 +688,25 @@ private fun OpenNote(
                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     BasicTextField(
                         value = editor.text,
-                        onValueChange = {
+                        onValueChange = { typed ->
+                            // Return on a list line continues the list
+                            // (owner rule, 2026-09-01). It is caught here,
+                            // as a change to the buffer, rather than in
+                            // the preview key handler below, for two
+                            // reasons. An IME is never interrupted: the
+                            // newline is read off the text the keyboard
+                            // committed, so no key is taken out of its
+                            // hands. And the `/` menu keeps its Enter for
+                            // nothing: while a session is live the handler
+                            // consumes the key and the field never sees
+                            // it, so no change arrives and there is
+                            // nothing here to yield.
+                            val changed = continued(editor.text, typed) ?: typed
                             // Moving the caret is not an edit: only changed
                             // text may mark the buffer unsaved, or a note
                             // nobody typed into would sit dirty for ever.
-                            editor.dirty = editor.dirty || it.text != editor.text.text
-                            editor.text = it
+                            editor.dirty = editor.dirty || changed.text != editor.text.text
+                            editor.text = changed
                             // A live session re-reads the line; otherwise
                             // the trigger is offered the caret. `openAt`
                             // asks § 2's own questions — a `/` at a word
@@ -683,13 +715,13 @@ private fun OpenNote(
                             // registry, a selection, and the fence rule.
                             val live = session
                             session = when {
-                                live != null -> live.updateAt(it.text, it.selection.start)
+                                live != null -> live.updateAt(changed.text, changed.selection.start)
                                 fields.isEmpty() -> null
-                                !it.selection.collapsed -> null
-                                caretIsInsideCodeFence(it.text, it.selection.start) -> null
+                                !changed.selection.collapsed -> null
+                                caretIsInsideCodeFence(changed.text, changed.selection.start) -> null
                                 else -> SuggestSession.openAt(
-                                    it.text,
-                                    it.selection.start,
+                                    changed.text,
+                                    changed.selection.start,
                                     fields,
                                     filter,
                                     LocalDate.now(),

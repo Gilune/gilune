@@ -653,8 +653,29 @@ gates promises) are ratified. **Next: application-level engineering — see
      done: (builtInDecorations only, contradicting VaultFiles' own
      comment) — folded into the Enter-continuation round. Search is
      per-keystroke unindexed on mobile (inherited); no OR
-     (inherited). **Next: Enter-continues-checkbox (both editors) +
-     the Read-stamp fix, then the mobile delivery summary.**
+     (inherited).
+   - **Enter continues lists (both editors) + Read-stamp fix
+     (2026-09-01, owner rule)** — shared pure
+     `listContinuation(text, caretAfterNewline)` in MarkdownEditing
+     (reads the buffer AFTER the newline so mid-item Return falls
+     out: split text lands behind the fresh marker, Obsidian-style;
+     "empty item" judged over marker remainder + carried text;
+     checked→unchecked; indentation preserved; fences and a live
+     suggest session excluded; empty item UNWRAPS incl. the typed
+     newline — CM6 behaviour, pinned). Desktop hooks onValueChange
+     (IME-safe; suggest wins structurally since preview-Enter
+     starves the field); mobile is an InputTransformation editing
+     the incoming change (soft Return is a committed newline, not a
+     key; MS1's no-whole-rewrite honoured; ONE undo removes
+     newline+marker, device-proven). Read-view tick now stamps done:
+     (call-site bug — ReadScreen took the default chain). Suites:
+     desktop 420/0; instrumented 508/3 — the 3 are MS1 rig flakes,
+     now known non-deterministic EVEN FROM SNAPSHOT (different
+     members per run; rig-stabilisation spawned as a background
+     task). Not continued: ordered lists, blockquotes,
+     outdent-before-clear on indented empties; a batched
+     autocorrect+Return single commit won't continue (safe default,
+     un-tested against real Gboard).
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

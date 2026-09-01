@@ -68,6 +68,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.KeyboardActionHandler
 import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldBuffer
@@ -241,6 +242,45 @@ class MarkdownOutputTransformation(
     override fun TextFieldBuffer.transformOutput() {
         for ((range, glyph) in editorGlyphEdits(asCharSequence().toString(), decorations).asReversed()) {
             replace(range.first, range.last + 1, glyph)
+        }
+    }
+}
+
+/// Return on a list line continues the list (owner rule, 2026-09-01), on
+/// the seam the modern API provides for exactly this: an
+/// [InputTransformation] is handed the change *before* it lands, with the
+/// buffer it would produce and the selection it would leave, and may edit
+/// that buffer in place.
+///
+/// Which is why the rule is here rather than in a key handler. A soft
+/// keyboard sends Return as a committed newline through the input
+/// connection, not as a key event anyone can intercept, and MS1's verdict
+/// forbids the alternative — rewriting the whole buffer afterwards would
+/// restart the IME's composing session on the very keystroke that ends a
+/// line. This edits the incoming change and nothing else: one [replace] of
+/// the prefix's width, or one deletion of the empty marker.
+///
+/// The decision is the desktop's decision, asked of the same shared
+/// function, so a list continues identically on both.
+@OptIn(ExperimentalFoundationApi::class)
+object ListContinuationTransformation : InputTransformation {
+    override fun TextFieldBuffer.transformInput() {
+        if (!selection.collapsed) return
+        val caret = selection.start
+        val text = asCharSequence()
+        if (!insertedNewline(originalText, originalSelection.min, originalSelection.max, text, caret)) {
+            return
+        }
+        when (val decision = listContinuation(text, caret)) {
+            is ListContinuation.Continue -> {
+                replace(caret, caret, decision.prefix)
+                selection = TextRange(caret + decision.prefix.length)
+            }
+            is ListContinuation.Unwrap -> {
+                replace(decision.range.first, decision.range.last + 1, "")
+                selection = TextRange(decision.range.first)
+            }
+            null -> {}
         }
     }
 }
@@ -724,6 +764,10 @@ private fun EditorBuffer(
             textStyle = base.copy(color = Color.Transparent),
             lineLimits = TextFieldLineLimits.MultiLine(),
             cursorBrush = SolidColor(colours.primary),
+            // Return continues a list. It edits the change on its way in,
+            // which is why it is here and not in the output transformation
+            // beside it: one changes bytes and the other may never.
+            inputTransformation = ListContinuationTransformation,
             outputTransformation = transformation,
             onTextLayout = { result -> layout = result() },
         )

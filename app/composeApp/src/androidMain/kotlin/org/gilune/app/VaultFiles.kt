@@ -45,9 +45,16 @@ fun noteTitle(relPath: String): String = relPath.substringAfterLast('/').removeS
 /// The rendered checkbox carries the **source line** its block was parsed
 /// from, so this needs no text matching: it re-reads the file, checks
 /// nothing moved under it, folds `activateLine` over that one line — the
-/// same shared function the desktop editor toggles through, so the tasks
-/// plugin's `done:` stamp applies identically — and writes the note back
-/// with every other byte untouched.
+/// same shared function the desktop editor toggles through — and writes
+/// the note back with every other byte untouched.
+///
+/// `decorations` is that fold's chain, and it is the **caller's live
+/// one**: gated on the plugin and carrying the global filter, exactly as
+/// `MobileEditor` and `AgendaScreen` build theirs. Only then does the
+/// tasks plugin's `done:` stamp apply here as it applies in the editors.
+/// The default is the shell standing alone — the right answer for a test
+/// that means to ask about the built-ins, and the wrong one for a screen
+/// (a Read view that took it stamped nothing for a whole release).
 ///
 /// It returns the new file text, or null when it declined: the file
 /// changed since it was read (`mayOverwrite`), the line is gone, or no

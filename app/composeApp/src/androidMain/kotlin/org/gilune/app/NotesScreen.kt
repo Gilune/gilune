@@ -121,6 +121,20 @@ fun ReadScreen(
         BlockRenderers(listOf(mobileFilterBlockRegistration(state.vaultDir, tick, plugins, onOpenNote)))
     }
 
+    // The chain the editors fold over a line they are toggling, gated the
+    // same way and honouring the same filter — so ticking a box from Read
+    // stamps `done:` exactly as ticking it in the editor does, and stamps
+    // nothing when the plugin that owns the stamp is off. Read used to
+    // take the default and quietly write the flip alone (found by MB3).
+    val filter = plugins.tasksFilter()
+    val decorations = remember(plugins, filter) {
+        if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
+            builtInDecorations() + tasksDecorations(filter)
+        } else {
+            builtInDecorations()
+        }
+    }
+
     fun toggle(line: Int) {
         val onDisk = runCatching { file.readText() }.getOrNull()
         val updated = toggleTaskAtLine(
@@ -128,6 +142,7 @@ fun ReadScreen(
             hashAtRead = hashAtRead,
             hashOnDisk = onDisk.let(::contentHash),
             bodyLine = line,
+            decorations = decorations,
         )
         if (updated == null) {
             // Either the file moved under the reader or nothing claimed
