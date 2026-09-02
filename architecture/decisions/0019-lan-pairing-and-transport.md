@@ -1,6 +1,7 @@
 # ADR 0019: LAN Pairing and Transport
 
-Status: **Proposed**  
+Status: **Proposed** (design ratified and build authorised 2026-09-02;
+flips to Accepted when § Acceptance gate is evidence)  
 Validation: milestone M5, staged M5a–M5c in § 11. The acceptance gate in
 § 10 is the S4-extended scenario set ADR 0008 demands, run against the
 production kernel rather than a spike.
@@ -570,3 +571,17 @@ Each stage is shippable alone and in order.
   Settings ▸ Sync and the Android equivalent; foreground sync on resume
   and the periodic worker; the user docs sync guide. Gate C, on real
   hardware and a real network.
+
+## Ratification record
+
+Ratified by the owner on 2026-09-02, as proposed, with no
+modifications — following the four scope decisions fixed earlier the
+same day and embedded in § Context as constraints (transport only;
+full replica; on-open plus background scheduling; both pairing paths
+in v0 — the QR path being the owner's amendment to the coordinator's
+recommendation to defer it). Ratification authorises the M5 build;
+per this ADR's own gate, Status flips to Accepted only when § 10 is
+evidence, and the status of ADRs 0005 and 0008 is recorded in those
+files when their own gates pass. Gate C's real-device scenarios are
+expected to wait on the owner acquiring an Android device, in the
+same pattern as ADR 0001's assumed budgets and spike MS2.
