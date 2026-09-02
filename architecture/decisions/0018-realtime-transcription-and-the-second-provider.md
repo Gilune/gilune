@@ -1,6 +1,7 @@
 # ADR 0018: Realtime Transcription and the Second Provider
 
-Status: **Proposed** (design round 2026-09-02; owner ratification pending)  
+Status: **Accepted** (owner ratification 2026-09-02; R0 gates R1, the
+crash-matrix additions gate R2, MS2 sets the packaged default)  
 Validation: gated on **R0**, the Moonshine spike (§ 6). Any packaged mobile
 default is additionally gated on **MS2** (ADR 0017 § 8), which becomes the pass
 where both engines are measured on the same hardware. Evidence base:
@@ -400,16 +401,19 @@ the research that is unambiguous, primary and central.
 
 ## Consequences
 
-- **Amendments to make on acceptance** (not made here): ADR 0015's debt 7 gains
-  a discharge note pointing at R2 — its other half, one subscription per plugin,
-  stays open. ADR 0013 gains a note that an output submitted through the FFI
-  route **is** a processor output — same origin, provenance and idempotency —
-  while its rejection of the external-edit path stands unchanged, and that a
-  live caption is neither capture nor stored interpretation. ADR 0017 § 4 gains
-  the caption and the second provider, and § 2's law is confirmed as editor law
-  with the caption named out of scope. ADR 0011's slot list gains `capture.live`
-  **only if** the seam is declared. `05-plugin-system.md` § Provider plugins
-  gains the one-active-provider rule.
+- **Amendments made on acceptance** (2026-09-02, all six): **ADR 0015**'s debt 7
+  records that R2 takes its second half on — a debt until R2 ships, discharging
+  nothing for the wasm profile, with one subscription per plugin left standing.
+  **ADR 0013** records that an output submitted through the FFI route **is** a
+  processor output — same origin, provenance and idempotency — while its
+  rejection of the external-edit path stands unchanged, and that a live caption
+  is neither capture nor stored interpretation. **ADR 0017** § 4 gains the
+  caption and the second provider, § 2's law is confirmed as editor law with the
+  caption out of scope, and MS2 widens to both engines. **ADR 0011**'s slot list
+  **stays at nine**, with `capture.live` reserved rather than declared while the
+  shell owns the caption. **ADR 0001** gains the companion app-package budget,
+  its number set at R0. **`05-plugin-system.md`** § Provider plugins gains the
+  one-active-provider rule.
 - **The provider-specific `enable_whisper` door becomes an asymmetry**: under
   this decision Moonshine never needs an `enable_*` call, because it registers
   as an external processor. Whisper's hard-coded door stays, still naming its
@@ -446,24 +450,20 @@ the research that is unambiguous, primary and central.
 6. **New**: the live path is shell-owned, so a sandboxed plugin cannot produce a
    caption. The capability would be `capture.stream`; it is named, not designed.
 
-## Open questions for the owner
+## Ratification record
 
-1. **Packaged mobile default** — streaming-tiny at 77.7 MB with realtime, or
-   legacy tiny-int8 at 28.2 MB with no streaming (smaller than today's 31 MiB)?
-   **Recommend streaming-tiny** — realtime is the point — with legacy int8 in
-   the catalogue for constrained devices, and the final call made on MS2's
-   numbers rather than here.
-2. **Order** — does the FFI processor route land before Moonshine ships, or
-   after? **Recommend R1 first**: it delivers words-while-speaking with no
-   kernel risk and proves the caption, then R2, then R3.
-3. **Caption on the widget's notification too, or app-only in v1?**
-   **Recommend app-only** — a notification rewriting its own tail several times a
-   second is battery and attention spent for no capture benefit; the
-   notification keeps *Stop* and the duration.
-4. **Does `provides` land in the kernel now** (at most one Enabled plugin per
-   opaque capability name) or stay a shell rule? **Recommend the shell rule for
-   v1**, with the kernel field when a second capability gets a second provider.
-5. **Does ADR 0001 gain a companion app-package budget**, now that native weight
-   can move out of the kernel `.so` and into the APK? **Recommend yes**, with the
-   number set from R0's measurement — otherwise the 15 MB line can be met while
-   the download grows.
+Owner review, 2026-09-02 — "0018 is fine as recommended". The five open
+questions, answered:
+
+| # | Question | Answer | Date |
+|---|---|---|---|
+| 1 | Packaged mobile default | **Streaming-tiny** (77.7 MB), as recommended — realtime is the point; legacy tiny-int8 stays in the catalogue for constrained devices, and MS2's numbers, not this ADR, make the final call | 2026-09-02 |
+| 2 | Order of the stages | **R1 → R2 → R3**, as recommended: the caption ships first with no kernel risk, the FFI route second, Moonshine as provider last | 2026-09-02 |
+| 3 | Caption on the widget notification | **App-only in v1**, as recommended; the notification keeps *Stop* and the duration | 2026-09-02 |
+| 4 | `provides` in the kernel | **Shell rule for v1**, as recommended; the kernel field waits until a second capability gets a second provider (§ 3's hole stays named) | 2026-09-02 |
+| 5 | Companion app-package budget | **Yes**, as recommended — ADR 0001 gains it, with the number **set at R0** | 2026-09-02 |
+
+The ADR is Accepted, and the six amendments it listed were made the same day
+(ADR 0013, 0015, 0017, 0011, 0001 and `05-plugin-system.md`). **R0 starts on
+the owner's word and gates R1**; R2 ships only with its crash-matrix points
+green; R3 waits on MS2 for the packaged default.

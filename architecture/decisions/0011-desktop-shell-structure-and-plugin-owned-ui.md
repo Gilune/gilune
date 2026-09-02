@@ -160,3 +160,12 @@ to**, the tasks plugin's `tasks.fields` being the first. Such a
 contribution is live only while **both** the publishing and the
 contributing plugin are enabled, so disabling or removing either takes
 the contribution out of the app and changes no byte in the vault.
+
+**2026-09-02 (owner, via ADR 0018 acceptance):** the slot list **stays at
+nine**. ADR 0018's live caption is drawn by the shell in v1, so the seam it
+would otherwise need is **recorded, not declared**: the name
+**`capture.live`** — a plugin-contributed view rendered inside the capture
+surface while a recording runs — is reserved against the day a second
+implementation wants it, with the streaming contract as its `config`. A slot
+with one producer and one consumer both written in shell code is how
+`settings.form` became decorative; this list does not grow that way.

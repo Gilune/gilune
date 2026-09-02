@@ -564,6 +564,12 @@ Surfaced, not fixed, and none absorbed into this plugin's scope:
    panel switch and the field registry all land in that same string.
 7. One subscription per plugin, and no route for a non-Rust processor across the
    FFI. Neither blocks T1–T4; both block the wasm version of this plugin.
+   **(2026-09-02, via ADR 0018 acceptance: the second half is taken on — 0018's
+   R2 builds `register_external_processor` / `claim_job` / `submit_output` /
+   `fail_job` with the processor contract's semantics intact. It stays a debt
+   until R2 ships, and it discharges nothing for the *wasm* profile: an external
+   processor is in-process trusted host code, not a sandboxed one. One
+   subscription per plugin stands.)**
 8. `editor.blocks` is renderer-only: a plugin may render a **fenced** block, never
    add block syntax. Anything that is not a fence stays shell-parsed.
 9. Fence info strings are a namespace nobody owns. `filter` collides with nothing

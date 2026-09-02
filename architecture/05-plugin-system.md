@@ -24,6 +24,16 @@ plain disclosure of what is sent and to whom; nothing leaves the vault
 silently. The first-party v0 transcription provider runs locally (on the
 capturing device or a paired coordinator), never in the cloud.
 
+**One provider of a replaceable capability is active at a time** (ADR 0018,
+2026-09-02). Two providers of one capability is otherwise an unmodelled state:
+sharing a processor id, one silently wins and disabling either disables both;
+with distinct ids both run, and the slower engine wins the object's head. The
+rule is enforced by the host — the shell enables exactly one, and a disabled
+plugin's queued jobs park rather than die — while the kernel learns nothing
+about what the capability is. Making it a kernel invariant (at most one enabled
+plugin per declared capability name) is deferred until a second capability has a
+second provider.
+
 ### Platform adapters
 
 Trusted application components that implement narrow OS capabilities such as

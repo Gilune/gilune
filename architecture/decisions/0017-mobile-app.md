@@ -526,3 +526,19 @@ Owner review, 2026-09-01. The five open questions, answered:
 The ADR is Accepted. MB0 — the toolchain stage everything queues behind —
 starts on the owner's word; MS1 (IME) and MS2 (ARM64 whisper) remain the
 gates they were.
+
+## Amendments
+
+**2026-09-02 (owner, via ADR 0018 acceptance):** § 4 gains a **live caption** —
+while a recording runs the shell renders streaming words in the capture surface
+as **display only**, never bytes. The recording commits exactly as § 4 already
+says, the note's words still arrive from the job loop, and the pending
+vocabulary grows one state: *listening* is not *transcribing…*, and the caption
+is cleared on stop rather than left standing as if it were the body. § 4 also
+gains a **second transcription provider**, exactly one of which is enabled at a
+time, so § 7's per-plugin switches become mutually exclusive between them.
+**§ 2's no-reflow law is editor law** — it protects a caret and a thumb — and
+does not bind a caption that has no caret in it; ADR 0018 § 1 says so
+explicitly, so a later reader does not obey it there and lose the feature.
+**MS2 widens**: it now measures both engines on the same device over the same
+clips, and it sets the packaged mobile default.

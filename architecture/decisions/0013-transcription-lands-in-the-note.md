@@ -75,3 +75,18 @@ and the audio is already safe.)
   beside it.
 - A conflict between a transcription revision and a concurrent edit is
   handled like any other: both heads preserved (rule 6).
+
+## Amendments
+
+**2026-09-02 (owner, via ADR 0018 acceptance):** an output submitted
+through the FFI processor route **is a processor output** — same
+`processor:{id}` origin, same derived IDs, same `processing_runs`
+idempotency, same revise-subject landing — whatever language the
+implementation is written in and whichever process runs it. The rejection
+above stands unchanged and is not weakened by it: what was rejected is the
+**external-edit path**, not out-of-kernel code, and nothing a processor
+produced may still reach the vault as `external-edit`. A **live caption**
+shown while recording is neither a capture nor a stored interpretation —
+display state, never written, never projected, never synced, cleared when
+recording stops — so rule 2 is untouched and the dictation asymmetry above
+is unchanged.

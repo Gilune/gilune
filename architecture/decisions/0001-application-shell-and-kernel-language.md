@@ -111,3 +111,15 @@ S1 must demonstrate on physical Android and Windows targets:
 
 If these fail materially, supersede this ADR with a Kotlin Multiplatform kernel
 decision before domain features are implemented.
+
+## Amendments
+
+**2026-09-02 (owner, via ADR 0018 acceptance):** the package-size budget gains a
+companion. "Kernel contribution to release package size: under 15 MB per ABI"
+(`architecture/spikes/README.md:36`) measures the kernel's own line, and native
+weight can now leave it: ADR 0018 ships a transcription engine as an Android
+library, so `gilune_ffi.so` does not grow while the user's download does. A
+**companion app-package budget** therefore sits beside it — per ABI, measured on
+the shipped artefact — and the two are reported together, so bytes moved across
+the boundary cannot be counted as a saving. Its number is **set at R0** from
+that spike's measurement rather than guessed here.
