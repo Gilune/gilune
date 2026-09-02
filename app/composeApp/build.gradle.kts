@@ -70,6 +70,37 @@ kotlin {
                 // with NoSuchMethodException InputManager.getInstance.
                 // 3.7.0 is the release that stopped doing that.
                 implementation("androidx.test.espresso:espresso-core:3.7.0")
+                // ---------------------------------------------------------
+                // SPIKE R0 SCAFFOLDING ONLY — ADR 0018 § 6. Not product
+                // wiring: the Moonshine AAR is scoped to the instrumented
+                // TEST source set, so it lands in the test APK and the
+                // shipped app APK is byte-for-byte unaffected. R1 is the
+                // stage that would promote this to `androidMain`, and the
+                // per-ABI cost of doing so is what R0 measures. Delete this
+                // line and `R0*.kt` together if the spike is discarded.
+                //
+                // Resolves from mavenCentral(), already declared in
+                // settings.gradle.kts — no repository addition needed.
+                // Pulls appcompat, material, okhttp and work-runtime
+                // transitively (recorded in the spike README).
+                //
+                // The excludes are NOT cosmetic. `androidx.work` and
+                // `appcompat` (via emoji2) each contribute an
+                // `androidx.startup.InitializationProvider` to the MERGED
+                // manifest; AGP then dedupes the `androidx.startup` classes
+                // out of the test APK because the app APK already carries
+                // them, so any process started for the test package alone
+                // dies with ClassNotFoundException before a test runs.
+                // Measured — see the spike README § "The transitive
+                // dependencies". `okhttp` is deliberately KEPT: a03 measures
+                // the vendor's own downloader and genuinely needs it. R1
+                // should exclude that one too and fetch models itself, which
+                // ADR 0018 § 4's consent rule requires anyway.
+                implementation("ai.moonshine:moonshine-voice:0.1.5") {
+                    exclude(group = "androidx.appcompat")
+                    exclude(group = "com.google.android.material")
+                    exclude(group = "androidx.work")
+                }
             }
         }
     }

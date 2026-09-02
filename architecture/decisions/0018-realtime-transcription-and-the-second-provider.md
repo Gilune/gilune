@@ -467,3 +467,22 @@ The ADR is Accepted, and the six amendments it listed were made the same day
 (ADR 0013, 0015, 0017, 0011, 0001 and `05-plugin-system.md`). **R0 starts on
 the owner's word and gates R1**; R2 ships only with its crash-matrix points
 green; R3 waits on MS2 for the packaged default.
+
+## R0's verdict and corrected numbers
+
+R0 ran 2026-09-02 (`spikes/r0-moonshine/README.md`): **PASS WITH
+CONDITIONS** — the interval set to 0.25 s (TTFT 649 ms against the default's
+1,149 ms), the caption's calm proven in R1's real Compose, the AAR's
+transitive dependencies excluded (a defect fix: two inject a
+ContentProvider that crashes isolated process starts), and the owner's
+acceptance of the measured package cost. The research's estimates are
+superseded by measurement: the bundled ONNX runtime is **6.29 MB**, not
+30.6 MiB (Moonshine ships a reduced build); the streaming-tiny download is
+**45.23 MB in 8 crc32c-verified files**, not 77.7 MB — **+39 %** on today's
+consent ask, not two and a half times; native cost **16.70 MiB arm64**, and
+the per-device APK delta **≈16.8 MiB** with the exclusions (≈24.7 without).
+ADR 0001's companion app-package budget takes its number from these.
+Partials rewrite **mid-phrase**, not only the tail, confirming § 1's
+exemption of the caption from the editor's no-reflow law. Hardware-only
+remainder: battery, thermals, ARM64 latency, real acoustics — MS2's, as
+staged.
