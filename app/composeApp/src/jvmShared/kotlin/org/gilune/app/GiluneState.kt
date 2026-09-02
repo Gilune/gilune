@@ -33,6 +33,28 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// Bumped whenever vault contents may have changed; file panels watch it.
     val vaultTick = mutableStateOf(0)
 
+    /// Processors this host implements **outside** the kernel (ADR 0018
+    /// § 2). `runProcessing` deliberately leaves their jobs alone — the
+    /// registered host claims them itself — so wherever this state runs
+    /// the kernel's loop it must run theirs too, or an external provider's
+    /// words would arrive only when something else happened to ask.
+    ///
+    /// Null everywhere but the Android shell, where a Moonshine provider
+    /// is registered on this handle. The desktop keeps whisper in the
+    /// kernel (§ 4) and never sets this, so its behaviour is unchanged by
+    /// construction rather than by care. Returns how many outputs the
+    /// external pass wrote, so the messages below can count words from
+    /// both routes without knowing which engine produced them.
+    var externalProcessing: ((Gilune) -> Long)? = null
+
+    /// One processing pass: the kernel's own processors, then this host's
+    /// external ones. Returns the outputs both wrote.
+    private fun processAll(g: Gilune): uniffi.gilune_ffi.ProcessingSummary {
+        val summary = g.runProcessing()
+        val external = runCatching { externalProcessing?.invoke(g) }.getOrNull() ?: 0L
+        return summary.copy(outputs = summary.outputs + external)
+    }
+
     fun openVault(onOpened: (Gilune) -> Unit = {}) {
         scope.launch(Dispatchers.IO) {
             try {
@@ -98,7 +120,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) {
             try {
                 val r = g.reconcile()
-                val p = g.runProcessing()
+                val p = processAll(g)
                 g.project()
                 refresh()
                 if (announce) {
@@ -145,7 +167,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 val wav = wavBytes(audio)
                 val receipt = writeChunked(g.beginCapture("wav"), wav)
                 message.value = "voice captured (${wav.size / 1024} KiB); transcribing…"
-                val p = g.runProcessing()
+                val p = processAll(g)
                 g.project()
                 refresh()
                 message.value =
@@ -175,7 +197,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 val wav = wavBytes(audio)
                 val receipt = writeChunked(g.beginAttachedCapture("wav"), wav)
                 message.value = "transcribing…"
-                val p = g.runProcessing()
+                val p = processAll(g)
                 val text = g.objectText(receipt.sourceId)
                 refresh()
                 if (!text.isNullOrBlank()) {
@@ -216,17 +238,33 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
 
     /// Process captures no plugin ever saw — ones made before a plugin
     /// was installed or while it was off.
+    ///
+    /// **The queue is blanket; the writing is scoped** (ADR 0018 § 3).
+    /// `backfillJobs` queues one job per enabled subscription per past
+    /// event, which under a *changed* provider is every capture in the
+    /// vault — and a blanket re-decode would rewrite every note body with
+    /// the new engine's words. What stops it is the provider itself: a
+    /// claimed job whose subject already has words is completed with **no
+    /// output**, which is the shipped "nothing to do" outcome a Rust
+    /// processor gets for a capture it has nothing to say about. So the
+    /// only notes that change are the ones that had no words, which is the
+    /// scope § 3 asks for, and the count the caller shows first is
+    /// `wordlessRecordings`.
     fun backfill() {
         val g = gilune.value ?: return
         scope.launch(Dispatchers.IO) {
             try {
                 val queued = g.backfillJobs()
-                val p = g.runProcessing()
+                val p = processAll(g)
                 g.project()
                 refresh()
+                // Both numbers, because under a provider that scopes its
+                // own writing they are deliberately different: every past
+                // capture may be queued while only the wordless ones gain
+                // words.
                 message.value =
-                    if (queued == 0L) "nothing was waiting"
-                    else "caught up $queued capture(s): ${p.outputs} new"
+                    if (queued == 0L && p.outputs == 0L) "nothing was waiting"
+                    else "caught up $queued capture(s): ${p.outputs} transcribed"
             } catch (e: Throwable) {
                 message.value = "catch-up failed: ${e.message}"
             }

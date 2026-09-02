@@ -42,6 +42,7 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,6 +54,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.kernelVersion
 
@@ -229,11 +232,7 @@ private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {
             } else {
                 Switch(
                     checked = plugin.state == "enabled",
-                    onCheckedChange = { enable ->
-                        state.pluginAction(
-                            if (enable) "${plugin.name} switched on" else "${plugin.name} switched off",
-                        ) { it.setPluginEnabled(plugin.pluginId, enable) }
-                    },
+                    onCheckedChange = { enable -> switchPlugin(state, plugin, enable) },
                 )
             }
         }
@@ -269,13 +268,27 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo, moonshine: Moon
         } else {
             Switch(
                 checked = plugin.state == "enabled",
-                onCheckedChange = { enable ->
-                    state.pluginAction(
-                        if (enable) "${plugin.name} switched on" else "${plugin.name} switched off",
-                    ) { it.setPluginEnabled(plugin.pluginId, enable) }
-                },
+                onCheckedChange = { enable -> switchPlugin(state, plugin, enable) },
+                modifier = Modifier.testTag("plugin-switch"),
             )
         }
+    }
+
+    // § 3's confirmation, said **before** the switch rather than only
+    // after it: enabling a transcriber switches the other one off, and a
+    // person should read that rather than discover it.
+    providerSwitchWarning(state.plugins.toList(), plugin.pluginId)?.let { warning ->
+        if (plugin.state != "enabled") {
+            Text(
+                warning,
+                style = MaterialTheme.typography.bodySmall,
+                color = colours.onSurfaceVariant,
+                modifier = Modifier.testTag("provider-warning"),
+            )
+        }
+    }
+    if (plugin.pluginId in TRANSCRIPTION_PROVIDERS && plugin.state == "enabled") {
+        TranscriberCatchUp(state, plugin)
     }
 
     if (plugin.capabilities.isNotEmpty()) {
@@ -366,6 +379,73 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo, moonshine: Moon
             style = MaterialTheme.typography.bodySmall,
             color = colours.onSurfaceVariant,
         )
+    }
+}
+
+/// **One active transcriber** (ADR 0018 § 3), which is a *shell* rule: the
+/// kernel needs no new concept because disabled already means "nothing new
+/// is queued and queued jobs are claimable by nobody" — parked, not
+/// destroyed. So the whole enforcement is this: enabling a transcription
+/// provider switches every other one off, in that order, and the message
+/// says so in words.
+///
+/// The displaced provider goes off **first**. For the instant between two
+/// writes one transcriber is better than two, and this is the ordering that
+/// cannot leave both on if the second call throws.
+private fun switchPlugin(state: GiluneState, plugin: PluginInfo, enable: Boolean) {
+    val switch = providerSwitch(state.plugins.toList(), plugin.pluginId, enable)
+    state.pluginAction(switch.message) { gilune ->
+        for (displaced in switch.disable) gilune.setPluginEnabled(displaced, false)
+        gilune.setPluginEnabled(plugin.pluginId, enable)
+    }
+}
+
+/// The catch-up a provider switch may offer, **scoped and counted**
+/// (ADR 0018 § 3).
+///
+/// The trap this exists to avoid is worth stating where the button is:
+/// idempotency is keyed `{processor_id}:{event_id}`, so a *different*
+/// processor id makes every past capture a fresh job. A blanket catch-up
+/// under a changed provider would decode the whole vault again and rewrite
+/// every note body with the new engine's words. Nothing would be lost —
+/// each is a revision — but every note would change.
+///
+/// So the number below is recordings that still have **no words**, that is
+/// what the sentence promises, and the provider keeps the promise by
+/// completing any job whose subject already has words without writing an
+/// output.
+@Composable
+private fun TranscriberCatchUp(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    var wordless by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(state.vaultTick.value, plugin.pluginId, plugin.state) {
+        val gilune = state.gilune.value ?: return@LaunchedEffect
+        wordless = withContext(Dispatchers.IO) {
+            runCatching { wordlessRecordings(gilune).size }.getOrNull()
+        }
+    }
+    val count = wordless ?: return
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Recordings without words", style = MaterialTheme.typography.titleSmall)
+    Text(
+        if (count == 0) {
+            "Every recording in your vault has words."
+        } else {
+            "$count recording${if (count == 1) "" else "s"} in your vault ha" +
+                "${if (count == 1) "s" else "ve"} no words yet — made before a " +
+                "transcriber was installed, or while one was switched off. " +
+                "Recordings that already have words are left exactly as they " +
+                "are: switching transcriber never re-transcribes your vault."
+        },
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+        modifier = Modifier.testTag("wordless-count"),
+    )
+    if (count > 0) {
+        OutlinedButton(
+            onClick = { state.backfill() },
+            modifier = Modifier.heightIn(min = TouchTarget).testTag("catch-up"),
+        ) { Text("Transcribe them with ${plugin.name}") }
     }
 }
 
@@ -530,8 +610,9 @@ private fun MoonshineSettings(state: GiluneState, plugin: PluginInfo, moonshine:
     Text(
         "While you record in the app, the words appear above the composer as " +
             "you say them. They are shown and never saved: the note's words " +
-            "still come from the transcription plugin, from the recording " +
-            "itself, after you stop. The caption clears when you stop.\n\n" +
+            "are read again from the recording itself after you stop, by this " +
+            "same engine, with the whole recording to go on. The caption " +
+            "clears when you stop.\n\n" +
             "Expect it to rewrite itself mid-sentence — “the lace of the” " +
             "becoming “the lazy dog.” — because it revises as it hears more. " +
             "Grey text is still changing; black text is settled and will not " +
@@ -548,7 +629,7 @@ private fun MoonshineSettings(state: GiluneState, plugin: PluginInfo, moonshine:
     )
 
     HorizontalDivider(color = colours.outlineVariant)
-    Text("Caption model", style = MaterialTheme.typography.titleSmall)
+    Text("Model", style = MaterialTheme.typography.titleSmall)
     Row(
         Modifier.fillMaxWidth().heightIn(min = TouchTarget).testTag("moonshine-model"),
         verticalAlignment = Alignment.CenterVertically,
@@ -567,10 +648,13 @@ private fun MoonshineSettings(state: GiluneState, plugin: PluginInfo, moonshine:
         Text(moonshine.notice, style = MaterialTheme.typography.bodySmall, color = colours.onSurfaceVariant)
     }
     Text(
-        "The app itself carries the caption engine; the ${model.size} model is " +
+        "The app itself carries the engine; the ${model.size} model is " +
             "the one thing it fetches, once, and only after you allow " +
             "network.request above. It is stored in this app's private " +
-            "storage, so uninstalling removes it with everything else.",
+            "storage, so uninstalling removes it with everything else. " +
+            "The same model writes both the caption and the note's words, " +
+            "so it is downloaded whenever this transcriber is on — turning " +
+            "the caption off does not remove the need for it.",
         style = MaterialTheme.typography.bodySmall,
         color = colours.onSurfaceVariant,
     )

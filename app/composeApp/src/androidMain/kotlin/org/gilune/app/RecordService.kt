@@ -243,9 +243,23 @@ class RecordService : Service() {
                 // carry derived IDs, so the app running the same job
                 // again later costs a retry and never a second
                 // transcript.
+                //
+                // **Either engine, on this handle** (ADR 0018 § 2, R3).
+                // Whisper runs inside the kernel and needs its model
+                // handed over; Moonshine runs here and claims its own
+                // jobs across the FFI route — and `runProcessing`
+                // deliberately leaves those alone, so the provider loop
+                // is not an optimisation but the only thing that runs
+                // them. The shell's one-active rule means at most one of
+                // these two is ever live; written as an either so that
+                // the both-enabled state § 3 names as its open hole
+                // still behaves.
                 runCatching {
-                    if (enableTranscriptionForService(this@RecordService, gilune)) {
+                    val provider = moonshineProviderForService(this@RecordService, gilune)
+                    val whisper = enableTranscriptionForService(this@RecordService, gilune)
+                    if (whisper || provider != null) {
                         gilune.runProcessing()
+                        provider?.let { runMoonshineJobs(gilune, it) }
                         // ADR 0013 revises the capture note in place, so
                         // the transcript reaches the file through a
                         // second projection.

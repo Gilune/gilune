@@ -255,14 +255,20 @@ class CaptionTest {
     }
 
     @Test
-    fun nothingIsFetchedForACaptionThatIsSwitchedOff() {
-        // R1's rule: the model's only use is the caption, so a caption
-        // that is off must not fetch 45 MB against a future.
+    fun theCaptionSwitchNoLongerDecidesWhetherTheModelIsFetched() {
+        // **R1's rule, overturned by R3 and for the reason R3 exists.**
+        // While the caption was the model's only use, fetching 45 MB for a
+        // switched-off feature would have been a fault. The same model now
+        // writes the note's committed words (ADR 0018 § 2), so gating the
+        // download on the caption would leave a person who turned the
+        // caption off with a transcriber that can never transcribe.
         val off = moonshineSettingsDocument(DEFAULT_MOONSHINE_MODEL, caption = false, wifiOnly = false)
         assertEquals(
-            MoonshinePlan.CaptionOff,
+            MoonshinePlan.Download(moonshineModel(null)),
             moonshinePlan(listOf(plugin(settings = off)), { false }, metered = false),
         )
+        // The caption's own gate is untouched: it is off, so no caption.
+        assertFalse(captionOffered(listOf(plugin(settings = off)), modelPresent = true))
     }
 
     @Test
@@ -338,23 +344,29 @@ class CaptionTest {
     }
 
     @Test
-    fun theDeclarationPromisesNothingR1CannotDo() {
-        // The load-bearing assertion of this whole stage. R1 captions and
-        // writes NOTHING: no processor id, no subscription, no emitted
-        // events. Declaring any of them would have the kernel queue jobs
-        // for a processor that does not exist until R2/R3.
+    fun theDeclarationPromisesExactlyWhatR3Delivers() {
+        // R1's load-bearing assertion was that this declaration promised
+        // NOTHING — no processor, no subscription, no events — because
+        // declaring any of them would have queued jobs for an
+        // implementation that did not exist. R3 built the implementation,
+        // so the declaration now says so, and this asserts the pair moves
+        // together: `MoonshineProvider.kt` claims the id declared here.
         val declaration = moonshineDeclaration()
         assertEquals(MOONSHINE_PLUGIN, declaration.pluginId)
-        assertNull(declaration.processorId, "R1 declares no processor")
-        assertNull(declaration.subscribes, "R1 subscribes to nothing")
-        assertTrue(declaration.emits.isEmpty(), "R1 emits nothing")
+        assertEquals(MOONSHINE_PROCESSOR, declaration.processorId)
+        assertEquals(SOURCE_READY_EVENT, declaration.subscribes)
+        assertEquals(listOf(REVISION_ADDED_EVENT), declaration.emits)
         assertFalse(declaration.required)
         assertEquals("provider", declaration.`class`)
         assertEquals("bundled", declaration.profile)
 
         // § 5: the AAR is packaged, so the code needs no consent beyond
-        // the enable switch; the model download is the only ask.
-        assertEquals(listOf(NETWORK_CAPABILITY), declaration.capabilities)
+        // the enable switch. The two local capabilities are what claiming
+        // and submitting do; the model download is the only ask.
+        assertEquals(
+            listOf("blobs.read", "objects.write", NETWORK_CAPABILITY),
+            declaration.capabilities,
+        )
 
         // It does NOT contribute capture.actions — recording belongs to
         // the voice adapter, so removing this plugin leaves recording

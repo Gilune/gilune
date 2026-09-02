@@ -5,9 +5,11 @@
 
 package org.gilune.app
 
+import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.PluginContribution
 import uniffi.gilune_ffi.PluginDeclaration
 import uniffi.gilune_ffi.PluginInfo
+import uniffi.gilune_ffi.SourceSummary
 import java.time.LocalDate
 
 object Slots {
@@ -54,6 +56,12 @@ const val DICTATE_ACTION = "dictate"
 /// shell only ever reads it back.
 const val TRANSCRIPTION_PLUGIN = "org.memory.transcription"
 const val NETWORK_CAPABILITY = "network.request"
+
+/// The capabilities a provider needs to read a claimed capture's bytes and
+/// write the words back (ADR 0018 § 5). **Local**: consented by installing
+/// the application under the host consent policy, never by a prompt — the
+/// network ask is the model download and nothing else.
+val PROVIDER_LOCAL_CAPABILITIES = listOf("blobs.read", "objects.write")
 
 /// The microphone adapter. Its code lives in the shell — the kernel never
 /// touches an OS API (ADR 0001) — so the shell is what declares it.
@@ -561,18 +569,32 @@ fun moonshineModel(key: String?): MoonshineModel =
     MOONSHINE_MODELS.firstOrNull { it.key == key?.trim() }
         ?: MOONSHINE_MODELS.first { it.key == DEFAULT_MOONSHINE_MODEL }
 
-/// **No `processorId`, no subscription and no emitted events in R1**, and
-/// that is the stage's whole point. R1 ships the live caption only: the
-/// committed transcript stays whisper's, and this plugin writes nothing
-/// anywhere (ADR 0018 § 6 R1). Declaring a processor here would have the
-/// kernel queue jobs for a processor that does not exist until R2's FFI
-/// route lands and R3 registers one — so the declaration says what is
-/// true today and grows when the thing it names does.
+/// Moonshine's own processor id (ADR 0018 § 3): **distinct from whisper's
+/// `transcribe`, deliberately**. A shared id would put both plugins on one
+/// subscription row — disabling either would disable the other — and both
+/// would write origin `processor:transcribe`, leaving *which engine wrote
+/// these words* unanswerable from the vault. Provenance that cannot name
+/// the interpreter is a defect, not a saving.
+const val MOONSHINE_PROCESSOR = "moonshine-transcribe"
+
+/// The kernel's own event names, as the shell must spell them to declare a
+/// subscription. Duplicated here rather than exported over the FFI, which
+/// is the same shape `voiceCaptureDeclaration` already lives with; the
+/// external route's kernel tests pin the pair, so a drift is a red test.
+const val SOURCE_READY_EVENT = "org.memory.source-ready"
+const val REVISION_ADDED_EVENT = "org.memory.revision-added"
+
+/// **The declaration grew at R3** (ADR 0018 § 6): R1 declared no processor
+/// because the plugin wrote nothing and a declared subscription would have
+/// queued jobs for an implementation that did not exist. R2 built the route,
+/// and this is where the thing the declaration names becomes true — the
+/// committed transcript is now this engine's, over the committed blob,
+/// claimed and submitted across the FFI processor route.
 ///
-/// **`network.request` is the only capability**, because the AAR is
-/// packaged and code needs no consent beyond the enable switch (§ 5). The
-/// model download is the ask, it always waits for an explicit yes, and
-/// nothing re-grants after a revoke.
+/// Capabilities are § 5's three. `blobs.read` and `objects.write` are what
+/// claiming and submitting actually do, and they are local — granted once
+/// on first install, never by a prompt. `network.request` is the model
+/// download and always waits for an explicit yes.
 fun moonshineDeclaration(): PluginDeclaration =
     PluginDeclaration(
         pluginId = MOONSHINE_PLUGIN,
@@ -580,10 +602,10 @@ fun moonshineDeclaration(): PluginDeclaration =
         `class` = "provider",
         profile = "bundled",
         required = false,
-        processorId = null,
-        subscribes = null,
-        emits = emptyList(),
-        capabilities = listOf(NETWORK_CAPABILITY),
+        processorId = MOONSHINE_PROCESSOR,
+        subscribes = SOURCE_READY_EVENT,
+        emits = listOf(REVISION_ADDED_EVENT),
+        capabilities = PROVIDER_LOCAL_CAPABILITIES + NETWORK_CAPABILITY,
         contributions = listOf(
             PluginContribution(
                 slot = Slots.SETTINGS_FORM,
@@ -592,6 +614,118 @@ fun moonshineDeclaration(): PluginDeclaration =
             ),
         ),
     )
+
+// ---------------------------------------------------------------------
+// One active transcriber (ADR 0018 § 3). The kernel needs no new concept:
+// which provider is active is **host policy**, and disabled already means
+// "nothing new is queued and queued jobs are claimable by nobody" —
+// parked, not destroyed. So the whole rule is the two functions below plus
+// the shell obeying them.
+// ---------------------------------------------------------------------
+
+/// The transcription providers this host knows about, in **precedence
+/// order**: whisper first because it is the incumbent and the packaged
+/// default, and because ADR 0018 § 6 forbids R3 shipping a packaged mobile
+/// default before MS2 has measured both engines on real hardware.
+///
+/// The order matters only in the state § 3 names as its open hole — a CLI
+/// user or a second host enabling both. This host then treats the first as
+/// the active one and the second claims nothing, which narrows the hole to
+/// a race rather than closing it; only the kernel field § 7 Q4 defers can
+/// close it.
+val TRANSCRIPTION_PROVIDERS = listOf(TRANSCRIPTION_PLUGIN, MOONSHINE_PLUGIN)
+
+/// The one provider writing committed transcripts right now, or null when
+/// none is enabled — which is a legal state, not a fault: recordings still
+/// commit and their jobs wait.
+fun List<PluginInfo>.activeTranscriber(): String? =
+    TRANSCRIPTION_PROVIDERS.firstOrNull { id ->
+        any { it.pluginId == id && it.state == "enabled" }
+    }
+
+/// What flipping one plugin's switch must do to the others, and what to
+/// tell the person (§ 3: "made mutually exclusive — enabling Moonshine
+/// disables whisper, and the confirmation says so in words").
+///
+/// [disable] is empty for everything that is not a provider and for every
+/// switch-off: turning a transcriber off must never turn another one on,
+/// because enabling a provider is a decision only a person makes.
+data class ProviderSwitch(val disable: List<String>, val message: String)
+
+fun providerSwitch(plugins: List<PluginInfo>, pluginId: String, enable: Boolean): ProviderSwitch {
+    val plugin = plugins.firstOrNull { it.pluginId == pluginId }
+    val name = plugin?.name ?: pluginId
+    val plain = if (enable) "$name switched on" else "$name switched off"
+    if (!enable || pluginId !in TRANSCRIPTION_PROVIDERS) return ProviderSwitch(emptyList(), plain)
+    val displaced = plugins.filter {
+        it.pluginId != pluginId && it.pluginId in TRANSCRIPTION_PROVIDERS && it.state == "enabled"
+    }
+    if (displaced.isEmpty()) return ProviderSwitch(emptyList(), plain)
+    return ProviderSwitch(
+        displaced.map { it.pluginId },
+        "$plain — ${displaced.joinToString(" and ") { it.name }} switched off. " +
+            "One transcriber writes your notes.",
+    )
+}
+
+/// The sentence the switch shows **before** it is flipped, so "enabling
+/// this turns that off" is something a person reads rather than discovers.
+/// Null when the switch displaces nothing.
+fun providerSwitchWarning(plugins: List<PluginInfo>, pluginId: String): String? {
+    val displaced = providerSwitch(plugins, pluginId, enable = true).disable
+    if (displaced.isEmpty()) return null
+    val names = displaced.mapNotNull { id -> plugins.firstOrNull { it.pluginId == id }?.name }
+    return "Switching this on switches ${names.joinToString(" and ")} off — " +
+        "one transcriber writes your notes."
+}
+
+/// A capture that preserved audio — the only kind a transcriber has
+/// anything to say about. Read off the blob's own path rather than a media
+/// key the summary does not carry.
+fun SourceSummary.isRecording(): Boolean =
+    blobRelPath?.endsWith(".wav", ignoreCase = true) == true
+
+/// How far back a catch-up count looks. Deliberately generous and
+/// deliberately bounded: the question is asked on a settings tap, and a
+/// vault with more recordings than this has a bigger problem than an
+/// undercount.
+const val WORDLESS_SCAN_LIMIT: UInt = 2000u
+
+/// **The scoped catch-up's set** (ADR 0018 § 3): recordings that still have
+/// no words. Switching provider must not re-transcribe a vault — idempotency
+/// is keyed `{processor_id}:{event_id}`, so a *different* processor id makes
+/// every past capture a fresh job, and a blanket run would rewrite every note
+/// body with the new engine's words. Nothing would be lost, but every note
+/// would change.
+///
+/// So this is what the shell counts and says before it runs anything, and it
+/// is the same question the provider loop asks of each job it claims — one
+/// definition of "has no words yet", asked in both places.
+fun wordlessRecordings(gilune: Gilune, limit: UInt = WORDLESS_SCAN_LIMIT): List<SourceSummary> =
+    gilune.recentSources(limit)
+        .filter { it.isRecording() }
+        .filter { runCatching { gilune.objectText(it.objectId) }.getOrNull().isNullOrBlank() }
+
+/// Local capabilities this declaration introduces that the installed one
+/// never offered, and so that nobody has ever been asked about or revoked
+/// (host consent policy; ADR 0018 § 5).
+///
+/// It exists because a plugin's declaration may **grow** — R1's Moonshine
+/// declared `network.request` alone and R3's needs `blobs.read` and
+/// `objects.write` to claim and submit. Granting on first install alone
+/// would leave an R1 vault's provider permanently short of two local
+/// capabilities it was never offered; granting everything on every
+/// registration would re-grant after a revoke, which is precisely what the
+/// policy forbids. "Newly declared" is the honest middle: never offered
+/// before, so never refused.
+fun newlyDeclaredLocalCapabilities(
+    installed: PluginInfo?,
+    declared: List<String>,
+    local: List<String> = PROVIDER_LOCAL_CAPABILITIES,
+): List<String> {
+    val known = installed?.capabilities.orEmpty()
+    return declared.filter { it in local && it !in known }
+}
 
 private const val CAPTION_KEY = "caption"
 private const val WIFI_ONLY_KEY = "wifiOnly"

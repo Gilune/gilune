@@ -6,22 +6,22 @@
 // a second provider. Where the two differ, they differ for a reason
 // recorded at the difference.
 //
-// Four rules, and the last is the one that makes R1 shippable:
+// Three rules, and the last one changed at R3:
 //
 //  - **Nothing downloads because the app opened.** The 45 MB ask waits on
 //    the plugin's `network.request` grant, which is never auto-granted,
 //    and on Wi-Fi by default.
-//  - **Nothing downloads for a switched-off feature.** In R1 the model's
-//    only use is the caption, so a caption that is off does not fetch a
-//    model against a future it might be turned on.
-//  - **The caption is display, and the download is not on any capture
-//    path.** A recording made while the model is arriving is unaffected;
-//    it simply has no caption.
-//  - **This plugin writes nothing, anywhere.** No processor, no
-//    subscription, no events (see `moonshineDeclaration`). The committed
-//    transcript is still whisper's. R1 changes what a person *sees* while
-//    speaking and nothing about what is *kept* — which is why it can ship
-//    before R2's kernel work exists.
+//  - **Neither the caption nor the download is on any capture path.** A
+//    recording made while the model is arriving is unaffected; it simply
+//    has no caption, and its words wait for the model exactly as they
+//    already wait for whisper's.
+//  - **At R3 this plugin writes.** R1's rule here was that it wrote
+//    nothing anywhere and the committed transcript stayed whisper's;
+//    ADR 0018 § 6 R3 is where that stops being true. The declaration now
+//    names a processor, and `MoonshineProvider.kt` claims its jobs and
+//    submits their words. What is still true is that the *caption* writes
+//    nothing: the kept words are always a fresh decode of the committed
+//    blob (§ 2), never the caption's text.
 
 package org.gilune.app
 
@@ -39,11 +39,6 @@ import java.io.File
 sealed interface MoonshinePlan {
     /// Not installed, removed, or switched off.
     data object NoProvider : MoonshinePlan
-
-    /// Installed and on, but the caption — its only feature in R1 — is
-    /// switched off. Distinct from [NoProvider] so the plugin's own screen
-    /// can say which of the two switches is the one holding it back.
-    data object CaptionOff : MoonshinePlan
 
     /// The model is not on disk and `network.request` has not been
     /// granted. § 4: consent is read as a **positive grant**, never as the
@@ -65,6 +60,16 @@ sealed interface MoonshinePlan {
 /// [metered] is what the *device* says about the connection, not what the
 /// setting says about metered connections — the setting is read here, so
 /// the caller does not have to know the policy.
+///
+/// **R3 removed a condition, and the reason is the stage itself.** R1 read
+/// the caption switch here, because the caption was the model's only use
+/// and fetching 45 MB for a switched-off feature would have been a fault.
+/// The same model now decodes the *committed transcript* (§ 2), so an
+/// enabled provider needs it whether or not anyone watches words arrive —
+/// and gating the download on the caption would leave a person who turned
+/// the caption off with a transcriber that can never transcribe. The
+/// caption switch still gates the caption (`captionOffered`); it no longer
+/// gates the model.
 fun moonshinePlan(
     plugins: List<PluginInfo>,
     modelOnDisk: (MoonshineModel) -> Boolean,
@@ -72,7 +77,6 @@ fun moonshinePlan(
 ): MoonshinePlan {
     val installed = plugins.firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
     if (installed == null || installed.state != "enabled") return MoonshinePlan.NoProvider
-    if (!plugins.moonshineCaption()) return MoonshinePlan.CaptionOff
     val chosen = plugins.moonshineModel()
     if (modelOnDisk(chosen)) return MoonshinePlan.Ready(chosen)
     if (NETWORK_CAPABILITY !in installed.granted) return MoonshinePlan.NeedsConsent(chosen)
@@ -143,13 +147,38 @@ fun connectionIsMetered(context: Context): Boolean = runCatching {
 /// ADR 0018 § 4 keeps whisper as the desktop engine.
 ///
 /// Registering is idempotent and never resurrects a plugin the user
-/// removed. **Nothing is granted here**: its one capability is
-/// `network.request`, which under the host consent policy always waits for
-/// an explicit yes — unlike the voice adapter's local recording
-/// capability, which installing the app consents to.
+/// removed.
+///
+/// **What is granted here, and what never is.** The provider's local
+/// capabilities — `blobs.read` and `objects.write`, which are what claiming
+/// a job and submitting its words actually do — are consented by installing
+/// the application, on the same host policy the voice adapter and whisper
+/// already follow. `network.request` is not among them and never will be:
+/// the 45 MB model download always waits for an explicit yes, and nothing
+/// re-grants after a revoke.
+///
+/// They are granted when the declaration **first offers** them rather than
+/// only on first install, because this declaration grew at R3: an R1 vault
+/// has a Moonshine that never mentioned either capability, so nobody has
+/// ever been asked about them and nobody has refused them. A capability the
+/// installed declaration already named is never re-granted, which is what
+/// keeps a revoke a revoke.
+///
+/// It also registers this handle as the provider's implementation (§ 2), so
+/// that jobs for `moonshine-transcribe` are left for `claimJob` instead of
+/// being claimed by a kernel loop with nothing to run them.
 fun registerMoonshine(state: GiluneState, gilune: Gilune) {
     runCatching {
-        gilune.registerPlugin(moonshineDeclaration())
+        val declaration = moonshineDeclaration()
+        val installed = gilune.plugins().firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
+        val newly = newlyDeclaredLocalCapabilities(installed, declaration.capabilities)
+        val registered = gilune.registerPlugin(declaration)
+        if (registered != "removed") {
+            for (capability in newly) {
+                runCatching { gilune.grantCapability(MOONSHINE_PLUGIN, capability) }
+            }
+        }
+        registerMoonshineProcessor(gilune, gilune.plugins())
         state.refresh()
     }
 }
@@ -168,6 +197,11 @@ fun startMoonshine(context: Context, state: GiluneState, runtime: MoonshineRunti
 
 private fun bringUpMoonshine(context: Context, state: GiluneState, runtime: MoonshineRuntime) {
     val plugins = state.plugins.toList()
+    // Re-declared here as well as at open, because this runs whenever the
+    // plugin's state changes: switching the provider on mid-session must
+    // register its implementation on this handle, or its jobs would be
+    // queued with nobody in this process able to claim them.
+    state.gilune.value?.let { registerMoonshineProcessor(it, plugins) }
     val plan = moonshinePlan(
         plugins,
         modelOnDisk = { moonshineModelPresent(moonshineModelDir(context, it)) },
@@ -179,11 +213,6 @@ private fun bringUpMoonshine(context: Context, state: GiluneState, runtime: Moon
             runtime.model = null
             runtime.modelDir = null
             runtime.notice = ""
-        }
-        MoonshinePlan.CaptionOff -> {
-            runtime.phase = MoonshinePhase.Absent
-            runtime.modelDir = null
-            runtime.notice = "The live caption is off, so its model is not downloaded."
         }
         is MoonshinePlan.NeedsConsent -> {
             runtime.phase = MoonshinePhase.Absent
@@ -230,6 +259,31 @@ private fun ready(runtime: MoonshineRuntime, model: MoonshineModel, dir: File) {
     runtime.progress = null
     runtime.phase = MoonshinePhase.Ready
     runtime.notice = ""
+}
+
+/// The provider for a handle that has no UI: the recording service
+/// (ADR 0018 § 2's headlessness note, and § 6 R3's "`RecordService`
+/// registering the external processor so widget captures still get
+/// words"). Returns a decoder factory when this handle may transcribe, and
+/// null when it may not.
+///
+/// **It never downloads**, on exactly `enableTranscriptionForService`'s
+/// rule: a 45 MB fetch is a consent conversation, and a foreground service
+/// started from a home-screen tap is the wrong place for one. A service
+/// that finds no model commits the recording and leaves the job queued for
+/// the app.
+///
+/// It registers the processor **before** deciding whether it can run one,
+/// because registration is what stops `runProcessing` on this handle from
+/// claiming a job it has no implementation for and burning its lease.
+fun moonshineProviderForService(context: Context, gilune: Gilune): (() -> MoonshineDecoder)? {
+    val plugins = runCatching { gilune.plugins() }.getOrNull() ?: return null
+    if (!registerMoonshineProcessor(gilune, plugins)) return null
+    if (plugins.activeTranscriber() != MOONSHINE_PLUGIN) return null
+    val model = plugins.moonshineModel()
+    val dir = moonshineModelDir(context, model)
+    if (!moonshineModelPresent(dir)) return null
+    return { MoonshineDecoder(dir, model.arch) }
 }
 
 /// The consent ask, with the number in it (ADR 0017 § 4 makes the size

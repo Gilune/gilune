@@ -253,13 +253,19 @@ class MoonshineCaptionTest {
     // -------------------------------------------------------- registration
 
     /// The provider arrives through the kernel's ordinary registry, and
-    /// **nothing is granted by arriving**. § 5: the AAR is packaged so the
-    /// code needs no consent beyond the enable switch, and
-    /// `network.request` always waits for an explicit yes — unlike the
-    /// voice adapter's local recording capability, which installing the
-    /// app consents to.
+    /// **the network is never granted by arriving**. § 5: the AAR is
+    /// packaged so the code needs no consent beyond the enable switch, the
+    /// 45 MB model download is the ask, and it always waits for an explicit
+    /// yes.
+    ///
+    /// R3 changed what else arrives with it. The declaration now names a
+    /// processor and two **local** capabilities — `blobs.read` and
+    /// `objects.write`, which are what claiming a job and submitting its
+    /// words actually do — and those are consented by installing the
+    /// application, on the same host policy whisper and the voice adapter
+    /// already follow.
     @Test
-    fun registeringTheProviderGrantsNothing() {
+    fun registeringTheProviderGrantsItsLocalCapabilitiesAndNeverTheNetwork() {
         Gilune.open(scratchVault()).use { gilune ->
             val state = GiluneState(scratchVault(), kotlinx.coroutines.MainScope())
             state.gilune.value = gilune
@@ -268,17 +274,27 @@ class MoonshineCaptionTest {
             val plugin = gilune.plugins().firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
             assertTrue(plugin != null, "the provider did not register")
             assertEquals("enabled", plugin!!.state)
-            assertEquals(listOf(NETWORK_CAPABILITY), plugin.capabilities)
-            assertTrue(plugin.granted.isEmpty(), "registering granted a capability")
+            assertEquals(
+                listOf("blobs.read", "objects.write", NETWORK_CAPABILITY),
+                plugin.capabilities,
+            )
+            assertEquals(listOf("blobs.read", "objects.write"), plugin.granted.sorted())
             assertEquals(listOf(NETWORK_CAPABILITY), plugin.ungranted)
-            assertEquals(null, plugin.processorId, "R1 must declare no processor")
-            assertEquals(null, plugin.subscribes, "R1 must subscribe to nothing")
+            assertEquals(MOONSHINE_PROCESSOR, plugin.processorId, "R3 declares the processor")
+            assertEquals(SOURCE_READY_EVENT, plugin.subscribes)
 
             // Registering twice is the idempotent path every bundled
-            // declaration uses; it must not double anything or re-grant.
+            // declaration uses; it must not double anything, and a
+            // capability the installed declaration already named is never
+            // granted again — which is what keeps a revoke a revoke.
+            gilune.revokeCapability(MOONSHINE_PLUGIN, "blobs.read")
             registerMoonshine(state, gilune)
             assertEquals(1, gilune.plugins().count { it.pluginId == MOONSHINE_PLUGIN })
-            assertTrue(gilune.plugins().single { it.pluginId == MOONSHINE_PLUGIN }.granted.isEmpty())
+            assertEquals(
+                listOf("objects.write"),
+                gilune.plugins().single { it.pluginId == MOONSHINE_PLUGIN }.granted,
+                "a revoked capability was re-granted by a re-registration",
+            )
 
             // And with no model on disk, the plan asks for consent rather
             // than reaching for the network.

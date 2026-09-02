@@ -676,6 +676,78 @@ gates promises) are ratified. **Next: application-level engineering — see
      outdent-before-clear on indented empties; a batched
      autocorrect+Return single commit won't continue (safe default,
      un-tested against real Gboard).
+   - **Moonshine arc R0–R3 DONE (2026-09-02, four sequential Opus
+     agents, Fable coordinating; ADR 0018 Accepted with six
+     consequence amendments; research
+     architecture/research/2026-09-02-moonshine.md)** — realtime
+     transcription per the owner's ask ("realtime on the phone will
+     just feel better"). **R0 spike PASS-WITH-CONDITIONS**
+     (spikes/r0-moonshine/): AAR ai.moonshine:moonshine-voice:0.1.5,
+     natives 16.70 MiB/arm64, model 45.23 MB / 8 files crc32c from
+     download.moonshine.ai, TTFT 649 ms at transcription_interval
+     0.25 s (condition), partials rewrite MID-PHRASE, silence emits
+     ZERO events (no [BLANK_AUDIO] analogue — so clean_transcript is
+     deliberately NOT ported to the provider); transitive-dep
+     exclusions are a DEFECT FIX (androidx.startup
+     InitializationProvider crashes isolated process starts).
+     **R1 (caption, 57d0959)**: org.memory.moonshine declared in
+     Plugins.kt, registered by the ANDROID shell only;
+     network.request-consented download is OURS (okhttp excluded —
+     vendor AssetDownloader unreachable; manifest checksums are
+     BASE64 crc32c decoded big-endian; java.util.zip.CRC32C is API 34
+     vs minSdk 29 so the CRC is hand-rolled; .part→verify→rename,
+     .ready last; Wi-Fi-only default); caption = fixed 68 dp block
+     above the composer reserved by the record tap, bottom-anchored,
+     settled lines onSurface + ENTIRE revisable region muted, fed by
+     a throw-guarded tee on the recorder loop (capture writes first)
+     into a bounded-queue session thread; display-only tested (the
+     recording commits identically with the caption on/off/crashing);
+     abiFilters arm64-v8a+x86_64 (the AAR ships armeabi-v7a);
+     first words 1.3–1.9 s (model loads while recording runs —
+     recording never waits). **R2 (FFI route, 67023e1; discharges
+     ADR 0015 debt 7)**: register_external_processor / claim_job /
+     submit_output / fail_job on the uniffi surface; ClaimedJob is a
+     kernel-OWNED object (unconstructable by callers — not a write
+     door); whisper's run-record→commit_outputs→complete_job became
+     the shared Store::deliver_outputs + one public idempotency_key;
+     blob crosses streamed 64 KiB, digest-verified twice (whole file
+     before the first chunk, running hash on the same handle);
+     NO schema migration (lease/processing_runs/blob facts suffice;
+     registration is per-handle per-process, deliberately not a row);
+     run loop EXCLUDES registered external ids (else it burns their
+     leases — pinned both directions); stale claimant's late
+     fail cannot resurrect a landed job; crash points as real process
+     aborts in gilune-cli/tests/external_route.rs; contracts/processor
+     records the third transport. cargo 92, bindings byte-identical
+     across targets again. **R3 (provider)**: declaration grew
+     processorId moonshine-transcribe (distinct from whisper's
+     `transcribe` — shared id = coupled disable + unanswerable
+     provenance) + blobs.read/objects.write; MoonshineProvider.kt
+     claims→streams→fresh-decodes the COMMITTED blob→submits
+     whisper's document shape, on BOTH handles (MainActivity and
+     RecordService — the widget gets words now); the
+     GiluneState.externalProcessing seam runs after every
+     runProcessing call site, null on desktop (unchanged by
+     construction); ONE ACTIVE TRANSCRIBER is host policy in
+     Plugins.kt (TRANSCRIPTION_PROVIDERS precedence: whisper
+     incumbent; providerSwitch disables the displaced side and says
+     so in words, providerSwitchWarning says it BEFORE the flip;
+     both-enabled via CLI ⇒ whisper wins, moonshine claims nothing);
+     catch-up: queue stays blanket, the WRITING is wordless-scoped in
+     the provider (worded subject ⇒ complete with no outputs) —
+     consequence: those runs are recorded so moonshine can never
+     later re-decode them; grown-declaration consent =
+     newlyDeclaredLocalCapabilities (never offered ⇒ granted; never
+     re-grants after revoke, pinned). Real-engine proof on emulator:
+     committed wav → all three sentences in the note. Suites: desktop
+     436, instrumented 610 (2 = the known MS1 rig flakes, 1 skip =
+     R0's a03). Open after the arc: hybrid caption+whisper-words is
+     UNREACHABLE (exclusivity; matches §2's one-engine rule — owner
+     eye flagged); packaged mobile default stays whisper until MS2
+     (moonshine opt-in); two models briefly co-resident (~57 MB each,
+     unmeasured); dictation-mic has no caption (no-reflow reasoning
+     fails over a live buffer); docs site has no mobile/caption
+     guide; MS2 owns ARM64/battery/thermals/"Gilune"-vocabulary.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

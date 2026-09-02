@@ -209,6 +209,34 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
         withContext(Dispatchers.IO) { startMoonshine(context, state, moonshine) }
     }
 
+    // **The provider loop** (ADR 0018 § 2, § 3, R3). `runProcessing`
+    // deliberately leaves an external processor's jobs alone, so every
+    // place this state runs the kernel's loop must run Moonshine's too —
+    // which is exactly what this hook is for. It is set once and read from
+    // `GiluneState`, so a capture, a dictation, a sync and a catch-up all
+    // reach the provider through one path rather than four call sites.
+    //
+    // Three conditions, and they are the shell's whole one-active rule:
+    // the plugin is enabled, it is **the** active transcriber (whisper
+    // being off is what makes it so), and its model is on disk. Short of
+    // that this returns zero and the jobs wait — parked, not lost.
+    LaunchedEffect(state) {
+        state.externalProcessing = { gilune ->
+            val plugins = state.plugins.toList()
+            if (plugins.activeTranscriber() == MOONSHINE_PLUGIN && moonshine.ready) {
+                val dir = moonshine.modelDir
+                val arch = moonshine.model?.arch
+                if (dir == null || arch == null) {
+                    0L
+                } else {
+                    runMoonshineJobs(gilune, { MoonshineDecoder(dir, arch) }).transcribed
+                }
+            } else {
+                0L
+            }
+        }
+    }
+
     var destination by remember { mutableStateOf(Destination.Capture) }
     // Which contributed destination is selected, by the key its
     // contribution named — null means one of the shell's own is. Held as a
