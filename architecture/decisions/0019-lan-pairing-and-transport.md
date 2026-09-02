@@ -1,0 +1,572 @@
+# ADR 0019: LAN Pairing and Transport
+
+Status: **Proposed**  
+Validation: milestone M5, staged M5a–M5c in § 11. The acceptance gate in
+§ 10 is the S4-extended scenario set ADR 0008 demands, run against the
+production kernel rather than a spike.
+
+This ADR decides the transport half of ADR 0005 and the first transport
+of ADR 0008. It does not restate their semantics and it does not change
+their status: **those flips are recorded in 0005 and 0008 themselves**,
+when this gate passes.
+
+## Context
+
+The kernel writes operations and has never read one. `operations`
+(`kernel/crates/gilune-kernel/src/store.rs:241-250`) carries device,
+sequence, kind, target and payload; four kinds are recorded; nothing but
+`COUNT(*)` reads them. There is no apply path, no frontier table, no
+device table and no key material anywhere in `kernel/`. `op_seq` is a
+single global counter, correct only while the kernel writes nobody's
+operations but its own. `add_revision` deletes every head
+(`revisions.rs:65`), so the production kernel has no representation for
+the concurrent heads ADR 0005 requires. And `device_id` lives inside the
+vault (`store.rs:47-50`), so copying a vault clones a device identity
+and its sequence space.
+
+The semantics, by contrast, are proven. Spike S4 demonstrated
+convergence across two and three replicas, origin-device processing,
+concurrent heads, idempotent re-application, safe halting on sequence
+gaps and corrupt operations, interrupted blob transfer, tombstones and
+unknown types — ten scenarios, green on Linux and Windows, over a
+shared folder. Its `sync.rs` separates cleanly into transport-blind
+semantics and relay-specific plumbing.
+
+So M5 is not a semantics milestone. It is the milestone that carries
+proven semantics onto a live socket, and everything genuinely new in it
+is what a socket adds and a folder did not: a peer who must be
+discovered, authenticated, authorised, bounded and revocable.
+
+The owner's constraints for this round, fixed 2026-09-02 and not
+reopened here: transport only, full applications on both ends — ADR
+0008's headless agent profile is a later round; **full replica** on
+every device; the phone syncs on open and foreground plus a periodic
+Wi-Fi background job while the desktop is an always-available listener;
+pairing offers a **6-digit short code and a QR path, both in v0**;
+per-device long-lived identity keys; transport encryption from an
+established Rust library; revocation from either device; a device
+restored from backup re-enrols as a new identity.
+
+The evidence for the decisions below is
+`architecture/research/2026-09-02-lan-sync.md`, kept like a spike report,
+with maintenance status and licence checked per crate and every
+unverified figure marked.
+
+The named risk this milestone owns is the one S5's threat model gave it:
+**LAN impersonation and unpaired access**, whose acceptance tests are
+the S4-extended scenarios.
+
+## Decision
+
+### 1. Discovery is DNS-SD, split by platform behind one trait
+
+- The service is **`_gilune._tcp`**, advertised by every device that has
+  sync switched on. The listener binds a fixed default port in the
+  dynamic range, recorded in the wire contract; if that port is taken it
+  takes an ephemeral one, and the actual port is always published in the
+  service record, the QR and Settings.
+- **The advertisement carries no personal data.** The DNS-SD instance
+  name is derived from the device's static-key fingerprint, and the TXT
+  record carries the protocol version and that fingerprint and nothing
+  else. A paired peer recognises the fingerprint; an observer on a café
+  network learns that a Gilune device is present — unavoidable for any
+  advertised service — and not whose, nor what it is called. The human
+  device name is exchanged inside the encrypted handshake.
+- **`PeerDiscovery` is a capability trait** with two implementations:
+  - **Rust `mdns-sd`** (0.21.1, `Apache-2.0 OR MIT`), used on desktop
+    and by any future headless host. It has no async-runtime dependency,
+    so it works from the kernel's synchronous world and from ADR 0008's
+    UI-less agent, which has no JVM to borrow an implementation from.
+  - **Android `NsdManager` through a Kotlin adapter.** The platform owns
+    the multicast socket, so the app needs no `MulticastLock` and no
+    `CHANGE_WIFI_MULTICAST_STATE`; battery behaviour is the platform's
+    problem rather than ours. This is ADR 0001's rule applied literally
+    — Rust does not call a platform API, an adapter implements the
+    trait.
+- **Discovery is never on the connect path when it can be avoided.** A
+  paired peer's last-known address and port are recorded at pairing and
+  refreshed after every successful session; a direct unicast connection
+  is tried first, and discovery runs only when it fails. This is what
+  makes the phone's background job cheap, and it is also the answer to
+  a network that filters multicast but routes unicast.
+- **The fallback chain is three-deep and the last step is words, not a
+  spinner**: cached address, then manual `host:port` entry (the desktop
+  shows its addresses and port in Settings, and the QR already carries
+  them, so the QR path works where discovery does not), then a
+  diagnostic that names AP client isolation as the likely cause.
+
+### 2. The Windows firewall prompt is shaped, not dodged
+
+Windows raises its Security Alert when a program binds a port to listen
+for unsolicited inbound traffic; an administrator may allow it from the
+dialog and a non-administrator is only told it was blocked. **mDNS does
+not avoid this** — it is a second inbound bind, on UDP 5353, not an
+escape from the first. ADR 0016 ships a per-user MSI that deliberately
+requires no elevation (`0016-...md:83-84`), so there is no installer
+moment in which to pre-create a rule.
+
+Therefore:
+
+- The listener and the responder **bind lazily, when the user turns sync
+  on**, never at startup. A user who never enables sync never sees the
+  prompt, and capture is never behind it.
+- The shell explains the prompt immediately before causing it, and asks
+  for the **Private profile only**.
+- The non-administrator case is a supported, documented state with a
+  `netsh advfirewall firewall add rule` line, not a mystery.
+
+### 3. One pairing protocol, two ways to carry its secret
+
+Pairing is a two-phase exchange over a plain TCP connection. It is the
+same exchange for both paths; only the secret's entropy differs.
+
+1. **SPAKE2** over the pairing secret, with role-distinguishing identity
+   strings so a code cannot be reflected back at its sender. Output: a
+   strong shared key `K`.
+2. **Noise `XXpsk0`** with `psk = K`. `XX` exchanges both static
+   identity keys; `psk0` mixes `K` in before the first message, so the
+   handshake completes only if both sides derived the same `K` and no
+   handshake message is intelligible without it.
+
+On completion each side stores the peer's static public key, its
+human-readable name and its address in the local roster, together with a
+freshly derived **pair secret** used as the `psk` for all later sessions.
+
+- **The short-code path**: the listening device generates a 6-digit code
+  from a CSPRNG and displays it; the joining device's user types it.
+- **The QR path**: the desktop displays a QR carrying protocol version,
+  a 128-bit CSPRNG pairing secret, the device's static-key fingerprint
+  and its address and port; the phone scans it and connects. Same two
+  phases, same code path, a longer password.
+
+**Why a PAKE and not the code as a Noise pre-shared key.** Six digits is
+about twenty bits: as a raw PSK, one captured handshake is
+brute-forceable offline in seconds. A PAKE makes each guess cost one
+online attempt and leaks nothing to grind on. The QR secret is long
+enough not to need this; running both paths over one protocol is
+cheaper than maintaining two, and it means the QR path inherits the
+code path's tests.
+
+**Online guessing is bounded.** A pairing code is single-use, expires
+after a short window, and the listener abandons it and stops
+advertising a pairing window after a small number of failed attempts.
+The user gets a new code, not an unbounded oracle.
+
+**QR is desktop→phone only.** The desktop renders; the phone scans.
+Desktop-to-desktop pairing uses the code, which is why the code path can
+never be treated as the secondary one.
+
+### 4. Device identity lives outside the vault
+
+- Every device holds a long-lived **X25519 static keypair** — the Noise
+  static identity — generated on first use.
+- It is stored **device-local, outside the vault**: `%LOCALAPPDATA%\Gilune`
+  on Windows, app-private `filesDir` on Android. This is not a
+  preference. The vault is a portable artefact that ADR 0008 plans to
+  put in Dropbox and on NAS shares and that users back up; an identity
+  inside it is a **cloned identity with a shared `op_seq` space**, which
+  is precisely the fork the threat model means when it says sequence
+  reuse is never legitimate.
+- The key file is wrapped by a **`KeyWrap` capability adapter** — DPAPI
+  user scope on Windows (JNA is already a desktop dependency), a
+  Keystore AES-GCM key on Android, since Keystore cannot export a raw
+  X25519 private key. Written in Kotlin, per ADR 0001. Stated honestly:
+  this protects the key at rest and from other users, **not from code
+  running as the user**, which is what `06-sync-and-security.md` means
+  by "platform-protected where available".
+- **The roster is device-local too** — peer public key, name, status,
+  last-known address. Pairing is pairwise; a roster is not vault state.
+
+**Re-enrolment becomes mechanical rather than remembered.** The vault
+gains `meta.identity_pub`, the public key of the device that owns
+`meta.device_id`. On open:
+
+| Local identity | `meta.identity_pub` | Action |
+| --- | --- | --- |
+| present, matches | present | same device, continue |
+| present | absent | first M5 run: adopt `device_id`, write the marker |
+| absent, or mismatched | present | **the vault came from elsewhere**: mint a new identity and a new `device_id`, start a fresh sequence space |
+
+The restored-from-backup rule is then a consequence of where the key is
+kept, not a check someone must remember to run. It also makes an
+unsupported configuration visible instead of silently corrupting: two
+machines sharing one live vault directory through a file syncer —
+already excluded by constitution rule 8 — now re-mint identities at each
+other rather than quietly forking one sequence space.
+
+Pairing is bound to identity, not to `device_id`: a peer is recognised
+by its static public key, and its `device_id` is a fact it asserts
+inside the authenticated channel.
+
+### 5. Transport is Noise over TCP, via `snow`
+
+- **`Noise_XXpsk0_25519_ChaChaPoly_BLAKE2s` for every connection**,
+  pairing and session alike. One pattern, one code path, one set of
+  tests; the phase differs only in which `psk` is supplied — the PAKE
+  output when pairing, the stored pair secret afterwards.
+- After the handshake, the session verifies the peer's transmitted
+  static key against the pinned roster entry. An unpaired or revoked
+  peer cannot complete the handshake at all, because it does not hold
+  the pair secret — **default-deny is a property of the handshake, not
+  a check performed after one**. It also means an unpaired scanner
+  cannot learn a paired device's static identity.
+- `snow` 0.10.0, `Apache-2.0 OR MIT`, 26.3 M downloads, tracking Noise
+  revision 34, pure-Rust resolver, no async runtime. It has **not been
+  formally audited**, and neither has `spake2`; both facts are recorded
+  here rather than discovered later. The mitigation is that neither
+  construction is invented here: SPAKE2-then-Noise is what
+  magic-wormhole ships for this exact problem.
+- Messages are length-prefixed frames inside the Noise transport, with
+  the protocol version agreed in the handshake prologue so a version
+  mismatch fails before any operation is parsed.
+
+### 6. Where the code lives
+
+- **`gilune-kernel::operations`** owns the operation envelope, its
+  versioned codec, `record` and **`apply`**, the per-device frontier,
+  the gap and corrupt-operation halt policy, and the size bounds on
+  apply. Apply writes heads, tombstones and idempotency records — these
+  are kernel invariants, and the conventions put invariants in the
+  kernel.
+- **`gilune-sync`**, a new crate beside it, owns discovery, pairing,
+  the Noise session, framing, the exchange loop and quota enforcement.
+  It depends on `gilune-kernel`; nothing depends on it but the FFI.
+- The seam between them is a **`Transport` trait** — `connect`, `listen`,
+  `have_after(device, seq)`, `send_envelope`, `send_chunk` — which is
+  what allows the whole S4 scenario suite to run over a **loopback
+  socket pair against the production kernel before any radio exists**.
+  This is M5a's entire point.
+- **Platform adapters only where the OS demands one**: `PeerDiscovery`
+  on Android (`NsdManager`), `KeyWrap` on both, background scheduling on
+  Android. Everything else is one Rust implementation serving both
+  shells, as whisper already is.
+- The FFI grows a narrow surface: `sync_status`, `start_pairing`,
+  `pairing_qr` (returning the module matrix, § 7), `pair_with_code`,
+  `pair_from_qr`, `peers`, `revoke_peer`, `sync_now`, `set_sync_enabled`.
+  Errors map onto the existing four flat `GiluneError` variants; the
+  boundary gains variants, never reshaped ones.
+- **Android bindings are regenerated from an NDK build**, per the
+  standing rule and `kernel/scripts/build-android.ps1`.
+
+### 7. QR is encoded in Rust and painted in Compose
+
+The desktop encodes with the `qrcode` crate (0.14.1,
+`MIT OR Apache-2.0`, no `image` dependency needed) and hands the module
+matrix across the FFI as bits; the shell paints squares on a `Canvas`.
+**No new Kotlin dependency, and the pairing secret never crosses the
+boundary as a string a shell might log.**
+
+Android scans with **CameraX plus `com.google.zxing:core`**
+(Apache-2.0), decoding the analysis frame directly.
+
+- **`CAMERA` is requested at the moment the user taps Scan**, never at
+  install, and the 6-digit path is always available — so the camera is a
+  convenience and never a condition of syncing.
+- ML Kit's Google code scanner would need no camera permission at all,
+  which is genuinely attractive; it is declined in § Alternatives
+  because it is closed source and hard-requires Google Play services, in
+  an app that already excluded OkHttp from a vendor AAR to keep a
+  network fetch inside its consent gate.
+
+### 8. Bounds on apply, and what a hostile peer costs
+
+Every bound below **reuses the proven halt policy** rather than inventing
+a second failure mode: raise a visible alert, stop that peer's stream,
+apply nothing past the offending point, resume from the frontier when
+the condition clears. The kernel gains the alert surface the spike
+proved and production lacks — silent halting is the failure mode that
+would make sync look like it works.
+
+- **Envelope size** is capped in the low megabytes. An operation payload
+  is a document, never bytes.
+- **Blob length is never trusted as an allocation.** Chunks stream into
+  the existing staging path, which already hashes incrementally, and the
+  transfer aborts if the bytes exceed the declared length or the digest
+  fails. This retires the spike's `Vec::with_capacity(byte_len)` from an
+  attacker-supplied manifest (`sync.rs:432`), which was safe over a
+  folder and is a one-packet OOM over a socket.
+- **A declared length larger than free space is refused before a byte is
+  written.**
+- **Per-session caps** on operations and bytes end a session cleanly
+  rather than truncating it; resumption costs nothing, because that is
+  what a frontier is for.
+- **Per-peer rate limits** on session establishment, with backoff.
+- The numbers are configuration with documented defaults, not constants
+  scattered through the exchange loop — one fact, one home.
+
+### 9. Revocation, including mid-session
+
+- Revocation is available in **either device's settings** and takes
+  effect locally and immediately: the peer is marked revoked, **any live
+  session with it is closed at once**, and subsequent handshakes fail
+  because the pair secret is gone.
+- **Mid-session revocation cannot half-apply anything.** Apply is one
+  transaction per operation, so closing the session stops at the next
+  operation boundary; what was applied is applied, what was not is
+  fetched again from the frontier if the peer is ever re-paired.
+- **Already-applied history is not retracted.** Revocation protects
+  what comes next. `06-sync-and-security.md` says so, and the UI must
+  say so too rather than implying an undo.
+- **A revoked device's operations are refused on apply whoever delivers
+  them**, by originating `device_id`. In a full-replica mesh a third
+  paired device holds and would otherwise relay them. This is policy,
+  not cryptography — see the limitation below — but it makes "a revoked
+  device is excluded" testable with three replicas instead of true only
+  by accident with two.
+- **Re-pairing a revoked device is a new pairing**, and if that device
+  was restored from a backup it is a new identity as well (§ 4).
+
+**The v0 limitation, stated plainly.** Operations are authenticated by
+the transport, not individually signed, so a paired device could forge
+history attributed to another device. That is defensible while every
+peer is the same user's own mutually-authenticated hardware and no relay
+exists; it stops being defensible the moment an untrusted store holds
+operations, which is exactly where the crypto ADR and its external
+review already sit as a gate. The door is kept open mechanically: the
+**raw received envelope bytes are stored**, not merely the parsed
+columns, because a full replica must forward a third device's operations
+byte-exactly and any signature added later must verify over the bytes
+that were signed.
+
+### 10. Phone scheduling, and the honest cadence
+
+- **Foreground**: a sync runs on app open and on every resume. This is
+  the prompt path and the only one the user should feel.
+- **Background**: a `PeriodicWorkRequest` with `NetworkType.UNMETERED`
+  and `setRequiresBatteryNotLow(true)`. **No charging requirement** —
+  it would make the job mean "overnight only" for most users.
+- **15 minutes is a floor, not a cadence.** WorkManager clamps anything
+  shorter; Doze then batches deferred work into maintenance windows that
+  lengthen the longer a device stays idle, and App Standby buckets gate
+  it further. The honest statement, and the one the settings screen
+  should make: near-15-minute cadence while the phone is in use,
+  degrading toward hourly or worse in a pocket overnight.
+- **Routine sync is not a foreground service.** Android 15 caps a
+  `dataSync` FGS at six hours and Android 16 makes jobs started from an
+  FGS obey their runtime quotas; the manifest's own comment already
+  records that there is deliberately no boot receiver and no scheduler
+  in it, and this decision keeps that posture. If a large first
+  synchronisation ever needs to survive the app being backgrounded,
+  the sanctioned route is a user-initiated data-transfer job, and it
+  needs its own decision.
+- **The desktop is the always-available listener** while the app is
+  running. Making it survive the app closing is the headless agent
+  profile, and that is ADR 0008's later round.
+
+## Alternatives considered
+
+### Custom UDP broadcast discovery
+
+Rejected. It pays every cost DNS-SD pays — the same inbound firewall
+bind, the same Android multicast suppression — and forfeits the one
+thing that makes Android discovery free, since `NsdManager` speaks
+DNS-SD and nothing else. It would also hand-roll conflict resolution,
+service metadata and IPv6 behaviour that DNS-SD already specifies.
+
+### One mDNS implementation everywhere (Rust `mdns-sd`, or JmDNS on both)
+
+Rejected. An in-process multicast socket on Android requires
+`CHANGE_WIFI_MULTICAST_STATE` and a held `WifiManager.MulticastLock`,
+because Android suppresses multicast delivery by default to save
+battery — so the "one implementation" saving is bought with a new
+permission, a battery cost, and worst behaviour exactly when the screen
+is off. Two implementations behind one trait is the smaller price, and
+the Rust one is what ADR 0008's future JVM-less agent inherits.
+
+### The 6-digit code as a Noise pre-shared key, with no PAKE
+
+Rejected on arithmetic. Twenty bits of PSK is offline-brute-forceable
+from a single captured handshake. The PAKE is the mechanism that makes
+a human-transferable secret safe, and it is the reason the short-code
+path is a real security boundary rather than a gesture.
+
+### rustls with RFC 7250 raw public keys instead of Noise
+
+The strongest rival, and it has the one advantage the chosen stack
+lacks: rustls is audited. Declined because TLS 1.3's external-PSK path
+is the awkward home for a PAKE-derived secret and is thinly exercised in
+rustls; raw-public-key mutual authentication needs custom verifiers on
+both sides, which is precisely where a hand-rolled mistake is silent;
+and it pulls a substantially larger tree into a library with a 15 MB
+per-ABI budget. Worth revisiting at the crypto ADR, where an external
+review exists to make the audit advantage count.
+
+### `iroh` (QUIC connections dialled by public key)
+
+Genuinely mature — 1.1.0 as of 2026-08-25, `MIT OR Apache-2.0`, 2.17 M
+downloads — and it solves connection establishment, NAT traversal and
+public-key addressing in one dependency. Declined for v0 because it is
+built around relay-assisted connectivity and a discovery story that
+reaches beyond the LAN, which imports exactly the hosted-infrastructure
+assumption ADR 0008 declined to take first; because it answers
+addressing and not pairing, so SPAKE2 and the roster would still be
+ours; and because its tree is large against the size budget. It is the
+obvious candidate the day off-network sync is on the table.
+
+### ML Kit's Google code scanner for QR
+
+The permission-less scan is a real product advantage for an app that
+justifies each of its six manifest permissions in a comment. Rejected
+because it is closed source and hard-requires Google Play services,
+which forfeits any non-Play distribution profile in the S5 matrix and
+hands camera frames to a Google process — in a project that removed
+OkHttp from a vendor AAR so a model fetch could not escape its consent
+gate. ZXing under Apache-2.0 costs a permission prompt we can scope to
+the moment of use.
+
+### Identity keys in the vault, or in the kernel store
+
+Rejected, and this is the sharpest rejection in the ADR. The vault is
+plaintext by owner decision and portable by design — ADR 0008 plans a
+shared-folder transport over third-party stores. An identity inside it
+is a cloned identity with a shared sequence space the moment anyone
+copies, restores or Dropbox-syncs a vault, which is the exact fork the
+threat model prohibits. Device-local storage is the only placement that
+makes the re-enrolment rule automatic rather than aspirational.
+
+### Syncing the pairing roster as operations
+
+Rejected for v0. It looks like it would make revocation propagate, but
+without per-operation signatures a synced roster is an unauthenticated
+assertion, and a revoked device restored from a backup would arrive
+carrying its own pairing claims. Pairwise rosters plus refusal-on-apply
+by originating device (§ 9) get the testable property without the
+false assurance. A synced, signed device registry belongs with the
+crypto ADR.
+
+## Consequences
+
+- **The production kernel gains its read side.** Schema v5 adds the
+  per-device frontier, the raw-envelope column, `meta.identity_pub` and
+  the integrity-alert surface; `op_seq` becomes per-device; and
+  `add_revision` must stop deleting every head, because concurrent heads
+  are ADR 0005's contract and the production kernel has never
+  represented them. That last change is the largest single piece of M5a
+  and it touches the most-exercised path in the kernel.
+- **The operation envelope becomes a versioned public contract** with
+  portable test vectors, which ADR 0005's gate requires and which
+  nothing today provides. Because production operations have never been
+  applied anywhere, M5a is free to reconcile the production kind names
+  with the spike's — once, now, behind a migration, and never again.
+- **The kernel takes its first network dependencies** — `mdns-sd`,
+  `snow`, `spake2`, `qrcode` — where it previously had none, and its
+  size budget must be re-measured per ABI rather than assumed. All four
+  are `MIT OR Apache-2.0` or dual-equivalent and clear ADR 0009.
+- **Two of those crates are unaudited** (`spake2`, `snow`). Recorded
+  here, carried into the crypto ADR's external review, and not
+  discovered by a reviewer later.
+- **Android gains `CAMERA`** (requested at use, for QR only) and the
+  desktop gains an inbound firewall rule the user must allow. Both are
+  new consent surfaces and both belong in the S5 distribution matrix.
+- **First run after M5 mints or adopts an identity**, and a vault opened
+  on a machine with no matching local identity becomes a new device.
+  That is the re-enrolment rule working, and the UI must say so plainly
+  when it happens rather than letting a user wonder why their laptop
+  appears twice.
+- **The user docs gain a sync guide**, in user vocabulary — no kernel,
+  no frontiers, no operations — and the pairing screenshots are shot
+  through the probe tooling like every other guide.
+- ADR 0008's shared-folder transport becomes cheap once the `Transport`
+  trait exists: the spike's relay is already an implementation of it.
+
+## Acceptance gate
+
+M5 is not complete and this ADR is not Accepted until the following are
+evidence, not assertions. Scenarios A run over a loopback socket; B over
+two processes on one machine; C between a real Windows desktop and a
+real Android device on a real network.
+
+**A — semantics survive the move to a socket (M5a)**
+
+1. All ten S4 scenarios pass against the **production** kernel over the
+   loopback transport: two- and three-replica convergence, origin-device
+   processing, concurrent heads preserved, idempotent re-application and
+   late joiners, sequence gap halting and repairing, corrupt operation
+   halting with nothing half-applied, interrupted blob transfer
+   completing byte-identically, tombstone propagation, unknown-type
+   round-trip.
+2. Reordered and duplicated deliveries converge; a deleted-and-restored
+   object converges; an offline-created object converges.
+3. Portable operation test vectors exist and a decoder rejects every
+   malformed and out-of-bounds vector in the set.
+4. Every bound in § 8 is exercised: an oversized envelope, an oversized
+   blob, a manifest declaring more than free space, and a session cap
+   each halt that peer visibly, apply nothing past the fault, and resume
+   correctly when the condition clears.
+
+**B — pairing is a real boundary (M5b)**
+
+5. Two devices pair by 6-digit code and by QR, and both paths produce
+   the same roster state.
+6. A wrong code fails, leaks nothing, and is exhausted after the attempt
+   limit; a code is single-use and expires.
+7. An unpaired device is refused — and cannot complete the handshake
+   far enough to learn the listener's static identity.
+8. A revoked device is refused; revoking mid-session closes the session
+   at an operation boundary with nothing half-applied; a third replica
+   refuses to apply a revoked device's operations relayed to it.
+9. A vault copied to a machine with no local identity re-enrols as a new
+   device with a fresh sequence space, and the original device is
+   unaffected.
+10. The identity key is wrapped by the platform adapter on both
+    platforms and survives an application update (ADR 0016's gate
+    already requires device-local state to survive; this joins it).
+
+**C — it works on a real network (M5c)**
+
+11. **The ADR 0008 six**: two devices discover each other, pair, sync and
+    converge over LAN **with no relay present**; an unpaired device is
+    refused; a revoked device is excluded; sync resumes correctly when
+    devices rejoin the network.
+12. Discovery failure degrades as designed: cached address, manual
+    `host:port`, then a diagnostic naming AP isolation — demonstrated on
+    a network with client isolation enabled.
+13. The Windows firewall prompt appears when sync is switched on and not
+    before; capture and startup are never behind it; the
+    non-administrator path is documented and works.
+14. The phone syncs on foreground within seconds, and a periodic
+    background job is observed to run under `UNMETERED`; the measured
+    real-world cadence is recorded honestly rather than quoted as
+    fifteen minutes.
+15. A capture made on the phone is transcribed on the phone, syncs to
+    the desktop, and projects byte-identically — the P0 loop across two
+    devices.
+16. The standing budget is met: **"LAN sync of 100 small operations
+    between two idle devices: under 5 s"**
+    (`architecture/spikes/README.md:37`). *Idle* puts discovery and the
+    handshake inside the five seconds, which is the measurement that
+    decides whether the cached-address-first rule of § 1 is an
+    optimisation or a requirement.
+
+**What M5 does not close.** ADR 0005's gate also names a **key-epoch
+change**, and v0 has no content-encryption keys at all (S5 threat model,
+decision 4), so that scenario stays with the crypto ADR: **0005 cannot
+flip to Accepted on M5 alone; M5 validates its LAN half.** ADR 0008's
+gate additionally requires **S1 to demonstrate a headless kernel host on
+Windows**, which the owner has scoped out of this round; 0008 flips when
+that lands beside these scenarios. Neither status change is recorded
+here.
+
+## Staging
+
+Each stage is shippable alone and in order.
+
+- **M5a — operations become bidirectional.** No network. Schema v5;
+  `gilune-kernel::operations` with apply, per-device sequences,
+  per-device frontiers, the raw-envelope column, the versioned codec and
+  its test vectors, the bounds of § 8 and the alert surface; concurrent
+  heads in `add_revision`; the `Transport` trait and a loopback
+  implementation; the whole S4 suite re-run against production. This is
+  the largest stage and the only one that changes the most-exercised
+  path in the kernel. Gate A.
+- **M5b — identity, pairing, crypto.** The device-local identity store
+  and `KeyWrap` adapters; `meta.identity_pub` and the re-enrolment
+  table; SPAKE2 and the Noise session; the roster, revocation and the
+  bounds on guessing; QR encode in Rust and scan on Android; the FFI
+  surface and regenerated Android bindings. Two processes, one machine,
+  no discovery. Gate B.
+- **M5c — the live exchange.** `PeerDiscovery` on both platforms; the
+  cached-address and manual fallbacks; the Windows firewall UX; desktop
+  Settings ▸ Sync and the Android equivalent; foreground sync on resume
+  and the periodic worker; the user docs sync guide. Gate C, on real
+  hardware and a real network.
