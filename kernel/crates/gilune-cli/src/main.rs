@@ -20,8 +20,9 @@ fn run() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut args = args.iter().map(String::as_str);
 
-    let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|project|\
-                 reconcile|status|verify|backfill|plugins [enable|disable|remove <id>]>";
+    let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|\
+                 external [--at <ms>]|project|reconcile|status|verify|backfill|\
+                 plugins [enable|disable|remove <id>]>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
@@ -107,6 +108,39 @@ fn run() -> Result<(), String> {
                     "failed": s.failed,
                     "outputs": s.outputs,
                 })
+            );
+            Ok(())
+        }
+        Some("external") => {
+            // Dev tool: drives the FFI processor route's kernel half
+            // (ADR 0018 § 2) as a host application drives it — claim,
+            // stream the subject, submit. The crash harness aborts this
+            // command between those steps and asserts the vault converges
+            // on exactly one output or a cleanly re-claimable job.
+            store
+                .register_plugin(&gilune_kernel::external::fake_external_descriptor())
+                .map_err(|e| e.to_string())?;
+            // `--at <ms>` lets the harness step past a dead claimant's
+            // lease without reaching into SQL, the same way the kernel's
+            // own tests supply `now_ms` (jobs.rs).
+            let now_ms = match (args.next(), args.next()) {
+                (None, _) => gilune_kernel::ids::now_ms(),
+                (Some("--at"), Some(ms)) => ms.parse().map_err(|_| usage.to_string())?,
+                _ => return Err(usage.to_string()),
+            };
+            let delivered =
+                gilune_kernel::external::run_external_once(&store, now_ms, 30_000)
+                    .map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                match delivered {
+                    Some(d) => serde_json::json!({
+                        "claimed": true,
+                        "skipped_duplicate": d.skipped_duplicate,
+                        "outputs": d.outputs,
+                    }),
+                    None => serde_json::json!({ "claimed": false }),
+                }
             );
             Ok(())
         }

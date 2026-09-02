@@ -19,13 +19,30 @@ use crate::{ids, KernelError, Result};
 
 pub const OBJECT_CREATED_EVENT_PREFIX: &str = "org.memory.";
 
+/// Where a subject's preserved bytes are and what they must hash to.
+/// Enough to read the blob without reading it — which is what lets the
+/// external route stream it instead of returning it whole (ADR 0018 § 2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobFacts {
+    /// Vault-relative, '/'-separated (03-data-model).
+    pub rel_path: String,
+    pub sha256: String,
+    pub bytes: u64,
+}
+
 /// What a processor may read while handling a job.
 pub struct ProcessorCtx<'a> {
     store: &'a Store,
     subject_id: String,
 }
 
-impl ProcessorCtx<'_> {
+impl<'a> ProcessorCtx<'a> {
+    /// The seam is the kernel's to hand out, never the caller's to build:
+    /// a `ProcessorCtx` exists only for the subject of a claimed job.
+    pub(crate) fn new(store: &'a Store, subject_id: String) -> Self {
+        Self { store, subject_id }
+    }
+
     /// The subject's current head payload (canonical JSON document).
     pub fn subject_payload(&self) -> Result<String> {
         head_payload(self.store.conn(), &self.subject_id)?.ok_or_else(|| KernelError::Corrupt {
@@ -33,18 +50,40 @@ impl ProcessorCtx<'_> {
         })
     }
 
+    /// Where the subject's blob is, or `None` when it has none — a
+    /// derived object carries its interpretation in its document.
+    pub fn subject_blob_facts(&self) -> Result<Option<BlobFacts>> {
+        self.store
+            .conn()
+            .query_row(
+                "SELECT rel_path, sha256, bytes FROM blobs
+                 WHERE object_id = ?1 AND state = 'ready'",
+                [&self.subject_id],
+                |row| {
+                    Ok(BlobFacts {
+                        rel_path: row.get(0)?,
+                        sha256: row.get(1)?,
+                        bytes: row.get::<_, i64>(2)? as u64,
+                    })
+                },
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(KernelError::from(e)),
+            })
+    }
+
     /// The subject's original blob bytes, verified against the recorded
     /// digest — a processor never sees bytes the kernel cannot vouch for.
     pub fn subject_blob(&self) -> Result<Vec<u8>> {
-        let (rel_path, sha256): (String, String) = self.store.conn().query_row(
-            "SELECT rel_path, sha256 FROM blobs WHERE object_id = ?1 AND state = 'ready'",
-            [&self.subject_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )?;
-        let path = self.store.vault().join(&rel_path);
+        let facts = self.subject_blob_facts()?.ok_or_else(|| KernelError::Corrupt {
+            detail: format!("{} has no blob", self.subject_id),
+        })?;
+        let path = self.store.vault().join(&facts.rel_path);
         let bytes =
             std::fs::read(&path).map_err(|e| KernelError::Io { path, source: e })?;
-        if ids::sha256_hex(&bytes) != sha256 {
+        if ids::sha256_hex(&bytes) != facts.sha256 {
             return Err(KernelError::VaultUnusable {
                 reason: format!("blob for {} fails its digest", self.subject_id),
             });
@@ -96,6 +135,22 @@ pub struct ProcessingSummary {
     pub outputs: i64,
 }
 
+/// What one delivery of a processor's result did. A duplicate delivery is
+/// not a failure — it is at-least-once working as promised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Delivery {
+    /// The run was already recorded, so nothing was written a second time.
+    pub skipped_duplicate: bool,
+    pub outputs: i64,
+}
+
+/// One processing run per processor per event, however often the job is
+/// delivered and **whichever process delivers it** — the derived IDs in
+/// `commit_outputs` hang off this, so it is the whole of exactly-once.
+pub fn idempotency_key(processor_id: &str, event_id: &str) -> String {
+    format!("{processor_id}:{event_id}")
+}
+
 impl Store {
     /// Run pending jobs against the registered processors until none are
     /// claimable. At-least-once: a crash mid-run only delays the job.
@@ -105,27 +160,39 @@ impl Store {
         now_ms: i64,
         lease_ms: i64,
     ) -> Result<ProcessingSummary> {
+        self.run_pending_jobs_excluding(processors, &[], now_ms, lease_ms)
+    }
+
+    /// As `run_pending_jobs`, but leaving `external` processor ids alone.
+    /// An externally-implemented processor (ADR 0018 § 2) claims its own
+    /// work; without this its jobs would be claimed here, find no
+    /// implementation in the vector, and burn an attempt and a lease on
+    /// every pass.
+    pub fn run_pending_jobs_excluding(
+        &self,
+        processors: &[&dyn Processor],
+        external: &[String],
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<ProcessingSummary> {
         let mut summary = ProcessingSummary::default();
-        while let Some(job) = self.claim_next_job(now_ms, lease_ms)? {
+        while let Some(job) = self.claim_next_job_excluding(external, now_ms, lease_ms)? {
             let Some(processor) = processors.iter().find(|p| p.id() == job.subscription_id)
             else {
                 // No implementation registered here (another device may own
                 // it); release the claim by letting the lease expire.
                 continue;
             };
-            let idempotency_key = format!("{}:{}", processor.id(), job.event_id);
-            if self.run_exists(processor.id(), &idempotency_key)? {
-                self.complete_job(&job.job_id)?;
-                summary.skipped_duplicate += 1;
-                continue;
-            }
-            let ctx = ProcessorCtx { store: self, subject_id: job.subject_id.clone() };
+            let ctx = ProcessorCtx::new(self, job.subject_id.clone());
             match processor.process(&ctx, &job) {
                 Ok(outputs) => {
-                    summary.outputs +=
-                        self.commit_outputs(processor.id(), &idempotency_key, &job, &outputs)?;
-                    self.complete_job(&job.job_id)?;
-                    summary.completed += 1;
+                    let delivered = self.deliver_outputs(processor.id(), &job, &outputs)?;
+                    summary.outputs += delivered.outputs;
+                    if delivered.skipped_duplicate {
+                        summary.skipped_duplicate += 1;
+                    } else {
+                        summary.completed += 1;
+                    }
                 }
                 Err(message) => {
                     self.fail_job(&job.job_id, now_ms, &message)?;
@@ -134,6 +201,33 @@ impl Store {
             }
         }
         Ok(summary)
+    }
+
+    /// **The output transaction, and the only one.** Whatever produced
+    /// these outputs — a bundled Rust processor, a sandboxed component, or
+    /// an external implementation reaching in over the FFI — the run
+    /// record, the derived revision IDs, the `processor:{id}` origin, the
+    /// operation and the event are the kernel's and are identical
+    /// (ADR 0013's 2026-09-02 amendment; ADR 0018 § 2). The caller
+    /// proposes; this commits.
+    pub fn deliver_outputs(
+        &self,
+        processor_id: &str,
+        job: &Job,
+        outputs: &[ProposedOutput],
+    ) -> Result<Delivery> {
+        let key = idempotency_key(processor_id, &job.event_id);
+        if self.run_exists(processor_id, &key)? {
+            self.complete_job(&job.job_id)?;
+            return Ok(Delivery { skipped_duplicate: true, outputs: 0 });
+        }
+        let outputs = self.commit_outputs(processor_id, &key, job, outputs)?;
+        // The window a redelivery must survive: the outputs are durable
+        // but the job is still leased. Recovery is the lease expiring and
+        // the run record making the retry a skip.
+        crashpoint("output.after_commit");
+        self.complete_job(&job.job_id)?;
+        Ok(Delivery { skipped_duplicate: false, outputs })
     }
 
     fn run_exists(&self, processor_id: &str, idempotency_key: &str) -> Result<bool> {

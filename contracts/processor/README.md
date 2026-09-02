@@ -1,7 +1,7 @@
 # Processor contract (org:memory, v0.1)
 
-The seam between the kernel and processors. Two execution profiles share
-it (ADR 0003, ADR 0006):
+The seam between the kernel and processors. Three execution profiles
+share it (ADR 0003, ADR 0006, ADR 0018 § 2):
 
 - **Bundled** — a Rust implementation of
   `gilune_kernel::processor::Processor`, statically linked (the store
@@ -12,8 +12,26 @@ it (ADR 0003, ADR 0006):
 - **Sandboxed** — a WebAssembly component of the `processor` world,
   capability-checked by the host (validated in Spike S3; product host
   lands when ADR 0003 flips to Accepted).
+- **External over the FFI** — an implementation carried by the host
+  application, in whatever language it is written, reaching the same
+  contract through four boundary calls (ADR 0018 § 2):
+  `register_external_processor`, `claim_job`, `submit_output`,
+  `fail_job`. **The same contract in a different transport, not a
+  different contract**: the run record, the derived IDs, the
+  `processor:{id}` origin, the operation and the event are the kernel's
+  and are identical, so an output submitted this way *is* a processor
+  output (ADR 0013's 2026-09-02 amendment). It is **not** the sandbox
+  and confers nothing on store builds — downloadable still means the
+  wasm profile (ADR 0010).
 
-Contract obligations, both profiles:
+  One deliberate difference of transport, recorded rather than hidden:
+  `host-objects.subject-blob` returns the bytes whole, while the FFI
+  route streams them chunk by chunk, digest-verified before the first
+  chunk crosses. The promise is the same — a processor never sees bytes
+  the kernel cannot vouch for — but a boundary copy of a whole recording
+  is what ADR 0001 forbids, so the shape differs.
+
+Contract obligations, all profiles:
 
 - at-least-once delivery: handlers are idempotent, and the kernel
   additionally guarantees one committed run per (processor, idempotency

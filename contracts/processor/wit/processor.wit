@@ -1,6 +1,9 @@
 // The Gilune processor contract, v0.1 — the public seam between the
-// kernel and any processor implementation, bundled or sandboxed
-// (ADR 0003). Namespaces are permanently project-neutral (org:memory).
+// kernel and any processor implementation: bundled, sandboxed
+// (ADR 0003), or external over the FFI (ADR 0018 § 2). All three are
+// the same contract in different transports; the README says what the
+// FFI route's streamed subject-blob changes and what it does not.
+// Namespaces are permanently project-neutral (org:memory).
 //
 // The host import is shaped like a scoped `objects.read` grant: a
 // processor sees its job's subject and nothing else. Outputs are

@@ -36,7 +36,8 @@ impl From<gilune_kernel::KernelError> for GiluneError {
             K::NoSuchJob { .. }
             | K::NoSuchPlugin { .. }
             | K::PluginRequired { .. }
-            | K::UndeclaredCapability { .. } => GiluneError::Invalid { detail: e.to_string() },
+            | K::UndeclaredCapability { .. }
+            | K::ProcessorNotClaimable { .. } => GiluneError::Invalid { detail: e.to_string() },
             K::Storage(_) | K::Io { .. } | K::Encoding(_) | K::Corrupt { .. } => {
                 GiluneError::Storage { detail: e.to_string() }
             }
@@ -258,10 +259,96 @@ pub struct ProcessingSummary {
     pub outputs: i64,
 }
 
+/// Where a proposed output lands (ADR 0013). An enum, not a string: this
+/// is contract, and a typo in it would be a silent new object where a
+/// revision was meant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum OutputTarget {
+    /// A new interpretation object, with provenance back to the subject.
+    NewObject,
+    /// A new revision of the subject's own document, replacing its head.
+    ReviseSubject,
+}
+
+/// An interpretation an external processor proposes. The kernel owns
+/// committing it: nothing here may supply a revision ID, an origin, an
+/// operation or a provenance row (ADR 0018 § 2).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ProposedOutput {
+    /// Ignored for `ReviseSubject`, which keeps the subject's own type.
+    pub type_id: String,
+    /// Ignored for `ReviseSubject`, as `type_id` is.
+    pub type_schema: i64,
+    /// Canonical JSON document.
+    pub payload: String,
+    pub target: OutputTarget,
+}
+
+impl From<ProposedOutput> for gilune_kernel::processor::ProposedOutput {
+    fn from(o: ProposedOutput) -> Self {
+        gilune_kernel::processor::ProposedOutput {
+            type_id: o.type_id,
+            type_schema: o.type_schema,
+            payload: o.payload,
+            target: match o.target {
+                OutputTarget::NewObject => gilune_kernel::processor::OutputTarget::NewObject,
+                OutputTarget::ReviseSubject => {
+                    gilune_kernel::processor::OutputTarget::ReviseSubject
+                }
+            },
+        }
+    }
+}
+
+/// Where a claimed subject's preserved bytes are and what they must hash
+/// to — enough for a caller to know it received all of them.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct BlobFacts {
+    pub rel_path: String,
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// A claimed job as an external processor sees it: what `ProcessorCtx`
+/// carries, flattened for the crossing.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct ExternalJob {
+    pub job_id: String,
+    pub processor_id: String,
+    pub event_id: String,
+    pub event_type: String,
+    pub subject_id: String,
+    /// The event's own payload, as the subscription delivered it.
+    pub event_payload: String,
+    pub attempts: i64,
+    /// The subject's head document at the moment of the claim.
+    pub subject_payload: String,
+    /// `None` when the subject has no preserved bytes.
+    pub blob: Option<BlobFacts>,
+}
+
+/// What one submission did. A skipped duplicate is not a failure — it is
+/// at-least-once working as promised.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SubmitReceipt {
+    pub skipped_duplicate: bool,
+    pub outputs: i64,
+}
+
+/// How long a claim holds a job before it is claimable again. The same
+/// lease `run_processing` takes, because an external claimant is not a
+/// different kind of claimant.
+const LEASE_MS: i64 = 60_000;
+
 #[derive(uniffi::Object)]
 pub struct Gilune {
     store: Mutex<gilune_kernel::store::Store>,
     processors: Mutex<Vec<Box<dyn gilune_kernel::processor::Processor>>>,
+    /// Processor ids this host process carries an external implementation
+    /// for (ADR 0018 § 2). Per-handle and per-session by design: which
+    /// process can run something is a fact about that process, never
+    /// about the vault, so it is never written down.
+    external: Mutex<Vec<String>>,
 }
 
 impl Gilune {
@@ -273,7 +360,9 @@ impl Gilune {
 
     /// Stop running a processor in this process. Job claiming is already
     /// gated on the plugin's state, so this only releases what the
-    /// implementation holds — a loaded model, for instance.
+    /// implementation holds — a loaded model, for instance — and the
+    /// external registration, so a disabled provider cannot keep claiming
+    /// through a handle that already said yes.
     fn unload_processor(&self, plugin_id: &str) -> FfiResult<()> {
         let Some(plugin) = self.store().plugin(plugin_id)? else { return Ok(()) };
         let Some(processor_id) = plugin.descriptor.processor_id else { return Ok(()) };
@@ -281,7 +370,19 @@ impl Gilune {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .retain(|p| p.id() != processor_id);
+        self.external
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|id| *id != processor_id);
         Ok(())
+    }
+
+    fn is_external(&self, processor_id: &str) -> bool {
+        self.external
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|id| id == processor_id)
     }
 }
 
@@ -320,6 +421,7 @@ impl Gilune {
         Ok(Arc::new(Self {
             store: Mutex::new(store),
             processors: Mutex::new(Vec::new()),
+            external: Mutex::new(Vec::new()),
         }))
     }
 
@@ -368,20 +470,134 @@ impl Gilune {
     }
 
     /// Run pending processing jobs with whatever processors this build
-    /// registered. A no-op when none are (Android v0).
+    /// registered. A no-op when none are (Android v0). Jobs belonging to
+    /// an external processor registered here are left alone: their host
+    /// claims them itself, and claiming them here would only burn a lease.
     pub fn run_processing(&self) -> FfiResult<ProcessingSummary> {
         let processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&dyn gilune_kernel::processor::Processor> =
             processors.iter().map(|p| p.as_ref()).collect();
-        let s = self
-            .store()
-            .run_pending_jobs(&refs, gilune_kernel::ids::now_ms(), 60_000)?;
+        let external = self.external.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let s = self.store().run_pending_jobs_excluding(
+            &refs,
+            &external,
+            gilune_kernel::ids::now_ms(),
+            LEASE_MS,
+        )?;
         Ok(ProcessingSummary {
             completed: s.completed,
             skipped_duplicate: s.skipped_duplicate,
             failed: s.failed,
             outputs: s.outputs,
         })
+    }
+
+    /// Declare that **this host process** carries an implementation of
+    /// `processor_id` for `plugin_id` (ADR 0018 § 2). It creates no
+    /// subscription — `register_plugin` already does that — and queues
+    /// nothing: it only says that jobs for this id have somewhere to go
+    /// here, so `run_processing` leaves them for `claim_job` instead of
+    /// expiring their lease forever.
+    ///
+    /// Per-handle and per-session, exactly as `enable_whisper` is. Refused
+    /// while the plugin is disabled or removed, and refused for an id the
+    /// plugin's own declaration does not name — a host may implement what
+    /// a plugin declared, never more.
+    pub fn register_external_processor(
+        &self,
+        plugin_id: String,
+        processor_id: String,
+    ) -> FfiResult<()> {
+        use gilune_kernel::plugins::PluginState;
+        let plugin = self.store().plugin(&plugin_id)?.ok_or(GiluneError::Invalid {
+            detail: format!("{plugin_id} is removed"),
+        })?;
+        if plugin.state != PluginState::Enabled {
+            return Err(GiluneError::Invalid {
+                detail: format!("{plugin_id} is {}", plugin.state.as_str()),
+            });
+        }
+        if plugin.descriptor.processor_id.as_deref() != Some(processor_id.as_str()) {
+            return Err(GiluneError::Invalid {
+                detail: format!("{plugin_id} does not declare the processor {processor_id}"),
+            });
+        }
+        let mut external = self.external.lock().unwrap_or_else(|e| e.into_inner());
+        if !external.contains(&processor_id) {
+            external.push(processor_id);
+        }
+        Ok(())
+    }
+
+    /// Claim one job for an external processor registered here, under the
+    /// shipped lease. `None` when nothing is waiting. The subject's head
+    /// document comes with the claim; its blob is streamed from the claim
+    /// chunk by chunk, digest-verified before a byte crosses.
+    ///
+    /// A claimant that dies holds the job only until its lease expires;
+    /// after that it is claimable again, which is at-least-once doing the
+    /// work a reclaim column would otherwise have to do.
+    pub fn claim_job(self: Arc<Self>, processor_id: String) -> FfiResult<Option<Arc<ClaimedJob>>> {
+        if !self.is_external(&processor_id) {
+            return Err(GiluneError::Invalid {
+                detail: format!("no external implementation of {processor_id} is registered here"),
+            });
+        }
+        let claimed = self.store().claim_external_job(
+            &processor_id,
+            gilune_kernel::ids::now_ms(),
+            LEASE_MS,
+        )?;
+        Ok(claimed.map(|claim| {
+            Arc::new(ClaimedJob {
+                gilune: self.clone(),
+                claim,
+                stream: Mutex::new(None),
+                drained: Mutex::new(false),
+            })
+        }))
+    }
+
+    /// Commit an external processor's outputs through **the same
+    /// transaction a bundled Rust processor's outputs take**: the
+    /// `processing_runs` row keyed `{processor_id}:{event_id}`, revision
+    /// IDs derived from those same inputs, `processor:{id}` origin, the
+    /// `create-revision` operation and the `revision-added` event
+    /// (ADR 0013's amendment). Retrying a submit after a crash therefore
+    /// lands exactly once by construction, not by luck.
+    ///
+    /// Refused if the plugin stopped being enabled while the work was in
+    /// flight. The claim is the kernel's own — a caller cannot name a
+    /// subject it did not claim, so this is not a general write door.
+    pub fn submit_output(
+        &self,
+        claim: Arc<ClaimedJob>,
+        outputs: Vec<ProposedOutput>,
+    ) -> FfiResult<SubmitReceipt> {
+        let outputs: Vec<gilune_kernel::processor::ProposedOutput> =
+            outputs.into_iter().map(Into::into).collect();
+        let delivered = self.store().submit_external_outputs(
+            &claim.claim.job.subscription_id,
+            &claim.claim.job,
+            &outputs,
+        )?;
+        Ok(SubmitReceipt {
+            skipped_duplicate: delivered.skipped_duplicate,
+            outputs: delivered.outputs,
+        })
+    }
+
+    /// Report that an external processor could not do the work. The very
+    /// same path a Rust processor's `Err` takes: retry with backoff, then
+    /// quarantine after five attempts. The job returns to the queue; the
+    /// capture is never at risk either way.
+    pub fn fail_job(&self, claim: Arc<ClaimedJob>, message: String) -> FfiResult<()> {
+        Ok(self.store().fail_external_job(
+            &claim.claim.job.subscription_id,
+            &claim.claim.job,
+            gilune_kernel::ids::now_ms(),
+            &message,
+        )?)
     }
 
     pub fn schema_version(&self) -> FfiResult<i64> {
@@ -584,6 +800,71 @@ impl CaptureWriter {
             .take()
             .ok_or(GiluneError::Invalid { detail: "capture already finished".into() })?;
         Ok(stage.finish(&self.gilune.store())?.into())
+    }
+}
+
+/// A job an external processor holds a lease on. The claim is the
+/// kernel's to hand out and cannot be built by a caller, which is what
+/// stops `submit_output` from becoming a route to revise any object at
+/// all: you may write an output only for the subject you were given.
+#[derive(uniffi::Object)]
+pub struct ClaimedJob {
+    gilune: Arc<Gilune>,
+    claim: gilune_kernel::external::ExternalClaim,
+    /// Opened on the first chunk, not on the claim: the digest pass costs
+    /// a read of the whole file, and a caller that never wants the bytes
+    /// should never pay for it.
+    stream: Mutex<Option<gilune_kernel::external::BlobStream>>,
+    drained: Mutex<bool>,
+}
+
+#[uniffi::export]
+impl ClaimedJob {
+    /// Everything the claim carries except the bytes.
+    pub fn job(&self) -> ExternalJob {
+        let job = &self.claim.job;
+        ExternalJob {
+            job_id: job.job_id.clone(),
+            processor_id: job.subscription_id.clone(),
+            event_id: job.event_id.clone(),
+            event_type: job.event_type.clone(),
+            subject_id: job.subject_id.clone(),
+            event_payload: job.payload.clone(),
+            attempts: job.attempts,
+            subject_payload: self.claim.subject_payload.clone(),
+            blob: self.claim.blob.as_ref().map(|b| BlobFacts {
+                rel_path: b.rel_path.clone(),
+                sha256: b.sha256.clone(),
+                bytes: b.bytes,
+            }),
+        }
+    }
+
+    /// The next chunk of the subject's preserved bytes, or `None` once
+    /// the whole blob has crossed. The kernel verifies the digest over the
+    /// entire file before the first chunk is handed out, and checks a
+    /// running hash again at the end — so a truncated or altered read is
+    /// an error here, not a surprise in the transcript. A caller may also
+    /// hash what it received and compare it against `job().blob.sha256`.
+    pub fn next_chunk(&self) -> FfiResult<Option<Vec<u8>>> {
+        let mut drained = self.drained.lock().unwrap_or_else(|e| e.into_inner());
+        // A subject with no preserved bytes reads as no bytes, not as an
+        // error: `job().blob` is how a caller asks whether there are any.
+        if *drained || self.claim.blob.is_none() {
+            return Ok(None);
+        }
+        let mut guard = self.stream.lock().unwrap_or_else(|e| e.into_inner());
+        if guard.is_none() {
+            *guard = Some(self.gilune.store().open_claim_blob(&self.claim)?);
+        }
+        let stream = guard.as_mut().expect("just opened");
+        match stream.next_chunk()? {
+            Some(chunk) => Ok(Some(chunk)),
+            None => {
+                *drained = true;
+                Ok(None)
+            }
+        }
     }
 }
 

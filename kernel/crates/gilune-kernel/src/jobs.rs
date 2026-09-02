@@ -22,6 +22,13 @@ pub struct Job {
     pub attempts: i64,
 }
 
+/// Which processors a claim may answer for.
+enum JobFilter<'a> {
+    Any,
+    Only(&'a str),
+    Excluding(&'a [String]),
+}
+
 impl Store {
     /// Register interest in an event type. Jobs are created only for
     /// events committed while a subscription exists, and claimed only
@@ -62,36 +69,87 @@ impl Store {
     }
 
     /// Claim the next runnable job under a lease. A job whose lease has
-    /// expired is claimable again — that is at-least-once, by design.
+    /// expired is claimable again — that is at-least-once, by design, and
+    /// it is also the whole of abandoned-claim recovery: a claimant that
+    /// dies holding a job blocks it for the rest of its lease and no
+    /// longer, whether that claimant was a Rust processor or an external
+    /// implementation across the FFI (ADR 0018 § 2).
     pub fn claim_next_job(&self, now_ms: i64, lease_ms: i64) -> Result<Option<Job>> {
+        self.claim_where(JobFilter::Any, now_ms, lease_ms)
+    }
+
+    /// Claim the next runnable job for exactly one processor. The external
+    /// route claims this way: a host answers for the ids it registered and
+    /// for nothing else.
+    pub fn claim_next_job_for(
+        &self,
+        processor_id: &str,
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<Option<Job>> {
+        self.claim_where(JobFilter::Only(processor_id), now_ms, lease_ms)
+    }
+
+    /// Claim the next runnable job that no listed processor owns.
+    pub fn claim_next_job_excluding(
+        &self,
+        processor_ids: &[String],
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<Option<Job>> {
+        if processor_ids.is_empty() {
+            return self.claim_next_job(now_ms, lease_ms);
+        }
+        self.claim_where(JobFilter::Excluding(processor_ids), now_ms, lease_ms)
+    }
+
+    fn claim_where(&self, filter: JobFilter<'_>, now_ms: i64, lease_ms: i64) -> Result<Option<Job>> {
         let conn = self.conn();
+        // The subscription id is always a bound parameter, never text spliced
+        // into the statement: an id is host-supplied data.
+        let (clause, ids): (String, Vec<&str>) = match filter {
+            JobFilter::Any => (String::new(), Vec::new()),
+            JobFilter::Only(id) => (" AND j.subscription_id = ?2".to_string(), vec![id]),
+            JobFilter::Excluding(ids) => {
+                let holes: Vec<String> =
+                    (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
+                (
+                    format!(" AND j.subscription_id NOT IN ({})", holes.join(", ")),
+                    ids.iter().map(String::as_str).collect(),
+                )
+            }
+        };
+        let sql = format!(
+            "SELECT j.job_id, j.subscription_id, j.event_id, j.attempts,
+                    e.event_type, e.subject_id, e.payload
+             FROM jobs j
+             JOIN events e ON e.event_id = j.event_id
+             JOIN subscriptions s ON s.subscription_id = j.subscription_id
+             WHERE s.enabled = 1
+               AND ((j.state = 'pending' AND j.not_before_ms <= ?1)
+                    OR (j.state = 'leased' AND j.lease_until_ms <= ?1))
+               {clause}
+             ORDER BY e.created_ms
+             LIMIT 1"
+        );
+        let mut params: Vec<&dyn rusqlite::ToSql> = vec![&now_ms];
+        for id in &ids {
+            params.push(id);
+        }
         conn.execute_batch("BEGIN IMMEDIATE;")?;
         let claimed: Result<Option<Job>> = (|| {
             let row = conn
-                .query_row(
-                    "SELECT j.job_id, j.subscription_id, j.event_id, j.attempts,
-                            e.event_type, e.subject_id, e.payload
-                     FROM jobs j
-                     JOIN events e ON e.event_id = j.event_id
-                     JOIN subscriptions s ON s.subscription_id = j.subscription_id
-                     WHERE s.enabled = 1
-                       AND ((j.state = 'pending' AND j.not_before_ms <= ?1)
-                            OR (j.state = 'leased' AND j.lease_until_ms <= ?1))
-                     ORDER BY e.created_ms
-                     LIMIT 1",
-                    [now_ms],
-                    |row| {
-                        Ok(Job {
-                            job_id: row.get(0)?,
-                            subscription_id: row.get(1)?,
-                            event_id: row.get(2)?,
-                            attempts: row.get::<_, i64>(3)? + 1,
-                            event_type: row.get(4)?,
-                            subject_id: row.get(5)?,
-                            payload: row.get(6)?,
-                        })
-                    },
-                )
+                .query_row(&sql, params.as_slice(), |row| {
+                    Ok(Job {
+                        job_id: row.get(0)?,
+                        subscription_id: row.get(1)?,
+                        event_id: row.get(2)?,
+                        attempts: row.get::<_, i64>(3)? + 1,
+                        event_type: row.get(4)?,
+                        subject_id: row.get(5)?,
+                        payload: row.get(6)?,
+                    })
+                })
                 .map(Some)
                 .or_else(|e| match e {
                     rusqlite::Error::QueryReturnedNoRows => Ok(None),

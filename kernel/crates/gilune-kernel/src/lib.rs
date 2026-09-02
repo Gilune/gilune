@@ -5,6 +5,7 @@
 
 pub mod capture;
 pub mod crashpoints;
+pub mod external;
 pub mod fs;
 pub mod ids;
 pub mod jobs;
@@ -41,6 +42,8 @@ pub enum KernelError {
     PluginRequired { plugin_id: String },
     #[error("{plugin_id} does not declare the capability {capability}")]
     UndeclaredCapability { plugin_id: String, capability: String },
+    #[error("no enabled plugin claims work for the processor {processor_id}")]
+    ProcessorNotClaimable { processor_id: String },
     #[error("local state is corrupt: {detail}")]
     Corrupt { detail: String },
 }
