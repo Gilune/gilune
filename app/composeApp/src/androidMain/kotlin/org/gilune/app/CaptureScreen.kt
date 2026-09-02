@@ -21,9 +21,11 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
@@ -48,6 +50,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalContext
@@ -151,6 +154,7 @@ fun CaptureScreen(
     focusNonce: Int = 0,
     micNonce: Int = 0,
     transcription: TranscriptionRuntime = remember { TranscriptionRuntime() },
+    moonshine: MoonshineRuntime = remember { MoonshineRuntime() },
 ) {
     // The feed is not on the path to a typable caret (§ 1), so it waits
     // for the frame that made the caret exist.
@@ -161,7 +165,7 @@ fun CaptureScreen(
         Box(Modifier.weight(1f).fillMaxWidth()) {
             if (feedComposed) CaptureFeed(state, onOpenNote, transcription)
         }
-        Composer(state, draft, onDraftChange, onCommit, focusNonce, micNonce)
+        Composer(state, draft, onDraftChange, onCommit, focusNonce, micNonce, moonshine)
     }
 }
 
@@ -176,6 +180,7 @@ private fun Composer(
     onCommit: () -> Unit,
     focusNonce: Int = 0,
     micNonce: Int = 0,
+    moonshine: MoonshineRuntime = remember { MoonshineRuntime() },
 ) {
     val colours = MaterialTheme.colorScheme
     val context = LocalContext.current
@@ -192,6 +197,56 @@ private fun Composer(
         micGranted = granted
         if (!granted) state.message.value = "the microphone permission was declined"
     }
+
+    // ------------------------------------------------- the live caption
+    //
+    // ADR 0018 § 1, and every line of it is a rule rather than a
+    // preference. The caption is display state: nothing here writes
+    // anywhere, and the three lines below are the whole of its lifecycle —
+    // it exists while a recording does and not one moment longer, which is
+    // both the battery courtesy § 1 asks for and the reason a stopped
+    // recording cannot leave words on screen implying they were kept.
+    var caption by remember { mutableStateOf(CaptionDisplay.EMPTY) }
+    var session by remember { mutableStateOf<MoonshineSession?>(null) }
+    val captionOn = captionOffered(state.plugins.toList(), moonshine.ready)
+
+    fun endCaption() {
+        recorder.tee = null
+        session?.stop()
+        session = null
+        caption = CaptionDisplay.EMPTY
+    }
+
+    fun beginCaption() {
+        val dir = moonshine.modelDir
+        if (!captionOn || dir == null) return
+        val opened = MoonshineSession(
+            modelDir = dir,
+            arch = moonshine.model?.arch ?: MOONSHINE_ARCH_TINY_STREAMING,
+            onDisplay = { caption = it },
+            // A caption that dies goes quiet — the tee comes off, the
+            // block stops being drawn, and nothing is said about it on the
+            // composer's notice line, because the recording is fine and
+            // the person is mid-sentence.
+            onFailure = {
+                recorder.tee = null
+                caption = CaptionDisplay.EMPTY
+                session = null
+            },
+        )
+        // Even starting is wrapped: the recording has already begun, and
+        // nothing about the caption may reach back into it.
+        runCatching { opened.start() }
+            .onSuccess {
+                session = opened
+                recorder.tee = { bytes, length -> opened.feed(bytes, length) }
+            }
+    }
+
+    // Leaving the screen mid-recording must not leave a native session
+    // running. The recorder's own lifecycle is unchanged — this disposes
+    // only the caption.
+    DisposableEffect(Unit) { onDispose { endCaption() } }
 
     // The widget's Record cell before the microphone has been granted
     // (§ 4). A widget cannot ask, so it sent the ask here; a yes starts
@@ -229,6 +284,17 @@ private fun Composer(
     Surface(color = colours.surfaceContainerLow, tonalElevation = 2.dp) {
         Column {
             HorizontalDivider(color = colours.outlineVariant)
+            // Above the composer, below nothing (§ 1).
+            //
+            // Drawn for the WHOLE recording rather than from the first
+            // word, and that is the calmer of the two: the block's three
+            // lines are reserved by the tap that started recording, so the
+            // one moment the composer moves is a moment the person caused.
+            // Waiting for words would move it again at whatever
+            // unpredictable instant the engine first spoke. It goes when a
+            // session dies, which is the only unannounced shift left and
+            // is a failure path.
+            if (recording && session != null) CaptionBlock(caption)
             // The shared status line, minus the two lines that are only
             // ever a developer's: where the vault is and that it is
             // opening. Settings ▸ Vault says the first plainly and the
@@ -273,10 +339,21 @@ private fun Composer(
                                     .onSuccess {
                                         recording = true
                                         state.message.value = "recording… tap the microphone to stop"
+                                        // After the recording is running,
+                                        // never before it: the capture is
+                                        // what the tap promised.
+                                        beginCaption()
                                     }
                                     .onFailure { state.message.value = "microphone unavailable: ${it.message}" }
                             } else {
                                 recording = false
+                                // § 1: "on stop the caption is cleared and
+                                // replaced by the note's pending state" —
+                                // which is the notice line above, already
+                                // saying "voice captured… transcribing…".
+                                // Nothing on screen may imply the caption's
+                                // words were the ones kept.
+                                endCaption()
                                 state.captureAudio(recorder.stop())
                             }
                         },
@@ -305,6 +382,73 @@ private fun Composer(
         }
     }
 }
+
+/// The live caption (ADR 0018 § 1). Words while you speak, and nothing
+/// else: **no caret, no selection, no tap target, and not a text field.**
+///
+/// Three decisions are load-bearing and all three come from R0's measured
+/// event trace rather than from taste.
+///
+///  - **Fixed height, bottom-anchored, clipped.** The block reserves its
+///    three lines when the recording starts and never resizes again, so
+///    nothing above it moves for the whole recording. Growth is upward
+///    into the reserved space and older lines are clipped off the top.
+///    ADR 0018 § 1 exempts the caption from ADR 0017 § 2's no-reflow law —
+///    a caption has no caret to jump — but the composer *underneath* it
+///    does, and reserving the space is what keeps that promise anyway.
+///  - **The whole revisable region is muted, not just a tail.** R0
+///    recorded "fox can" becoming "fox jumps up so" and "lace of the"
+///    becoming "lazy dog." — mid-phrase rewrites, not refinements. There
+///    is no stable prefix to promote into the settled role, so nothing is.
+///  - **Settled lines never move.** `LineCompleted` freezes a line, R0
+///    asserted it for every line, and `foldCaption` enforces it here too.
+@Composable
+fun CaptionBlock(display: CaptionDisplay, modifier: Modifier = Modifier) {
+    val colours = MaterialTheme.colorScheme
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(CaptionHeight)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clipToBounds()
+            .testTag("caption"),
+        contentAlignment = Alignment.BottomStart,
+    ) {
+        // `unbounded` is what makes this actually grow upward. Without it
+        // the column is measured against the block's own height and
+        // overflows DOWNWARDS — the oldest words stay pinned to the top
+        // and the words being spoken fall out of the clip, which is the
+        // exact opposite of § 1 and is what the first build did. Measuring
+        // unbounded and aligning to the bottom puts the newest line
+        // against the bottom edge and scrolls the oldest off the top.
+        Column(
+            Modifier.wrapContentHeight(Alignment.Bottom, unbounded = true),
+            verticalArrangement = Arrangement.Bottom,
+        ) {
+            for (line in display.settled) {
+                Text(
+                    line,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colours.onSurface,
+                    maxLines = CAPTION_LINES,
+                )
+            }
+            if (display.live.isNotBlank()) {
+                Text(
+                    display.live,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colours.onSurfaceVariant,
+                    maxLines = CAPTION_LINES,
+                    modifier = Modifier.testTag("caption-live"),
+                )
+            }
+        }
+    }
+}
+
+/// Three lines of `bodyMedium` plus its padding. A constant rather than a
+/// wrap, because the whole point is that it does not change.
+private val CaptionHeight = 68.dp
 
 /// The recent-capture feed. Newest first, because the thing you just said
 /// is the thing you are looking for.

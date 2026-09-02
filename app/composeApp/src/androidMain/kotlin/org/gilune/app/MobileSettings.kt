@@ -79,6 +79,7 @@ fun SettingsScreen(
     onIdleTimeoutChange: (IdleTimeout) -> Unit,
     onExport: () -> Unit,
     modifier: Modifier = Modifier,
+    moonshine: MoonshineRuntime = remember { MoonshineRuntime() },
 ) {
     Column(
         modifier
@@ -99,7 +100,7 @@ fun SettingsScreen(
                 if (plugin == null) {
                     PluginsManager(state) { onNavigate(SettingsRoute.Plugin(it)) }
                 } else {
-                    PluginScreen(state, plugin)
+                    PluginScreen(state, plugin, moonshine)
                 }
             }
         }
@@ -251,7 +252,7 @@ private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
+private fun PluginScreen(state: GiluneState, plugin: PluginInfo, moonshine: MoonshineRuntime) {
     val colours = MaterialTheme.colorScheme
 
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -322,6 +323,10 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
     if (plugin.pluginId == TRANSCRIPTION_PLUGIN) {
         HorizontalDivider(color = colours.outlineVariant)
         TranscriptionSettings(state, plugin)
+    }
+    if (plugin.pluginId == MOONSHINE_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        MoonshineSettings(state, plugin, moonshine)
     }
 
     val events = buildList {
@@ -476,6 +481,137 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
         style = MaterialTheme.typography.bodySmall,
         color = colours.onSurfaceVariant,
     )
+}
+
+/// The realtime provider's own screen (ADR 0018 § 5).
+///
+/// Three controls and a lot of honesty. The wording carries R0's measured
+/// numbers rather than the ADR's estimates — the download is **45 MB, not
+/// 77.7 MB**, and the latency figures came off an x86_64 emulator and have
+/// never been measured on a phone, which is said here rather than left for
+/// someone to assume.
+///
+/// All three keys travel on every write (`moonshineSettingsDocument`), on
+/// the tasks precedent: turning the caption off must not silently revert
+/// the model or re-enable a mobile-data download.
+@Composable
+private fun MoonshineSettings(state: GiluneState, plugin: PluginInfo, moonshine: MoonshineRuntime) {
+    val colours = MaterialTheme.colorScheme
+    val settings = listOf(plugin)
+    val caption = remember(plugin.settings) { settings.moonshineCaption() }
+    val wifiOnly = remember(plugin.settings) { settings.moonshineWifiOnly() }
+    val model = remember(plugin.settings) { settings.moonshineModel() }
+
+    fun write(describe: String, caption: Boolean, wifiOnly: Boolean) {
+        state.pluginAction(describe) {
+            it.setPluginSettings(plugin.pluginId, moonshineSettingsDocument(model.key, caption, wifiOnly))
+        }
+    }
+
+    Text("Live caption", style = MaterialTheme.typography.titleSmall)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = TouchTarget),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Show words while you speak",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = caption,
+            onCheckedChange = { on ->
+                write(if (on) "live caption on" else "live caption off", on, wifiOnly)
+            },
+            modifier = Modifier.testTag("caption-switch"),
+        )
+    }
+    Text(
+        "While you record in the app, the words appear above the composer as " +
+            "you say them. They are shown and never saved: the note's words " +
+            "still come from the transcription plugin, from the recording " +
+            "itself, after you stop. The caption clears when you stop.\n\n" +
+            "Expect it to rewrite itself mid-sentence — “the lace of the” " +
+            "becoming “the lazy dog.” — because it revises as it hears more. " +
+            "Grey text is still changing; black text is settled and will not " +
+            "change again.\n\n" +
+            "Measured on an emulator: once the model is loaded the words " +
+            "arrive about 0.65 s after you start speaking and run about " +
+            "0.15 s behind you. The first recording after you open the app " +
+            "waits about a second longer, because the model loads while you " +
+            "are already recording — the recording never waits for it. No " +
+            "figure here has been measured on a real phone, and battery " +
+            "cost has not been measured at all.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Caption model", style = MaterialTheme.typography.titleSmall)
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = TouchTarget).testTag("moonshine-model"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(model.label, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                moonshineStatus(moonshine.phase, moonshine.progress),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (moonshine.phase == MoonshinePhase.Failed) colours.error else colours.onSurfaceVariant,
+            )
+        }
+    }
+    if (moonshine.notice.isNotBlank()) {
+        Text(moonshine.notice, style = MaterialTheme.typography.bodySmall, color = colours.onSurfaceVariant)
+    }
+    Text(
+        "The app itself carries the caption engine; the ${model.size} model is " +
+            "the one thing it fetches, once, and only after you allow " +
+            "network.request above. It is stored in this app's private " +
+            "storage, so uninstalling removes it with everything else.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = TouchTarget),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Only download on Wi-Fi",
+            style = MaterialTheme.typography.bodyLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Switch(
+            checked = wifiOnly,
+            onCheckedChange = { on ->
+                write(if (on) "downloads wait for Wi-Fi" else "downloads may use any connection", caption, on)
+            },
+            modifier = Modifier.testTag("wifi-switch"),
+        )
+    }
+}
+
+/// Where the model is, in one line. Pure over the two values it reads —
+/// not over the runtime — so the wording is testable without a network,
+/// and so a progress figure the server never supplied cannot become a
+/// percentage nobody measured.
+fun moonshineStatus(phase: MoonshinePhase, progress: MoonshineProgress?): String = when (phase) {
+    MoonshinePhase.Unknown -> "checking…"
+    MoonshinePhase.Absent -> "not downloaded"
+    MoonshinePhase.Downloading -> progress?.let {
+        val percent = it.percent
+        if (percent == null) {
+            "downloading file ${it.fileIndex} of ${it.fileCount}…"
+        } else {
+            "downloading — $percent%, file ${it.fileIndex} of ${it.fileCount}"
+        }
+    } ?: "downloading…"
+    MoonshinePhase.Ready -> "downloaded and ready"
+    MoonshinePhase.Failed -> "download failed — your recordings are unaffected"
 }
 
 /// The catalogue's own label, with the desktop's recommendation swapped

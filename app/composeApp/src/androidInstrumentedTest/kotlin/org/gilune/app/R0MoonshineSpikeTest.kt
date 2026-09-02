@@ -127,6 +127,18 @@ class R0MoonshineSpikeTest {
     @Test
     fun a03_fetchTheStreamingTinyModel() {
         assumeTrue("R0 SKIP: pass -e gilune.r0.fetch 1 to allow the download", R0.fetchRequested())
+        // R1 dropped okhttp (ADR 0018 § 4's consent flow needs our own
+        // downloader, and R0 condition 4 wanted the dependency gone), so
+        // the vendor's `AssetDownloader` cannot run in this tree any more.
+        // The measurement it made is recorded in the spike README and is
+        // not re-runnable here — which is the honest state of this test
+        // rather than a failure. `MoonshineDownloadTest` covers what R1
+        // fetches instead.
+        assumeTrue(
+            "R0 SKIP: okhttp was excluded in R1, so the vendor AssetDownloader is unreachable " +
+                "(see spikes/r0-moonshine/README.md § The transitive dependencies)",
+            runCatching { Class.forName("okhttp3.OkHttpClient") }.isSuccess,
+        )
         val root = R0.downloadRoot().apply { mkdirs() }
         val start = System.nanoTime()
         val dir = AssetDownloader().ensureModelPresent(root, R0.spec()) { path, index, count, got, want ->

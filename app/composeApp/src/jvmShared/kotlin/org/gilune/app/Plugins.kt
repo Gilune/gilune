@@ -513,6 +513,117 @@ fun List<PluginInfo>.transcriptionLanguage(): String =
 fun transcriptionSettingsDocument(language: String, model: String): String =
     """{"$LANGUAGE_KEY":"${escapeJsonString(language)}","$MODEL_KEY":"${escapeJsonString(model)}"}"""
 
+// ---------------------------------------------------------------------
+// The realtime provider (ADR 0018 § 5). Declared here beside the other
+// bundled declarations, and **registered from the Android shell only** —
+// the AAR is Android-only and § 4 keeps whisper as the desktop engine, so
+// `openVault` must not learn about it. MainActivity registers it; the
+// desktop never does.
+// ---------------------------------------------------------------------
+
+const val MOONSHINE_PLUGIN = "org.memory.moonshine"
+
+/// One downloadable streaming model as data. `arch` is the bare `int`
+/// `Transcriber.loadFromFiles(path, arch)` takes — R0 found that slot is
+/// the MODEL ARCHITECTURE and not flags, and that passing the wrong one
+/// fails with a message naming the *path*, which reads like a missing
+/// file. 2 is `MOONSHINE_MODEL_ARCH_TINY_STREAMING`.
+///
+/// One entry in v1, deliberately: R0 measured streaming-tiny and nothing
+/// else ("Only streaming-tiny was measured" — its honest gaps), so a
+/// catalogue offering small or medium would be offering numbers nobody
+/// has. The shape is the whisper catalogue's so a second row costs a line
+/// when someone measures one.
+data class MoonshineModel(
+    val key: String,
+    val language: String,
+    val arch: Int,
+    /// The consent ask, **measured** by R0 (45,233,659 B across 8 files),
+    /// not the 77.7 MB ADR 0018 § 4 estimated before it ran.
+    val size: String,
+    val files: Int,
+) {
+    val label: String get() = "$key — $size, $files files"
+}
+
+const val MOONSHINE_ARCH_TINY_STREAMING = 2
+
+val MOONSHINE_MODELS: List<MoonshineModel> = listOf(
+    MoonshineModel("tiny-streaming-en", "en", MOONSHINE_ARCH_TINY_STREAMING, "45 MB", 8),
+)
+
+const val DEFAULT_MOONSHINE_MODEL = "tiny-streaming-en"
+
+/// The stored key resolved against the catalogue, on the whisper rule:
+/// absent, blank, or a key this build never heard of resolves to the
+/// default rather than failing.
+fun moonshineModel(key: String?): MoonshineModel =
+    MOONSHINE_MODELS.firstOrNull { it.key == key?.trim() }
+        ?: MOONSHINE_MODELS.first { it.key == DEFAULT_MOONSHINE_MODEL }
+
+/// **No `processorId`, no subscription and no emitted events in R1**, and
+/// that is the stage's whole point. R1 ships the live caption only: the
+/// committed transcript stays whisper's, and this plugin writes nothing
+/// anywhere (ADR 0018 § 6 R1). Declaring a processor here would have the
+/// kernel queue jobs for a processor that does not exist until R2's FFI
+/// route lands and R3 registers one — so the declaration says what is
+/// true today and grows when the thing it names does.
+///
+/// **`network.request` is the only capability**, because the AAR is
+/// packaged and code needs no consent beyond the enable switch (§ 5). The
+/// model download is the ask, it always waits for an explicit yes, and
+/// nothing re-grants after a revoke.
+fun moonshineDeclaration(): PluginDeclaration =
+    PluginDeclaration(
+        pluginId = MOONSHINE_PLUGIN,
+        name = "Realtime transcription (Moonshine)",
+        `class` = "provider",
+        profile = "bundled",
+        required = false,
+        processorId = null,
+        subscribes = null,
+        emits = emptyList(),
+        capabilities = listOf(NETWORK_CAPABILITY),
+        contributions = listOf(
+            PluginContribution(
+                slot = Slots.SETTINGS_FORM,
+                id = "moonshine-settings",
+                label = "Live caption, model and downloads",
+            ),
+        ),
+    )
+
+private const val CAPTION_KEY = "caption"
+private const val WIFI_ONLY_KEY = "wifiOnly"
+
+/// **Absent means on** (ADR 0018 § 5: caption on by default). A settings
+/// document written before this key existed — or none at all — must read
+/// as the shipped default rather than as a switch nobody ever saw quietly
+/// holding the feature back. Same rule the tasks panel switch uses.
+///
+/// Not gated on the plugin's state, for [tasksFilter]'s reason: the
+/// plugin's own screen must show what is stored even while it is off.
+fun List<PluginInfo>.moonshineCaption(): Boolean =
+    firstOrNull { it.pluginId == MOONSHINE_PLUGIN }?.let { jsonBoolean(it.settings, CAPTION_KEY) } ?: true
+
+/// **Absent means on**, and this default is the cautious one rather than
+/// the convenient one: 45 MB over somebody's mobile data because an app
+/// decided to fetch is exactly what § 4's rule exists to prevent.
+fun List<PluginInfo>.moonshineWifiOnly(): Boolean =
+    firstOrNull { it.pluginId == MOONSHINE_PLUGIN }?.let { jsonBoolean(it.settings, WIFI_ONLY_KEY) } ?: true
+
+fun List<PluginInfo>.moonshineModelKey(): String? =
+    firstOrNull { it.pluginId == MOONSHINE_PLUGIN }?.let { jsonString(it.settings, MODEL_KEY) }
+
+fun List<PluginInfo>.moonshineModel(): MoonshineModel = moonshineModel(moonshineModelKey())
+
+/// All three keys travel on every write, on the tasks and transcription
+/// precedent: whichever control a person touched, the other two carry
+/// their stored values, so turning the caption off can never revert the
+/// model or silently re-enable a mobile-data download.
+fun moonshineSettingsDocument(model: String, caption: Boolean, wifiOnly: Boolean): String =
+    """{"$MODEL_KEY":"${escapeJsonString(model)}","$CAPTION_KEY":$caption,"$WIFI_ONLY_KEY":$wifiOnly}"""
+
 /// One string value out of a flat JSON document, escapes handled. Plugin
 /// settings and contribution configs are opaque strings with no schema
 /// (a debt ADR 0015 names), and the shell reads a handful of known keys

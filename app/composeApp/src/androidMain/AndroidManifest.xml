@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- The widget's Record cell (ADR 0017 § 4). The microphone
          foreground service type is declared here AND passed to
@@ -18,9 +19,29 @@
          never touch the network at all. -->
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Whether this connection is metered, which is the whole of the
+         caption model's "only download on Wi-Fi" default (ADR 0018 § 4).
+         Declared HERE deliberately: the Moonshine AAR's own manifest
+         merges this permission in whether we write it or not (R0
+         condition 4), and a permission the app holds should be one
+         somebody decided to hold. It reads a flag; it opens nothing. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
     <application
         android:label="Gilune"
         android:theme="@style/Theme.Gilune">
+
+        <!-- The other half of that merge. The AAR declares an activity of
+             its own, `MicrophonePermissionActivity`, which exists to ask
+             for the microphone on behalf of `MicTranscriber` — the
+             convenience wrapper that opens its own recorder and that this
+             app deliberately never uses (ADR 0018 § 1: a tee, not a second
+             microphone). Gilune asks for the microphone itself, beside the
+             control that needs it, so this activity would be a second
+             consent surface for a path that does not exist here. -->
+        <activity
+            android:name="ai.moonshine.voice.MicrophonePermissionActivity"
+            tools:node="remove" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

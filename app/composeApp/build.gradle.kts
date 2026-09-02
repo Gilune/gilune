@@ -52,6 +52,43 @@ kotlin {
                 // port — `java.util.prefs` is unusable on Android — and the
                 // ADR names DataStore as the replacement.
                 implementation("androidx.datastore:datastore-preferences:1.1.1")
+                // -------------------------------------------------------
+                // The live caption's engine (ADR 0018 § 4, R1). Promoted
+                // from R0's test-only scope to the shipped app: this is
+                // the stage that puts the AAR in the APK, and the cost is
+                // measured rather than estimated — 16.70 MiB of native
+                // libraries per arm64 device, +8.02 MiB of dex and
+                // resources IF the transitive dependencies come with it.
+                //
+                // **The four exclusions are a defect fix, not a saving**
+                // (R0 condition 4). `androidx.work` and `appcompat` (via
+                // emoji2) each contribute an
+                // `androidx.startup.InitializationProvider` to the merged
+                // manifest, which AGP then dedupes out of the test APK —
+                // crashing every process started for the test package
+                // alone. Excluding them removed the crash outright,
+                // measured, and takes 8.13 MiB with it. Nothing in the AAR
+                // references Material at all; `appcompat` appears only in
+                // the signature of `loadFromAssets`, which we never call
+                // (we use `loadFromFiles`).
+                //
+                // **okhttp goes too, and that is a decision the ADR took
+                // rather than a size argument**: § 4 requires the model
+                // fetch to go through the plugin's `network.request`
+                // consent, Wi-Fi-first, so the vendor's `AssetDownloader`
+                // could never have been the downloader. `MoonshineDownload.kt`
+                // is ours; `AssetDownloader` is consequently unreachable
+                // and must never be called.
+                //
+                // `gilune_ffi.so` does not grow by a byte — Moonshine
+                // links into nothing of ours — so ADR 0001's 15 MB
+                // per-ABI kernel budget is untouched by this line.
+                implementation("ai.moonshine:moonshine-voice:0.1.5") {
+                    exclude(group = "androidx.appcompat")
+                    exclude(group = "com.google.android.material")
+                    exclude(group = "com.squareup.okhttp3")
+                    exclude(group = "androidx.work")
+                }
             }
         }
         val androidInstrumentedTest by getting {
@@ -70,37 +107,14 @@ kotlin {
                 // with NoSuchMethodException InputManager.getInstance.
                 // 3.7.0 is the release that stopped doing that.
                 implementation("androidx.test.espresso:espresso-core:3.7.0")
-                // ---------------------------------------------------------
-                // SPIKE R0 SCAFFOLDING ONLY — ADR 0018 § 6. Not product
-                // wiring: the Moonshine AAR is scoped to the instrumented
-                // TEST source set, so it lands in the test APK and the
-                // shipped app APK is byte-for-byte unaffected. R1 is the
-                // stage that would promote this to `androidMain`, and the
-                // per-ABI cost of doing so is what R0 measures. Delete this
-                // line and `R0*.kt` together if the spike is discarded.
-                //
-                // Resolves from mavenCentral(), already declared in
-                // settings.gradle.kts — no repository addition needed.
-                // Pulls appcompat, material, okhttp and work-runtime
-                // transitively (recorded in the spike README).
-                //
-                // The excludes are NOT cosmetic. `androidx.work` and
-                // `appcompat` (via emoji2) each contribute an
-                // `androidx.startup.InitializationProvider` to the MERGED
-                // manifest; AGP then dedupes the `androidx.startup` classes
-                // out of the test APK because the app APK already carries
-                // them, so any process started for the test package alone
-                // dies with ClassNotFoundException before a test runs.
-                // Measured — see the spike README § "The transitive
-                // dependencies". `okhttp` is deliberately KEPT: a03 measures
-                // the vendor's own downloader and genuinely needs it. R1
-                // should exclude that one too and fetch models itself, which
-                // ADR 0018 § 4's consent rule requires anyway.
-                implementation("ai.moonshine:moonshine-voice:0.1.5") {
-                    exclude(group = "androidx.appcompat")
-                    exclude(group = "com.google.android.material")
-                    exclude(group = "androidx.work")
-                }
+                // The Moonshine AAR is NOT declared here any more. R1
+                // promoted it to `androidMain` (above), so the tested app
+                // carries it and the instrumented suite — R0's spike tests
+                // included — compiles against the app's own dependency.
+                // One consequence is deliberate and recorded in R0's
+                // README: with okhttp excluded, the vendor's
+                // `AssetDownloader` is unreachable, so R0's `a03` skips
+                // itself rather than failing.
             }
         }
     }
@@ -117,6 +131,15 @@ android {
         versionCode = 1
         versionName = "0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        ndk {
+            // The two ABIs this app ships, stated so that a dependency's
+            // extra ones cannot ride along (R0 condition 4). The Moonshine
+            // AAR carries **armeabi-v7a**, which Gilune does not support;
+            // without this filter a universal build would package 12.72 MiB
+            // of native libraries it can never load. Our own jniLibs have
+            // only these two directories, so nothing of ours is affected.
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

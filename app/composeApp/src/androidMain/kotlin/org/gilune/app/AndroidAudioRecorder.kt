@@ -14,6 +14,19 @@ class AndroidAudioRecorder : AudioRecorder {
     private var worker: Thread? = null
     private val buffer = ByteArrayOutputStream()
 
+    /// The live caption's tee (ADR 0018 § 1: "a tee off that buffer, not a
+    /// second microphone"). Set while a caption session is running, null
+    /// otherwise, and read on the recording thread.
+    ///
+    /// **The recording does not depend on it and cannot be harmed by it.**
+    /// The bytes reach [buffer] first, the call is wrapped so a throw
+    /// cannot break the read loop, and the tee's own contract is to return
+    /// immediately — `MoonshineSession.feed` converts and hands off to a
+    /// bounded queue, because the transcriber decodes on its caller's
+    /// thread and that must never be this one.
+    @Volatile
+    var tee: ((ByteArray, Int) -> Unit)? = null
+
     // The caller gates on RECORD_AUDIO being granted (MainActivity).
     @SuppressLint("MissingPermission")
     override fun start() {
@@ -38,7 +51,14 @@ class AndroidAudioRecorder : AudioRecorder {
             val chunk = ByteArray(4096)
             while (record === opened) {
                 val read = opened.read(chunk, 0, chunk.size)
-                if (read > 0) synchronized(buffer) { buffer.write(chunk, 0, read) }
+                if (read > 0) {
+                    // The capture first, always. The caption sees the
+                    // bytes only after they are safely in the buffer the
+                    // recording will be made from, and a tee that throws
+                    // loses the caption, never the recording.
+                    synchronized(buffer) { buffer.write(chunk, 0, read) }
+                    runCatching { tee?.invoke(chunk, read) }
+                }
                 if (read < 0) break
             }
         }.apply {

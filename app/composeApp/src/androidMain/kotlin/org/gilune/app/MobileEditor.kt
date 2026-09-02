@@ -613,6 +613,17 @@ private fun NoteActions(
     if (!dictationOffered(state.plugins.toList(), transcription.phase)) return
 
     var recording by remember { mutableStateOf(false) }
+    // **No live caption here, deliberately** (ADR 0018 § 1, R1). The tee
+    // that feeds the caption lives on this same recorder, so wiring one up
+    // would be three lines — but the caption is a block of text that
+    // appears and disappears, and the thing under it here is a *buffer
+    // with a caret in it*. § 1 exempts the caption from ADR 0017 § 2's
+    // no-reflow law on the grounds that "a caption with no caret in it
+    // costs nobody a keystroke"; above a live editor that reasoning does
+    // not hold, and § 1 names the capture surface — and only it — as where
+    // the caption is rendered. Dictation with a caption is a real want and
+    // it needs a decided answer about what moves when it appears; that is
+    // a design question, not an oversight.
     val recorder = remember { AndroidAudioRecorder() }
     var micGranted by remember {
         mutableStateOf(

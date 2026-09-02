@@ -166,7 +166,13 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
 
     val state = remember { GiluneState(vaultDir, scope) }
 
-    LaunchedEffect(Unit) { state.openVault() }
+    // The realtime provider is registered **here** rather than in
+    // `openVault`, and that is the whole of "bundled on mobile only in v1"
+    // (ADR 0018 § 5): the shared open path declares the microphone and
+    // tasks for both shells, and Moonshine is neither shared nor desktop.
+    // Registering grants nothing — its one capability is `network.request`,
+    // which always waits for an explicit yes.
+    LaunchedEffect(Unit) { state.openVault { gilune -> registerMoonshine(state, gilune) } }
 
     // Local transcription (§ 4). The model is fetched and handed to the
     // kernel off the capture path entirely — nothing here is on the way
@@ -185,6 +191,22 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     LaunchedEffect(transcriptionKey) {
         val gilune = state.gilune.value ?: return@LaunchedEffect
         withContext(Dispatchers.IO) { startTranscription(context, state, gilune, transcription) }
+    }
+
+    // The live caption's model (ADR 0018 § 4), on exactly the transcription
+    // idiom above and for the same reason: one call site, keyed on the
+    // inputs the plan reads, so it re-runs when allowing `network.request`,
+    // switching the plugin on, or turning the caption on would change the
+    // answer — and never twice at once into the same partial file.
+    //
+    // Nothing here is on the path to a typable caret, and no recording
+    // waits on any of it: with no model there is simply no caption.
+    val moonshine = remember { MoonshineRuntime() }
+    val moonshineKey = state.plugins.firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
+        ?.let { "${it.state}|${it.granted.sorted().joinToString(",")}|${it.settings}" }
+    LaunchedEffect(moonshineKey) {
+        if (state.gilune.value == null) return@LaunchedEffect
+        withContext(Dispatchers.IO) { startMoonshine(context, state, moonshine) }
     }
 
     var destination by remember { mutableStateOf(Destination.Capture) }
@@ -335,6 +357,7 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                                     focusNonce = focusComposer,
                                     micNonce = askForMic,
                                     transcription = transcription,
+                                    moonshine = moonshine,
                                 )
                                 Destination.Notes ->
                                     NotesScreen(state, onOpenNote = { screen = Screen.Read(it) })
@@ -365,6 +388,7 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                             idleTimeout = idleTimeout,
                             onIdleTimeoutChange = { scope.launch { prefs.setIdleTimeout(it) } },
                             onExport = { exporter.launch(exportFileName(LocalDate.now().toString())) },
+                            moonshine = moonshine,
                         )
                     }
                 }
