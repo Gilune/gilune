@@ -748,6 +748,33 @@ gates promises) are ratified. **Next: application-level engineering — see
      unmeasured); dictation-mic has no caption (no-reflow reasoning
      fails over a live buffer); docs site has no mobile/caption
      guide; MS2 owns ARM64/battery/thermals/"Gilune"-vocabulary.
+   - **MS1 rig stabilised (2026-09-02, one Opus agent, owner-started
+     chip; coordinator decision (a) ratified in-flight)** — the flakes
+     were never establishment timing: the emulator's bound LatinIME
+     calls finishComposingText UNPROMPTED 150–860 ms after every edit
+     on the LEGACY Compose field (a platform EditText under the
+     identical rig takes zero interjections), and waitForIdle only
+     waits for our process — every composing assertion raced another
+     process, and the spike's original 5 green runs were luck. Fix:
+     `Ms1InputSessionRule` disables device IMEs per row and restores
+     in finally + a JVM shutdown hook (chained OUTSIDE the Compose
+     rule — bare @Rule ordering is undefined); rows whose subject IS
+     the keyboard opt back in via @WithSystemKeyboard and await the
+     teardown as an event (bounded poll, no blind sleeps). The two
+     old defect rows were CONTRADICTORY under any deterministic rig
+     (region asserted open AND absent either side of the same ~260 ms
+     teardown) and were rewritten to pin the REAL mechanism — field
+     opens the region, keyboard tears it down, next span appends =
+     bytes the user did not type; falsification proven (annotation
+     stripped ⇒ all 3 mechanism rows fail). MS1 verdict + all four
+     conditions UNCHANGED (condition 1 reinforced; TextFieldState
+     unflaky 8/8 in diagnosis). Re-proof: 39/39 ×6 cold-no-snapshot
+     + ×6 snapshot; full suite 610 = 609/0/1(a03 skip) from BOTH boot
+     types — zero flakes anywhere. README keeps the superseded
+     account verbatim. New honest gaps: one keyboard measured
+     (Gboard); 36 rows now run keyboard-UNBOUND; whether
+     TextFieldState suffers the same teardown is unasserted (wants
+     its own @WithSystemKeyboard row).
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

@@ -56,6 +56,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
 import org.junit.runners.Parameterized
 import kotlin.test.assertEquals
@@ -73,8 +74,14 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
     /// in, not the shape of the offset table this measures.
     enum class Reveal { AlwaysGlyph, CaretLineRaw }
 
+    private val rule: ComposeContentTestRule = createComposeRule()
+
+    /// [Ms1InputSessionRule] must be the OUTER rule: the device's input
+    /// methods have to be in the right state before the Compose rule launches
+    /// an activity and a field takes focus. Bare `@Rule` ordering is
+    /// undefined, so the two are chained explicitly.
     @get:Rule
-    val rule: ComposeContentTestRule = createComposeRule()
+    val chain: RuleChain = RuleChain.outerRule(Ms1InputSessionRule()).around(rule)
 
     private val state: MutableState<TextFieldValue> = mutableStateOf(TextFieldValue(""))
 
@@ -203,11 +210,9 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
 
     // ---------------------------------------------------------------- (d)
 
-    // Three separate rows, one composing sequence each, because a session
-    // that has ENDED a composition never opens another (the finding pinned
-    // by [theLegacyFieldStopsOpeningComposingRegionsAfterACommit]). Running
-    // them in one method would measure that defect a second time instead of
-    // measuring the correction.
+    // Three separate rows, one composing sequence each, so that each row
+    // measures one autocorrect shape from a clean start rather than
+    // inheriting the composing state the previous sequence left behind.
 
     @Test
     fun autocorrectReplacesAWordWithALongerOne_besideTheGlyph() {
@@ -263,8 +268,8 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
             // One word is one batch, which is how a keyboard actually
             // delivers a word: `beginBatchEdit` … `endBatchEdit` with the
             // composing span rewritten in place inside it. See
-            // [theLegacyFieldStopsOpeningComposingRegionsAfterACommit] for
-            // what happens when the same calls are delivered unbatched, and
+            // [theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion] for
+            // what a bound keyboard does to a region BETWEEN batches, and
             // why that is a property of the legacy API rather than of the
             // decoration under test.
             ime {
@@ -314,34 +319,37 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
 
     // --------------------------------------- the finding that gates MB2
 
+    @WithSystemKeyboard
     @Test
-    fun theLegacyFieldStopsOpeningComposingRegionsAfterACommit() {
+    fun theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion() {
         // MS1's headline measurement, and it is NOT about the decoration.
         //
-        // Once a composition has been ended — by `commitText` or by
-        // `finishComposingText` — the legacy `BasicTextField(TextFieldValue)`
-        // never opens another composing region for the rest of the session
-        // when the calls are delivered unbatched. `setComposingText` still
-        // inserts its text, so a keyboard rewriting its composing span in
-        // place gets every intermediate prefix ACCUMULATED into the
-        // document: "c", then "cd", lands as "ccd".
+        // THIS ROW SUPERSEDES an earlier formulation, which asserted that the
+        // legacy field "stops opening composing regions after a commit" so
+        // that unbatched prefixes accumulate. The corruption is real and is
+        // still pinned below — but the premise was wrong and the row could
+        // only pass when a cross-process race resolved one particular way,
+        // which is why it used to fail in BOTH directions on a loaded
+        // emulator. The original wording and the evidence that retired it are
+        // recorded in `spikes/ms1-ime/README.md`.
         //
-        // Three controls run under this same rig say the fault is the
-        // legacy API's and not ours:
-        //   * `VisualTransformation.None` produces a byte-identical trace,
-        //     so `MarkdownEditTransformation` is not implicated;
-        //   * a plain platform `EditText` re-opens the region correctly
-        //     (comp=24,25 where Compose reports none);
-        //   * `TextFieldState` + `outputTransformation` re-opens it
-        //     correctly too — see `Ms1TextFieldStateSpikeTest`.
-        // `InputMethodManager.restartInput` does not repair it.
+        // What actually happens, measured: the legacy field DOES open the
+        // region. Then the BOUND KEYBOARD tears it down unprompted — Google
+        // LatinIME calls `finishComposingText` of its own accord 150–860 ms
+        // after the edit, reacting to what the legacy field reports through
+        // `updateSelection`. A platform `EditText` driven by the identical
+        // rig under the identical keyboard is never touched at all
+        // (`Ms1ControlsTest`), and `VisualTransformation.None` is torn down
+        // exactly as this is — so the fault is the legacy field's, not the
+        // keyboard's caprice and not the decoration's.
         //
-        // This test pins the behaviour so the day it changes, the tree says
-        // so and the MB2 condition can be revisited.
+        // This row runs WITH the keyboard bound, because the keyboard is what
+        // it measures, and it synchronises on the teardown as an EVENT rather
+        // than racing it. Every other row in this suite owns the session
+        // exclusively so that nothing can interfere with what it measures.
         open(DOC + "- [ ] milk\n", caret = 22)
         // One held connection, the protocol a real keyboard uses and the
         // one `Ms1TextFieldStateSpikeTest` uses for the same sequence.
-        // Re-obtaining the connection per call makes no difference here.
         val held = rule.runOnUiThread { findConnection(decorView(), EditorInfo()) }
         assertNotNull(held)
         fun on(block: InputConnection.() -> Unit) {
@@ -349,27 +357,45 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
             rule.waitForIdle()
         }
 
-        // The first run, batched, so this assertion is about the defect's
-        // absence rather than about delivery shape.
-        on {
-            beginBatchEdit()
-            setComposingText("a", 1)
-            setComposingText("ab", 1)
-            endBatchEdit()
+        // 1. Our command opens a composing region, exactly as the API says it
+        //    must. Read INSIDE the same UI-thread block that issues it: an
+        //    interjection from another process arrives as its own looper
+        //    message and cannot land inside this block, so the observation is
+        //    exact rather than a race.
+        val atCommand = rule.runOnUiThread {
+            held.setComposingText("a", 1)
+            state.value
         }
-        assertEquals(DOC + "- [ ] milk\nab", text(), "the FIRST composing run replaces in place")
-        assertEquals(TextRange(22, 24), value().composition)
-
-        on { commitText("ab ", 1) }
-        assertEquals(DOC + "- [ ] milk\nab ", text())
-        assertNull(value().composition)
-
-        on { setComposingText("c", 1) }
-        assertNull(value().composition, "no region is opened after a commit — the defect")
-        on { setComposingText("cd", 1) }
-
+        rule.waitForIdle()
+        assertEquals(DOC + "- [ ] milk\na", atCommand.text, "the composing span landed")
         assertEquals(
-            DOC + "- [ ] milk\nab ccd",
+            TextRange(22, 23),
+            atCommand.composition,
+            "the legacy field DOES open a composing region",
+        )
+
+        // 2. Nobody asked it to, and yet the region goes away. The wait is
+        //    bounded and asserted: if a platform ever stops doing this, the
+        //    row FAILS here rather than passing quietly — which is exactly
+        //    what a physical-device run should be able to check.
+        assertTrue(
+            awaitCondition(TEARDOWN_WAIT) { value().composition == null },
+            "the bound keyboard tore the composing region down within ${TEARDOWN_WAIT}ms",
+        )
+        assertEquals(
+            DOC + "- [ ] milk\na",
+            text(),
+            "and it wrote no bytes of its own doing so",
+        )
+
+        // 3. That teardown IS the corruption the ADR's pass criterion
+        //    forbids: the next span, which a keyboard means as a REPLACEMENT
+        //    of the one it is still rewriting, finds no region and appends.
+        //    Deterministic now, because step 2 waited for the teardown rather
+        //    than racing it.
+        on { setComposingText("ab", 1) }
+        assertEquals(
+            DOC + "- [ ] milk\naab",
             text(),
             "so the prefixes accumulate: bytes the user did not type",
         )
@@ -509,16 +535,20 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
 
     /// Seeds the buffer and waits until a real IME session exists.
     ///
-    /// Both halves of this are load-bearing, and both were arrived at by
-    /// measurement rather than taste. The field must hold its text BEFORE
-    /// `setContent`, because a session that opens over an empty buffer never
-    /// opens a composing region afterwards at all; and a programmatic write
-    /// must then land AFTER the session exists, because a command issued
-    /// into a session still settling from `setContent` drops its composing
-    /// region perhaps one run in three. Seeded both ways, every row starts
-    /// from the same state and the suite is deterministic. Both symptoms are
-    /// the same legacy-field fragility the verdict rests on — the rig has to
-    /// steer around it to measure anything else.
+    /// The field must hold its text BEFORE `setContent`, and the
+    /// programmatic write must then land AFTER the session exists, so that
+    /// every row starts from one identical state.
+    ///
+    /// An earlier version of this comment claimed the second half was
+    /// steering around a settling session that "drops its composing region
+    /// perhaps one run in three". That was wrong: the session does not
+    /// settle into correctness, and waiting longer never helped. What was
+    /// actually happening is that a second process — the bound keyboard —
+    /// was on the same connection, tearing composing regions down at
+    /// unpredictable moments. [Ms1InputSessionRule] now gives this row sole
+    /// ownership of the input session, which is what makes the suite
+    /// deterministic; the seeding order below is kept because it is still
+    /// the cleanest way to start every row from the same bytes.
     private fun open(source: String, caret: Int) {
         if (!contentSet) {
             state.value = TextFieldValue(source, TextRange(caret))
@@ -569,14 +599,20 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
     /// inside one `beginBatchEdit`…`endBatchEdit`, so every command lands on
     /// a single edit buffer with no recomposition between them.
     ///
-    /// This is not a convenience. Measured on this emulator, batched
-    /// delivery is the ONLY shape in which the legacy field keeps a
-    /// composing region reliably; unbatched, it loses one about a quarter of
-    /// the time even before the after-a-commit defect that
-    /// [theLegacyFieldStopsOpeningComposingRegionsAfterACommit] pins. The
-    /// matrix therefore measures the offset mapping under the delivery a
-    /// real IME uses, and the unbatched fragility is reported as its own
-    /// finding rather than smeared across every row.
+    /// This is not a convenience: it is the delivery shape a real IME uses,
+    /// so the matrix measures the offset mapping under the traffic that
+    /// actually occurs. Inside one batch every command lands on a single
+    /// edit buffer with no recomposition between, which is also why a batch
+    /// cannot be interrupted by another actor on the connection.
+    ///
+    /// An earlier version of this comment said batched delivery was "the
+    /// ONLY shape in which the legacy field keeps a composing region
+    /// reliably", unbatched losing one "about a quarter of the time". The
+    /// loss was real but the cause was not the delivery shape: it was the
+    /// bound keyboard tearing regions down between commands, which
+    /// [theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion] now pins
+    /// directly. With the session owned exclusively, unbatched delivery is
+    /// as stable as batched.
     private fun batch(block: InputConnection.() -> Unit) = ime {
         beginBatchEdit()
         block()
@@ -673,6 +709,12 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
     companion object {
         private const val FIELD = "ms1-field"
         private const val SESSION_WAIT = 10_000L
+
+        /// The bound keyboard's teardown was measured at 150–860 ms across
+        /// runs on this emulator. The bound is generous against a loaded one;
+        /// the row returns as soon as the event lands, so the margin costs
+        /// nothing when the machine is fast.
+        private const val TEARDOWN_WAIT = 2_000L
 
         private val PALETTE = MarkdownPalette(
             muted = Color.Gray,

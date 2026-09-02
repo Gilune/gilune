@@ -3,10 +3,14 @@
 Status: **Complete** — verdict **PASS WITH CONDITIONS** (§ Verdict). The
 offset mapping ADR 0017 § 8 was chartered to doubt is sound under every
 composing sequence measured. A different defect was found in the same place
-and it is not ours: Compose's **legacy** `BasicTextField(TextFieldValue)`
-stops opening composing regions after a commit, which writes bytes the user
-did not type. The condition on MB2 follows from that, not from the
-decoration.
+and it is not ours: with a keyboard bound, Compose's **legacy**
+`BasicTextField(TextFieldValue)` has its composing region torn down by that
+keyboard after every edit, so an unbatched sequence writes bytes the user did
+not type. A platform `EditText` on the same rig under the same keyboard is
+never touched. The condition on MB2 follows from that, not from the
+decoration. (The mechanism was corrected on 2026-09-02; the superseded
+formulation and the evidence that retired it are kept in § The finding that
+gates MB2 and § The rig owns the input session.)
 
 Evidence prototype for **ADR 0017 § 2** (the mobile editor's always-glyph
 checkbox, the one length-delta decoration in the buffer) and the gate on
@@ -14,7 +18,9 @@ checkbox, the one length-delta decoration in the buffer) and the gate on
 
 ```text
 app/composeApp/src/androidInstrumentedTest/kotlin/org/gilune/app/
-  Ms1ImeRig.kt                  the route to a real InputConnection
+  Ms1ImeRig.kt                  the route to a real InputConnection, and the
+                                ownership of the input session that makes
+                                driving it deterministic
   Ms1ImeSpikeTest.kt            the matrix, ×2 transformation configs
   Ms1TextFieldStateSpikeTest.kt the modern-API prototype (questions 2 and 3)
   Ms1ControlsTest.kt            the two controls the verdict rests on
@@ -61,10 +67,11 @@ surface directly. It does not claim to have run a keyboard.
 - Windows 11 host; SDK at `%LOCALAPPDATA%\Android\Sdk` with the stale
   `ANDROID_HOME` overridden per process, per CLAUDE.md.
 
-Tallies: **39 MS1 tests, five consecutive green runs**, no flakes. Full
-Android instrumented suite **389/389** green (MB0's and MB1's suites
-unchanged beside these). Desktop **394/394** green — MS1 touched no desktop
-code and the number is unchanged.
+Tallies: **39 MS1 tests**. The original run (2026-09-01) recorded five
+consecutive green runs; those runs were **luck**, and the suite was later
+found to be non-deterministic — see § The rig owns the input session, which
+records what was wrong, what fixed it, and the re-proof tallies taken on
+2026-09-02 after the fix.
 
 ## The rig, and which layer each row exercises
 
@@ -87,6 +94,76 @@ Per-row layer disclosure, because it matters:
 | The transformed string each row asserts | `MarkdownEditTransformation.filter` called directly — a pure function over the same input the field gets |
 | The offset-mapping soundness check (`assertSound`) | The same pure call; the mapping is then walked exhaustively at **every** offset in both directions |
 | "The field did not crash" | In vivo: Compose wraps every `OffsetMapping` in a validator that throws during composition, so a run that completes is a run the validator passed |
+
+## The rig owns the input session
+
+**This section supersedes an earlier account of the rig's flakiness, and the
+account it replaces was wrong. Both are kept, because a spike that quietly
+rewrites its own history is worth nothing.**
+
+What the first version said: that a command delivered into a session "up but
+not yet settled" lost its composing region "roughly one run in four", and
+that a harmless warm-up round trip steered around it. What was actually
+happening: **the rig was not the only actor on the connection.**
+
+The emulator image carries Google LatinIME, it is the default input method,
+and it binds to the field the moment the field takes focus. "Installed and
+not driven" is not the same as "not bound". On the **legacy** Compose field
+it then calls `finishComposingText` of its own accord, unprompted, **150–860
+ms after every edit** — reacting to what that field reports through
+`updateSelection`. `rule.waitForIdle()` waits only for this process and
+returns 50–150 ms in. So every assertion about a composing region was a race
+against another process, and the suite failed in **both** directions with
+different members each run: a region missing where one had to be open
+(`expected TextRange(22,24) but was null`) and a region present where the
+old defect row said none could be (`expected null, but was TextRange(25,26)`).
+
+The evidence, in the order that settled it:
+
+| Measurement | Result |
+| --- | --- |
+| Cold `-no-snapshot` reproduction, 3 runs | 3 / 1 / 4 failures, **different members each run** |
+| Every static gate at the moment the rig starts — window focus, host focus, `imm.isActive`, `isAcceptingText` | all already true; the gate was never the problem |
+| A sentinel opening and closing a composing region 30 times, seconds into the session | still erratic; the session never "settles", and waiting longer never helped |
+| Watching the field for 800 ms after each command *without touching it* | our command opens the region correctly every time, then `comp=null` lands unprompted at +264 / +270 / +386 / +431 / **+864** ms |
+| The same rig, same keyboard, driving a platform `EditText` | **zero** interjections, 3 instances × 6 commands, over a 1200 ms window each |
+| All input methods disabled, 3 suite runs | fully deterministic: the same 3 rows fail every time, identical assertion text |
+| A passive (voice) IME bound instead, 2 suite runs | identical to the above — so it is the keyboard's **commands**, not the binding |
+
+That `EditText` row is the one that matters: under the identical rig and the
+identical keyboard the platform's own editor is never touched. So this is the
+**legacy Compose field's** doing, not the keyboard being hostile to everyone.
+
+**The fix.** `Ms1InputSessionRule` (in `Ms1ImeRig.kt`) disables the device's
+input methods for the duration of a row and restores them in a `finally`, so
+the only actor on the connection is the test. It is chained *outside* the
+Compose rule — plain `@Rule` ordering is undefined and the input methods must
+be right before an activity launches. Restoration runs on failure too, and a
+JVM shutdown hook covers a hard kill, because a device left with no input
+method would break every later suite on the same emulator. The rows whose
+subject **is** the keyboard opt back in with `@WithSystemKeyboard`, and they
+synchronise on the interjection as an *event* — `awaitCondition`, a bounded
+poll that returns the moment the teardown lands and asserts its return value,
+so a platform that stops doing this fails the row rather than passing quietly.
+
+No blind sleeps were added. The one fixed window in the suite is the negative
+assertion on the `EditText` control, which states the window it watched.
+
+**Re-proof, 2026-09-02**, all 39 MS1 tests green in every run:
+
+- **six consecutive runs from a cold `-no-snapshot` boot**, 39/39 each;
+- **six consecutive runs from a snapshot boot**, 39/39 each;
+- **one full Android instrumented suite from each boot type**: 610 tests,
+  609 passed, 0 failures, 1 assumption-skip — R0's known `a03` network skip —
+  from cold and from snapshot alike.
+
+Falsifiability was checked by removing `@WithSystemKeyboard` so the mechanism
+could not occur: all three mechanism instances failed, on the awaited event,
+with the message naming it, while the other 30 rows in that class stayed
+green.
+
+For comparison, the same four classes before the fix, on a cold boot: **3 / 1
+/ 4 failures over three runs, different members each time**.
 
 `assertSound()` is the strongest single check in the suite: after every step
 of every row it asserts, for all offsets `0..length`, that
@@ -148,49 +225,80 @@ the caret; and a four-character whole-word delete.
 
 ## The finding that gates MB2
 
-Once a composition has been ended — by `commitText` or by
-`finishComposingText` — the legacy `BasicTextField(TextFieldValue)` **never
-opens another composing region** for the rest of the session when commands
-arrive unbatched. `setComposingText` still inserts its text, so a keyboard
-rewriting its composing span in place gets every intermediate prefix
-accumulated into the document: `"c"` then `"cd"` lands as `ccd`. A later
-`setComposingRegion` is ignored the same way, which is how an autocorrect
-would silently double a word.
+**Superseded formulation, recorded rather than erased.** Until 2026-09-02
+this section said: once a composition has been ended, the legacy
+`BasicTextField(TextFieldValue)` *never opens another composing region for
+the rest of the session* when commands arrive unbatched, so prefixes
+accumulate — `"c"` then `"cd"` lands as `ccd`. The corruption is real and is
+still pinned. The **premise was wrong**: the field does open the region. And
+the row that pinned it could only pass when a cross-process race resolved one
+particular way, which is why it later failed in both directions. It was
+retired by the measurements in § The rig owns the input session.
+
+**What is measured now.** With a keyboard bound, the legacy field opens the
+composing region exactly as the API says it must — and then the **keyboard
+tears it down unprompted**, 150–860 ms later, having been given no reason to.
+The next composing span, which a keyboard means as a *replacement* of the one
+it is still rewriting, therefore finds no region and **appends**:
+
+```text
+setComposingText("a")     → "…\na"     composition (22,23)   ← the field is fine
+   …150–860 ms later, unprompted:        composition null     ← the keyboard
+setComposingText("ab")    → "…\naab"                          ← bytes not typed
+```
 
 That is "a byte the user did not type", and it is what the ADR's pass
-criterion forbids.
+criterion forbids. The row is
+`Ms1ImeSpikeTest.theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion`,
+run under both caret rules, with the keyboard deliberately bound. It waits
+for the teardown as an event and asserts that it arrived, so it stays
+**falsifiable**: a platform that stops doing this fails the row.
 
 Three controls place the fault, and all three ran on the identical rig:
 
 1. **`VisualTransformation.None`** — no decoration, no offset mapping,
-   nothing of ours — produces a byte-identical trace. Our transformation is
-   not implicated. (`Ms1ControlsTest.theSameComposeFieldAccumulatesWithNoTransformationAtAll`)
+   nothing of ours — is torn down identically and accumulates identically.
+   Our transformation is not implicated.
+   (`Ms1ControlsTest.theSameComposeFieldIsTornDownWithNoTransformationAtAll`)
 2. **A plain platform `EditText`** — the reference implementation of an
-   `InputConnection` — re-opens the region correctly: composing span
-   `24,25` where Compose reports none, and the second span replaces the
-   first. So the rig is sound.
-   (`Ms1ControlsTest.aPlatformEditTextReOpensTheComposingRegionAfterACommit`)
-3. **`TextFieldState` + `outputTransformation`** handles the same sequence
-   correctly.
+   `InputConnection` — driven by the same calls under the **same bound
+   keyboard** is never interfered with at all: zero interjections over a
+   1200 ms window in which the Compose field is torn down every time, and it
+   re-opens its composing region correctly afterwards. So the rig is sound,
+   and the keyboard is not simply hostile to everything.
+   (`Ms1ControlsTest.aPlatformEditTextIsNeverTouchedByTheBoundKeyboard`)
+3. **`TextFieldState` + `outputTransformation`** handles the same sequences
+   correctly, and was never seen to accumulate in any run.
 
 `InputMethodManager.restartInput` — the framework's own repair mechanism —
-does not restore it. Holding one connection rather than re-obtaining it does
+does not prevent it. Holding one connection rather than re-obtaining it does
 not change it either.
 
-**It is invisible inside a batch.** Every command in one
+**A batch is atomic against it.** Every command in one
 `beginBatchEdit`/`endBatchEdit` lands on a single edit buffer with no
-recomposition between, so composition bookkeeping survives. Real keyboards
-batch, which is very likely why this has not sunk the legacy field in
-production — and it is why the matrix above delivers each composing sequence
-batched, measuring the mapping under the delivery a real IME uses. The
-defect is reported as its own row
-(`theLegacyFieldStopsOpeningComposingRegionsAfterACommit`) rather than
-smeared across every other one.
+recomposition between, and no `updateSelection` goes out mid-batch, so the
+keyboard cannot interject inside one. The teardown then arrives after the
+batch ends. Real keyboards batch a word at a time, which is very likely why
+this has not sunk the legacy field in production — a word survives, and it is
+the seam *between* words that is exposed. It is also why the matrix above
+delivers each composing sequence batched: it measures the mapping under the
+delivery a real IME uses, with the interference reported as its own row
+rather than smeared across every other one.
 
-A second, milder symptom of the same fragility: a command delivered into a
-session that is up but not yet settled loses its composing region, roughly
-one run in four. The rig steers around it with a harmless warm-up round trip
-so that the suite measures the mapping rather than the settling.
+**The conditions in § Verdict are unchanged, and this reinforces them.** The
+mechanism is more specific than the old wording and it points the same way:
+the legacy field, alone among the editors measured, provokes a bound keyboard
+into destroying its composing state. MB2 was already built on
+`TextFieldState` + `outputTransformation`, which is what condition 1 asked
+for, and that class was green in every run taken during this investigation.
+
+This section previously claimed "a second, milder symptom of the same
+fragility": that a command issued into a session "up but not yet settled"
+lost its composing region "roughly one run in four", absorbed by a warm-up
+round trip. There is no such symptom. That was the same interference, seen
+before its cause was known — a sentinel driven 30 times, seconds into the
+session, was still erratic, so nothing was ever settling. The warm-up round
+trip is kept only because it starts every row from one identical state.
 
 ## Question 2 — `TextFieldState` and `outputTransformation`
 
@@ -272,21 +380,37 @@ write it".
   must be revisited when the owner's device arrives. What is claimed here is
   the `InputConnection` contract, which is the surface all of them use — not
   the sequences any particular one of them chooses to send.
-- **The emulator carries Google LatinIME and it was not driven.** Injecting
+- **The emulator carries Google LatinIME and its UI was not driven** —
+  but it was *bound*, and that turned out to matter enormously. Injecting
   keystrokes through `adb shell input` produces key events, not a composing
-  session, so it would have measured a different thing while looking like it
-  measured this one. Driving the keyboard's own UI headlessly is not
-  deterministic. A physical-device run should use the real keyboards rather
-  than repeat this.
+  session, so driving it that way would have measured a different thing while
+  looking like it measured this one; driving the keyboard's own UI headlessly
+  is not deterministic. What the suite does instead is control whether the
+  keyboard is attached at all: every row but three owns the session
+  exclusively, and those three are attached deliberately and measure the
+  attachment. A physical-device run should use the real keyboards rather than
+  repeat this.
+- **The teardown was measured with one keyboard.** Google LatinIME on this
+  image is the only keyboard that has ever driven this field. Whether Gboard
+  proper, Samsung Keyboard or a CJK converter tear the legacy field's
+  composing region down on the same schedule is **assumed**, not measured. The
+  mechanism-pinning rows are written to be falsifiable precisely so a
+  hardware run can answer this: if a real keyboard does not do it, they fail.
 - **x86_64 only.** No ARM64 execution, as everywhere else in this repo.
-- **The modern API was not proved immune to the composing fragility.** In
-  runs taken while the rig was still being settled, the modern field also
-  lost a post-commit composing region in a minority of unbatched sequences.
-  No rate is quoted, because the rig was changing underneath those
-  observations and a number would imply more than was measured. What is
-  solid: the legacy field does it every time and deterministically; the
-  platform `EditText` never did it; the modern field is markedly better and
-  is not proven perfect.
+- **The modern API was not proved immune to the teardown.**
+  `Ms1TextFieldStateSpikeTest` owns the input session exclusively, like the
+  rest of the matrix, so it measures the API and not the keyboard: it says
+  nothing either way about whether a bound keyboard tears *its* composing
+  region down. What is on record is circumstantial and worth exactly that
+  much: it was green in all fifteen-plus runs taken across this
+  investigation, including every run in which the legacy field was failing,
+  and it was never seen to accumulate. Standing the comparison up properly
+  needs one more row, attached with `@WithSystemKeyboard`, mirroring the
+  legacy mechanism row. It is not written. (An earlier version of this entry
+  reported the modern field "also lost a post-commit composing region in a
+  minority of unbatched sequences"; those observations were taken while the
+  keyboard was interfering unrecognised, so they measured the race, not
+  the API.)
 - **Desktop composing is untested.** This measurement is Android-only. The
   desktop editor ships the legacy field with the same transformation, and
   desktop IMEs (a Windows CJK IME, for one) reach it through AWT input
@@ -300,11 +424,18 @@ write it".
 - **No performance measurement.** The transformation is re-run per
   recomposition on the whole buffer; this spike measured correctness only.
   A long note under composing churn is unmeasured.
-- **The rig's warm-up is a real caveat.** The suite inserts a harmless IME
-  round trip before each row because the first command into a fresh session
-  can lose its composing region. A real keyboard's first keystroke gets no
-  such warm-up. Whether a user's very first character after focusing a field
-  is at risk is exactly the sort of thing only a physical device answers.
+- **Most rows run with no keyboard bound, and a real user always has one.**
+  That is the price of determinism, and it is a real limit on what the matrix
+  claims: it proves the offset mapping and the byte behaviour of the field
+  under a real `InputConnection`, with nothing else on the wire. What a
+  keyboard *adds* on top is measured only by the three attached rows. The
+  mapping is the thing ADR 0017 § 8 chartered, so this is the right trade —
+  but a row that passes here has not been proved to pass with Gboard
+  attached.
+- **The negative control is only as strong as its window.** The `EditText`
+  row asserts that nothing touched it for 1200 ms — the window over which it
+  was measured undisturbed, and one in which the Compose field is torn down
+  every time. A slower interjection than any yet seen would slip past it.
 
 ## Verdict
 
@@ -321,12 +452,14 @@ The conditions:
 
 1. **The mobile editor must use `TextFieldState` with
    `outputTransformation`, not `BasicTextField(TextFieldValue)` with
-   `VisualTransformation`.** The legacy field stops opening composing
-   regions after a commit and accumulates the bytes a keyboard did not
-   intend to leave — measured deterministically, reproduced with no
-   decoration at all, and not reproduced by a platform `EditText` on the
+   `VisualTransformation`.** With a keyboard bound, the legacy field has its
+   composing region torn down by that keyboard after every edit, so an
+   unbatched sequence accumulates the bytes a keyboard did not intend to
+   leave — measured deterministically, reproduced with no decoration at all,
+   and not reproduced by a platform `EditText` under the same keyboard on the
    same rig. This condition is about the API; ADR 0017 § 2's rendering is
-   vindicated.
+   vindicated. (Condition unchanged since ratification; only the mechanism
+   behind it was corrected on 2026-09-02, and it points the same way.)
 2. **No length-delta decoration may sit inside a word.** On the modern API
    the IME is shown the decorated text, so a glyph inside a word would land
    inside the keyboard's dictionary lookups. ADR 0017 § 2 already permits

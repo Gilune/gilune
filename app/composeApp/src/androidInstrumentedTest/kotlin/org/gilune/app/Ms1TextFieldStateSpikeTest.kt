@@ -43,6 +43,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.TextRange
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
@@ -50,8 +51,14 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalFoundationApi::class)
 class Ms1TextFieldStateSpikeTest {
 
+    private val rule: ComposeContentTestRule = createComposeRule()
+
+    /// [Ms1InputSessionRule] must be the OUTER rule — see `Ms1ImeRig.kt`.
+    /// This prototype owns the input session exclusively, like the rest of
+    /// the matrix, so what it measures is the API rather than a race with the
+    /// device's keyboard.
     @get:Rule
-    val rule: ComposeContentTestRule = createComposeRule()
+    val chain: RuleChain = RuleChain.outerRule(Ms1InputSessionRule()).around(rule)
 
     private val state = TextFieldState(DOC, initialSelection = TextRange(DOC.length))
 
@@ -119,16 +126,18 @@ class Ms1TextFieldStateSpikeTest {
         assertTrue(before.contains("- ☐ "), "on every task line")
     }
 
-    // NOT a test, deliberately: the unbatched after-a-commit comparison.
+    // NOT a test, deliberately: the bound-keyboard comparison.
     //
-    // Driven unbatched, the legacy field accumulates composing prefixes
-    // EVERY run (pinned by
-    // Ms1ImeSpikeTest.theLegacyFieldStopsOpeningComposingRegionsAfterACommit).
-    // This field mostly does not — but it did accumulate in a minority of
-    // runs on this rig, so the comparison is recorded in
-    // `spikes/ms1-ime/README.md` with its counts rather than asserted here.
-    // A test that passes most of the time is worse than a number that is
-    // honest about how often it was taken.
+    // With a keyboard bound, the legacy field's composing region is torn
+    // down after every edit and unbatched sequences then accumulate (pinned
+    // by
+    // Ms1ImeSpikeTest.theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion).
+    // Whether the MODERN field is immune to the same interference is not
+    // asserted here: it was never seen to accumulate, but this class owns the
+    // session exclusively, so what these rows measure is the API and not the
+    // keyboard. Standing that comparison up properly wants its own row with
+    // [WithSystemKeyboard], and it is named as an open gap in
+    // `spikes/ms1-ime/README.md` rather than half-asserted here.
 
     @Test
     fun undoIsCarriedByTheApi() {

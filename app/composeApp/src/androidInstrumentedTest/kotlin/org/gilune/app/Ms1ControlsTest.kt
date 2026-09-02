@@ -1,25 +1,31 @@
 // MS1's control group.
 //
-// `Ms1ImeSpikeTest.theLegacyFieldStopsOpeningComposingRegionsAfterACommit`
-// records a real defect: after a commit, the legacy
-// `BasicTextField(TextFieldValue)` never opens another composing region, so
-// a keyboard rewriting its composing span in place accumulates every
-// intermediate prefix into the document. A defect found through a rig is
-// worth nothing until the rig is ruled out, and a defect found in a field
-// carrying our decoration is worth nothing until the decoration is ruled
-// out. These two tests do both, on the identical rig:
+// `Ms1ImeSpikeTest.theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion`
+// records a real defect: with a keyboard bound, the legacy
+// `BasicTextField(TextFieldValue)` has its composing region torn down after
+// every edit by the keyboard itself, so a keyboard rewriting its composing
+// span in place appends instead of replacing and the document gains bytes
+// the user did not type. A defect found through a rig is worth nothing until
+// the rig is ruled out, and a defect found in a field carrying our decoration
+// is worth nothing until the decoration is ruled out. These two rows do both,
+// on the identical rig and under the identical bound keyboard:
 //
 //  1. A plain platform `EditText` — the reference implementation of an
-//     `InputConnection` — driven by the same calls, re-opens the composing
-//     region correctly. So the rig is sound.
+//     `InputConnection` — driven by the same calls under the same keyboard is
+//     never interfered with at all, and re-opens its composing region
+//     correctly. So the rig is sound and the keyboard is not simply hostile
+//     to everything.
 //  2. The same Compose field with `VisualTransformation.None` — no
-//     decoration, no offset mapping, nothing of ours at all — accumulates
-//     exactly as it does with `MarkdownEditTransformation`. So the
-//     decoration is not implicated.
+//     decoration, no offset mapping, nothing of ours at all — is torn down
+//     exactly as the decorated one is. So the decoration is not implicated.
 //
 // Together they place the fault in the legacy Compose text field, which is
 // what turns MS1's verdict into a condition on the API rather than a
 // condition on ADR 0017 § 2's rendering.
+//
+// Both rows run WITH the device's keyboard bound ([WithSystemKeyboard]),
+// because the keyboard's behaviour is the thing being compared. Every other
+// MS1 row owns the input session exclusively — see `Ms1ImeRig.kt`.
 
 package org.gilune.app
 
@@ -44,12 +50,19 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.viewinterop.AndroidView
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class Ms1ControlsTest {
+    private val rule: ComposeContentTestRule = createComposeRule()
+
+    /// [Ms1InputSessionRule] must be the OUTER rule — see `Ms1ImeRig.kt`.
+    /// Both rows here are annotated [WithSystemKeyboard], so what it does for
+    /// this class is guarantee the keyboard really IS bound before the
+    /// activity launches, including after an earlier row failed.
     @get:Rule
-    val rule: ComposeContentTestRule = createComposeRule()
+    val chain: RuleChain = RuleChain.outerRule(Ms1InputSessionRule()).around(rule)
 
     // Seeded before `setContent`: a session that opens over an empty buffer
     // never opens a composing region afterwards (measured), which would make
@@ -58,8 +71,9 @@ class Ms1ControlsTest {
         mutableStateOf(TextFieldValue(DOC, TextRange(DOC.length)))
     private var editText: EditText? = null
 
+    @WithSystemKeyboard
     @Test
-    fun aPlatformEditTextReOpensTheComposingRegionAfterACommit() {
+    fun aPlatformEditTextIsNeverTouchedByTheBoundKeyboard() {
         rule.setContent {
             AndroidView(
                 factory = { context -> EditText(context).also { editText = it } },
@@ -88,6 +102,17 @@ class Ms1ControlsTest {
         ime { setComposingText("c", 1) }
         assertEquals(24, composingStart(), "and the platform opens a NEW one")
 
+        // The measurement that places the fault. Over a window in which the
+        // legacy Compose field is torn down every single time — the teardown
+        // was measured at 150–860 ms — nothing touches the EditText at all.
+        // This is a negative assertion, so it is only as strong as the window
+        // it watched; the window is stated rather than implied.
+        val interjections = observeFor(WATCH_WINDOW) { editTextSnapshot() }
+        assertTrue(
+            interjections.isEmpty(),
+            "nobody interfered with the EditText in ${WATCH_WINDOW}ms, yet $interjections",
+        )
+
         ime { setComposingText("cd", 1) }
         assertEquals(
             DOC + "ab cd",
@@ -96,8 +121,9 @@ class Ms1ControlsTest {
         )
     }
 
+    @WithSystemKeyboard
     @Test
-    fun theSameComposeFieldAccumulatesWithNoTransformationAtAll() {
+    fun theSameComposeFieldIsTornDownWithNoTransformationAtAll() {
         val focus = FocusRequester()
         rule.setContent {
             LaunchedEffect(Unit) { focus.requestFocus() }
@@ -114,17 +140,31 @@ class Ms1ControlsTest {
         rule.waitForIdle()
         warmUp()
 
-        ime { setComposingText("a", 1) }
-        ime { setComposingText("ab", 1) }
-        assertEquals(DOC + "ab", state.value.text)
-
-        ime { commitText("ab ", 1) }
-        ime { setComposingText("c", 1) }
-        assertNull(state.value.composition, "no region opens after a commit here either")
-
-        ime { setComposingText("cd", 1) }
+        // The command opens a region, read inside the same UI-thread block
+        // that issues it so no other process can have touched it yet.
+        val atCommand = rule.runOnUiThread {
+            imeConnection(resumedDecorView(), EditorInfo())!!.setComposingText("a", 1)
+            state.value
+        }
+        rule.waitForIdle()
+        assertEquals(DOC + "a", atCommand.text, "the composing span landed")
         assertEquals(
-            DOC + "ab ccd",
+            TextRange(21, 22),
+            atCommand.composition,
+            "with no decoration in play the field opens a region too",
+        )
+
+        // And it is torn down just the same, with nothing of ours anywhere
+        // near it. Bounded wait on the event: if the platform stops doing
+        // this, the row fails here.
+        assertTrue(
+            awaitCondition(TEARDOWN_WAIT) { liveComposition() == null },
+            "the bound keyboard tore the region down within ${TEARDOWN_WAIT}ms here too",
+        )
+
+        ime { setComposingText("ab", 1) }
+        assertEquals(
+            DOC + "aab",
             state.value.text,
             "identical accumulation with no decoration in play: the fault is the API's",
         )
@@ -151,13 +191,29 @@ class Ms1ControlsTest {
         return result
     }
 
+    private fun liveComposition(): TextRange? = rule.runOnUiThread { state.value.composition }
+
     private fun plainText(): String = rule.runOnUiThread { editText!!.text.toString() }
 
     private fun composingStart(): Int =
         rule.runOnUiThread { BaseInputConnection.getComposingSpanStart(editText!!.text) }
 
+    /// Everything about the EditText another actor could disturb: its bytes,
+    /// its caret and its composing span.
+    private fun editTextSnapshot(): String = rule.runOnUiThread {
+        val editable = editText!!.text
+        "text=${editable} sel=${editText!!.selectionStart}" +
+            " comp=${BaseInputConnection.getComposingSpanStart(editable)}" +
+            "..${BaseInputConnection.getComposingSpanEnd(editable)}"
+    }
+
     private companion object {
         const val DOC = "- [x] done\n- [ ] milk"
         const val SESSION_WAIT = 10_000L
+        const val TEARDOWN_WAIT = 2_000L
+
+        /// The window the EditText was proved undisturbed over. The Compose
+        /// field's teardown lands inside it every time.
+        const val WATCH_WINDOW = 1_200L
     }
 }
