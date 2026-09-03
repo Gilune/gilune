@@ -33,11 +33,16 @@ impl From<gilune_kernel::KernelError> for GiluneError {
         match e {
             K::VaultUnusable { .. } => GiluneError::VaultUnusable { detail: e.to_string() },
             K::SchemaTooNew { .. } => GiluneError::Incompatible { detail: e.to_string() },
+            // A halted sync stream is refused input, like any other
+            // invalid argument: M5a adds no boundary variant, and the
+            // shells learn about halts from the integrity alerts (M5c),
+            // not from an error code.
             K::NoSuchJob { .. }
             | K::NoSuchPlugin { .. }
             | K::PluginRequired { .. }
             | K::UndeclaredCapability { .. }
-            | K::ProcessorNotClaimable { .. } => GiluneError::Invalid { detail: e.to_string() },
+            | K::ProcessorNotClaimable { .. }
+            | K::SyncHalted { .. } => GiluneError::Invalid { detail: e.to_string() },
             K::Storage(_) | K::Io { .. } | K::Encoding(_) | K::Corrupt { .. } => {
                 GiluneError::Storage { detail: e.to_string() }
             }

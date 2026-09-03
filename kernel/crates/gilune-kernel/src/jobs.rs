@@ -50,6 +50,10 @@ impl Store {
     /// re-run the past, but a person may ask for the catch-up. Safe to
     /// repeat: processing runs stay idempotent, so an event that was
     /// already handled produces nothing new. Returns jobs queued.
+    ///
+    /// Only this device's own events. Work belongs to the device that
+    /// captured it (ADR 0005), and a catch-up that reached across the
+    /// frontier would have every replica transcribe every recording.
     pub fn backfill_jobs(&self) -> Result<i64> {
         let queued = self.conn().execute(
             "INSERT OR IGNORE INTO jobs
@@ -59,6 +63,7 @@ impl Store {
              FROM events e
              JOIN subscriptions s ON s.event_type = e.event_type
              WHERE s.enabled = 1
+               AND e.origin_device = (SELECT value FROM meta WHERE key = 'device_id')
                AND NOT EXISTS (
                    SELECT 1 FROM jobs j
                    WHERE j.subscription_id = s.subscription_id AND j.event_id = e.event_id

@@ -175,11 +175,39 @@ impl CaptureStage {
                  VALUES (?1, ?2, ?3, ?4, ?5, 'committed')",
                 rusqlite::params![blob_id, source_id, rel_path, sha256, bytes as i64],
             )?;
-            record_operation(conn, "create-source", &source_id, &payload, created_ms)?;
+            crate::operations::record(
+                conn,
+                crate::operations::OBJECT_CREATED,
+                &source_id,
+                serde_json::json!({
+                    "object": {
+                        "object_id": source_id,
+                        "type_id": SOURCE_TYPE,
+                        "type_schema": 1,
+                        "created_ms": created_ms,
+                    },
+                    "revision": {
+                        "revision_id": revision_id,
+                        "payload": payload,
+                        "origin": "capture",
+                        "created_ms": created_ms,
+                    },
+                    "blob": {
+                        "blob_id": blob_id,
+                        "rel_path": rel_path,
+                        "sha256": sha256,
+                        "bytes": bytes,
+                    },
+                    "event_type": SOURCE_READY_EVENT,
+                }),
+                created_ms,
+            )?;
             let event_id = ids::new_id();
             conn.execute(
-                "INSERT INTO events (event_id, event_type, subject_id, payload, created_ms)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                "INSERT INTO events
+                 (event_id, event_type, subject_id, payload, created_ms, origin_device)
+                 VALUES (?1, ?2, ?3, ?4, ?5,
+                         (SELECT value FROM meta WHERE key = 'device_id'))",
                 rusqlite::params![event_id, SOURCE_READY_EVENT, source_id, payload, created_ms],
             )?;
             conn.execute(
@@ -204,37 +232,6 @@ impl CaptureStage {
 
         Ok(CaptureReceipt { source_id, blob_id, rel_path, sha256, bytes })
     }
-}
-
-/// Operations are the sync substrate (ADR 0005): immutable, per-device
-/// monotonic, self-describing. Written inside the caller's transaction so
-/// a committed change and its operation are inseparable.
-pub(crate) fn record_operation(
-    conn: &rusqlite::Connection,
-    kind: &str,
-    target_id: &str,
-    payload: &str,
-    created_ms: i64,
-) -> Result<()> {
-    let device_id: String =
-        conn.query_row("SELECT value FROM meta WHERE key = 'device_id'", [], |row| row.get(0))?;
-    let seq: i64 = conn
-        .query_row("SELECT value FROM meta WHERE key = 'op_seq'", [], |row| row.get(0))
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(0),
-            e => Err(e),
-        })?
-        + 1;
-    conn.execute(
-        "INSERT OR REPLACE INTO meta (key, value) VALUES ('op_seq', ?1)",
-        [seq],
-    )?;
-    conn.execute(
-        "INSERT INTO operations (op_id, device_id, op_seq, kind, target_id, payload, created_ms)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        rusqlite::params![ids::new_id(), device_id, seq, kind, target_id, payload, created_ms],
-    )?;
-    Ok(())
 }
 
 fn promote(store: &Store, blob_id: &str, stage_path: &std::path::Path, rel_path: &str) -> Result<()> {
@@ -280,19 +277,31 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
 }
 
 pub(crate) fn recover_with_sweep_age(store: &Store, sweep_age_ms: u128) -> Result<()> {
-    let committed: Vec<(String, String)> = {
+    let committed: Vec<(String, String, String)> = {
         let conn = store.conn();
-        let mut stmt =
-            conn.prepare("SELECT blob_id, rel_path FROM blobs WHERE state = 'committed'")?;
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+        let mut stmt = conn
+            .prepare("SELECT blob_id, rel_path, origin FROM blobs WHERE state = 'committed'")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
         rows.collect::<std::result::Result<_, _>>()?
     };
-    for (blob_id, rel_path) in committed {
+    for (blob_id, rel_path, origin) in committed {
         let target = store.vault().join(&rel_path);
         if target.exists() {
+            // A promotion that landed before the process died. For bytes
+            // that arrived over a transport the digest is checked again
+            // here, because this is the only path that did not check it
+            // as it wrote — the promoting one did.
+            if origin == "sync" && !crate::blobs::promoted_bytes_are_sound(store, &blob_id)? {
+                continue;
+            }
             store
                 .conn()
                 .execute("UPDATE blobs SET state = 'ready' WHERE blob_id = ?1", [&blob_id])?;
+            continue;
+        }
+        // Bytes still arriving from another device have no stage file
+        // here to find: their transfer, not recovery, completes them.
+        if origin != "local" {
             continue;
         }
         // The stage file is findable by digest match: any staged file whose
@@ -313,6 +322,12 @@ pub(crate) fn recover_with_sweep_age(store: &Store, sweep_age_ms: u128) -> Resul
         let entry = entry.map_err(|e| KernelError::Io { path: store.staging_dir(), source: e })?;
         let path = entry.path();
         if !path.is_file() {
+            continue;
+        }
+        // A blob transfer in progress lives in staging too, and it is not
+        // an orphan however long it has been paused: its bytes belong to
+        // an operation that has already applied.
+        if crate::blobs::is_incoming(&entry.file_name().to_string_lossy()) {
             continue;
         }
         let age_ms = entry
@@ -348,6 +363,9 @@ fn find_stage_by_digest(store: &Store, blob_id: &str) -> Result<Option<PathBuf>>
         let entry = entry.map_err(|e| KernelError::Io { path: store.staging_dir(), source: e })?;
         let path = entry.path();
         if !path.is_file() {
+            continue;
+        }
+        if crate::blobs::is_incoming(&entry.file_name().to_string_lossy()) {
             continue;
         }
         if let Ok(data) = std::fs::read(&path) {

@@ -21,8 +21,8 @@ fn run() -> Result<(), String> {
     let mut args = args.iter().map(String::as_str);
 
     let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|\
-                 external [--at <ms>]|project|reconcile|status|verify|backfill|\
-                 plugins [enable|disable|remove <id>]>";
+                 external [--at <ms>]|apply --file <path>|project|reconcile|status|\
+                 verify|backfill|alerts|plugins [enable|disable|remove <id>]>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
@@ -77,6 +77,8 @@ fn run() -> Result<(), String> {
                     "jobs_pending": s.jobs_pending,
                     "jobs_quarantined": s.jobs_quarantined,
                     "operations": s.operations,
+                    "blobs_awaiting": s.blobs_awaiting,
+                    "alerts": s.alerts,
                     "projections": s.projections,
                     "proposals_open": s.proposals_open,
                     "quarantined_files": s.quarantined_files,
@@ -142,6 +144,48 @@ fn run() -> Result<(), String> {
                     None => serde_json::json!({ "claimed": false }),
                 }
             );
+            Ok(())
+        }
+        Some("apply") => {
+            // Dev tool: applies one operation envelope from a file, the
+            // way a transport hands one over. The crash harness aborts
+            // this command at apply's commit boundaries and asserts the
+            // next command finds either nothing or exactly one.
+            let (Some("--file"), Some(path)) = (args.next(), args.next()) else {
+                return Err(usage.to_string());
+            };
+            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+            let applied = store
+                .apply_operation("cli", &bytes, gilune_kernel::limits::Limits::DEFAULT)
+                .map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "op_id": applied.op_id,
+                    "device_id": applied.device_id,
+                    "op_seq": applied.op_seq,
+                    "duplicate": applied.duplicate,
+                    "uninterpreted": applied.uninterpreted,
+                    "blob_wanted": applied.blob_wanted.map(|b| b.blob_id),
+                })
+            );
+            Ok(())
+        }
+        Some("alerts") => {
+            let listed: Vec<_> = store
+                .integrity_alerts()
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|a| {
+                    serde_json::json!({
+                        "kind": a.kind,
+                        "subject": a.subject,
+                        "detail": a.detail,
+                        "raised_ms": a.raised_ms,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::json!({ "alerts": listed }));
             Ok(())
         }
         Some("project") => {

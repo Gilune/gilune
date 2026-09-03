@@ -10,7 +10,6 @@
 //! `contracts/processor/`; bundled and sandboxed implementations must
 //! stay behaviourally interchangeable (ADR 0003).
 
-use crate::capture::record_operation;
 use crate::crashpoints::crashpoint;
 use crate::jobs::Job;
 use crate::revisions::{add_revision, head_payload, Announce};
@@ -306,29 +305,40 @@ impl Store {
                      VALUES (?1, ?2, 'derived-from', ?3)",
                     rusqlite::params![object_id, job.subject_id, processor_id],
                 )?;
-                record_operation(
-                    conn,
-                    "create-object",
-                    &object_id,
-                    &serde_json::json!({
-                        "type_id": output.type_id,
-                        "type_schema": output.type_schema,
-                        "payload": output.payload,
-                        "origin": origin,
-                        "derived_from": job.subject_id,
-                        "created_ms": created_ms,
-                    })
-                    .to_string(),
-                    created_ms,
-                )?;
                 let short_type =
                     output.type_id.rsplit('.').next().unwrap_or("object").to_string();
+                let event_type = format!("{OBJECT_CREATED_EVENT_PREFIX}{short_type}-ready");
+                crate::operations::record(
+                    conn,
+                    crate::operations::OBJECT_CREATED,
+                    &object_id,
+                    serde_json::json!({
+                        "object": {
+                            "object_id": object_id,
+                            "type_id": output.type_id,
+                            "type_schema": output.type_schema,
+                            "created_ms": created_ms,
+                        },
+                        "revision": {
+                            "revision_id": revision_id,
+                            "payload": output.payload,
+                            "origin": origin,
+                            "created_ms": created_ms,
+                        },
+                        "derived_from": job.subject_id,
+                        "processor_id": processor_id,
+                        "event_type": event_type,
+                    }),
+                    created_ms,
+                )?;
                 conn.execute(
-                    "INSERT INTO events (event_id, event_type, subject_id, payload, created_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    "INSERT INTO events
+                     (event_id, event_type, subject_id, payload, created_ms, origin_device)
+                     VALUES (?1, ?2, ?3, ?4, ?5,
+                             (SELECT value FROM meta WHERE key = 'device_id'))",
                     rusqlite::params![
                         ids::new_id(),
-                        format!("{OBJECT_CREATED_EVENT_PREFIX}{short_type}-ready"),
+                        event_type,
                         object_id,
                         output.payload,
                         created_ms
@@ -564,7 +574,15 @@ mod tests {
                 .collect::<std::result::Result<_, _>>()
                 .expect("rows")
         };
-        assert_eq!(kinds, vec!["create-source".to_string(), "create-object".to_string()]);
+        // A capture and a processor's derived object are the same kind of
+        // operation; they differ in payload, not in name (ADR 0019 § 6).
+        assert_eq!(
+            kinds,
+            vec![
+                crate::operations::OBJECT_CREATED.to_string(),
+                crate::operations::OBJECT_CREATED.to_string()
+            ]
+        );
     }
 
     #[test]

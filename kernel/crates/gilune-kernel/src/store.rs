@@ -5,12 +5,12 @@
 //! capture recovery; the schema grows only through the registry below so
 //! every version is a tested upgrade path (constitution rule 12).
 
-use crate::{capture, fs, ids, transcript_merge, KernelError, Result};
+use crate::{capture, fs, ids, operations, transcript_merge, KernelError, Result};
 use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 4;
+pub const SCHEMA_VERSION: i64 = 5;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -54,6 +54,10 @@ impl Store {
         // recovery may still have been completing (ADR 0013), and it is
         // flagged rather than versioned so it can be re-run to converge.
         transcript_merge::run(&store)?;
+        // Likewise a data step, and for the same reason: rebuilding the
+        // envelopes of operations written before v5 reads the objects and
+        // revisions they describe, which recovery may just have settled.
+        operations::adopt_legacy_envelopes(&store)?;
         Ok(store)
     }
 
@@ -68,6 +72,33 @@ impl Store {
             |row| row.get(0),
         )?;
         Ok(id)
+    }
+
+    /// The public half of the identity key belonging to the device that
+    /// owns `device_id`, or `None` on a vault no M5 kernel has opened.
+    /// Written by M5b, whose re-enrolment rule (ADR 0019 § 4) reads it to
+    /// tell "same device" from "this vault came from elsewhere"; the
+    /// accessors live here so that rule has one home when it arrives.
+    pub fn identity_pub(&self) -> Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = 'identity_pub'",
+                [],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(KernelError::from(e)),
+            })
+    }
+
+    pub fn set_identity_pub(&self, public_key: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('identity_pub', ?1)",
+            [public_key],
+        )?;
+        Ok(())
     }
 
     pub fn vault(&self) -> &Path {
@@ -99,7 +130,13 @@ impl Store {
         Ok(Status {
             sources: count("SELECT COUNT(*) FROM objects WHERE type_id = 'org.memory.source'")?,
             blobs_ready: count("SELECT COUNT(*) FROM blobs WHERE state = 'ready'")?,
-            blobs_committed: count("SELECT COUNT(*) FROM blobs WHERE state = 'committed'")?,
+            blobs_committed: count(
+                "SELECT COUNT(*) FROM blobs WHERE state = 'committed' AND origin = 'local'",
+            )?,
+            blobs_awaiting: count(
+                "SELECT COUNT(*) FROM blobs WHERE state = 'committed' AND origin = 'sync'",
+            )?,
+            alerts: count("SELECT COUNT(*) FROM integrity_alerts")?,
             events: count("SELECT COUNT(*) FROM events")?,
             jobs_pending: count("SELECT COUNT(*) FROM jobs WHERE state IN ('pending','leased')")?,
             jobs_quarantined: count("SELECT COUNT(*) FROM jobs WHERE state = 'quarantined'")?,
@@ -118,7 +155,7 @@ impl Store {
         let mut problems = Vec::new();
         let mut stmt = self
             .conn
-            .prepare("SELECT blob_id, rel_path, sha256, bytes, state FROM blobs")?;
+            .prepare("SELECT blob_id, rel_path, sha256, bytes, state, origin FROM blobs")?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -126,12 +163,19 @@ impl Store {
                 row.get::<_, String>(2)?,
                 row.get::<_, i64>(3)?,
                 row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
             ))
         })?;
         for row in rows {
-            let (blob_id, rel_path, sha256, bytes, state) = row?;
+            let (blob_id, rel_path, sha256, bytes, state, origin) = row?;
             if state != "ready" {
-                problems.push(format!("blob {blob_id} is {state}, not ready"));
+                // Bytes still arriving over a transport are a documented
+                // pending state, not damage: the operation applied before
+                // its content finished, exactly as ADR 0005 intends, and
+                // `status().blobs_awaiting` is where it is visible.
+                if origin != "sync" {
+                    problems.push(format!("blob {blob_id} is {state}, not ready"));
+                }
                 continue;
             }
             let path = self.vault.join(&rel_path);
@@ -158,6 +202,10 @@ pub struct Status {
     pub sources: i64,
     pub blobs_ready: i64,
     pub blobs_committed: i64,
+    /// Blobs whose operation has applied but whose bytes are still in
+    /// transit. A pending state, not damage: `verify` says so too.
+    pub blobs_awaiting: i64,
+    pub alerts: i64,
     pub events: i64,
     pub jobs_pending: i64,
     pub jobs_quarantined: i64,
@@ -318,6 +366,57 @@ const MIGRATIONS: &[&str] = &[
          granted_ms INTEGER NOT NULL,
          PRIMARY KEY (plugin_id, capability)
      );",
+    // v4 -> v5: operations become bidirectional (ADR 0019 M5a). The
+    // kernel has written operations since v1 and read none; this step
+    // adds everything reading one requires.
+    //
+    // `sync_frontiers` is the per-device acknowledged position — how far
+    // this device has applied another's stream. It is deliberately not
+    // MAX(op_seq): a halted stream may hold operations past its frontier.
+    //
+    // `envelope` stores the bytes as received, not merely the columns
+    // parsed out of them. A full replica must forward a third device's
+    // operations byte-exactly, and any signature added later must verify
+    // over the bytes that were signed (ADR 0019 § 9).
+    //
+    // `events.origin_device` is the origin-device processing policy: work
+    // belongs to the device that captured it, so an applied operation
+    // announces itself locally but queues nothing, and `backfill_jobs`
+    // must not catch up another device's captures either.
+    //
+    // `blobs.origin` separates bytes this device staged from bytes that
+    // are still arriving over a transport, so startup recovery does not
+    // hunt for a stage file that was never here and `verify` does not
+    // report an in-flight transfer as damage.
+    //
+    // `meta.op_seq` retires: the local sequence is MAX(op_seq) for this
+    // device, which is what the global counter held while this kernel
+    // wrote nobody's operations but its own, and which stays correct once
+    // it writes other devices' rows too. Deleting the key is the
+    // migration of the counter — one fact, one home.
+    //
+    // `meta.identity_pub` needs nothing: meta is key-value, so M5b writes
+    // the key without a schema change.
+    "CREATE TABLE sync_frontiers (
+         device_id TEXT PRIMARY KEY,
+         applied_seq INTEGER NOT NULL
+     );
+     CREATE TABLE integrity_alerts (
+         alert_id TEXT PRIMARY KEY,
+         kind TEXT NOT NULL,
+         subject TEXT NOT NULL,
+         detail TEXT NOT NULL,
+         raised_ms INTEGER NOT NULL,
+         UNIQUE (kind, subject)
+     );
+     ALTER TABLE operations ADD COLUMN envelope BLOB NOT NULL DEFAULT x'';
+     ALTER TABLE events ADD COLUMN origin_device TEXT NOT NULL DEFAULT '';
+     ALTER TABLE blobs ADD COLUMN origin TEXT NOT NULL DEFAULT 'local';
+     UPDATE events
+        SET origin_device =
+            COALESCE((SELECT value FROM meta WHERE key = 'device_id'), '')
+      WHERE origin_device = '';
+     DELETE FROM meta WHERE key = 'op_seq';",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
@@ -338,6 +437,7 @@ fn migrate(conn: &rusqlite::Connection) -> Result<()> {
         conn.execute_batch("BEGIN IMMEDIATE;")?;
         let applied: Result<()> = (|| {
             conn.execute_batch(step)?;
+            crate::crashpoints::crashpoint("migration.during");
             conn.execute(
                 "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?1)",
                 [version + 1],

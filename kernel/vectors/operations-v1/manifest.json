@@ -1,0 +1,157 @@
+{
+  "format": "gilune-operation-envelope",
+  "invalid": [
+    {
+      "file": "not-json.json",
+      "reason": "not JSON at all"
+    },
+    {
+      "file": "empty.json",
+      "reason": "no bytes"
+    },
+    {
+      "file": "top-level-array.json",
+      "reason": "top level is an array"
+    },
+    {
+      "file": "top-level-string.json",
+      "reason": "top level is a string"
+    },
+    {
+      "file": "not-utf8.json",
+      "reason": "not valid UTF-8"
+    },
+    {
+      "file": "trailing-garbage.json",
+      "reason": "valid JSON followed by more bytes"
+    },
+    {
+      "file": "version-missing.json",
+      "reason": "no codec version"
+    },
+    {
+      "file": "version-future.json",
+      "reason": "a codec version this kernel cannot read"
+    },
+    {
+      "file": "version-zero.json",
+      "reason": "codec version zero"
+    },
+    {
+      "file": "version-string.json",
+      "reason": "codec version is a string"
+    },
+    {
+      "file": "op-seq-missing.json",
+      "reason": "no sequence number"
+    },
+    {
+      "file": "op-seq-zero.json",
+      "reason": "sequence numbers start at one"
+    },
+    {
+      "file": "op-seq-negative.json",
+      "reason": "negative sequence number"
+    },
+    {
+      "file": "op-seq-beyond-i64.json",
+      "reason": "sequence number past the representable range, which must be refused not truncated"
+    },
+    {
+      "file": "op-seq-float.json",
+      "reason": "sequence number is not an integer"
+    },
+    {
+      "file": "op-id-missing.json",
+      "reason": "no operation id"
+    },
+    {
+      "file": "op-id-too-long.json",
+      "reason": "operation id past the length bound"
+    },
+    {
+      "file": "device-id-missing.json",
+      "reason": "no device id"
+    },
+    {
+      "file": "device-id-empty.json",
+      "reason": "empty device id"
+    },
+    {
+      "file": "device-id-number.json",
+      "reason": "device id is not a string"
+    },
+    {
+      "file": "device-id-control-characters.json",
+      "reason": "device id carries control characters, which reach file names and log lines"
+    },
+    {
+      "file": "kind-missing.json",
+      "reason": "no kind"
+    },
+    {
+      "file": "kind-empty.json",
+      "reason": "empty kind"
+    },
+    {
+      "file": "kind-too-long.json",
+      "reason": "kind past the length bound"
+    },
+    {
+      "file": "target-id-missing.json",
+      "reason": "no target"
+    },
+    {
+      "file": "target-id-empty.json",
+      "reason": "empty target"
+    },
+    {
+      "file": "created-ms-missing.json",
+      "reason": "no timestamp"
+    },
+    {
+      "file": "created-ms-negative.json",
+      "reason": "a timestamp before the epoch"
+    },
+    {
+      "file": "payload-missing.json",
+      "reason": "no payload"
+    },
+    {
+      "file": "payload-array.json",
+      "reason": "payload is an array"
+    },
+    {
+      "file": "payload-string.json",
+      "reason": "payload is a string"
+    },
+    {
+      "file": "oversize.json",
+      "reason": "larger than the envelope cap"
+    }
+  ],
+  "note": "Every file under valid/ must decode and re-encode to identical bytes. Every file under invalid/ must be refused, with the named condition. Decoders are checked against a 4096-byte envelope cap.",
+  "valid": [
+    {
+      "file": "object-created-capture.json",
+      "kind": "object-created"
+    },
+    {
+      "file": "object-created-derived.json",
+      "kind": "object-created"
+    },
+    {
+      "file": "object-revised-concurrent.json",
+      "kind": "object-revised"
+    },
+    {
+      "file": "tombstone.json",
+      "kind": "tombstone"
+    },
+    {
+      "file": "unknown-kind.json",
+      "kind": "com.example.widget-moved"
+    }
+  ],
+  "version": 1
+}

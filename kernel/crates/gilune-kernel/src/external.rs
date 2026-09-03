@@ -180,13 +180,17 @@ impl Store {
     }
 
     /// The origin recorded on an object's current head revision — who
-    /// wrote the words a person is reading.
+    /// wrote the words a person is reading. With concurrent heads this is
+    /// the head a reader sees, by the one ordering every reader uses.
     pub fn head_origin(&self, object_id: &str) -> Result<Option<String>> {
         self.conn()
             .query_row(
-                "SELECT r.origin FROM heads h
-                 JOIN revisions r ON r.revision_id = h.revision_id
-                 WHERE h.object_id = ?1",
+                &format!(
+                    "SELECT r.origin FROM heads h
+                     JOIN revisions r ON r.revision_id = h.revision_id
+                     WHERE h.object_id = ?1 {} LIMIT 1",
+                    crate::revisions::newest_head_first("r")
+                ),
                 [object_id],
                 |row| row.get(0),
             )
@@ -487,7 +491,13 @@ mod tests {
                 .collect::<std::result::Result<_, _>>()
                 .expect("rows")
         };
-        assert_eq!(kinds, vec!["create-source".to_string(), "create-revision".to_string()]);
+        assert_eq!(
+            kinds,
+            vec![
+                crate::operations::OBJECT_CREATED.to_string(),
+                crate::operations::OBJECT_REVISED.to_string()
+            ]
+        );
         assert!(store.verify().expect("verify").is_empty());
     }
 

@@ -131,10 +131,65 @@ gates promises) are ratified. **Next: application-level engineering — see
      random tail, since the timestamp prefix collided filenames for
      same-millisecond captures. (3) whisper.cpp logs spam stderr;
      silence via log hooks.
-   - **M5 LAN sync** — discovery, short-code pairing, device keys,
-     encrypted transport, op exchange; acceptance = the S4-extended
-     scenarios (pair, refuse unpaired, revoke, rejoin). Threat-model
-     rules apply (re-enrollment on restore, per-device quotas).
+   - **M5 LAN sync — ADR 0019 ratified 2026-09-02 (build authorised;
+     Accepted only at its 16-point gate), staged M5a/M5b/M5c.** Owner
+     constraints: transport only (0008's headless agent = later
+     round); FULL replica; phone syncs on open + periodic unmetered
+     background; pairing = 6-digit SPAKE2 code AND desktop-QR both in
+     v0. Design: DNS-SD `_gilune._tcp` (Rust mdns-sd desktop /
+     NsdManager adapter Android; cached-address-first, manual
+     host:port fallback), SPAKE2→Noise XXpsk0 via snow (both crates
+     UNAUDITED — recorded), identity keys OUTSIDE the vault
+     (DPAPI/Keystore wrap; vault meta.identity_pub makes re-enrolment
+     mechanical), gilune-kernel::operations + gilune-sync crate split
+     behind a Transport trait, raw envelope bytes stored for future
+     signatures, revocation mid-session at op boundary + third-replica
+     refusal by origin device. Gate C needs the owner's real device
+     (like MS2). **M5a DONE (2026-09-03, one Opus agent)**: schema v5
+     (sync_frontiers, integrity_alerts UNIQUE(kind,subject),
+     operations.envelope raw BLOB, events.origin_device,
+     blobs.origin, meta.op_seq deleted — MAX(op_seq) per device IS
+     the counter), real-v4-binary fixture migration test (worktree
+     build; adopted history applies into a fresh replica to the same
+     digest); canonical-JSON versioned codec, kinds reconciled ONCE
+     (create-source/object→object-created, create-revision→
+     object-revised; unrebuildable rows→legacy-operation keeping the
+     sequence DENSE); 37 portable vectors in kernel/vectors/
+     (valid ones re-encode byte-exact; generator #[ignore]d — format
+     changes must be an act); apply = one txn/op, halt kinds
+     sync-gap/-corrupt-operation/-unsupported-version/-limit-exceeded
+     (alerts raised OUTSIDE the txn; successful apply clears them;
+     unknown kind applies-and-forwards, no halt); **add_revision now
+     supersedes only the heads it saw and NAMES them in the op**
+     (readers take one rule: newest_head_first created_ms then
+     revision_id; recent_sources rewritten deterministic; projection
+     keeps gilune-conflicted); limits.rs one home (env 2MiB, blob
+     512MiB, free-space margin 64MiB via new dep fs4, 10k ops +
+     256MiB/session; spike's attacker-sized Vec::with_capacity
+     retired — staged length IS the resume point); gilune-sync:
+     Transport/Session split (+devices()/have_blob() for the pull
+     side; send_envelope returns BlobNeed so the crate never parses
+     payloads), loopback = real TCP on a second handle. Gate A green:
+     all ten S4 scenarios vs PRODUCTION kernel + reorder/dup/
+     restore/offline + vectors + every bound (visible halt, nothing
+     past fault, clean resume) + 4 apply crash tests. Suites: cargo
+     150/0, desktop 436/0, instrumented 610/0/1(a03); dll restaged,
+     both ABIs rebuilt, bindings byte-identical (SyncHalted maps to
+     existing Invalid — shells learn of halts from alerts, M5c).
+     Gaps: GiluneStatus lacks blobs_awaiting/alerts (deliberate, no
+     FFI change — `gilune-cli alerts` meanwhile, M5c wires shells);
+     per-peer establishment rate limits → M5b (no peer identity yet);
+     malformed blob declaration files under sync-limit-exceeded
+     (imprecise); no duplicate-JSON-key vector; loopback serves one
+     connection; per-device sequences only, no causal parents (S4's
+     inherited gap). **Next: M5b** (identity, SPAKE2/Noise pairing,
+     KeyWrap adapters, roster, revocation, QR, FFI surface) then M5c
+     (discovery, firewall UX, live exchange, docs).
+     RIG NOTE (2026-09-03): MS1 determinism holds on FRESH boots
+     only — after ~90 min of accumulated emulator load
+     Ms1ImeSpikeTest degrades (2000 ms teardown assertion, activity
+     lifecycle timeout); class alone 4/4, full suite clean after
+     emulator restart. Restart the emulator before judging MS1.
    - **M6 desktop shell** — design session held 2026-08-31; ADR 0011
      (shell regions, fixed five-slot list, plugin-owned UI, everything
      but the vault projection removable) and ADR 0012 (the Markdown

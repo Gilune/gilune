@@ -15,7 +15,6 @@
 //! type and event identifiers remain `org.memory.*` per the permanent
 //! namespace rule — so a future rename touches keys only.
 
-use crate::capture::record_operation;
 use crate::crashpoints::crashpoint;
 use crate::revisions::{add_revision, Announce};
 use crate::store::Store;
@@ -27,6 +26,9 @@ pub struct ProjectSummary {
     pub written: i64,
     pub unchanged: i64,
     pub held_back: i64,
+    /// Files withdrawn because their object was deleted elsewhere and the
+    /// tombstone reached this device.
+    pub removed: i64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -119,7 +121,48 @@ impl Store {
                 }
             }
         }
+        summary.removed = self.withdraw_tombstoned()?;
         Ok(summary)
+    }
+
+    /// Withdraw the projections of objects deleted elsewhere. A tombstone
+    /// that arrives by sync finds the file still on disk — unlike a local
+    /// deletion, which is a missing file in the first place — so the
+    /// projection has to answer it.
+    ///
+    /// Only bytes the kernel itself last wrote are removed. A file edited
+    /// since then is left exactly where it is: a deletion on one device
+    /// must not silently destroy words written on another, and reconcile
+    /// preserves it as an import candidate (constitution rule 1).
+    fn withdraw_tombstoned(&self) -> Result<i64> {
+        let doomed: Vec<(String, String, String)> = {
+            let mut stmt = self.conn().prepare(
+                "SELECT p.object_id, p.rel_path, p.content_sha256
+                 FROM projections p JOIN objects o ON o.object_id = p.object_id
+                 WHERE o.deleted = 1",
+            )?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let mut removed = 0;
+        for (object_id, rel_path, recorded_sha) in doomed {
+            let target = self.vault().join(&rel_path);
+            match std::fs::read(&target) {
+                Ok(bytes) if ids::sha256_hex(&bytes) != recorded_sha => continue,
+                Ok(_) => {
+                    std::fs::remove_file(&target)
+                        .map_err(|e| KernelError::Io { path: target.clone(), source: e })?;
+                    if let Some(parent) = target.parent() {
+                        fs::fsync_dir(parent)?;
+                    }
+                    removed += 1;
+                }
+                Err(_) => {}
+            }
+            self.conn()
+                .execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
+        }
+        Ok(removed)
     }
 
     /// Ingest external changes to the vault. Never destructive: kernel
@@ -257,7 +300,13 @@ impl Store {
                     [&object_id],
                 )?;
                 conn.execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
-                record_operation(conn, "tombstone", &object_id, "{}", ids::now_ms())?;
+                crate::operations::record(
+                    conn,
+                    crate::operations::TOMBSTONE,
+                    &object_id,
+                    serde_json::json!({}),
+                    ids::now_ms(),
+                )?;
             }
             Ok(())
         })();
@@ -282,7 +331,7 @@ impl Store {
     // ---------------------------------------------------------- internals
 
     fn live_heads(&self) -> Result<Vec<Head>> {
-        let mut stmt = self.conn().prepare(
+        let mut stmt = self.conn().prepare(&format!(
             "SELECT o.object_id, o.type_id, o.type_schema, o.created_ms,
                     r.revision_id, r.payload,
                     (SELECT COUNT(*) FROM heads h2 WHERE h2.object_id = o.object_id) AS head_count
@@ -290,8 +339,9 @@ impl Store {
              JOIN heads h ON h.object_id = o.object_id
              JOIN revisions r ON r.revision_id = h.revision_id
              WHERE o.deleted = 0
-             ORDER BY o.object_id, r.created_ms DESC, r.revision_id DESC",
-        )?;
+             ORDER BY o.object_id, {}",
+            crate::revisions::newest_head_first("r").trim_start_matches("ORDER BY ")
+        ))?;
         let rows = stmt.query_map([], |row| {
             Ok(Head {
                 object_id: row.get(0)?,
@@ -362,12 +412,16 @@ impl Store {
         let body = if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
             text.to_string()
         } else if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
+            let name = blob_rel.rsplit('/').next().unwrap_or(blob_rel);
             if payload.get("media").and_then(|v| v.as_str()) == Some("txt") {
-                std::fs::read_to_string(self.vault().join(blob_rel)).map_err(|e| {
-                    KernelError::Io { path: self.vault().join(blob_rel), source: e }
-                })?
+                // Bytes that have not arrived yet are the ordinary state
+                // of a note whose operation reached this device before
+                // its content did (ADR 0005). Project the link now and
+                // canonicalise when the content lands: refusing to
+                // project would make one missing transfer hide a vault.
+                std::fs::read_to_string(self.vault().join(blob_rel))
+                    .unwrap_or_else(|_| format!("![[{name}]]\n"))
             } else {
-                let name = blob_rel.rsplit('/').next().unwrap_or(blob_rel);
                 format!("![[{name}]]\n")
             }
         } else {
@@ -790,6 +844,12 @@ mod tests {
                 .collect::<std::result::Result<_, _>>()
                 .expect("rows")
         };
-        assert_eq!(kinds, vec!["create-source".to_string(), "create-revision".to_string()]);
+        assert_eq!(
+            kinds,
+            vec![
+                crate::operations::OBJECT_CREATED.to_string(),
+                crate::operations::OBJECT_REVISED.to_string()
+            ]
+        );
     }
 }

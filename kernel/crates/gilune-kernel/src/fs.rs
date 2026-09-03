@@ -45,6 +45,14 @@ pub fn fsync_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Bytes still available on the filesystem holding `path`. Used to refuse
+/// a declared blob length that would not fit before a byte of it is
+/// written (ADR 0019 § 8) — a length a peer declares is a claim, and this
+/// is the only thing that makes it answerable.
+pub fn available_space(path: &Path) -> Result<u64> {
+    fs4::available_space(path).map_err(|e| io_err(path, e))
+}
+
 /// Relative paths stored in the database, manifests, and operation files
 /// are a portable contract: `/`-separated on every platform
 /// (03-data-model § Export contract). Joining them back onto a root with

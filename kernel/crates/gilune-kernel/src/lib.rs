@@ -3,12 +3,16 @@
 //! operations — and names no domain type (constitution rule 4). Domain
 //! behaviour lives in plugins behind the contracts in `contracts/`.
 
+pub mod alerts;
+pub mod blobs;
 pub mod capture;
 pub mod crashpoints;
 pub mod external;
 pub mod fs;
 pub mod ids;
 pub mod jobs;
+pub mod limits;
+pub mod operations;
 pub mod plugins;
 pub mod processor;
 pub mod query;
@@ -46,6 +50,12 @@ pub enum KernelError {
     ProcessorNotClaimable { processor_id: String },
     #[error("local state is corrupt: {detail}")]
     Corrupt { detail: String },
+    /// An operation arriving from elsewhere was refused. The stream from
+    /// that device is halted: nothing past the fault has been applied,
+    /// the frontier is where it was, and a standing integrity alert says
+    /// so. Resuming needs no repair here — only the condition to clear.
+    #[error("sync halted for {device_id}: {reason}")]
+    SyncHalted { device_id: String, reason: String },
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

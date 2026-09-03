@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/gilune-kernel", "crates/gilune-ffi", "crates/gilune-cli"]
+members = [
+    "crates/gilune-kernel",
+    "crates/gilune-sync",
+    "crates/gilune-ffi",
+    "crates/gilune-cli",
+]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +14,7 @@ license = "MIT"
 rust-version = "1.98"
 
 [workspace.dependencies]
+fs4 = { version = "1.1", default-features = false }
 hex = "0.4"
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde_json = "1"

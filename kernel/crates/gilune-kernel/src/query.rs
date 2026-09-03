@@ -23,18 +23,23 @@ impl Store {
     /// and the exclusion is in SQL so the limit still bounds what a
     /// person sees.
     pub fn recent_sources(&self, limit: u32) -> Result<Vec<SourceSummary>> {
+        // One row per object, and always the same row: the head every
+        // reader sees (revisions::newest_head_first). An object with
+        // concurrent heads appears once, not once per head.
         let mut stmt = self.conn().prepare(&format!(
             "SELECT o.object_id, o.created_ms, r.payload,
                     (SELECT p.rel_path FROM projections p WHERE p.object_id = o.object_id)
              FROM objects o
-             JOIN heads h ON h.object_id = o.object_id
-             JOIN revisions r ON r.revision_id = h.revision_id
+             JOIN revisions r ON r.revision_id = (
+                 SELECT h.revision_id FROM heads h
+                 JOIN revisions hr ON hr.revision_id = h.revision_id
+                 WHERE h.object_id = o.object_id {head_order} LIMIT 1
+             )
              WHERE o.deleted = 0 AND o.type_id = 'org.memory.source'
                AND COALESCE(json_extract(r.payload, '$.{ATTACHED_KEY}'), 0) = 0
-             GROUP BY o.object_id
-             HAVING r.created_ms = MAX(r.created_ms)
              ORDER BY o.created_ms DESC
-             LIMIT ?1"
+             LIMIT ?1",
+            head_order = crate::revisions::newest_head_first("hr")
         ))?;
         let rows = stmt.query_map([limit], |row| {
             Ok((
@@ -102,6 +107,47 @@ impl Store {
             [object_id],
             |row| row.get(0),
         )?)
+    }
+
+    /// Every head an object currently has, newest first. One is the
+    /// ordinary case; more than one means two devices wrote concurrently
+    /// and both were kept (ADR 0005).
+    pub fn object_heads(&self, object_id: &str) -> Result<Vec<String>> {
+        crate::revisions::heads(self.conn(), object_id)
+    }
+
+    /// A digest of everything two replicas must agree on: which objects
+    /// exist, of what type, whether they are tombstoned, and which
+    /// revisions are their heads. Equal digests are what convergence
+    /// means, and unequal ones say so without a person diffing two
+    /// databases.
+    ///
+    /// Deliberately excludes device-local facts — frontiers, alerts, job
+    /// state, projections — because replicas are not supposed to agree on
+    /// those, and a digest that included them could never be equal.
+    pub fn convergence_digest(&self) -> Result<String> {
+        let mut stmt = self.conn().prepare(
+            "SELECT object_id, type_id, type_schema, deleted FROM objects ORDER BY object_id",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i64>(3)?,
+            ))
+        })?;
+        let mut material = String::new();
+        for row in rows {
+            let (object_id, type_id, type_schema, deleted) = row?;
+            let mut heads = self.object_heads(&object_id)?;
+            heads.sort();
+            material.push_str(&format!(
+                "{object_id}|{type_id}|{type_schema}|{deleted}|{}\n",
+                heads.join(",")
+            ));
+        }
+        Ok(crate::ids::sha256_hex(material.as_bytes()))
     }
 }
 

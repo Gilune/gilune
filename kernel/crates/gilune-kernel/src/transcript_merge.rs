@@ -8,7 +8,6 @@
 //! interrupted anywhere converges on the next open. The flag only spares
 //! healthy vaults the scan.
 
-use crate::capture::record_operation;
 use crate::revisions::{add_revision, head_payload, Announce};
 use crate::store::Store;
 use crate::{ids, Result};
@@ -131,7 +130,13 @@ fn merge_into_source(store: &Store, transcript_id: &str) -> Result<()> {
         // own words preserved in kernel history rather than in the vault.
         conn.execute("UPDATE objects SET deleted = 1 WHERE object_id = ?1", [transcript_id])?;
         conn.execute("DELETE FROM projections WHERE object_id = ?1", [transcript_id])?;
-        record_operation(conn, "tombstone", transcript_id, "{}", created_ms)?;
+        crate::operations::record(
+            conn,
+            crate::operations::TOMBSTONE,
+            transcript_id,
+            serde_json::json!({}),
+            created_ms,
+        )?;
         Ok(())
     })();
     match done {
@@ -269,8 +274,8 @@ mod tests {
         assert_eq!(
             kinds,
             vec![
-                "create-source".to_string(),
-                "create-revision".to_string(),
+                crate::operations::OBJECT_CREATED.to_string(),
+                crate::operations::OBJECT_REVISED.to_string(),
                 "tombstone".to_string()
             ],
             "a future sync peer converges on the same merge"

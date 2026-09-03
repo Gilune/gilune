@@ -3,6 +3,10 @@
 # on every platform, so no end-of-line translation.
 spikes/s2-durable-capture/fixtures/** -text
 
+# The v4 migration fixture was produced by the real schema-v4 binary and the
+# v5 migration re-encodes its operations from the bytes it holds: same rule.
+kernel/crates/gilune-cli/tests/fixtures/** -text
+
 # Gradle wrapper scripts must keep their native line endings to run.
 gradlew text eol=lf
 gradlew.bat text eol=crlf
