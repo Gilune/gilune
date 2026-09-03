@@ -265,18 +265,34 @@ fun rememberConnectionIsMetered(context: Context): Boolean {
 /// second job per recording that nothing in this process ever claimed.
 /// Moonshine is opt-in until MS2 has measured both engines on real
 /// hardware, and this is where that stops being a sentence in an ADR.
-fun registerMoonshine(state: GiluneState, gilune: Gilune) {
+/// What registering did that a caller may have to act on.
+///
+/// [switchedOffOnUpgrade] is true **only** for the case a message line
+/// cannot carry: a vault where the provider was already installed and
+/// switched on, and this open took it away. A fresh install is not that —
+/// nothing was taken away there, because the provider arrives switched off
+/// and says so on the screen that offers it.
+data class MoonshineRegistration(val switchedOffOnUpgrade: Boolean = false)
+
+fun registerMoonshine(state: GiluneState, gilune: Gilune): MoonshineRegistration {
+    var outcome = MoonshineRegistration()
     runCatching {
         val declaration = moonshineDeclaration()
         val installed = gilune.plugins().firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
         val newly = newlyDeclaredLocalCapabilities(installed, declaration.capabilities)
-        val registered = gilune.registerPlugin(declaration)
+        // **The vault this open found**, asked before anything is written:
+        // a provider that was already here and already on is the only one
+        // an upgrade can take away, and afterwards there is no way to tell
+        // that state from a fresh install's default-enabled row.
+        val wasRunning = installed != null && installed.state == "enabled"
+        val registered = registerProviderRespectingTheRule(gilune, declaration, installed)
         var said: String? = null
         if (registered != "removed") {
             for (capability in newly) {
                 runCatching { gilune.grantCapability(MOONSHINE_PLUGIN, capability) }
             }
             said = applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN)
+            if (said != null && wasRunning) outcome = MoonshineRegistration(switchedOffOnUpgrade = true)
         }
         registerMoonshineProcessor(gilune, gilune.plugins())
         state.refresh()
@@ -288,6 +304,7 @@ fun registerMoonshine(state: GiluneState, gilune: Gilune) {
             state.message.value = said
         }
     }
+    return outcome
 }
 
 /// Bring the provider up: fetch the model if the plan says so, and report

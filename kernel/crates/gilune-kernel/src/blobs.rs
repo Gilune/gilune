@@ -72,19 +72,6 @@ impl Store {
         Ok(needs)
     }
 
-    /// How many blobs are awaiting content, store-wide. The one place a
-    /// pending count comes from: `blobs_awaiting_bytes` is store-wide too,
-    /// so a caller that syncs several peers in a row and adds up what each
-    /// session reported counts the same blob once per peer.
-    pub fn blobs_awaiting_count(&self) -> Result<usize> {
-        let count: i64 = self.conn().query_row(
-            "SELECT COUNT(*) FROM blobs WHERE state = 'committed' AND origin = 'sync'",
-            [],
-            |row| row.get(0),
-        )?;
-        Ok(count.max(0) as usize)
-    }
-
     /// Append one chunk of a blob's content at `offset`, which must be
     /// exactly what is already staged — a sender that has lost its place
     /// is told the truth rather than allowed to write a hole. Returns the
@@ -108,17 +95,38 @@ impl Store {
         limits: Limits,
     ) -> Result<u64> {
         let declared = self.declared_blob_length(blob_id)?;
+        self.write_blob_chunk_bounded(blob_id, declared, offset, chunk, limits)
+    }
+
+    /// As `write_blob_chunk`, for a caller that already holds the length
+    /// the operation declared — the fetch loop has it in the `BlobNeed`
+    /// it is working through, so looking it up again for every 64 KiB was
+    /// a query per chunk to learn something the caller had in its hand.
+    ///
+    /// The staged length is still read from the file on every chunk, and
+    /// deliberately: multi-instance is supported use, so another process
+    /// may be appending to the same transfer, and the offset check is the
+    /// one thing standing between that and a hole in the middle of
+    /// somebody's recording. It costs a stat, which is not a query.
+    pub fn write_blob_chunk_bounded(
+        &self,
+        blob_id: &str,
+        declared: u64,
+        offset: u64,
+        chunk: &[u8],
+        limits: Limits,
+    ) -> Result<u64> {
         let path = incoming_path(self, blob_id);
         let staged = staged_bytes(self, blob_id);
         if offset != staged {
-            return Err(self.halt_transfer(
+            return Err(self.halt(
                 alerts::SYNC_CORRUPT_OPERATION,
                 blob_id,
                 &format!("chunk offered at {offset}, but {staged} bytes are staged"),
             ));
         }
         if chunk.len() > limits.chunk_bytes {
-            return Err(self.halt_transfer(
+            return Err(self.halt(
                 alerts::SYNC_LIMIT_EXCEEDED,
                 blob_id,
                 &format!(
@@ -130,7 +138,7 @@ impl Store {
         }
         let would_be = staged.saturating_add(chunk.len() as u64);
         if would_be > declared {
-            return Err(self.halt_transfer(
+            return Err(self.halt(
                 alerts::SYNC_LIMIT_EXCEEDED,
                 blob_id,
                 &format!("content would reach {would_be} bytes, past the declared {declared}"),
@@ -149,19 +157,6 @@ impl Store {
         // resumes from what survived, a torn one fails its digest and is
         // fetched again. An fsync every 64 KiB bought nothing but time.
         Ok(would_be)
-    }
-
-    /// Raise and name a refusal about content, so a blob transfer is as
-    /// visible when it stops as an operation stream is.
-    fn halt_transfer(&self, kind: &str, blob_id: &str, detail: &str) -> KernelError {
-        if let Err(e) = alerts::raise(self.conn(), kind, blob_id, detail) {
-            return e;
-        }
-        KernelError::SyncHalted {
-            kind: kind.to_string(),
-            subject: blob_id.to_string(),
-            reason: detail.to_string(),
-        }
     }
 
     /// Complete a transfer: verify the staged bytes against the digest the
@@ -205,27 +200,11 @@ impl Store {
         // The one fsync of the transfer, here rather than per chunk: the
         // bytes must be durable before the rename that publishes them.
         fs::fsync_file(&path)?;
-        let target = self.vault().join(&rel_path);
-        if let Some(parent) = target.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| KernelError::Io { path: parent.to_path_buf(), source: e })?;
-            match std::fs::rename(&path, &target) {
-                Ok(()) => {}
-                // Another process completed the same transfer between our
-                // check and here: multi-instance is supported use.
-                Err(e) if target.exists() => {
-                    let _ = e;
-                    let _ = std::fs::remove_file(&path);
-                }
-                Err(e) => return Err(KernelError::Io { path: target.clone(), source: e }),
-            }
-            fs::fsync_dir(parent)?;
-        }
-        crate::crashpoints::crashpoint("blob.promote.after");
-        self.conn().execute(
-            "UPDATE blobs SET state = 'ready' WHERE blob_id = ?1",
-            [blob_id],
-        )?;
+        // The same promotion a capture takes, and deliberately not a
+        // second copy of it: two of them had already drifted, and the
+        // half that cleaned up after a lost race was the half that did
+        // not need to (`capture::promote`).
+        crate::capture::promote(self, blob_id, &path, &rel_path)?;
         // Content that arrived whole withdraws everything that was
         // standing about this transfer.
         for kind in [
@@ -302,26 +281,45 @@ pub(crate) fn promoted_bytes_are_sound(store: &Store, blob_id: &str) -> Result<b
     Ok(digest_of(&path)? == sha256)
 }
 
-/// Hash a staged file by reading it back a chunk at a time. Deliberately
-/// not a running hasher held across chunk writes: a transfer that resumes
-/// after a restart has no such hasher, and one code path that always
-/// works beats two that agree only while the process lives.
-fn digest_of(path: &std::path::Path) -> Result<String> {
-    use sha2::Digest;
+/// How much of a file is resident while it is being hashed. A blob may be
+/// half a gigabyte (`Limits::max_blob_bytes`), and nothing in the kernel
+/// is ever allowed to hold one.
+pub(crate) const DIGEST_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Hash a file by reading it back a chunk at a time. Deliberately not a
+/// running hasher held across chunk writes: a transfer that resumes after
+/// a restart has no such hasher, and one code path that always works
+/// beats two that agree only while the process lives.
+///
+/// **The only way the kernel hashes a blob.** `Store::verify`,
+/// recovery's stage matching and the external route's streaming claim all
+/// used to call `std::fs::read` and hash the result, so the three places
+/// that exist to protect large recordings each held one whole.
+pub(crate) fn digest_of(path: &std::path::Path) -> Result<String> {
     let mut file = std::fs::File::open(path)
         .map_err(|e| KernelError::Io { path: path.to_path_buf(), source: e })?;
+    digest_reader(&mut file)
+        .map_err(|e| KernelError::Io { path: path.to_path_buf(), source: e })
+        .map(|(digest, _)| digest)
+}
+
+/// Hash whatever a reader yields, `DIGEST_CHUNK_BYTES` at a time, and say
+/// how many bytes there were — so a caller checking a length need not
+/// stat the file a second time or read it again to find out.
+pub(crate) fn digest_reader(reader: &mut impl Read) -> std::io::Result<(String, u64)> {
+    use sha2::Digest;
     let mut hasher = <sha2::Sha256 as sha2::Digest>::new();
-    let mut buffer = vec![0u8; 64 * 1024];
+    let mut buffer = vec![0u8; DIGEST_CHUNK_BYTES];
+    let mut total = 0u64;
     loop {
-        let read = file
-            .read(&mut buffer)
-            .map_err(|e| KernelError::Io { path: path.to_path_buf(), source: e })?;
+        let read = reader.read(&mut buffer)?;
         if read == 0 {
             break;
         }
         hasher.update(&buffer[..read]);
+        total += read as u64;
     }
-    Ok(hex::encode(hasher.finalize()))
+    Ok((hex::encode(hasher.finalize()), total))
 }
 
 #[cfg(test)]
@@ -390,7 +388,7 @@ mod tests {
             Vec::<u8>::new()
         );
         assert!(store.blobs_awaiting_bytes().expect("awaiting").is_empty());
-        assert_eq!(store.blobs_awaiting_count().expect("count"), 0);
+        assert_eq!(store.status().expect("status").blobs_awaiting, 0);
         assert!(store.verify().expect("verify").is_empty());
     }
 
@@ -443,6 +441,86 @@ mod tests {
             1
         );
         assert_eq!(staged_bytes(&store, &blob_id), 0, "the transfer can start again");
+    }
+
+    /// A reader that records the largest buffer it was ever asked to
+    /// fill. Nothing else can prove "never held whole" from the outside:
+    /// a hasher that read the file into a `Vec` first would produce the
+    /// same digest and pass every other assertion.
+    struct Counting<'a> {
+        bytes: &'a [u8],
+        at: usize,
+        largest_ask: usize,
+    }
+
+    impl Read for Counting<'_> {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            self.largest_ask = self.largest_ask.max(buffer.len());
+            let taken = buffer.len().min(self.bytes.len() - self.at);
+            buffer[..taken].copy_from_slice(&self.bytes[self.at..self.at + taken]);
+            self.at += taken;
+            Ok(taken)
+        }
+    }
+
+    #[test]
+    fn hashing_a_blob_never_holds_more_than_a_chunk_of_it() {
+        // A blob may be half a gigabyte (`Limits::max_blob_bytes`), and
+        // three separate places used to hash one by reading the whole
+        // file into memory first: `Store::verify`, recovery's stage
+        // matching, and the external route's streaming claim — the three
+        // places whose whole job is to protect large recordings.
+        let content: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let mut reader = Counting { bytes: &content, at: 0, largest_ask: 0 };
+        let (digest, len) = digest_reader(&mut reader).expect("hash");
+        assert_eq!(digest, ids::sha256_hex(&content));
+        assert_eq!(len, content.len() as u64, "the length comes back from the same pass");
+        assert!(
+            reader.largest_ask <= DIGEST_CHUNK_BYTES,
+            "asked for {} bytes at once, which is more than a chunk",
+            reader.largest_ask
+        );
+        assert!(reader.at > DIGEST_CHUNK_BYTES, "and it really did read past the first chunk");
+    }
+
+    #[test]
+    fn verify_reads_past_the_first_chunk_of_a_large_blob() {
+        // The second-order case for streaming: a hasher that stopped
+        // early would also never hold the file whole, and would also
+        // agree with itself. Damage placed deliberately beyond the first
+        // chunk is what tells the two apart.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        let content: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
+        let receipt = store.capture_bytes("wav", &content).expect("capture");
+        assert!(store.verify().expect("verify").is_empty());
+
+        let path = dir.path().join(&receipt.rel_path);
+        let mut damaged = std::fs::read(&path).expect("read");
+        let far = DIGEST_CHUNK_BYTES * 3 + 17;
+        damaged[far] ^= 0xFF;
+        std::fs::write(&path, &damaged).expect("damage a byte a long way in");
+
+        let problems = store.verify().expect("verify");
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains("content hash mismatch"), "{}", problems[0]);
+    }
+
+    #[test]
+    fn a_promotion_that_lost_the_race_leaves_no_staged_duplicate() {
+        // The transfer side of the shared promotion: another process
+        // finished the same transfer first. The bytes are in the vault
+        // either way, and the stage must not be left behind.
+        let (dir, store, blob_id) = awaiting(&[4u8; 96]);
+        store.write_blob_chunk(&blob_id, 0, &[4u8; 96], Limits::DEFAULT).expect("all of it");
+        let target = dir.path().join("Captures/remote.wav");
+        std::fs::create_dir_all(target.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&target, [4u8; 96]).expect("another process got there first");
+
+        assert!(store.finish_blob(&blob_id).expect("complete"));
+        assert!(!incoming_path(&store, &blob_id).exists(), "no staged duplicate is left");
+        assert_eq!(store.status().expect("status").blobs_awaiting, 0);
+        assert!(store.verify().expect("verify").is_empty());
     }
 
     #[test]

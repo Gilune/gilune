@@ -51,6 +51,22 @@ fun recordingNotificationText(elapsedMs: Long): String = "Recording ${formatDura
 fun recordedNotificationText(durationMs: Long?): String =
     if (durationMs == null) "Recorded · tap to open" else "Recorded ${formatDuration(durationMs)} · tap to open"
 
+/// The second line of that notification.
+///
+/// **The widget's only channel for a failure.** This path has no screen and
+/// no message line, so a transcription that failed here used to be visible
+/// nowhere: the notification said the recording had landed — true — and the
+/// missing words were a logcat line. The recording itself is never in doubt
+/// (it committed before anything was asked of a processor), so the sentence
+/// says what is safe and what is outstanding, and never that something was
+/// lost: a failed job backs off and is tried again.
+fun recordedNotificationDetail(noteTitle: String?, transcriptionFailed: Long): String = when {
+    transcriptionFailed > 0L ->
+        "Saved. The words could not be written yet — Gilune will try again."
+    noteTitle != null -> noteTitle
+    else -> "Saved to your vault."
+}
+
 class RecordService : Service() {
     private val queue = LinkedBlockingQueue<ByteArray>()
     private var recorder: Thread? = null
@@ -214,6 +230,12 @@ class RecordService : Service() {
     private fun commitLoop() {
         var landed: String? = null
         var duration: Long? = null
+        // Jobs the provider ran and could not finish. Threaded out to the
+        // notification because this path has no screen and no message line:
+        // until this round the pass was discarded where it was computed, so
+        // a widget recording whose words failed was announced exactly like
+        // one whose words landed, and the only trace was in logcat.
+        var transcriptionFailed = 0L
         try {
             Gilune.open(vaultDir(this)).use { gilune ->
                 val writer = gilune.beginCapture("wav")
@@ -262,8 +284,9 @@ class RecordService : Service() {
                     val provider = moonshineProviderForService(this@RecordService, gilune)
                     val whisper = enableTranscriptionForService(this@RecordService, gilune)
                     if (whisper || provider != null) {
-                        gilune.runProcessing()
-                        provider?.let { runMoonshineJobs(gilune, it) }
+                        val summary = gilune.runProcessing()
+                        val pass = provider?.let { runMoonshineJobs(gilune, it) } ?: ProviderPass()
+                        transcriptionFailed = summary.failed + pass.failed
                         // ADR 0013 revises the capture note in place, so
                         // the transcript reaches the file through a
                         // second projection.
@@ -278,10 +301,10 @@ class RecordService : Service() {
         } catch (e: Throwable) {
             Log.e(TAG, "the recording did not commit", e)
         }
-        finished(landed, duration)
+        finished(landed, duration, transcriptionFailed)
     }
 
-    private fun finished(notePath: String?, durationMs: Long?) {
+    private fun finished(notePath: String?, durationMs: Long?, transcriptionFailed: Long) {
         capturing = false
         running = false
         ticker.post {
@@ -289,7 +312,10 @@ class RecordService : Service() {
             // Detach rather than cancel: the notification is how the user
             // reaches the note they just spoke (§ 4).
             stopForeground(STOP_FOREGROUND_DETACH)
-            notifications().notify(NOTIFICATION_ID, recordedNotification(notePath, durationMs))
+            notifications().notify(
+                NOTIFICATION_ID,
+                recordedNotification(notePath, durationMs, transcriptionFailed),
+            )
             refreshWidgets(this)
             stopSelf()
         }
@@ -322,10 +348,16 @@ class RecordService : Service() {
             .build()
     }
 
-    private fun recordedNotification(notePath: String?, durationMs: Long?): Notification =
+    private fun recordedNotification(
+        notePath: String?,
+        durationMs: Long?,
+        transcriptionFailed: Long,
+    ): Notification =
         baseNotification()
             .setContentTitle(recordedNotificationText(durationMs))
-            .setContentText(notePath?.let(::noteTitle) ?: "Saved to your vault.")
+            .setContentText(
+                recordedNotificationDetail(notePath?.let(::noteTitle), transcriptionFailed),
+            )
             .setOngoing(false)
             .setAutoCancel(true)
             .setContentIntent(

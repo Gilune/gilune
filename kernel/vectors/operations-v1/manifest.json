@@ -151,6 +151,14 @@
     {
       "file": "unknown-kind.json",
       "kind": "com.example.widget-moved"
+    },
+    {
+      "file": "object-revised-named-origins.json",
+      "kind": "object-revised"
+    },
+    {
+      "file": "tombstone-named-origins.json",
+      "kind": "tombstone"
     }
   ],
   "version": 1

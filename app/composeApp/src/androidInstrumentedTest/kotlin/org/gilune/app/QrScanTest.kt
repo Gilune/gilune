@@ -80,6 +80,74 @@ class QrScanTest {
     }
 
     // ------------------------------------------------------------------
+    // The analyser's one buffer
+    //
+    // Analysis frames arrive many times a second and a Y plane is the
+    // frame's whole area, so a `ByteArray` per frame was megabytes a second
+    // of garbage on a screen whose whole job is to wait. The buffer is
+    // reused; these say what "reused" must mean.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theScanBuysOneBufferAndKeepsIt() {
+        val scratch = LuminanceScratch()
+        val frame = java.nio.ByteBuffer.wrap(ByteArray(240 * 240) { -1 })
+        val first = scratch.take(frame, 240 * 240)
+        frame.rewind()
+        val second = scratch.take(frame, 240 * 240)
+        assertSame(first, second, "a second frame of the same shape allocated again")
+        assertEquals(1, scratch.allocations)
+    }
+
+    @Test
+    fun aBiggerFrameGrowsTheBufferAndASmallerOneDoesNot() {
+        val scratch = LuminanceScratch()
+        scratch.take(java.nio.ByteBuffer.wrap(ByteArray(100)), 100)
+        assertEquals(1, scratch.allocations)
+        scratch.take(java.nio.ByteBuffer.wrap(ByteArray(400)), 400)
+        assertEquals(2, scratch.allocations)
+        assertEquals(400, scratch.capacity)
+        // A smaller frame afterwards keeps the larger buffer: geometry does
+        // not change mid-scan, and re-allocating downwards would be the
+        // per-frame allocation coming back the other way.
+        scratch.take(java.nio.ByteBuffer.wrap(ByteArray(100)), 100)
+        assertEquals(2, scratch.allocations)
+        assertEquals(400, scratch.capacity)
+    }
+
+    @Test
+    fun aShortPlanesTailIsZeroedRatherThanTheLastFramesPixels() {
+        // The reused-buffer hazard, and the reason the tail is filled: a
+        // driver that reports geometry it did not fill would otherwise be
+        // decoding the previous frame's pixels at the bottom of this one.
+        val scratch = LuminanceScratch()
+        scratch.take(java.nio.ByteBuffer.wrap(ByteArray(64) { -1 }), 64)
+        val short = scratch.take(java.nio.ByteBuffer.wrap(ByteArray(8) { 7 }), 64)
+        assertEquals(7.toByte(), short[7])
+        for (index in 8 until 64) {
+            assertEquals(
+                0.toByte(),
+                short[index],
+                "byte $index is the last frame's, not this one's",
+            )
+        }
+    }
+
+    @Test
+    fun aReusedBufferStillDecodesTheCodeItIsHolding() {
+        // End to end through the same call the analyser makes: the payload
+        // survives the buffer being one somebody else already used.
+        val payload = "gilune-sync/1|192.168.1.20:51837|ABCDEFGH"
+        val (bytes, stride, width) = plane(payload)
+        val height = bytes.size / stride
+        val scratch = LuminanceScratch()
+        scratch.take(java.nio.ByteBuffer.wrap(ByteArray(bytes.size) { -1 }), bytes.size)
+        val reused = scratch.take(java.nio.ByteBuffer.wrap(bytes), stride * height)
+        assertEquals(payload, decodeQrLuminance(qrReader(), reused, stride, width, height))
+        assertEquals(1, scratch.allocations, "the second frame allocated")
+    }
+
+    // ------------------------------------------------------------------
     // The scan's lifetime
     //
     // **The defect these pin.** `ProcessCameraProvider.getInstance` is a

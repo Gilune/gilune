@@ -122,6 +122,14 @@ pub(crate) fn add_revision(
         },
         "supersedes": superseded,
     });
+    // Whose object this is, and whose each superseded head was. Additive
+    // keys, and the exit from `sync-awaiting-referent`: a receiver that
+    // has never seen the object cannot look up whose it was, so a
+    // revision of an object belonging to a device it has revoked would
+    // otherwise halt its stream waiting for something that can never come
+    // (ADR 0019 § 9). Read before the operation below is recorded, so it
+    // describes the history this revision was written over.
+    operations::name_origins(conn, object_id, &superseded, &mut carried)?;
     if announce == Announce::Event {
         // A silent revision carries no key at all rather than a null one:
         // the canonical bytes say only what is true.

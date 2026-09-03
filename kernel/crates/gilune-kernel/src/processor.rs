@@ -49,6 +49,16 @@ impl<'a> ProcessorCtx<'a> {
         })
     }
 
+    /// Which revision `subject_payload` just answered with — the head a
+    /// processor actually read. Passing it back as an output's
+    /// `expected_head` is how a slow processor declines to overwrite an
+    /// answer that landed while it was working.
+    pub fn subject_head(&self) -> Result<Option<String>> {
+        Ok(crate::revisions::heads(self.store.conn(), &self.subject_id)?
+            .into_iter()
+            .next())
+    }
+
     /// Where the subject's blob is, or `None` when it has none — a
     /// derived object carries its interpretation in its document.
     pub fn subject_blob_facts(&self) -> Result<Option<BlobFacts>> {
@@ -116,6 +126,13 @@ pub struct ProposedOutput {
     /// Canonical JSON document.
     pub payload: String,
     pub target: OutputTarget,
+    /// The subject head this output was written over, for a
+    /// `ReviseSubject` that would rather be refused than overwrite. `None`
+    /// — the default and the shape everything shipped with — keeps the
+    /// old behaviour: the output lands whatever the subject has become.
+    ///
+    /// Ignored for `NewObject`, which replaces nothing.
+    pub expected_head: Option<String>,
 }
 
 pub trait Processor: Send + Sync {
@@ -299,6 +316,23 @@ impl Store {
             for (index, output) in outputs.iter().enumerate() {
                 let revision_id = derived_id(&format!("{idempotency_key}:{index}:rev"));
                 if output.target == OutputTarget::ReviseSubject {
+                    // Compare-and-set, inside the transaction that writes
+                    // — anywhere else it would be a check that another
+                    // submitter could slip past. An output that names no
+                    // head asks for nothing and is not checked.
+                    if let Some(expected) = &output.expected_head {
+                        let found = crate::revisions::heads(conn, &job.subject_id)?
+                            .into_iter()
+                            .next()
+                            .unwrap_or_default();
+                        if &found != expected {
+                            return Err(KernelError::SubjectMoved {
+                                subject_id: job.subject_id.clone(),
+                                expected: expected.clone(),
+                                found,
+                            });
+                        }
+                    }
                     add_revision(
                         conn,
                         &job.subject_id,
@@ -453,6 +487,7 @@ impl Processor for FakeTranscriber {
             type_schema: 1,
             payload: document.to_string(),
             target: OutputTarget::ReviseSubject,
+            expected_head: None,
         }])
     }
 }
@@ -571,6 +606,7 @@ mod tests {
                     type_schema: 1,
                     payload: serde_json::json!({ "text": "a summary" }).to_string(),
                     target: OutputTarget::NewObject,
+                    expected_head: None,
                 }])
             }
         }

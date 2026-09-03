@@ -96,6 +96,49 @@ fun qrReader(): MultiFormatReader = MultiFormatReader().apply {
     setHints(mapOf(DecodeHintType.POSSIBLE_FORMATS to listOf(BarcodeFormat.QR_CODE)))
 }
 
+/// The analyser's one luminance buffer, reused frame after frame.
+///
+/// **Why this is not a `ByteArray(remaining)` in `analyze`.** Analysis
+/// frames arrive many times a second and a Y plane is the frame's whole
+/// area — hundreds of kilobytes each — so allocating one per frame handed
+/// the collector megabytes a second on a screen whose whole job is to wait
+/// for a code to appear. On a phone that is a scanner that stutters and a
+/// battery that drops while nothing is happening.
+///
+/// It is safe to reuse because the analyser runs on a **single-threaded**
+/// executor (`QrSession.analyserExecutor`), so exactly one frame is in this
+/// buffer at a time, and the decoded payload is a `String` that outlives it.
+/// The buffer never shrinks: frame geometry does not change mid-scan, so
+/// after the first frame this allocates nothing at all.
+///
+/// The short-plane case keeps its old behaviour rather than inheriting the
+/// last frame's pixels: a driver that fills fewer bytes than its geometry
+/// claims gets the tail **zeroed**, exactly as the `copyOf` it replaces did.
+internal class LuminanceScratch {
+    private var bytes = ByteArray(0)
+
+    /// How many times a new array had to be made. A scan that grows this
+    /// past one is allocating per frame again.
+    var allocations = 0
+        private set
+
+    val capacity: Int get() = bytes.size
+
+    fun take(source: java.nio.ByteBuffer, needed: Int): ByteArray {
+        val remaining = source.remaining()
+        val size = maxOf(remaining, needed)
+        var buffer = bytes
+        if (buffer.size < size) {
+            buffer = ByteArray(size)
+            bytes = buffer
+            allocations += 1
+        }
+        source.get(buffer, 0, remaining)
+        if (remaining < size) java.util.Arrays.fill(buffer, remaining, size, 0)
+        return buffer
+    }
+}
+
 /// One payload, once. The analyser keeps running until the composable
 /// leaves, so the latch is what stops a code held in front of the lens
 /// from pairing four times a second.
@@ -107,14 +150,16 @@ private class QrAnalyser(private val onPayload: (String) -> Unit) : ImageAnalysi
     private val reader = qrReader()
     private val spent = AtomicBoolean(false)
 
+    /// One buffer for the whole scan (see [LuminanceScratch]). Confined to
+    /// the analyser's single-threaded executor.
+    private val scratch = LuminanceScratch()
+
     override fun analyze(image: ImageProxy) {
         try {
             if (spent.get()) return
             if (image.format != ImageFormat.YUV_420_888) return
             val plane = image.planes.firstOrNull() ?: return
-            val buffer = plane.buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)
+            val bytes = scratch.take(plane.buffer, plane.rowStride * image.height)
             val payload = decodeQrLuminance(reader, bytes, plane.rowStride, image.width, image.height)
             if (payload != null && spent.compareAndSet(false, true)) onPayload(payload)
         } catch (e: Throwable) {

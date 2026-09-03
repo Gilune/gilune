@@ -493,7 +493,20 @@ neighbourhood and one shell-policy gap; the fixes amend § 2 and § 3.
   Moonshine opt-in until MS2). Registering it enabled — the kernel's default
   for an unseen plugin — made § 3's "both enabled" hole the *default* state
   on every fresh install and every R1→R3 upgrade, queueing one job per
-  recording that nothing would ever claim.
+  recording that nothing would ever claim. *Second review, same day:* the
+  first correction registered then disabled in two boundary calls, leaving a
+  window in which a capture on another handle still queued the orphan job;
+  the kernel now offers `register_plugin_disabled`, so an opt-in provider is
+  never enabled even briefly, and the register-then-disable rule survives
+  only for vaults upgraded with both already on — which are told, once and
+  dismissibly, why their live caption went away.
+- **A processor output may name the head it read** (§ 2, second review).
+  `ProposedOutput` carries an optional expected head and a claim exposes the
+  head it was taken against; a revise-subject output whose expected head has
+  moved is refused for whichever route submits it. The "never overwrite
+  words already in the note" rule was provider-local Kotlin before this,
+  which left the FFI route open to any submitter; it is now a kernel
+  compare-and-set, and Moonshine passes the head it read.
 
 ## R0's verdict and corrected numbers
 

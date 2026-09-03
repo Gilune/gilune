@@ -663,6 +663,107 @@ fn a_revision_naming_a_head_that_has_not_arrived_halts_rather_than_resurrecting_
 }
 
 #[test]
+fn a_revoked_devices_history_never_arriving_does_not_silence_the_device_relaying_it() {
+    // The fault the awaiting-referent exit exists for, in the shape that
+    // makes it serious. C has revoked A and has never held a single one
+    // of A's operations. B has: it pulled A's note and revised it. So
+    // every session C has with B carries a revision of an object C will
+    // never see — and waiting for that object halted B's whole stream,
+    // permanently. One revoked device silencing a healthy one, in a mesh
+    // where a full replica relays a third device's history by design.
+    let (a, b, object_id, _rel) = a_wrote_and_b_answered("what a wrote");
+    let a_device = a.store.device_id().expect("device");
+    let text_rel = b.projection_of(&object_id).expect("projected on b");
+    let text = std::fs::read_to_string(b.path(&text_rel)).expect("read");
+    std::fs::write(b.path(&text_rel), text.replace("what a wrote", "what b made of it"))
+        .expect("edit");
+    b.store.reconcile().expect("reconcile");
+    // Something of B's own, written after the revision, so "the stream
+    // carries on" is a fact about history and not about one operation.
+    let mine = b.store.capture_bytes("txt", b"b's own words").expect("capture");
+
+    let c = Replica::new();
+    c.store.refuse_device(&a_device).expect("C has revoked A");
+
+    let report = c.pull_through(&b, Fault::WithholdDevice(a_device.clone()));
+    assert!(report.halted.is_empty(), "B's stream must not stop: {:?}", report.halted);
+    assert!(
+        report.uninterpreted >= 1,
+        "the revision of A's object is preserved and forwarded, never applied"
+    );
+    assert_eq!(
+        c.alert_kinds(),
+        vec![alerts::SYNC_REFERENT_REFUSED],
+        "and it says why it did not stop"
+    );
+    assert!(
+        !c.store.integrity_alerts().expect("alerts")[0].damage,
+        "carrying on past a revoked device's history is policy, not damage"
+    );
+
+    // What the halt used to cost: everything behind it.
+    assert_eq!(
+        std::fs::read(c.path(&mine.rel_path)).expect("B's own capture arrived, bytes and all"),
+        b"b's own words",
+        "B's own history arrived, which is the whole point"
+    );
+    assert_eq!(
+        c.store.status().expect("status").sources,
+        1,
+        "and A's object was never accepted, because A is revoked here"
+    );
+    assert_eq!(
+        c.store.sync_frontier(&b.store.device_id().expect("device")).expect("frontier"),
+        2,
+        "the frontier moved past the moot operation rather than sticking on it"
+    );
+
+    // Stable: asking again neither halts nor grows the notice.
+    let again = c.pull_through(&b, Fault::WithholdDevice(a_device));
+    assert!(again.halted.is_empty());
+    assert_eq!(c.alert_kinds(), vec![alerts::SYNC_REFERENT_REFUSED]);
+    assert!(c.store.verify().expect("verify").is_empty());
+}
+
+#[test]
+fn a_session_reports_what_it_left_unfinished_rather_than_what_the_vault_is_missing() {
+    // `incomplete()` is a question about **this** exchange: did it leave
+    // work for the next one? A peer that has applied an operation but is
+    // still waiting for its content has nothing to give, and a session
+    // with a peer that has everything must be able to say it finished.
+    let a = Replica::new();
+    let b = Replica::new();
+    let c = Replica::new();
+    let receipt = a.store.capture_bytes("txt", b"words with a recording").expect("capture");
+    b.pull_from(&a);
+    assert_eq!(b.store.status().expect("status").blobs_awaiting, 0, "B has the content");
+
+    // A peer that supplies none: the operation applies, the bytes do not.
+    let none = c.pull_through(&a, Fault::WithholdBlobs);
+    assert_eq!(none.applied, 1);
+    assert_eq!(none.blobs_completed, 0);
+    assert_eq!(none.blobs_pending, 1, "this session left one transfer unfinished");
+    assert!(none.incomplete(), "so the caller is told to come back");
+    assert_eq!(c.store.status().expect("status").blobs_awaiting, 1);
+
+    // A peer that supplies all.
+    let all = c.pull_from(&b);
+    assert_eq!(all.blobs_completed, 1);
+    assert_eq!(all.blobs_pending, 0, "this session finished what it started");
+    assert!(!all.incomplete(), "and says so, rather than asking to be run again");
+    assert_eq!(
+        c.store.status().expect("status").blobs_awaiting,
+        0,
+        "the store-wide fact has its own home and agrees"
+    );
+    assert_eq!(
+        std::fs::read(c.path(&receipt.rel_path)).expect("arrived"),
+        b"words with a recording"
+    );
+    assert!(c.store.verify().expect("verify").is_empty());
+}
+
+#[test]
 fn a_capture_of_nought_bytes_syncs_and_converges() {
     // A recording that caught nothing is still a capture, and its note
     // must reach the other device. There is no chunk to send for it, so

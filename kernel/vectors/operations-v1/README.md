@@ -48,8 +48,40 @@ is a vector for exactly that, and a decoder that rejects it is wrong.
   the heads it replaces. Any head it does not name was concurrent with
   it and survives: this array is where ADR 0005's concurrent-head
   contract lives on the wire.
-- **`tombstone`** — the object named by `target_id` is deleted. Payload
-  is empty; history keeps the object.
+- **`tombstone`** — the object named by `target_id` is deleted. It names
+  in `supersedes` the heads the deleter could see, exactly as a revision
+  does; history keeps the object. A head a tombstone does not name was
+  written concurrently with the deletion, and a projection keeps that
+  file rather than destroying words the deleter never had in front of
+  them.
+
+## The origin keys
+
+Two optional payload keys, on `object-revised` and `tombstone` alike:
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `object_origin_device` | string | The device whose `object-created` brought `object_id` into being. |
+| `supersedes_origin` | object | Each superseded revision id mapped to the device whose operation carried it. Only ids whose origin the writer knew appear. |
+
+They exist because waiting is only correct while the thing waited for
+might still arrive. A revision or a tombstone of an object belonging to a
+device the receiver has **revoked** names something that can never come,
+and without these keys the receiver cannot know that — it has never seen
+the object, so it has no way to look up whose it was. It would halt that
+stream for ever, which in a full-replica mesh is one revoked device
+silencing a healthy one.
+
+Both keys are **additive and optional**. A decoder must accept an
+operation that carries neither: that is what every operation written
+before they existed looks like, and `object-revised-concurrent.json` and
+`tombstone.json` are kept in the set as exactly that shape.
+
+> Added 2026-09-03. Regenerating this set is a deliberate act — see
+> "Using them" below. The two new files were added and the manifest
+> rewritten; the thirty-seven files that were already here are
+> byte-identical, which is the property that makes this an addition to
+> the format rather than a change to it.
 
 `revision.payload` is a **string** containing the object's document, not
 a nested object. The document's bytes are what the vault projection

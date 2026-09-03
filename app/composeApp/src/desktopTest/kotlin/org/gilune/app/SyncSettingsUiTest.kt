@@ -65,6 +65,7 @@ class SyncSettingsUiTest {
                 subject = "a device this vault has never met",
                 detail = "",
                 raisedMs = 0,
+                damage = true,
             ),
         )
 
@@ -105,6 +106,9 @@ class SyncSettingsUiTest {
                 subject = "device-7",
                 detail = "seq 41",
                 raisedMs = 0,
+                // The kernel's own classification, which is what decides
+                // whether this banner is drawn as an error.
+                damage = true,
             ),
         )
 

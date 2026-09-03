@@ -150,19 +150,53 @@ class ProviderRegistrationTest {
         // Settings ▸ About can hold jobs nobody will ever claim. An
         // upgraded vault that ran both transcribers for a while carries
         // exactly those, and a bare number reads as work to clear.
-        val note = waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 4L)
+        val note = waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 4L, 3L)
         assertTrue(note != null && note.contains("parked"), "'$note'")
         assertTrue(note.contains("Realtime transcription (Moonshine)"), "name it: '$note'")
         assertTrue(note.contains("nothing is waiting on you"), "'$note'")
     }
 
     @Test
+    fun bothNumbersAreSaidRatherThanHedgedAsSome() {
+        // **The second-order case.** The first round said "some are parked"
+        // because the shell could see which plugins were off but not how
+        // much work belonged to them — a hedge in front of a number a
+        // person is looking at. The kernel counts parked work now, so the
+        // sentence says how many wait on a switch and how many do not.
+        val mixed = waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 4L, 3L)!!
+        assertTrue(mixed.startsWith("3 parked"), "'$mixed'")
+        assertTrue(mixed.contains("1 more is waiting on Gilune"), "'$mixed'")
+        assertFalse(mixed.contains("some are parked"), "the hedge came back: '$mixed'")
+
+        // Every waiting job parked: there is no "more" to promise.
+        val all = waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 3L, 3L)!!
+        assertTrue(all.contains("nothing else is waiting"), "'$all'")
+
+        // Plural, because 2 of them is not "1 more".
+        val two = waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 5L, 3L)!!
+        assertTrue(two.contains("2 more are waiting"), "'$two'")
+    }
+
+    @Test
     fun nothingParkedAndNothingWaitingBothSayNothing() {
-        assertNull(waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 0L))
-        assertNull(waitingJobsNote(listOf(whisperRow(), moonshineRow()), 7L))
-        // A switched-off plugin with no processor parks nothing, so it is
-        // not an explanation for a count.
-        assertNull(waitingJobsNote(listOf(plugin("org.memory.tasks", "disabled")), 7L))
+        assertNull(waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 0L, 0L))
+        assertNull(waitingJobsNote(listOf(whisperRow(), moonshineRow()), 7L, 0L))
+        // A vault with work waiting and none of it parked has nothing to
+        // explain — the jobs are simply queued and will run.
+        assertNull(waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 7L, 0L))
+        // A switched-off plugin with no processor parks nothing, and the
+        // kernel agrees by counting none.
+        assertNull(waitingJobsNote(listOf(plugin("org.memory.tasks", "disabled")), 7L, 0L))
+    }
+
+    @Test
+    fun parkedWorkIsStillSaidWhenThisBuildCannotNameThePluginHoldingIt() {
+        // The kernel's count is the fact; naming the plugin is a courtesy.
+        // A vault carrying a plugin this build has never heard of — or one
+        // removed since its jobs were queued — must not silence a number.
+        val note = waitingJobsNote(emptyList(), 2L, 2L)!!
+        assertTrue(note.startsWith("2 parked"), "'$note'")
+        assertTrue(note.contains("switched off"), "'$note'")
     }
 
     // ------------------------------------------------------------------
@@ -193,11 +227,21 @@ class ProviderRegistrationTest {
 
     @Test
     fun anExchangeThatReceivedNothingHasNothingToProject() {
-        assertFalse(syncNeedsProjection(0L))
-        assertTrue(syncNeedsProjection(1L))
+        assertFalse(syncNeedsProjection(0L, 0L))
+        assertTrue(syncNeedsProjection(1L, 0L))
         // Sending is not receiving: what this device sent is already on
         // its own disk.
-        assertFalse(syncNeedsProjection(0L))
+        assertFalse(syncNeedsProjection(0L, 0L))
+    }
+
+    @Test
+    fun aSessionThatOnlyCompletedBlobsStillProjects() {
+        // The second-order case the first round of this fix missed: an
+        // operation applies in one session and the bytes it refers to
+        // arrive in the next, which applies nothing at all. Without a pass
+        // the note goes on pointing at a recording the vault already holds.
+        assertTrue(syncNeedsProjection(0L, 1L))
+        assertTrue(syncNeedsProjection(2L, 3L))
     }
 
     // ------------------------------------------------------------------
@@ -205,18 +249,24 @@ class ProviderRegistrationTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun aSealedIdentityWhoseKeyIsGoneIsRecognisedAsTheRecoverableOne() {
+    fun aSealedIdentityWhoseKeyIsGoneIsRecognisedByItsTypeNotItsWording() {
+        // The kernel raises its own error variant for this and for nothing
+        // else, so the question is the type.
         assertTrue(
             identityUnreadable(
-                "sync unavailable: the Keystore key that sealed this device's identity is " +
-                    "no longer on this phone — a restored backup is a new device and has " +
-                    "to be paired again",
+                uniffi.gilune_ffi.GiluneException.IdentityUnreadable(
+                    "identity unreadable: the Keystore key that sealed this device's " +
+                        "identity is no longer on this phone",
+                ),
             ),
         )
+        // **The second-order case.** Reword the kernel's sentence to
+        // something that shares not one phrase with the old prose matcher,
+        // and the way out must still be offered. Under the shipped string
+        // matching this returned false and the button silently vanished.
         assertTrue(
             identityUnreadable(
-                "sync unavailable: this phone's Keystore could not open the identity key: " +
-                    "InvalidKeyException",
+                uniffi.gilune_ffi.GiluneException.IdentityUnreadable("sealed elsewhere"),
             ),
         )
     }
@@ -226,11 +276,19 @@ class ProviderRegistrationTest {
         // A reset throws away a pairing. Offering it for a fault it cannot
         // fix would cost somebody their roster for nothing.
         assertFalse(identityUnreadable(null))
-        assertFalse(identityUnreadable(""))
-        assertFalse(identityUnreadable("vault: /data/user/0/org.gilune.app/files/vault"))
-        assertFalse(identityUnreadable("sync unavailable: the port was already taken"))
-        // And a message that merely mentions a key is not this state.
-        assertFalse(identityUnreadable("paired with the device at 192.168.1.20:51837"))
+        assertFalse(identityUnreadable(uniffi.gilune_ffi.GiluneException.Storage("disk full")))
+        assertFalse(identityUnreadable(IllegalStateException("the port was already taken")))
+        // And the other side of the same coin: a storage failure whose text
+        // happens to read like the identity one is still not it. Under the
+        // shipped prose matcher this offered to throw away a working
+        // identity.
+        assertFalse(
+            identityUnreadable(
+                uniffi.gilune_ffi.GiluneException.Storage(
+                    "could not open the identity key file: disk error",
+                ),
+            ),
+        )
     }
 
     @Test

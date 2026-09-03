@@ -599,7 +599,6 @@ class MoonshineProviderTest {
             state.gilune.value = gilune
             state.externalProcessing = { handle ->
                 runMoonshineJobs(handle, { StandInEngine { "through the shell's own path" } })
-                    .transcribed
             }
             state.backfill()
 
@@ -608,6 +607,108 @@ class MoonshineProviderTest {
                 Thread.sleep(100)
             }
             assertEquals("through the shell's own path", gilune.objectText(source))
+        }
+    }
+
+    @Test
+    fun wordsTypedWhileTheEngineWasWorkingAreNotOverwritten() {
+        // **Compare-and-set on the subject's head**, through the real
+        // route. The engine's own decode is where the interference
+        // happens, which is exactly when it happens in life: a decode takes
+        // seconds and the note is a file somebody can type in for all of
+        // them. Before `expectedHead` the transcript was written over
+        // whatever the note had become, and the typing was gone with no
+        // trace but a revision nobody asked for.
+        val vault = scratchVault()
+        Gilune.open(vault).use { gilune ->
+            gilune.registerPlugin(moonshineDeclaration())
+            registerMoonshineProcessor(gilune, gilune.plugins())
+            val source = capture(gilune)
+            gilune.project()
+
+            val pass = runMoonshineJobs(
+                gilune,
+                {
+                    StandInEngine {
+                        // Somebody types in the note while the engine runs.
+                        val note = File(gilune.vaultPath(), relPath(gilune, source))
+                        note.writeText(note.readText().trimEnd() + "\ntyped while it decoded\n")
+                        gilune.reconcile()
+                        "the words the engine heard"
+                    }
+                },
+            )
+
+            assertEquals(0L, pass.transcribed, "the transcript overwrote a newer revision")
+            assertEquals(1L, pass.skipped, "a refused submission is not a failure")
+            assertEquals(0L, pass.failed, "and it must not be retried forever either")
+            val text = gilune.objectText(source).orEmpty()
+            assertTrue(text.contains("typed while it decoded"), "the typing was lost: '$text'")
+            assertFalse(
+                text.contains("the words the engine heard"),
+                "the stale transcript landed anyway: '$text'",
+            )
+            // The job is done rather than left to come back and be refused
+            // again for the same reason.
+            assertNull(gilune.claimJob(MOONSHINE_PROCESSOR))
+        }
+    }
+
+    @Test
+    fun anUndisturbedNoteStillGetsItsWords() {
+        // The other half of the compare-and-set: naming a head must not
+        // stop the ordinary case, where nothing touched the note at all.
+        val vault = scratchVault()
+        Gilune.open(vault).use { gilune ->
+            gilune.registerPlugin(moonshineDeclaration())
+            registerMoonshineProcessor(gilune, gilune.plugins())
+            val source = capture(gilune)
+            val pass = runMoonshineJobs(gilune, { StandInEngine { "nothing interfered" } })
+            assertEquals(1L, pass.transcribed)
+            assertEquals("nothing interfered", gilune.objectText(source))
+        }
+    }
+
+    @Test
+    fun aProviderThatFailsEveryJobIsSaidRatherThanCountedAsNothingToDo() {
+        // **The second-order half of the "provider failures are reported"
+        // fix.** The first round carried only a provider that *threw* — and
+        // the provider loop never lets one out: a decode that goes wrong is
+        // caught and turned into `failJob`, so the pass returned normally
+        // with `failed = 1` and the shell, which read only `.transcribed`,
+        // told the person "0 transcribed". Nothing here throws.
+        val vault = scratchVault()
+        Gilune.open(vault).use { gilune ->
+            gilune.registerPlugin(moonshineDeclaration())
+            registerMoonshineProcessor(gilune, gilune.plugins())
+            capture(gilune)
+
+            val state = GiluneState(vault, kotlinx.coroutines.MainScope())
+            state.gilune.value = gilune
+            state.externalProcessing = { handle ->
+                val pass = runMoonshineJobs(
+                    handle,
+                    { StandInEngine { throw IllegalStateException("the engine could not decode") } },
+                )
+                assertEquals(1L, pass.failed, "the loop swallowed the failure")
+                pass
+            }
+            state.backfill()
+
+            val deadline = System.currentTimeMillis() + 20_000
+            while (System.currentTimeMillis() < deadline &&
+                !state.message.value.contains("could not be transcribed")
+            ) {
+                Thread.sleep(100)
+            }
+            assertTrue(
+                state.message.value.contains("could not be transcribed"),
+                "the failure never reached a person: '${state.message.value}'",
+            )
+            assertTrue(
+                state.message.value.contains("try again"),
+                "and a failure that retries must not read as a loss: '${state.message.value}'",
+            )
         }
     }
 

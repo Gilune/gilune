@@ -11,6 +11,7 @@
 //! the roster changes, so a revoked device's operations are refused
 //! whoever relays them.
 
+use crate::addressing;
 use crate::discovery::PeerDiscovery;
 use crate::exchange;
 use crate::handshake::{self, Greeting, Intent};
@@ -20,7 +21,7 @@ use crate::protocol;
 use crate::qr;
 use crate::rate::RateLimiter;
 use crate::roster::{PeerState, Roster};
-use crate::secure::{dial, SecureTransport};
+use crate::secure::{dial_first, split_address, SecureTransport};
 use crate::transport::Transport;
 use crate::wire::PlainChannel;
 use crate::{ExchangeReport, Result, SyncError};
@@ -69,87 +70,59 @@ pub const DEFAULT_BIND_HOST: &str = "0.0.0.0";
 pub const MAX_CONCURRENT_SESSIONS: usize = 8;
 
 /// The IPv4 addresses this machine can actually be dialled at, best
-/// first.
-///
-/// Read from the interface table (`getifaddrs` / `GetAdaptersAddresses`)
-/// and **not** by opening a socket. The std-only way to answer this is to
-/// bind a UDP socket and `connect` it at a private-range address to learn
-/// the preferred outbound interface — and that is a bind, in a program
-/// whose § 2 discipline is that it binds when the user switches sync on
-/// and at no other moment. `listening_on` is read by every settings
-/// refresh; a socket opened behind a status query would be exactly the
-/// kind of surprise the firewall UX was designed to avoid.
-///
-/// **IPv4 only, for the reason `discovery::first_address` gives**: a
-/// link-local IPv6 address needs the scope id of the interface it was
-/// heard on, and `host:port` cannot carry one.
-///
-/// The honest limitation: a machine with Hyper-V, WSL or a VPN adapter
-/// has several routable addresses and this cannot know which one a phone
-/// shares a network with. That is why `listening_addresses` reports all
-/// of them for a settings screen to show, and why § 1's manual entry is
-/// the answer when the first guess is the wrong one.
+/// first. See `addressing::local_addresses`, which is where this and the
+/// dialling side's ranking became one function.
 pub fn routable_addresses() -> Vec<std::net::Ipv4Addr> {
-    let Ok(interfaces) = if_addrs::get_if_addrs() else { return Vec::new() };
-    let mut addresses: Vec<std::net::Ipv4Addr> = interfaces
-        .into_iter()
-        .filter(|i| i.is_oper_up())
-        .filter_map(|i| match i.ip() {
-            std::net::IpAddr::V4(ip) => Some(ip),
-            std::net::IpAddr::V6(_) => None,
-        })
-        .filter(is_routable)
-        .collect();
-    addresses.sort();
-    addresses.dedup();
-    addresses
+    addressing::local_addresses()
 }
 
-/// Whether an address is one a peer on a LAN could dial. Never the
-/// unspecified address, never the loopback, never what an interface has
-/// when DHCP did not answer.
-fn is_routable(ip: &std::net::Ipv4Addr) -> bool {
-    !ip.is_unspecified()
-        && !ip.is_loopback()
-        && !ip.is_link_local()
-        && !ip.is_multicast()
-        && !ip.is_broadcast()
-        && !ip.is_documentation()
-}
-
-/// What a device should publish for a listener bound at `bound`.
+/// Every address a device should publish for a listener bound at `bound`,
+/// best first.
 ///
-/// **`0.0.0.0` is not an address.** The listener binds every interface
-/// (§ 2), and `local_addr` reports that bind verbatim — so the string
-/// that reached the pairing window, the QR's fourth field and both
-/// shells' settings screens was `0.0.0.0:51837`, which no peer can dial
-/// and nothing downstream substituted. A phone that scanned that QR was
-/// being told to connect to itself.
+/// **`0.0.0.0` is not an address**, and it used to be the one this device
+/// published: the listener binds every interface (§ 2), `local_addr`
+/// reports that bind verbatim, and nothing downstream substituted
+/// anything — so a phone scanning the QR was being told to connect to
+/// itself.
 ///
-/// So an unspecified bind publishes a routable address of this machine
-/// instead, keeping the port the listener actually took. Anything else —
-/// a deliberate `127.0.0.1` for a test or a host that narrowed its own
-/// bind — is published exactly as it was asked for: substituting there
-/// would be overruling a caller who said what they meant.
+/// The first fix substituted **one** routable address, and that was the
+/// second defect: it took the numerically lowest, which on a laptop with
+/// Hyper-V, WSL or a VPN is a virtual adapter's address roughly as often
+/// as it is the LAN's. A machine cannot know which of its interfaces the
+/// phone in front of it shares — that is not a heuristic problem, it is
+/// missing information — so nothing here chooses. Every candidate is
+/// published, ranked by the classifier both sides share, and the joiner
+/// dials them in turn: **the device that answers is the decision**.
 ///
-/// A machine with no routable address at all publishes the loopback. It
-/// is not reachable from anywhere else, and saying `127.0.0.1` is the
-/// true description of that; `0.0.0.0` would be a false one.
-pub fn publishable(bound: &str, candidates: &[std::net::Ipv4Addr]) -> String {
-    let Some((host, port)) = bound.rsplit_once(':') else {
-        return bound.to_string();
+/// Anything but an unspecified bind is published exactly as it was asked
+/// for — a deliberate `127.0.0.1` for a test, or a host that narrowed its
+/// own bind — because substituting there would overrule a caller who said
+/// what they meant. A machine with no routable address at all publishes
+/// the loopback: it is not reachable from anywhere else, and `127.0.0.1`
+/// is the true description of that where `0.0.0.0` is a false one.
+pub fn publishable(bound: &str, candidates: &[std::net::Ipv4Addr]) -> Vec<String> {
+    let Some((host, port)) = split_address(bound) else {
+        return vec![bound.to_string()];
     };
-    let unspecified = match host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+    let unspecified = match host.parse::<std::net::IpAddr>() {
         Ok(ip) => ip.is_unspecified(),
         Err(_) => false,
     };
     if !unspecified {
-        return bound.to_string();
+        return vec![bound.to_string()];
     }
-    match candidates.iter().find(|ip| is_routable(ip)) {
-        Some(ip) => format!("{ip}:{port}"),
-        None => format!("127.0.0.1:{port}"),
+    // Ranked against this machine's own addresses, which is every
+    // candidate — so what the shared classifier decides here is that the
+    // routable ones come first and nothing unusable is offered at all.
+    let published: Vec<String> = addressing::ranked(candidates, candidates)
+        .into_iter()
+        .filter(addressing::is_routable)
+        .map(|ip| format!("{ip}:{port}"))
+        .collect();
+    if published.is_empty() {
+        return vec![format!("127.0.0.1:{port}")];
     }
+    published
 }
 
 /// Why a peer could not be reached, in the words the user gets. § 1's
@@ -220,7 +193,15 @@ pub struct PeerSummary {
 #[derive(Debug, Clone)]
 pub struct PairingOffer {
     pub code: String,
+    /// The best-ranked address, for a screen with room for one line and
+    /// for a person who is going to type it.
     pub address: String,
+    /// Every address this device published for the window, best first.
+    /// The QR carries all of them; a settings screen with room can show
+    /// them all, and on a machine with a VPN or a hypervisor that is the
+    /// difference between somebody reading the right address off the
+    /// screen and giving up.
+    pub addresses: Vec<String>,
     pub fingerprint: String,
     pub expires_ms: i64,
     pub attempts_left: u32,
@@ -257,6 +238,12 @@ pub struct SyncFacts {
     pub enrolment: String,
     pub enrolment_notice: Option<String>,
     pub listening_on: Option<String>,
+    /// Every address this device is reachable at, best first —
+    /// `listening_on` is the first of them. A machine with a VPN or a
+    /// hypervisor has several and cannot know which one a phone shares,
+    /// so a settings screen that shows them all is the difference between
+    /// a person reading the right one and giving up.
+    pub listening_addresses: Vec<String>,
     /// Whether the user has switched sync on, as opposed to whether it is
     /// listening right now. The two differ exactly when a machine was
     /// meant to be reachable and could not bind — a busy port, a firewall
@@ -282,6 +269,11 @@ pub struct SyncShared {
     limits: Limits,
     identity: Identity,
     device_id: String,
+    /// What this machine called itself for this vault before it
+    /// re-enrolled. Travels in the greeting so a peer that re-pairs this
+    /// device can stop refusing the history it wrote under the old name
+    /// (§ 4 meeting § 9).
+    previous_device_ids: Vec<String>,
     name: String,
     /// Where this device is currently listening, or empty. Travels in the
     /// encrypted greeting so a peer this device dialled can dial back
@@ -336,6 +328,7 @@ impl SyncShared {
             &self.name,
             &self.advertised.lock().unwrap_or_else(|e| e.into_inner()),
         )
+        .with_previous(&self.previous_device_ids)
     }
 
     fn handshake_timeout(&self) -> std::time::Duration {
@@ -346,8 +339,20 @@ impl SyncShared {
     }
 }
 
+/// A bound listener, and **the addresses this device publishes for it**.
+///
+/// Enumerated once, here, when the socket is bound — not re-derived on
+/// every read. `listening_on` and `listening_addresses` were two
+/// functions computing the answer two different ways, one of them by
+/// re-reading `bind_host` and re-enumerating the interface table on every
+/// settings refresh; they could and did disagree about which address this
+/// machine was offering, and a QR that disagrees with the settings screen
+/// beside it is not a small fault. Now there is one list, the first of it
+/// is what a single-address caller gets, and `refresh_addresses` is the
+/// deliberate way to ask again when a laptop has changed network.
 struct Listening {
-    address: String,
+    addresses: Vec<String>,
+    port: u16,
     stopping: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
@@ -359,11 +364,7 @@ impl Listening {
         // bind is every interface now, and `0.0.0.0` is not somewhere a
         // connect can be aimed on every platform — the loopback reaches
         // the same listener and always exists.
-        let knock = match self.address.rsplit_once(':') {
-            Some((_, port)) => format!("127.0.0.1:{port}"),
-            None => self.address.clone(),
-        };
-        let _ = std::net::TcpStream::connect(&knock);
+        let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", self.port));
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -442,12 +443,21 @@ impl SyncService {
         } else {
             device_name.chars().take(64).collect()
         };
+        let previous_device_ids = identities.previous_device_ids(&device_id);
+        // The persisted switch, cached. `outbound` is consulted by a live
+        // session at every operation boundary and it must start out
+        // agreeing with what the user actually chose — a device that
+        // starts willing to dial before anybody has switched sync on is a
+        // device whose first background pass reaches the network on the
+        // strength of a default.
+        let wanted = identities.sync_wanted(&device_id);
         Ok(SyncService {
             shared: Arc::new(SyncShared {
                 vault: store.vault().to_path_buf(),
                 limits,
                 identity,
                 device_id: device_id.clone(),
+                previous_device_ids,
                 name,
                 advertised: Mutex::new(String::new()),
                 roster: Arc::new(Mutex::new(roster)),
@@ -455,7 +465,7 @@ impl SyncService {
                 rate: Mutex::new(RateLimiter::default()),
                 live: Arc::new(AtomicUsize::new(0)),
                 serving: Arc::new(AtomicBool::new(false)),
-                outbound: Arc::new(AtomicBool::new(true)),
+                outbound: Arc::new(AtomicBool::new(wanted)),
                 handshake_timeout: Mutex::new(handshake::HANDSHAKE_TIMEOUT),
             }),
             listening: Mutex::new(None),
@@ -550,10 +560,13 @@ impl SyncService {
     /// still reach it, which is precisely the situation § 1's fallback
     /// chain was written for. So the outcome is recorded and not raised.
     fn begin_advertising(&self) {
-        let Some(address) = self.listening_on() else { return };
-        let Some(port) = address.rsplit_once(':').and_then(|(_, p)| p.parse().ok()) else {
-            return;
-        };
+        let port = self
+            .listening
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|l| l.port);
+        let Some(port) = port else { return };
         let ad = crate::discovery::Advertisement {
             fingerprint: identity::fingerprint_compact(self.shared.identity.public()),
             port,
@@ -600,42 +613,54 @@ impl SyncService {
     }
 
     /// Where a peer should be told to reach this device, or `None` when
-    /// it is not listening. Never the bind: see `publishable`.
+    /// it is not listening. The best-ranked of `listening_addresses`, and
+    /// never the bind: see `publishable`.
     pub fn listening_on(&self) -> Option<String> {
-        self.listening
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .as_ref()
-            .map(|l| l.address.clone())
+        self.listening_addresses().into_iter().next()
     }
 
     /// Every address this device could be reached at, best first.
     ///
-    /// The QR and the pairing window carry exactly one (§ 3), because a
-    /// scanner has to be handed one thing to dial. A settings screen has
-    /// room to show them all, and on a machine with a VPN or a Hyper-V
-    /// adapter that is the difference between a person reading the right
-    /// address off the screen and giving up.
+    /// **The same list `listening_on` answers from**, and the same list
+    /// the QR carries. These were three derivations of one fact — one
+    /// from `local_addr`, one re-deriving from `bind_host`, one picking a
+    /// single candidate — and three derivations of one fact are two
+    /// chances to disagree. They are enumerated once, when the socket is
+    /// bound, and `refresh_addresses` is how a caller asks again.
     pub fn listening_addresses(&self) -> Vec<String> {
-        let Some(bound) = self.listening_on() else { return Vec::new() };
-        let Some((host, port)) = bound.rsplit_once(':') else { return vec![bound] };
-        // A host that narrowed its own bind is reachable at that and
-        // nowhere else; only an every-interface bind has candidates.
-        let unspecified = self
-            .bind_host
+        self.listening
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .parse::<std::net::IpAddr>()
-            .map(|ip| ip.is_unspecified())
-            .unwrap_or(false);
-        if !unspecified {
-            return vec![format!("{host}:{port}")];
+            .as_ref()
+            .map(|l| l.addresses.clone())
+            .unwrap_or_default()
+    }
+
+    /// Ask the interface table again, for a machine that has moved
+    /// network since it bound. Deliberately explicit: this is a system
+    /// call, and putting it behind a status read is how a settings screen
+    /// came to enumerate every interface on every refresh.
+    pub fn refresh_addresses(&self) -> Vec<String> {
+        let mut listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
+        let Some(live) = listening.as_mut() else { return Vec::new() };
+        let bound = format!(
+            "{}:{}",
+            self.bind_host.lock().unwrap_or_else(|e| e.into_inner()),
+            live.port
+        );
+        live.addresses = publishable(&bound, &routable_addresses());
+        let addresses = live.addresses.clone();
+        // The greeting travels with the top one, and only its port is
+        // ever believed by the far end — but a device that moved network
+        // should still say where it thinks it is.
+        if let Some(first) = addresses.first() {
+            *self
+                .shared
+                .advertised
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = first.clone();
         }
-        let routable = routable_addresses();
-        if routable.is_empty() {
-            return vec![format!("127.0.0.1:{port}")];
-        }
-        routable.iter().map(|ip| format!("{ip}:{port}")).collect()
+        addresses
     }
 
     /// Switch sync on or off. **This is the moment the socket is bound**
@@ -674,7 +699,7 @@ impl SyncService {
             return Ok(None);
         }
         if let Some(live) = listening.as_ref() {
-            return Ok(Some(live.address.clone()));
+            return Ok(live.addresses.first().cloned());
         }
         let host = self.bind_host.lock().unwrap_or_else(|e| e.into_inner()).clone();
         let preferred = *self.preferred_port.lock().unwrap_or_else(|e| e.into_inner());
@@ -682,12 +707,14 @@ impl SyncService {
         // whichever was actually taken is what gets published (§ 1).
         let socket = TcpListener::bind((host.as_str(), preferred))
             .or_else(|_| TcpListener::bind((host.as_str(), 0)))?;
-        // What was bound, and then what a peer can dial. `local_addr` on
-        // an every-interface bind answers `0.0.0.0:<port>`, which is the
-        // string that used to reach the pairing window, the QR and both
-        // shells' settings screens — and which no device on the network
-        // could ever connect to.
-        let address = publishable(&socket.local_addr()?.to_string(), &routable_addresses());
+        // What was bound, and then every address a peer can dial.
+        // `local_addr` on an every-interface bind answers `0.0.0.0:<port>`,
+        // which is the string that used to reach the pairing window, the
+        // QR and both shells' settings screens — and which no device on
+        // the network could ever connect to. Enumerated **here**, once.
+        let bound = socket.local_addr()?;
+        let addresses = publishable(&bound.to_string(), &routable_addresses());
+        let address = addresses.first().cloned().unwrap_or_default();
         self.shared.outbound.store(true, Ordering::SeqCst);
         *self
             .shared
@@ -700,7 +727,8 @@ impl SyncService {
         shared.serving.store(true, Ordering::SeqCst);
         let thread = std::thread::spawn(move || accept_loop(shared, socket, flag));
         *listening = Some(Listening {
-            address: address.clone(),
+            addresses,
+            port: bound.port(),
             stopping,
             thread: Some(thread),
         });
@@ -777,13 +805,17 @@ impl SyncService {
     /// naming them here is what lets "a code expires" be a test rather
     /// than a three-minute wait.
     pub fn start_pairing_with(&self, window_ms: i64, max_attempts: u32) -> Result<PairingOffer> {
-        let Some(address) = self.listening_on() else {
+        // Every address, not the best guess at one: a scanner dials them
+        // in turn and the device that answers settles which interface the
+        // two machines actually share.
+        let addresses = self.listening_addresses();
+        if addresses.is_empty() {
             return Err(SyncError::Refused {
                 detail: "turn sync on before pairing a device".to_string(),
             });
-        };
+        }
         let window = PairingWindow::open(
-            &address,
+            &addresses,
             &identity::fingerprint_compact(self.shared.identity.public()),
             ids::now_ms(),
             window_ms,
@@ -869,15 +901,20 @@ impl SyncService {
 
     pub fn pair_with_code(&self, store: &Store, address: &str, code: &str) -> Result<PeerSummary> {
         let code = pairing::normalise_code(code)?;
-        self.join(store, address, Credential::Code, code.as_bytes(), None)
+        self.join(
+            store,
+            &[address.to_string()],
+            Credential::Code,
+            code.as_bytes(),
+            None,
+        )
     }
 
     pub fn pair_from_qr(&self, store: &Store, payload: &str) -> Result<PeerSummary> {
         let scanned = pairing::decode_qr_payload(payload)?;
-        let address = scanned.address.clone();
         self.join(
             store,
-            &address,
+            &scanned.addresses,
             Credential::Qr,
             &scanned.secret,
             Some(scanned.fingerprint),
@@ -885,21 +922,32 @@ impl SyncService {
     }
 
     /// The joining half of a pairing, for both credentials.
+    ///
+    /// **Several addresses, tried in order.** A QR carries every address
+    /// the listener could be reached at, because that machine cannot know
+    /// which of its interfaces this one shares. So this is where the
+    /// question is answered — by dialling — and the address that answered
+    /// is the one recorded in the roster and tried first ever after. A
+    /// typed address is a list of one and behaves exactly as it always
+    /// did, patient timeout included.
     fn join(
         &self,
         store: &Store,
-        address: &str,
+        addresses: &[String],
         credential: Credential,
         secret: &[u8],
         expect_fingerprint: Option<String>,
     ) -> Result<PeerSummary> {
         let now = ids::now_ms();
+        // One attempt is one attempt however many addresses it tried:
+        // the candidates are one device, so they share the limiter's key.
+        let key = addresses.first().cloned().unwrap_or_default();
         self.shared
             .rate
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .check(address, now)?;
-        let attempt = dial(address).and_then(|stream| {
+            .check(&key, now)?;
+        let attempt = dial_first(addresses).and_then(|(stream, reached)| {
             handshake::dial_pairing(
                 stream,
                 self.shared.limits,
@@ -908,18 +956,20 @@ impl SyncService {
                 credential,
                 secret,
             )
+            .map(|established| (established, reached))
         });
-        let mut established = match attempt {
-            Ok(established) => established,
+        let (mut established, address) = match attempt {
+            Ok(reached) => reached,
             Err(e) => {
                 self.shared
                     .rate
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .failed(address, now);
+                    .failed(&key, now);
                 return Err(e);
             }
         };
+        let address = address.as_str();
         // A QR names the device it came from. If the handshake produced a
         // different identity, the code was photographed off somebody
         // else's screen or redirected — refuse, and store nothing.
@@ -954,16 +1004,12 @@ impl SyncService {
         let peer = self.roster().pair(
             &established.remote_static_hex(),
             &established.peer.device_id,
+            &established.peer.previous_device_ids,
             &established.peer.name,
             address,
             established.derived_secret,
         )?;
-        // Re-pairing a device that was revoked is a new pairing, so its
-        // operations stop being refused. An explicit welcome back is the
-        // **only** thing that takes a device out of the kernel's refusal
-        // set, and it withdraws the standing alert with it: nobody should
-        // have to dismiss a notice about a device they have just paired.
-        store.unrefuse_device(&established.peer.device_id)?;
+        welcome(store, &peer)?;
         Ok(summary(&peer))
     }
 
@@ -979,17 +1025,24 @@ impl SyncService {
     /// a dialled session asks the same question before every request it
     /// writes.
     pub fn revoke_peer(&self, store: &Store, static_pub: &str) -> Result<bool> {
-        let device_id = self
+        // Every name the device has used, not only its current one. A
+        // peer that re-enrolled writes under a new device id and its older
+        // operations are still in every replica — revoking the device has
+        // to mean the device, or half its work keeps arriving.
+        let device_ids = self
             .roster()
             .find(static_pub)
-            .map(|p| p.device_id.clone())
+            .map(|p| p.device_ids())
             .unwrap_or_default();
         let revoked = self.roster().revoke(static_pub)?;
-        if revoked && !device_id.is_empty() {
-            // Added to the kernel's durable set, not written over it: a
-            // revocation is a decision this vault carries from here on,
-            // whatever happens to the device-local roster afterwards.
-            store.refuse_device(&device_id)?;
+        if revoked {
+            for device_id in device_ids {
+                // Added to the kernel's durable set, not written over it:
+                // a revocation is a decision this vault carries from here
+                // on, whatever happens to the device-local roster
+                // afterwards.
+                store.refuse_device(&device_id)?;
+            }
         }
         Ok(revoked)
     }
@@ -1066,7 +1119,26 @@ impl SyncService {
     }
 
     /// Sync with every paired peer, reaching each down the chain in § 1.
+    ///
+    /// **Nothing is dialled when the user has sync switched off.** § 2's
+    /// rule is about more than the listener: a device with sync off must
+    /// not reach the network at all, and the only thing that stopped it
+    /// was a flag that started `true` in every fresh process. Android's
+    /// background worker opens a handle, configures sync and calls this
+    /// **without ever binding a listener** — that is § 2 working — so
+    /// `enabled()` cannot be the question; the persisted switch is, and
+    /// `outbound` is a cache of it rather than a second opinion.
+    ///
+    /// The answer is an empty report rather than an error. Sync being off
+    /// is not a failure to sync, and a background pass that had to catch
+    /// an error to learn a user's setting would log a fault every fifteen
+    /// minutes for a device that is behaving exactly as asked.
     pub fn sync_now(&self, store: &Store) -> Result<ExchangeReport> {
+        if !self.wanted() {
+            self.shared.outbound.store(false, Ordering::SeqCst);
+            return Ok(ExchangeReport::default());
+        }
+        self.shared.outbound.store(true, Ordering::SeqCst);
         // A responder that failed to start once is retried here rather
         // than left down until somebody toggles the switch. An adapter
         // can report failure for a registration that in fact completes
@@ -1119,16 +1191,15 @@ impl SyncService {
                     total.sent += report.sent;
                     total.chunks += report.chunks;
                     total.blobs_completed += report.blobs_completed;
-                    // **Not a sum.** Every other counter here is work this
-                    // round did, so adding is right; this one is a count
-                    // of rows still waiting in *this vault*, answered
-                    // once per session. Adding it across three peers
-                    // would report one outstanding blob as three, and
-                    // `incomplete()` reads it — so a shell would keep
-                    // being told there was more to come. The last session
-                    // has the most recent answer; taking the largest is
-                    // the same thing without depending on the order.
-                    total.blobs_pending = total.blobs_pending.max(report.blobs_pending);
+                    // **A sum, like every other counter here.** A session
+                    // now reports the blobs *it* left waiting rather than
+                    // every row outstanding in the vault, so a round with
+                    // three peers has three separate amounts of unfinished
+                    // business and adding them is what "still to come"
+                    // means. Taking the largest was right only while the
+                    // number described the whole vault, and it under-
+                    // reported the moment two peers each left one behind.
+                    total.blobs_pending += report.blobs_pending;
                     total.bytes += report.bytes;
                     total.halted.extend(report.halted);
                     total.ended_on_cap |= report.ended_on_cap;
@@ -1156,6 +1227,7 @@ impl SyncService {
             enrolment: self.enrolment.as_str().to_string(),
             enrolment_notice: self.enrolment.notice(),
             listening_on: self.listening_on(),
+            listening_addresses: self.listening_addresses(),
             wanted: self.wanted(),
             advertising: self.advertising(),
             discovery: self.discovery_route(),
@@ -1209,11 +1281,30 @@ impl Browsed {
 fn offer_from(window: &PairingWindow) -> PairingOffer {
     PairingOffer {
         code: window.code().to_string(),
-        address: window.address.clone(),
+        address: window.address(),
+        addresses: window.addresses.clone(),
         fingerprint: window.fingerprint.clone(),
         expires_ms: window.expires_ms,
         attempts_left: window.remaining_attempts(),
     }
+}
+
+/// A device that has just been paired is welcome — **under every name it
+/// has ever used**.
+///
+/// An explicit re-pairing is the only thing that takes a device out of the
+/// kernel's durable refusal set, and it withdraws the standing alert with
+/// it: nobody should have to dismiss a notice about a device they have
+/// just paired. Welcoming only the *current* device id was the half-fix: a
+/// peer that re-enrolled arrives under a new id, so the refusal recorded
+/// against its old one survived the welcome, its earlier history stayed
+/// refused however it arrived, and the alert that said so could not be
+/// cleared by any action the user had available.
+fn welcome(store: &Store, peer: &crate::roster::Peer) -> Result<()> {
+    for device_id in peer.device_ids() {
+        store.unrefuse_device(&device_id)?;
+    }
+    Ok(())
 }
 
 fn summary(peer: &crate::roster::Peer) -> PeerSummary {
@@ -1399,22 +1490,19 @@ fn answer(
                         Some(port) if port != 0 => format!("{caller}:{port}"),
                         _ => format!("{caller}:0"),
                     };
-                    shared
+                    let peer = shared
                         .roster
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .pair(
                             &established.remote_static_hex(),
                             &established.peer.device_id,
+                            &established.peer.previous_device_ids,
                             &established.peer.name,
                             &address,
                             established.derived_secret,
                         )?;
-                    // A device that has just been paired is welcome, and
-                    // that is the only thing that takes one out of the
-                    // kernel's durable refusal set — the standing alert
-                    // goes with it.
-                    store.unrefuse_device(&established.peer.device_id)?;
+                    welcome(store, &peer)?;
                     // Only now is the joiner told. Until this frame the
                     // pairing existed on one side only, and a joiner that
                     // returned before it would believe in a roster entry

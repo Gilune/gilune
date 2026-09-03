@@ -40,11 +40,24 @@ pub struct ExchangeReport {
     pub sent: usize,
     pub chunks: usize,
     pub blobs_completed: usize,
-    /// Blobs this device is still waiting for, store-wide — not "pending
-    /// with this peer". It is a count of rows, so a caller that syncs
-    /// several peers in a row must take the last (or the largest) rather
-    /// than adding them up: adding counts the same blob once per peer.
-    /// `service::sync_now` is that caller.
+    /// Blobs **this session** tried for and did not finish.
+    ///
+    /// Per session, not store-wide, because that is the question
+    /// `incomplete()` asks: did this exchange leave something for the
+    /// next one? A store-wide count made every session with a peer that
+    /// had nothing to give report `incomplete`, so a device that had done
+    /// everything it possibly could still asked to be run again — and a
+    /// session that finished a transfer reported the other device's
+    /// outstanding blob as its own unfinished business.
+    ///
+    /// Being per session, these **add up** across peers rather than being
+    /// maxed: `service::sync_now` sums them. Summing can over-report (a
+    /// blob peer A could not supply and peer B then did is counted once
+    /// by A), and that is the safe direction: the next round finds
+    /// nothing outstanding and says so.
+    ///
+    /// The store-wide count is a different fact and has its own home:
+    /// `Store::status().blobs_awaiting`.
     pub blobs_pending: usize,
     pub bytes: u64,
     pub halted: Vec<Halted>,
@@ -83,7 +96,7 @@ pub fn sync(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
     report.uninterpreted += pulled.uninterpreted;
     report.chunks += pulled.chunks;
     report.blobs_completed += pulled.blobs_completed;
-    report.blobs_pending = pulled.blobs_pending;
+    report.blobs_pending += pulled.blobs_pending;
     report.bytes += pulled.bytes;
     report.halted.extend(pulled.halted);
     report.ended_on_cap |= pulled.ended_on_cap;
@@ -276,14 +289,13 @@ pub fn pull(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
         }
     }
 
-    let (chunks, completed) = fetch_blobs(store, session, limits, &mut report)?;
+    let (chunks, completed, pending) = fetch_blobs(store, session, limits, &mut report)?;
     report.chunks += chunks;
     report.blobs_completed = completed;
-    // Asked of the store, once, rather than counted through this loop:
-    // what is outstanding is a property of this device, not of the
-    // session that has just run, and a session that halted before it
-    // reached a blob must still say the blob is outstanding.
-    report.blobs_pending = store.blobs_awaiting_count()?;
+    // What this session left unfinished — including blobs it never
+    // reached, because ending on a cap leaves them for the next session
+    // just as surely as a refusal does.
+    report.blobs_pending = pending;
     Ok(report)
 }
 
@@ -300,9 +312,10 @@ fn fetch_blobs(
     session: &mut dyn Session,
     limits: Limits,
     report: &mut ExchangeReport,
-) -> Result<(usize, usize)> {
+) -> Result<(usize, usize, usize)> {
     let mut chunks = 0;
     let mut completed = 0;
+    let mut pending = 0;
     for need in store.blobs_awaiting_bytes()? {
         let mut halted = false;
         let mut offset = need.received;
@@ -329,7 +342,9 @@ fn fetch_blobs(
                     continue;
                 }
                 report.bytes += bytes.len() as u64;
-                match store.write_blob_chunk(&blob_id, at, &bytes, limits) {
+                // The declared length travels with the need, so the
+                // kernel is not asked for it again on every 64 KiB.
+                match store.write_blob_chunk_bounded(&blob_id, need.bytes, at, &bytes, limits) {
                     Ok(staged) => offset = staged,
                     Err(KernelError::SyncHalted { subject, reason, .. }) => {
                         report.halted.push(Halted { device_id: subject, reason });
@@ -347,7 +362,13 @@ fn fetch_blobs(
         }
         if !halted && store.finish_blob(&need.blob_id)? {
             completed += 1;
+        } else {
+            // Refused, or the peer had no more of it to give, or the
+            // session ran out of budget before reaching it. Either way it
+            // is this session's unfinished business and the next session
+            // resumes it from what is already staged.
+            pending += 1;
         }
     }
-    Ok((chunks, completed))
+    Ok((chunks, completed, pending))
 }

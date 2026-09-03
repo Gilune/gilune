@@ -433,4 +433,58 @@ class CaptionTest {
         )
         assertTrue(moonshineStatus(MoonshinePhase.Failed, null).contains("recordings are unaffected"))
     }
+
+    // ------------------------------------------------------------------
+    // One fold, two retentions
+    //
+    // The caption and the committed transcript obey the same five findings
+    // and differ in exactly one thing: what they are allowed to forget.
+    // They were two hand-written folds until this round, so these say what
+    // "the same fold" must keep meaning.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theCaptionAndTheTranscriptShareOneFoldAndDifferOnlyInWhatTheyKeep() {
+        val spoken = (0 until 12).map {
+            CaptionEvent(CaptionEvent.TEXT_CHANGED, it.toLong(), "line$it", true)
+        }
+        val capped = spoken.fold(emptyList<CaptionLine>()) { lines, event -> foldCaption(lines, event) }
+        assertEquals(CAPTION_RETAINED, capped.size, "the caption is a display and is capped")
+        assertEquals("line11", capped.last().text)
+
+        val whole = spoken.fold(emptyList<CaptionLine>()) { lines, event ->
+            foldCaption(lines, event, retain = Int.MAX_VALUE)
+        }
+        assertEquals(12, whole.size, "a transcript that forgets is a data loss")
+        assertEquals("line0", whole.first().text)
+
+        // And the two holders agree with their folds, which is what makes
+        // this a statement about the shipped classes rather than about a
+        // function nobody calls.
+        val buffer = CaptionBuffer()
+        val collector = TranscriptCollector()
+        for (event in spoken) {
+            buffer.accept(event)
+            collector.accept(event)
+        }
+        assertEquals(capped.map { it.text }, buffer.lines.map { it.text })
+        assertEquals(whole.joinToString(" ") { it.text }, collector.text())
+    }
+
+    @Test
+    fun bothRetentionsStillRefuseASettledRewriteAndABlankOpening() {
+        // The findings are the fold's, not the caption's, so raising the
+        // retention must not quietly relax them.
+        for (retain in listOf(CAPTION_RETAINED, Int.MAX_VALUE)) {
+            var lines = emptyList<CaptionLine>()
+            lines = foldCaption(lines, CaptionEvent(CaptionEvent.TEXT_CHANGED, 1, "the quick", false), retain)
+            lines = foldCaption(lines, CaptionEvent(CaptionEvent.COMPLETED, 1, "the quick brown fox.", true), retain)
+            lines = foldCaption(lines, CaptionEvent(CaptionEvent.TEXT_CHANGED, 1, "nonsense", false), retain)
+            lines = foldCaption(lines, CaptionEvent(CaptionEvent.TEXT_CHANGED, 2, "   ", false), retain)
+            lines = foldCaption(lines, CaptionEvent(CaptionEvent.ERROR, 3, "boom", false), retain)
+            assertEquals(1, lines.size, "retain=$retain")
+            assertEquals("the quick brown fox.", lines.single().text, "retain=$retain")
+            assertTrue(lines.single().settled)
+        }
+    }
 }

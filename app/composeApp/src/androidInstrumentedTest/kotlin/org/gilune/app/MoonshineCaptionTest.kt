@@ -36,6 +36,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.platform.app.InstrumentationRegistry
+import kotlinx.coroutines.flow.first
 import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
@@ -321,6 +322,90 @@ class MoonshineCaptionTest {
                 moonshinePlan(gilune.plugins(), { false }, metered = false),
             )
         }
+    }
+
+    // ------------------------------------------- the upgrade that took it
+
+    /// **A fresh install is told nothing, because nothing was taken away.**
+    /// The provider arrives switched off and the screen that offers it says
+    /// so; a standing notice there would be an apology for a state nobody
+    /// was ever in.
+    @Test
+    fun aFreshInstallRaisesNoNoticeBecauseNothingWasTakenAway() {
+        val vault = scratchVault()
+        Gilune.open(vault).use { gilune ->
+            val state = GiluneState(vault, kotlinx.coroutines.MainScope())
+            state.gilune.value = gilune
+            val outcome = registerMoonshine(state, gilune)
+            assertFalse(
+                outcome.switchedOffOnUpgrade,
+                "a first install must not apologise for a switch nobody had on",
+            )
+            assertEquals(
+                "disabled",
+                gilune.plugins().single { it.pluginId == MOONSHINE_PLUGIN }.state,
+            )
+        }
+    }
+
+    /// The case the notice exists for: a vault where somebody had the
+    /// realtime provider on, opened by a build whose one-transcriber rule
+    /// switches it off. The caption stops, and the only word about it used
+    /// to be a message line the next thing to happen replaced.
+    @Test
+    fun aVaultThatHadTheProviderOnIsToldOnceThatItWasSwitchedOff() {
+        val vault = scratchVault()
+        Gilune.open(vault).use { gilune ->
+            // An upgraded vault: the row already exists and is on, which is
+            // exactly what R1 → R3 left behind.
+            gilune.registerPlugin(moonshineDeclaration())
+            gilune.setPluginEnabled(MOONSHINE_PLUGIN, true)
+            assertEquals(
+                "enabled",
+                gilune.plugins().single { it.pluginId == MOONSHINE_PLUGIN }.state,
+                "the fixture is wrong: nothing was on to be switched off",
+            )
+
+            val state = GiluneState(vault, kotlinx.coroutines.MainScope())
+            state.gilune.value = gilune
+            assertTrue(
+                registerMoonshine(state, gilune).switchedOffOnUpgrade,
+                "the switch moved and nobody was told",
+            )
+            assertEquals(
+                "disabled",
+                gilune.plugins().single { it.pluginId == MOONSHINE_PLUGIN }.state,
+            )
+
+            // **Once.** Every later open finds nothing to do, so the notice
+            // is not raised again over a decision the person has since made
+            // — including switching it back on.
+            assertFalse(
+                registerMoonshine(state, gilune).switchedOffOnUpgrade,
+                "the notice would come back on every open",
+            )
+        }
+    }
+
+    /// The notice itself: persisted, dismissible, and off by default.
+    @Test
+    fun theNoticeStandsUntilItIsDismissedAndDefaultsToNothing() {
+        val prefs = MobilePrefs(context)
+        kotlinx.coroutines.runBlocking {
+            prefs.dismissProviderOffNotice()
+            assertFalse(prefs.providerOffNotice.first(), "a store with nothing in it says nothing")
+            prefs.raiseProviderOffNotice()
+            assertTrue(prefs.providerOffNotice.first(), "the notice did not survive the write")
+            prefs.dismissProviderOffNotice()
+            assertFalse(prefs.providerOffNotice.first(), "dismissing it did not take")
+        }
+        // And the sentence names both plugins, so a person knows what they
+        // lost and what they have.
+        val said = providerUpgradeNotice("Realtime transcription", "Local transcription")
+        assertTrue(said.contains("Realtime transcription was switched off"), said)
+        assertTrue(said.contains("one transcriber writes your notes"), said)
+        assertTrue(said.contains("switch it on here"), said)
+        assertTrue(said.contains("instead of Local transcription"), said)
     }
 
     // ---------------------------------------------------------------- calm

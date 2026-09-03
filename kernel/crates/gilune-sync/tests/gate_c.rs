@@ -248,20 +248,26 @@ fn an_unspecified_bind_is_published_as_an_address_a_peer_can_dial() {
 
     assert_eq!(
         publishable("0.0.0.0:51837", &[routable]),
-        "192.168.1.20:51837",
+        vec!["192.168.1.20:51837".to_string()],
         "an every-interface bind must publish an address, not the bind"
     );
     assert_eq!(
         publishable("[::]:51837", &[routable]),
-        "192.168.1.20:51837",
+        vec!["192.168.1.20:51837".to_string()],
         "the v6 unspecified address is the same fact in another spelling"
     );
 
     // A host that named its own bind meant it. Substituting there would
     // be overruling a caller who said what they wanted — and it is what
     // keeps this whole suite on the loopback.
-    assert_eq!(publishable("127.0.0.1:51837", &[routable]), "127.0.0.1:51837");
-    assert_eq!(publishable("10.0.0.4:51837", &[routable]), "10.0.0.4:51837");
+    assert_eq!(
+        publishable("127.0.0.1:51837", &[routable]),
+        vec!["127.0.0.1:51837".to_string()]
+    );
+    assert_eq!(
+        publishable("10.0.0.4:51837", &[routable]),
+        vec!["10.0.0.4:51837".to_string()]
+    );
 
     // A machine with nothing routable publishes the loopback, because
     // that is the true description of where it can be reached. What it
@@ -270,10 +276,94 @@ fn an_unspecified_bind_is_published_as_an_address_a_peer_can_dial() {
     let link_local: std::net::Ipv4Addr = "169.254.3.4".parse().expect("ip");
     for candidates in [vec![], vec![loopback], vec![loopback, link_local]] {
         let published = publishable("0.0.0.0:51837", &candidates);
-        assert_eq!(published, "127.0.0.1:51837");
-        assert!(!published.starts_with("0.0.0.0"));
-        assert!(!published.starts_with("169.254"));
+        assert_eq!(published, vec!["127.0.0.1:51837".to_string()]);
+        assert!(!published.iter().any(|a| a.starts_with("0.0.0.0")));
+        assert!(!published.iter().any(|a| a.starts_with("169.254")));
     }
+}
+
+/// **Second-order test for the publishing side.** Substituting *one*
+/// routable address closed the `0.0.0.0` hole and opened a quieter one:
+/// the substitute was the numerically lowest candidate, and on a laptop
+/// with a hypervisor bridge, a VPN and a LAN that is a virtual adapter
+/// about as often as it is the network the phone is on. The machine
+/// cannot know which interface the scanner shares — so it publishes every
+/// one of them and lets the dial decide.
+#[test]
+fn every_address_a_machine_could_be_reached_at_is_published_not_the_lowest_one() {
+    use gilune_sync::service::publishable;
+    let virtual_adapter: std::net::Ipv4Addr = "172.20.0.1".parse().expect("ip");
+    let lan: std::net::Ipv4Addr = "192.168.1.20".parse().expect("ip");
+    let vpn: std::net::Ipv4Addr = "10.8.0.2".parse().expect("ip");
+    let loopback: std::net::Ipv4Addr = "127.0.0.1".parse().expect("ip");
+
+    let published = publishable("0.0.0.0:51837", &[virtual_adapter, lan, vpn, loopback]);
+    for offered in [&virtual_adapter, &lan, &vpn] {
+        assert!(
+            published.contains(&format!("{offered}:51837")),
+            "{offered} is an address this machine answers on and the QR left it out: \
+             {published:?}"
+        );
+    }
+    assert_eq!(published.len(), 3, "and only the dialable ones: {published:?}");
+    assert!(
+        !published.iter().any(|a| a.starts_with("127.")),
+        "the loopback reaches nobody else and is not published beside real addresses"
+    );
+
+    // The same list reaches the pairing window and the QR, so a scanner
+    // is handed every candidate rather than this machine's best guess.
+    let payload = gilune_sync::pairing::encode_qr_payload(
+        &[3u8; 16],
+        "0123456789abcdef",
+        &published,
+    );
+    let scanned = gilune_sync::pairing::decode_qr_payload(&payload).expect("decode");
+    assert_eq!(scanned.addresses, published);
+}
+
+/// **One list, three readers.** `listening_on`, `listening_addresses` and
+/// the pairing window each used to work out what this device publishes in
+/// their own way — one from `local_addr`, one re-deriving from the bind
+/// host and re-enumerating every interface on each read, one taking a
+/// single candidate. Three derivations of one fact are two chances to
+/// disagree, and a QR that disagrees with the settings screen beside it is
+/// not a small fault. They are enumerated once, at the bind.
+#[test]
+fn what_a_device_publishes_is_one_list_however_it_is_asked() {
+    let device = Device::new("Desktop").listening();
+
+    let addresses = device.service.listening_addresses();
+    assert!(!addresses.is_empty(), "a listening device publishes something");
+    assert_eq!(
+        device.service.listening_on().as_ref(),
+        addresses.first(),
+        "the single address a caller gets is the best-ranked of the list, not a \
+         separate answer"
+    );
+    assert_eq!(
+        device.service.facts().listening_addresses,
+        addresses,
+        "and the settings screen is told the same thing"
+    );
+
+    let offer = device.service.start_pairing().expect("a window");
+    assert_eq!(offer.addresses, addresses, "so is the pairing window");
+    assert_eq!(offer.address, addresses[0]);
+
+    // Asking the interface table again is a deliberate act — it is a
+    // system call, and putting it behind a status read is how a settings
+    // refresh came to enumerate every adapter on the machine.
+    assert_eq!(
+        device.service.refresh_addresses(),
+        addresses,
+        "a machine that has not moved network answers the same"
+    );
+
+    device.service.set_enabled(false).expect("switch off");
+    assert!(device.service.listening_addresses().is_empty());
+    assert_eq!(device.service.listening_on(), None);
+    assert!(device.service.refresh_addresses().is_empty());
 }
 
 /// And what this machine offers as candidates is never one of the three
@@ -388,6 +478,87 @@ fn switching_sync_on_is_remembered_when_the_app_starts_again() {
             "a device switched off stays off across a restart"
         );
     }
+}
+
+/// **Second-order: a device with sync switched off dials nobody.**
+///
+/// § 2's rule is about more than the listener. The switch was persisted so
+/// that a phone which had opted in still synced in the background — and
+/// that fix was tested only from the *on* side. From the off side nothing
+/// changed: `sync_now` consulted an in-memory flag that started `true` in
+/// every fresh process, so a background pass opened outbound connections
+/// to every paired peer on a device whose owner had turned sync off. The
+/// listener was shut; the dialling was not.
+///
+/// Counted rather than inferred: a socket stands where the peer was, and
+/// the assertion is how many times anything connected to it.
+#[test]
+fn a_device_with_sync_switched_off_dials_nobody() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let vault = tempfile::tempdir().expect("vault");
+    let local = tempfile::tempdir().expect("local");
+    let peer = Device::new("Phone").listening();
+
+    {
+        let desktop = Device::open("Desktop", vault.path(), local.path()).listening();
+        desktop.pair_by_code(&peer).expect("pair");
+        desktop.capture("written while sync was on");
+        assert!(desktop.sync().halted.is_empty(), "sync works when it is on");
+        desktop.service.set_enabled(false).expect("the user switches sync off");
+    }
+
+    // Something that counts connections stands where the peer is.
+    let counter = std::net::TcpListener::bind("127.0.0.1:0").expect("a socket");
+    let counter_address = counter.local_addr().expect("its address").to_string();
+    let dialled = Arc::new(AtomicUsize::new(0));
+    let counted = Arc::clone(&dialled);
+    std::thread::spawn(move || {
+        for stream in counter.incoming() {
+            match stream {
+                // Counted and closed at once: what this proves is that
+                // something connected, and a socket left open would put
+                // the establishment timeout inside a unit test.
+                Ok(stream) => {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    drop(stream);
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    // A fresh process, exactly as a background worker starts one.
+    let fresh = Device::open("Desktop", vault.path(), local.path());
+    assert!(!fresh.service.wanted(), "the user's choice survived the restart");
+    fresh
+        .service
+        .set_peer_address(&peer.identity_pub(), &counter_address)
+        .expect("point the roster at the counter");
+    fresh.capture("written after sync was switched off");
+
+    let report = fresh.service.sync_now(&fresh.store).expect("sync");
+    assert_eq!(
+        dialled.load(Ordering::SeqCst),
+        0,
+        "a device with sync switched off opened an outbound connection"
+    );
+    assert_eq!(report.sent, 0, "and nothing was sent: {report:?}");
+    assert!(
+        report.halted.is_empty(),
+        "sync being off is not a failure to sync, and a background pass must not log \
+         one every fifteen minutes: {:?}",
+        report.halted
+    );
+
+    // And with the switch back on it does dial — or this test would pass
+    // just as well against a counter nothing could ever reach.
+    fresh.service.set_enabled(true).expect("switch sync on");
+    let _ = fresh.service.sync_now(&fresh.store);
+    assert!(
+        dialled.load(Ordering::SeqCst) >= 1,
+        "with sync on, the roster's address is dialled"
+    );
 }
 
 /// The persisted choice is **device-local**, not vault state. A vault
@@ -509,6 +680,57 @@ fn a_taken_port_falls_to_an_ephemeral_one_and_the_real_one_is_published() {
     let report = first.sync();
     assert!(report.halted.is_empty(), "{:?}", report.halted);
     assert!(report.applied >= 1, "the desktop reached the laptop at its published port");
+}
+
+/// **The live half of publishing every candidate**: a joiner scanning a
+/// QR that offers several addresses reaches the device at the one that
+/// answers, **even when it is not the first**.
+///
+/// The listener here publishes the loopback (the harness's bind), and the
+/// payload is doctored to put an address nothing is behind in front of it
+/// — which is exactly the shape of the real fault: a laptop whose
+/// hypervisor adapter sorted first was handing phones an address on a
+/// network they were not on. A joiner that tried only the first candidate
+/// would fail, and the whole QR path would work on one machine and on no
+/// pair of them.
+#[test]
+fn a_qr_joiner_reaches_the_device_at_whichever_address_answers() {
+    let desktop = Device::new("Desktop").listening();
+    let phone = Device::new("Phone").listening();
+
+    desktop.service.start_pairing().expect("a window");
+    let payload = desktop.service.pairing_qr_payload().expect("the payload");
+    let real = desktop.address();
+    let (host, port) = real.rsplit_once(':').expect("host and port");
+    // TEST-NET-1 (RFC 5737): reserved for documentation, so nothing
+    // anywhere is behind it. It stands in for the virtual adapter that
+    // used to be the only address a QR carried.
+    let doctored = payload.replace(&real, &format!("192.0.2.1,{host}:{port}"));
+    assert_ne!(doctored, payload, "the payload carries the address field");
+    assert_eq!(
+        gilune_sync::pairing::decode_qr_payload(&doctored)
+            .expect("decode")
+            .addresses,
+        vec![format!("192.0.2.1:{port}"), real.clone()],
+        "two candidates, the dead one first"
+    );
+
+    let paired = phone
+        .service
+        .pair_from_qr(&phone.store, &doctored)
+        .expect("a joiner must work down the candidates rather than give up on the first");
+    assert_eq!(paired.state, "paired");
+    assert_eq!(
+        paired.address, real,
+        "and the address that answered is the one cached for next time, never the one \
+         that did not"
+    );
+
+    // Not merely recorded: the pairing works, in both directions.
+    desktop.capture("written on the desktop");
+    let report = phone.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert!(report.applied >= 1);
 }
 
 /// A session refreshes the cached address, so a peer that **moved port**
@@ -832,45 +1054,14 @@ fn a_capture_transcribed_on_one_device_projects_byte_identically_on_the_other() 
     // Byte-identical, file for file. Not "the same note" — the same
     // bytes, which is what a Markdown vault being the user-visible store
     // makes a testable claim.
-    let mine = vault_files(&phone.vault_path);
-    let theirs = vault_files(&desktop.vault_path);
+    let mine = paired::vault_content(&phone.vault_path);
+    let theirs = paired::vault_content(&desktop.vault_path);
     assert!(!mine.is_empty(), "the phone projected something");
     assert_eq!(
         mine, theirs,
         "the note and its audio must land on the second device byte for byte"
     );
     assert_eq!(phone.digest(), desktop.digest());
-}
-
-/// Every Markdown note and attachment in a vault, as `(relative path,
-/// bytes)`. Deliberately not a digest: when this fails, the assertion
-/// should be able to say *which* file differs.
-fn vault_files(root: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
-    let mut files = std::collections::BTreeMap::new();
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            // The kernel's own database is device-local state, not vault
-            // content, and two devices are not expected to have identical
-            // ones — they have different identities.
-            if path.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".gilune")) {
-                continue;
-            }
-            if path.is_dir() {
-                stack.push(path);
-            } else if let Ok(bytes) = std::fs::read(&path) {
-                let rel = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .replace('\\', "/");
-                files.insert(rel, bytes);
-            }
-        }
-    }
-    files
 }
 
 // -------------------------------------------------------------- point 12
@@ -1338,9 +1529,17 @@ fn a_handshake_that_is_never_finished_counts_against_the_caller() {
     // seconds rather than minutes — configuration with a documented
     // default is what § 8 asks of every bound here. Three failures free,
     // then a wait.
+    //
+    // **The backoff is deliberately long next to the handshake timeout.**
+    // The settle below has to sit *after* five 200 ms timeouts have been
+    // recorded and *before* the backoff they caused has expired, and with
+    // 300/600 ms that window was 300 ms wide at each end — narrow enough
+    // that a loaded machine running this suite in parallel could miss it
+    // in either direction. The window is now seconds wide and the
+    // property is unchanged.
     desktop
         .service
-        .configure_rate_limits(gilune_sync::rate::RateLimiter::new(3, 300, 600, 3_600_000));
+        .configure_rate_limits(gilune_sync::rate::RateLimiter::new(3, 1_000, 2_000, 3_600_000));
     let phone = Device::new("Phone").listening();
 
     let silent: Vec<std::net::TcpStream> = (0..5)
@@ -1354,7 +1553,7 @@ fn a_handshake_that_is_never_finished_counts_against_the_caller() {
     // which always counted — and this scenario would then pass without
     // the timeout existing at all. A caller that neither speaks nor
     // leaves is the one this is about.
-    std::thread::sleep(Duration::from_millis(500));
+    std::thread::sleep(Duration::from_millis(1_200));
 
     // Held off. What the caller sees is a closed connection and nothing
     // else, deliberately: "a caller being backed off learns nothing from
@@ -1371,10 +1570,24 @@ fn a_handshake_that_is_never_finished_counts_against_the_caller() {
 
     // And the control, which is what makes the refusal above mean
     // something: the same device pairs perfectly once the wait is over.
-    std::thread::sleep(Duration::from_millis(800));
-    phone
-        .pair_by_code(&desktop)
-        .expect("a caller is slowed down, never locked out");
+    //
+    // Polled to the backoff's own end rather than slept past by a guess —
+    // and each refused attempt costs the caller nothing here, because the
+    // limiter turns a held-off caller away *before* the handshake and so
+    // never records another failure against it.
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        match phone.pair_by_code(&desktop) {
+            Ok(_) => break,
+            Err(e) => {
+                assert!(
+                    Instant::now() < deadline,
+                    "a caller is slowed down, never locked out: {e}"
+                );
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+    }
     drop(silent);
 }
 

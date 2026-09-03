@@ -48,6 +48,18 @@ pub enum KernelError {
     UndeclaredCapability { plugin_id: String, capability: String },
     #[error("no enabled plugin claims work for the processor {processor_id}")]
     ProcessorNotClaimable { processor_id: String },
+    /// A revise-subject output named the head it was written over, and
+    /// the subject has moved on since. Compare-and-set: whoever submits
+    /// second is refused rather than quietly replacing an answer that
+    /// arrived while it was working. Naming a head is optional — an
+    /// output that names none keeps the old last-writer behaviour — so
+    /// this is only ever raised by a caller that asked for it.
+    #[error("{subject_id} was at {expected} when the work began and is now at {found}")]
+    SubjectMoved {
+        subject_id: String,
+        expected: String,
+        found: String,
+    },
     #[error("local state is corrupt: {detail}")]
     Corrupt { detail: String },
     /// An operation arriving from elsewhere was refused. The stream from

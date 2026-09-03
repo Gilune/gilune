@@ -35,6 +35,13 @@
 //    `sync-awaiting-referent` is two devices meeting in the wrong order.
 //    Painting those as faults sends somebody hunting for a problem that
 //    does not exist.
+//
+//    **Which of them are damage is the kernel's answer, not this file's.**
+//    It owns the kinds, so it owns the classification, and it travels on
+//    the alert (`IntegrityAlert.damage`). Each shell used to keep its own
+//    set — two places for one fact, and a kind the kernel added read as
+//    breakage in both until somebody remembered to edit them. What is left
+//    here is the wording, which is genuinely the shell's.
 
 package org.gilune.app
 
@@ -53,6 +60,19 @@ const val SYNC_UNKNOWN_OP_KIND = "sync-unknown-op-kind"
 const val SYNC_LIMIT_EXCEEDED = "sync-limit-exceeded"
 const val SYNC_BLOB_DIGEST_MISMATCH = "sync-blob-digest-mismatch"
 const val SYNC_REVOKED_DEVICE = "sync-revoked-device"
+
+/// An operation named something belonging to a device this vault refuses,
+/// so what it names can never arrive. **Not damage and not a halt**: the
+/// operation is kept and forwarded, the frontier moves on, and this is the
+/// exit from [SYNC_AWAITING_REFERENT] rather than another way into it.
+const val SYNC_REFERENT_REFUSED = "sync-referent-refused"
+
+/// A note's own preserved bytes could not be read here, so the projection
+/// was held back rather than written with a hole where the words are.
+/// **Not damage**: the record of the note is intact and the file on disk is
+/// untouched — something is wrong with the bytes *beside* it, and a person
+/// is the one who can say what.
+const val VAULT_CONTENT_UNREADABLE = "vault-content-unreadable"
 
 /// A change refers to something whose own history has not arrived yet.
 /// **Not damage and not a halt**: the two devices met in the wrong order,
@@ -84,23 +104,26 @@ val ALERT_KINDS: List<String> = listOf(
     SYNC_REVOKED_DEVICE,
     SYNC_AWAITING_REFERENT,
     VAULT_DELETED_NOTE_EDITED,
+    SYNC_REFERENT_REFUSED,
+    VAULT_CONTENT_UNREADABLE,
 )
 
-/// The conditions that are **not** damage: nothing stopped, nothing was
-/// lost, and nothing needs fixing. They are surfaced because silence about
-/// them would be its own confusion, not because anything is wrong.
+/// Whether a standing condition means something is **damaged**.
 ///
-/// A kind this build has never heard of is deliberately **not** in here: an
-/// unrecognised condition is treated as a halt, because assuming a newer
-/// kernel's condition is harmless is the one assumption that could hide a
-/// real one.
-val NON_DAMAGE_ALERT_KINDS: Set<String> = setOf(
-    SYNC_UNKNOWN_OP_KIND,
-    SYNC_AWAITING_REFERENT,
-    VAULT_DELETED_NOTE_EDITED,
-)
-
-fun alertIsDamage(kind: String): Boolean = kind !in NON_DAMAGE_ALERT_KINDS
+/// **Read off the row, never re-derived here.** Each shell used to keep its
+/// own set of "these ones are harmless", which is two places for one fact:
+/// a kind the kernel added arrived as damage in both shells until somebody
+/// remembered to edit them, and the sentence in front of the person said
+/// sync had stopped when it had not. The kernel owns the kinds, so the
+/// kernel owns the classification, and it now travels on the alert.
+///
+/// It also changes what an **unknown** kind means, deliberately. This build
+/// used to treat one as damage on the grounds that guessing "harmless"
+/// could hide a real halt. The kernel's answer is the opposite and better
+/// founded: a newer kernel's condition is not knowable here, so claiming it
+/// is breakage is exactly the over-claim the shells were making. The
+/// fallback wording below is written to be true either way.
+fun alertIsDamage(alert: uniffi.gilune_ffi.IntegrityAlert): Boolean = alert.damage
 
 /// How one shell names itself and what it is willing to show.
 ///
@@ -209,15 +232,36 @@ fun alertSentence(
                 "deleting the file here is what settles it. $RESUMES with everything " +
                 "else regardless."
 
-        // A kind this build has never heard of is still treated as a halt,
-        // and a halt nobody is told about is the failure mode § 8 names.
-        // The kernel's own words are the only ones there are, so they are
-        // shown on **both** shells — an aside is a nicety, and this is the
-        // one case where there would otherwise be nothing at all.
+        // The thing it names belongs to a device that was removed, so it
+        // is never coming. Worded as a tidy-up rather than a loss: the
+        // change is kept and passed on, and the stream did not stop.
+        SYNC_REFERENT_REFUSED ->
+            "A change referred to something from a device you removed$about — it was " +
+                "set aside; nothing is lost. That device's own work stays in your " +
+                "vault, and $RESUMES with everything else, without anybody doing " +
+                "anything."
+
+        // The kernel's record is intact; the bytes beside it are not
+        // readable *here*. The person is the only one who can put them
+        // back, so the sentence says what to look for.
+        VAULT_CONTENT_UNREADABLE ->
+            "A note's text file could not be read$about, so it was left as it is " +
+                "rather than rewritten with a gap where the words are. If you moved " +
+                "or renamed it with another app, put it back and it will reappear. " +
+                "Nothing was lost, and $RESUMES with everything else."
+
+        // A kind this build has never heard of. **Neutral by construction**:
+        // whether it is damage is the row's `damage` flag, not this
+        // sentence's to guess, so the words say what is certainly true —
+        // the kernel refused something and named it — and claim nothing
+        // about breakage in either direction. The kernel's own words are
+        // the only ones there are, so they are shown on **both** shells; an
+        // aside is a nicety, and this is the one case where there would
+        // otherwise be nothing at all.
         else -> {
             val said = detail.ifBlank { subject }.ifBlank { "no further detail" }
-            "Something about a change from another device stopped it being taken " +
-                "in: $said. Nothing past it has been applied and nothing is half " +
+            "A change from another device was set aside by a part of Gilune newer " +
+                "than the words this version has for it: $said. Nothing is half " +
                 "done, and $RESUMES once the condition clears."
         }
     }
@@ -228,8 +272,7 @@ fun alertSentence(
 // (ADR 0019 § 4).
 // ---------------------------------------------------------------------
 
-/// Whether a "sync unavailable" line is the one failure a person can
-/// actually recover from.
+/// Whether a failure is the one a person can actually recover from.
 ///
 /// The identity file is sealed by a platform key — a Keystore key on
 /// Android, DPAPI on Windows — and **the key does not travel with the
@@ -243,13 +286,18 @@ fun alertSentence(
 /// Every other enrolment failure is a transient or a bug; this one is a
 /// state that clears by throwing away device-local state and enrolling
 /// again, and the screen offers exactly that.
-fun identityUnreadable(message: String?): Boolean {
-    val said = message?.lowercase() ?: return false
-    if (!said.contains("sync unavailable")) return false
-    return said.contains("no longer on this") ||
-        said.contains("could not open the identity key") ||
-        said.contains("could not unwrap this device's identity key")
-}
+///
+/// **Typed, never phrased.** This read the message line for stock phrases
+/// until this round — "could not unwrap this device's identity key" and
+/// two others — which put a destructive button behind a string comparison:
+/// reword the kernel's sentence and the way out disappears with no test
+/// failing, and let any other failure produce matching prose and the app
+/// offers to throw away an identity that was working. The kernel raises
+/// [uniffi.gilune_ffi.GiluneException.IdentityUnreadable] for this and
+/// nothing else, so the type is the question; `GiluneState.identityUnreadable`
+/// is where the answer is kept.
+fun identityUnreadable(failure: Throwable?): Boolean =
+    failure is uniffi.gilune_ffi.GiluneException.IdentityUnreadable
 
 /// What to say about it, and what the button beside it will do. Stated in
 /// full because the action deletes something: a person is owed the exact
@@ -274,18 +322,33 @@ fun identityUnreadableSentence(thisDevice: String): String =
 /// [alertIsDamage] is a function rather than a comment. One real halt
 /// among the harmless ones outranks them all, because that is the one a
 /// person came here to find out about.
-fun alertsHeading(kinds: List<String>): String = when {
-    kinds.isEmpty() -> ""
-    kinds.any { alertIsDamage(it) } ->
-        if (kinds.size == 1) {
-            "Sync stopped short of taking everything in"
-        } else {
-            "Sync stopped short of taking everything in, for ${kinds.size} reasons"
-        }
-    kinds.all { it == SYNC_UNKNOWN_OP_KIND } -> "Sync kept something it could not read"
-    kinds.all { it == SYNC_AWAITING_REFERENT } ->
-        "Sync is waiting for the rest of another device's history"
-    kinds.all { it == VAULT_DELETED_NOTE_EDITED } ->
-        "A note deleted on another device was kept here"
-    else -> "Nothing has stopped — ${kinds.size} things worth knowing"
+///
+/// Takes the alerts themselves rather than their kinds, because damage is
+/// now a fact the kernel puts on the row (see [alertIsDamage]) and a list
+/// of strings cannot carry it.
+fun alertsHeading(alerts: List<uniffi.gilune_ffi.IntegrityAlert>): String {
+    val kinds = alerts.map { it.kind }
+    return when {
+        alerts.isEmpty() -> ""
+        alerts.any { alertIsDamage(it) } ->
+            if (alerts.size == 1) {
+                "Sync stopped short of taking everything in"
+            } else {
+                "Sync stopped short of taking everything in, for ${alerts.size} reasons"
+            }
+        kinds.all { it == SYNC_UNKNOWN_OP_KIND } -> "Sync kept something it could not read"
+        kinds.all { it == SYNC_AWAITING_REFERENT } ->
+            "Sync is waiting for the rest of another device's history"
+        kinds.all { it == VAULT_DELETED_NOTE_EDITED } ->
+            "A note deleted on another device was kept here"
+        kinds.all { it == SYNC_REFERENT_REFUSED } ->
+            "Sync set aside a change about a device you removed"
+        kinds.all { it == VAULT_CONTENT_UNREADABLE } ->
+            "A note's text file could not be read"
+        // A single condition this build has no heading of its own for —
+        // a newer kernel's kind that it says is not damage. Reachable with
+        // one alert, so it may not say "1 things".
+        alerts.size == 1 -> "Nothing has stopped — one thing worth knowing"
+        else -> "Nothing has stopped — ${alerts.size} things worth knowing"
+    }
 }

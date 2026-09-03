@@ -237,16 +237,73 @@ impl Device {
 /// cached address for it is stale. Allocating from a counter would give
 /// the restarted device a new port and quietly hide the very gap M5c
 /// closed. Falling back to an ephemeral port when the derived one is
-/// taken is the product's own behaviour, so a collision between two
-/// unrelated tests costs nothing but the assertion in the tests that are
-/// about ports, which pick their own.
+/// taken is the product's own behaviour, so a collision costs nothing but
+/// the assertion in the tests that are about ports.
+///
+/// **Below the ephemeral range, and that is what stops the flake.** These
+/// used to be derived from 52000, which is inside the range Windows
+/// (49152–65535) and Linux (32768–60999) hand out to *client* sockets —
+/// and this suite opens a great many of those, in several test binaries at
+/// once. Every so often one of them held the port a device was about to
+/// come back on; the device fell to an ephemeral port, as it should, and a
+/// peer's cached address for it went stale — which surfaced as
+/// `an_identity_and_its_pairings_outlive_every_handle_that_made_them`
+/// failing perhaps one run in fifteen, with an assertion about addresses
+/// and nothing about ports. Deriving below both ranges takes the whole
+/// collision class away rather than making the assertion looser.
 fn port_for(local: &Path) -> u16 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     local.hash(&mut hasher);
-    // The dynamic range, above the product's documented default so a
-    // suite run never squats on it.
-    52_000 + (hasher.finish() % 8_000) as u16
+    20_000 + (hasher.finish() % 8_000) as u16
+}
+
+/// Every file under a directory, recursively.
+///
+/// One walker, because there were two: gate B's looked at names and gate
+/// C's read bytes, and each had its own recursion, its own skip rules and
+/// its own idea of what a relative path looks like on Windows.
+pub fn files_under(root: &Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
+/// What a vault holds that two converged replicas must agree about, as
+/// `(relative path, bytes)`.
+///
+/// Deliberately not a digest: when this fails, the assertion should be
+/// able to say *which* file differs. The kernel's own database is left
+/// out — it is device-local state, and two devices are not expected to
+/// have identical ones because they have different identities.
+pub fn vault_content(root: &Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    let mut files = std::collections::BTreeMap::new();
+    for path in files_under(root) {
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        if rel.split('/').any(|part| part.starts_with(".gilune")) {
+            continue;
+        }
+        if let Ok(bytes) = std::fs::read(&path) {
+            files.insert(rel, bytes);
+        }
+    }
+    files
 }
 
 /// Copy a whole vault directory, the way a person copies a folder to a

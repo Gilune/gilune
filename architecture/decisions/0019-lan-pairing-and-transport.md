@@ -682,6 +682,100 @@ Each stage is shippable alone and in order.
     the persisted sync-enabled state before dialling anyone; vault open
     no longer waits behind the responder's registration; a sync that
     applied nothing skips the full re-projection.
+- **2026-09-03 (second review, kernel).** The first fix round was
+  tested against each defect's own scenario and not the adjacent one;
+  a second review found the regressions and these amendments are the
+  corrections. Rule adopted for every later round: a fix ships with
+  its second-order test or it is not done.
+  - **A referent that can never arrive is not waited for.** Naming
+    operations now carry the origin device of what they name
+    (`object_origin_device`; `supersedes_origin` per superseded head) —
+    additive canonical-JSON keys, codec version unchanged, two new
+    vectors, the existing thirty-seven byte-identical. On apply an
+    absent referent is one of three things: **awaited** (not yet
+    received from a device this vault still exchanges with — halts the
+    stream as `sync-awaiting-referent`, as before); **refused** (its
+    origin is a revoked device — the naming operation is applied
+    forward-only, frontier advanced, alert `sync-referent-refused`, not
+    damage, withdrawn if that history is ever re-admitted); or
+    **uninterpreted** (carried by a kind this build cannot read —
+    forward-only under `sync-unknown-op-kind`'s existing rule). Before
+    this, an innocent device's stream wedged permanently at the first
+    operation naming a revoked device's object, while the shell called
+    it "nothing is wrong".
+  - **A tombstone names the heads it saw**, exactly as a revision does.
+    § 9's withdrawal rule is now two facts, neither of which is a
+    re-render: the bytes on disk are the bytes the kernel last wrote,
+    and every local head is among the heads the deleter named. A local
+    head the deleter never saw is a concurrent edit and the file is
+    kept. Before this, the first fix round's "equal to what the kernel
+    would render now" check orphaned every note that was revised and
+    then deleted between two projections — a deletion made elsewhere
+    silently never landed.
+  - **A note whose own text file cannot be read is said**, as
+    `vault-content-unreadable` (not damage; cleared when it reads
+    again) — the placeholder link stays reserved for content still
+    crossing from another device. `vault-deleted-note-edited` is
+    withdrawn when the kept file is deleted or its words come back as
+    something new; resolution is observed per reconcile pass rather
+    than recorded, because nothing in the kernel yet turns an import
+    into an object.
+  - **A processor output may name the head it read.** `ProposedOutput`
+    gains an optional expected head and the claim exposes it; a
+    revise-subject output whose expected head has moved is refused, for
+    whichever route submits it. The provider-local "never overwrite
+    existing words" gate becomes a kernel compare-and-set.
+  - **The kernel says which alerts are damage** (`IntegrityAlert.damage`)
+    and how many jobs are parked (`GiluneStatus.jobs_parked`, the
+    subset of pending whose subscription is off); an opt-in plugin can
+    be registered disabled in one call; an identity file the platform
+    key cannot open is a typed boundary error. Shells stop restating
+    kernel facts as string tables and prose matches.
+  - A session's `blobs_pending` is what that session left unfinished
+    (the store-wide count is `blobs_awaiting` on status); `promote` is
+    one function with one already-exists branch; every blob digest is
+    streamed. The development stand-in processor is `external-interpret`
+    — the kernel names no domain type.
+- **2026-09-03 (second review, transport).**
+  - **Every reachable address is published, ranked, and the joiner
+    dials them in turn.** § 1 no longer publishes one guess: the
+    pairing window, Settings and the QR carry every routable candidate
+    (QR field five is `h1,h2,h3:port`, at most four hosts, one port; a
+    single host is byte-identical to the old shape), enumerated once at
+    bind, and the joiner tries each with a short timeout, recording the
+    one that answered. The first fix round's "first routable address"
+    picked the numerically lowest — on a machine with a Hyper-V, WSL or
+    VPN adapter, the one no phone can dial.
+  - **One address classifier for both sides** (`addressing.rs`): same
+    LAN segment as one of this machine's own addresses, then routable,
+    then link-local, then loopback; unusable addresses (unspecified,
+    multicast, broadcast, documentation) are dropped rather than sorted
+    last. Discovery's resolved-peer ranking uses it, so a multi-homed
+    peer is dialled on the shared segment first and a bogus address in
+    a responder's answer is never dialled.
+  - **A device remembers the identities it used before**, and a
+    pairing forgives them. Re-enrolment records the previous
+    `device_id` (chaining when the same machine re-enrols twice, at
+    most eight, newest first); the encrypted greeting carries them; a
+    successful pairing withdraws the refusal of every name the peer
+    answers to, and the roster retires any revoked row claiming any of
+    them. Nothing ever *adds* a refusal from a greeting. Before this,
+    re-pairing a device that had re-enrolled was undone at the next
+    launch by the roster reconcile, and its earlier history stayed
+    refused with a damage banner on every session.
+  - **`sync_now` honours the persisted switch itself**: with sync
+    switched off it dials nobody and reports nothing, whoever calls it.
+    The outbound-permission flag is initialised from the persisted
+    state at configure and is now a cache of that fact, not a second
+    one every entry point had to remember.
+  - One sealed-file envelope (`SealedFile`) for identity and roster,
+    one field name, reading the two previous layouts so an existing
+    installation keeps its key and its pairings; a roster the platform
+    key cannot open surfaces as the same typed identity-unreadable
+    error as a key. One handshake tail (`Handshaken::establish`) so no
+    flow can forget the timeout swap. Test rig: the paired-device port
+    band moved out of the OS ephemeral range, which had let a client
+    socket squat a port a device was about to restart on.
 
 ## Ratification record
 

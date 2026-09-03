@@ -113,8 +113,33 @@ impl Store {
     /// removed plugin stays removed. Returns the state the plugin is in,
     /// so a caller knows whether to initialise it.
     pub fn register_plugin(&self, descriptor: &PluginDescriptor) -> Result<PluginState> {
+        self.register_plugin_as(descriptor, PluginState::Enabled)
+    }
+
+    /// Record an implementation that exists here, but leave it **off**
+    /// until somebody turns it on. Idempotent exactly as `register_plugin`
+    /// is, and identical to it in every other respect: an existing
+    /// plugin's state, settings and grants are untouched, and a removed
+    /// plugin stays removed.
+    ///
+    /// It exists because "register, then disable" is two writes with a
+    /// window between them, and in that window the plugin is enabled: its
+    /// subscription is live, so a capture landing at that instant queues
+    /// work for a provider the user never opted into. An opt-in provider
+    /// must never have been on, not even for a moment.
+    pub fn register_plugin_disabled(&self, descriptor: &PluginDescriptor) -> Result<PluginState> {
+        self.register_plugin_as(descriptor, PluginState::Disabled)
+    }
+
+    /// The shared body. `unseen` is the state a plugin this vault has
+    /// never met starts in; a plugin it has met keeps the state it has.
+    fn register_plugin_as(
+        &self,
+        descriptor: &PluginDescriptor,
+        unseen: PluginState,
+    ) -> Result<PluginState> {
         let existing = self.plugin_state(&descriptor.plugin_id)?;
-        let state = existing.unwrap_or(PluginState::Enabled);
+        let state = existing.unwrap_or(unseen);
         let manifest = manifest_json(descriptor);
         match existing {
             Some(_) => {
@@ -139,7 +164,7 @@ impl Store {
                     "INSERT INTO plugins
                      (plugin_id, name, class, profile, required, processor_id,
                       manifest, settings, state, installed_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', 'enabled', ?8)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', ?8, ?9)",
                     rusqlite::params![
                         descriptor.plugin_id,
                         descriptor.name,
@@ -148,6 +173,7 @@ impl Store {
                         descriptor.required as i64,
                         descriptor.processor_id,
                         manifest,
+                        state.as_str(),
                         ids::now_ms(),
                     ],
                 )?;
@@ -572,6 +598,86 @@ mod tests {
         store.register_plugin(&transcription()).expect("register");
         let receipt = store.capture_bytes("wav", &[7u8; 64]).expect("capture");
         (dir, store, receipt.source_id)
+    }
+
+    #[test]
+    fn an_opt_in_provider_registers_off_and_was_never_on() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        assert_eq!(
+            store.register_plugin_disabled(&transcription()).expect("register"),
+            PluginState::Disabled
+        );
+        // The window this exists to close: a capture landing between a
+        // register and a disable used to queue work for a provider nobody
+        // opted into. Registered off, the subscription is off from the
+        // first instant, so the capture queues nothing at all.
+        store.capture_bytes("wav", &[1u8; 32]).expect("capture");
+        let jobs: i64 = store
+            .conn()
+            .query_row("SELECT COUNT(*) FROM jobs", [], |row| row.get(0))
+            .expect("count");
+        assert_eq!(jobs, 0, "an off provider is handed nothing, not handed it and parked");
+    }
+
+    #[test]
+    fn registering_off_never_switches_off_a_plugin_somebody_turned_on() {
+        // The second-order case: the same binary calls the same
+        // registration on every launch, and by then the user has said yes.
+        // Idempotent must mean "keeps the state it has", exactly as
+        // `register_plugin` does — not "puts it back the way it shipped".
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        store.register_plugin_disabled(&transcription()).expect("first launch");
+        store.set_plugin_enabled("org.memory.transcription", true).expect("the user says yes");
+
+        assert_eq!(
+            store.register_plugin_disabled(&transcription()).expect("second launch"),
+            PluginState::Enabled,
+            "a plugin this vault has met keeps the state it has"
+        );
+        store.capture_bytes("wav", &[1u8; 32]).expect("capture");
+        assert!(
+            store.claim_next_job_for("transcribe", 1_000, 30_000).expect("claim").is_some(),
+            "and its subscription is live again"
+        );
+        // And the mirror image: registering *enabled* over a plugin the
+        // user switched off must not switch it back on.
+        store.set_plugin_enabled("org.memory.transcription", false).expect("the user says no");
+        assert_eq!(
+            store.register_plugin(&transcription()).expect("third launch"),
+            PluginState::Disabled
+        );
+    }
+
+    #[test]
+    fn parked_work_is_counted_apart_from_work_that_is_merely_waiting() {
+        let (_dir, store, _id) = store_with_wav();
+        let status = store.status().expect("status");
+        assert_eq!(status.jobs_pending, 1);
+        assert_eq!(status.jobs_parked, 0, "an enabled plugin's job is waiting, not parked");
+
+        store.set_plugin_enabled("org.memory.transcription", false).expect("disable");
+        let status = store.status().expect("status");
+        assert_eq!(status.jobs_pending, 1, "parking never destroys the work");
+        assert_eq!(status.jobs_parked, 1, "and a status line can say why nothing is happening");
+
+        // The second-order case: switching it back on must unpark it, not
+        // leave a count that only ever grows.
+        store.set_plugin_enabled("org.memory.transcription", true).expect("enable");
+        let status = store.status().expect("status");
+        assert_eq!(status.jobs_pending, 1);
+        assert_eq!(status.jobs_parked, 0);
+
+        // And a finished job is neither: `jobs_parked` counts waiting work
+        // only, so disabling afterwards must not resurrect it as parked.
+        store
+            .run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000)
+            .expect("run the work");
+        store.set_plugin_enabled("org.memory.transcription", false).expect("disable again");
+        let status = store.status().expect("status");
+        assert_eq!(status.jobs_pending, 0);
+        assert_eq!(status.jobs_parked, 0, "work that is done is not work that is parked");
     }
 
     #[test]

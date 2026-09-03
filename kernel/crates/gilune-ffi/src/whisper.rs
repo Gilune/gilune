@@ -215,6 +215,11 @@ impl Processor for WhisperTranscriber {
         let mut document: serde_json::Value =
             serde_json::from_str(&ctx.subject_payload().map_err(|e| e.to_string())?)
                 .map_err(|e| e.to_string())?;
+        // Read together with the document, before the model runs: a long
+        // recording can take seconds, and whatever landed on the note in
+        // the meantime — a person typing, a second engine finishing — is
+        // an answer this one must not silently replace.
+        let read_head = ctx.subject_head().map_err(|e| e.to_string())?;
         if document.get("media").and_then(|v| v.as_str()) != Some("wav") {
             return Ok(Vec::new());
         }
@@ -231,6 +236,7 @@ impl Processor for WhisperTranscriber {
             type_schema: 1,
             payload: document.to_string(),
             target: OutputTarget::ReviseSubject,
+            expected_head: read_head,
         }])
     }
 }

@@ -224,6 +224,7 @@ fn two_live_claimants_across_two_processes_produce_one_output() {
                 payload: serde_json::json!({ "media": "wav", "text": "the slow one" })
                     .to_string(),
                 target: OutputTarget::ReviseSubject,
+                expected_head: None,
             }],
         )
         .expect("a late submit is legal");
@@ -259,6 +260,7 @@ fn a_submit_is_refused_when_the_plugin_was_disabled_mid_flight() {
             type_schema: 1,
             payload: serde_json::json!({ "media": "wav", "text": "too late" }).to_string(),
             target: OutputTarget::ReviseSubject,
+            expected_head: None,
         }],
     );
     assert!(

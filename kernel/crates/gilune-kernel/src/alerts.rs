@@ -43,6 +43,43 @@ pub const VAULT_DELETED_NOTE_EDITED: &str = "vault-deleted-note-edited";
 /// relay it, so "excluded" has to be a property of apply, not of who
 /// happens to be on the far end of the socket.
 pub const SYNC_REVOKED_DEVICE: &str = "sync-revoked-device";
+/// An operation named something whose origin device this vault refuses,
+/// so the thing it names can never arrive: a revision or a tombstone of
+/// an object belonging to a revoked device is moot. The operation is
+/// preserved and forwarded, the frontier moves on, and this says why the
+/// stream did **not** stop. Informational, never damage — it is the exit
+/// from `sync-awaiting-referent`, not another way in.
+pub const SYNC_REFERENT_REFUSED: &str = "sync-referent-refused";
+/// A note's own preserved bytes could not be read here, and they are not
+/// content in transit, so the projection was held back rather than
+/// written with a placeholder where the words are (`vault.rs`'s render).
+/// Not damage: the kernel's record of the note is intact and the file on
+/// disk is untouched — something is wrong with the *bytes beside* it, and
+/// a person is the one who can say what. Cleared as soon as the object
+/// renders again.
+pub const VAULT_CONTENT_UNREADABLE: &str = "vault-content-unreadable";
+
+/// Whether an alert kind means something is **damaged**, as opposed to
+/// something being pending, refused by policy, or waiting on a person.
+///
+/// The kernel owns this classification because it owns the kinds. Every
+/// shell used to restate the set in its own words, which is two places
+/// for one fact and a new kind silently reading as damage in both.
+///
+/// An unknown kind is **not** damage: a kernel newer than this build may
+/// raise a kind whose meaning is not knowable here, and guessing "broken"
+/// about it would be the same over-claim the shells were making.
+pub fn is_damage(kind: &str) -> bool {
+    matches!(
+        kind,
+        SYNC_GAP
+            | SYNC_CORRUPT_OPERATION
+            | SYNC_UNSUPPORTED_VERSION
+            | SYNC_LIMIT_EXCEEDED
+            | SYNC_REVOKED_DEVICE
+            | SYNC_BLOB_DIGEST_MISMATCH
+    )
+}
 
 /// One raised condition. `subject` is whatever the alert is *about* — a
 /// device id for a halted stream, an operation id for an unreadable
@@ -55,6 +92,10 @@ pub struct Alert {
     pub subject: String,
     pub detail: String,
     pub raised_ms: i64,
+    /// Whether this condition means damage. Derived from `kind` by
+    /// `is_damage`, and carried on the row so that no reader has to keep
+    /// its own copy of the kind set.
+    pub damage: bool,
 }
 
 /// Raise an alert, or refresh the detail of one already standing for this
@@ -100,9 +141,11 @@ impl Store {
              FROM integrity_alerts ORDER BY raised_ms, alert_id",
         )?;
         let rows = stmt.query_map([], |row| {
+            let kind: String = row.get(1)?;
             Ok(Alert {
                 alert_id: row.get(0)?,
-                kind: row.get(1)?,
+                damage: is_damage(&kind),
+                kind,
                 subject: row.get(2)?,
                 detail: row.get(3)?,
                 raised_ms: row.get(4)?,
@@ -150,6 +193,58 @@ mod tests {
         raise(store.conn(), SYNC_CORRUPT_OPERATION, "device-a", "c").expect("raise");
         assert_eq!(store.integrity_alerts().expect("list").len(), 3);
         assert_eq!(store.integrity_alerts_of(SYNC_GAP).expect("of kind").len(), 2);
+    }
+
+    #[test]
+    fn the_kernel_says_which_conditions_are_damage_so_no_shell_has_to() {
+        let (_dir, store) = store();
+        raise(store.conn(), SYNC_GAP, "device-a", "halted").expect("raise");
+        raise(store.conn(), SYNC_UNKNOWN_OP_KIND, "com.example.kind", "unread").expect("raise");
+        let by_kind: std::collections::BTreeMap<String, bool> = store
+            .integrity_alerts()
+            .expect("list")
+            .into_iter()
+            .map(|a| (a.kind, a.damage))
+            .collect();
+        assert!(by_kind[SYNC_GAP], "a halted stream is damage");
+        assert!(
+            !by_kind[SYNC_UNKNOWN_OP_KIND],
+            "data this build cannot read is preserved, not broken"
+        );
+    }
+
+    #[test]
+    fn every_kind_this_module_declares_is_classified_deliberately() {
+        // The second-order case: a kind added without a decision about
+        // what it means. `is_damage` answers `false` for anything it does
+        // not know, which is the safe default *and* the one that would
+        // hide a genuine fault — so the whole declared set is pinned here
+        // and adding a kind means adding a line to this table.
+        let damage = [
+            SYNC_GAP,
+            SYNC_CORRUPT_OPERATION,
+            SYNC_UNSUPPORTED_VERSION,
+            SYNC_LIMIT_EXCEEDED,
+            SYNC_REVOKED_DEVICE,
+            SYNC_BLOB_DIGEST_MISMATCH,
+        ];
+        let not_damage = [
+            SYNC_UNKNOWN_OP_KIND,
+            SYNC_AWAITING_REFERENT,
+            SYNC_REFERENT_REFUSED,
+            VAULT_DELETED_NOTE_EDITED,
+            VAULT_CONTENT_UNREADABLE,
+        ];
+        for kind in damage {
+            assert!(is_damage(kind), "{kind} must read as damage");
+        }
+        for kind in not_damage {
+            assert!(!is_damage(kind), "{kind} must not read as damage");
+        }
+        assert!(
+            !is_damage("something.a.newer.kernel.raised"),
+            "an unknown kind is not asserted to be damage"
+        );
     }
 
     #[test]

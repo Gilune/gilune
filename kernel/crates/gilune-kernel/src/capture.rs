@@ -234,7 +234,17 @@ impl CaptureStage {
     }
 }
 
-fn promote(store: &Store, blob_id: &str, stage_path: &std::path::Path, rel_path: &str) -> Result<()> {
+/// Move staged bytes into the vault and mark the blob ready. **The one
+/// promotion**: a capture's own bytes and a blob that arrived over a
+/// transport take exactly this path, because they are the same act and
+/// two copies of it had already drifted — `blobs::finish_blob` cleaned up
+/// after a lost race and this did not.
+pub(crate) fn promote(
+    store: &Store,
+    blob_id: &str,
+    stage_path: &std::path::Path,
+    rel_path: &str,
+) -> Result<()> {
     let target = store.vault().join(rel_path);
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent).map_err(|e| KernelError::Io {
@@ -246,7 +256,16 @@ fn promote(store: &Store, blob_id: &str, stage_path: &std::path::Path, rel_path:
         match std::fs::rename(stage_path, &target) {
             Ok(()) => {}
             Err(e) if target.exists() => {
-                let _ = e; // promotion already happened elsewhere
+                // Promotion already happened elsewhere, and the stage is
+                // now a duplicate of bytes that are safely in the vault.
+                // It has to go: leaving it violates recovery's own
+                // invariant that "promoted stages were renamed away;
+                // whatever remains is orphaned", so the sweep would file
+                // the user's recording in lost+found as if nobody had
+                // finished it — a second copy of a capture that
+                // succeeded, reported as one that failed.
+                let _ = e;
+                let _ = std::fs::remove_file(stage_path);
             }
             Err(e) => return Err(KernelError::Io { path: target.clone(), source: e }),
         }
@@ -368,10 +387,11 @@ fn find_stage_by_digest(store: &Store, blob_id: &str) -> Result<Option<PathBuf>>
         if crate::blobs::is_incoming(&entry.file_name().to_string_lossy()) {
             continue;
         }
-        if let Ok(data) = std::fs::read(&path) {
-            if ids::sha256_hex(&data) == expected {
-                return Ok(Some(path));
-            }
+        // Streamed: recovery runs on every open, and a vault with a
+        // half-gigabyte recording abandoned in staging must not need it
+        // in memory to find out whose it is.
+        if crate::blobs::digest_of(&path).ok().as_deref() == Some(expected.as_str()) {
+            return Ok(Some(path));
         }
     }
     Ok(None)
@@ -489,6 +509,38 @@ mod tests {
                 .expect("rows")
         };
         assert_eq!(seqs, vec![1, 2]);
+    }
+
+    #[test]
+    fn a_promotion_that_lost_the_race_leaves_no_second_copy_of_the_recording() {
+        // Multi-instance is supported use (owner decision 2026-08-31), so
+        // another process's recovery can promote these bytes between this
+        // one's commit and its own rename. The bytes are safe either way
+        // — but the stage left behind is a duplicate, and recovery's rule
+        // is "promoted stages were renamed away; whatever remains is
+        // orphaned", so the sweep filed a recording that had succeeded in
+        // lost+found as one that had failed.
+        let (dir, store) = open();
+        let receipt = store.capture_bytes("wav", &[9u8; 128]).expect("capture");
+        let stage = store.staging_dir().join("racing.wav");
+        std::fs::write(&stage, [9u8; 128]).expect("a stage this process still holds");
+
+        promote(&store, &receipt.blob_id, &stage, &receipt.rel_path).expect("promote");
+        assert!(!stage.exists(), "the duplicate stage goes with the race it lost");
+        assert_eq!(store.status().expect("status").blobs_ready, 1, "and the blob is ready");
+
+        // One step past: the sweep is where the duplicate would have
+        // surfaced, so it is the sweep that has to find nothing.
+        store.force_stage_sweep().expect("sweep past every age gate");
+        assert!(
+            !dir.path().join(".gilune/local/lost+found").exists(),
+            "a capture that succeeded must not also be reported as one that failed"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join(&receipt.rel_path)).expect("blob"),
+            vec![9u8; 128]
+        );
+        assert!(store.verify().expect("verify").is_empty());
     }
 
     #[test]

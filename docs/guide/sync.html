@@ -91,14 +91,30 @@
 
   <ol>
     <li>On one device, in <strong>Settings ▸ Sync</strong>, press <strong>Start
-    pairing</strong>. It shows a six-digit code and an address.</li>
+    pairing</strong>. It shows a six-digit code, and the address or addresses that
+    device can be reached at.</li>
     <li>On the other device, on the same screen, find <strong>Enter a code from another
-    device</strong> and type in both the address and the code.</li>
+    device</strong> and type in one of those addresses and the code.</li>
     <li>Press <strong>Pair</strong>.</li>
   </ol>
 
   <p>This works between any two devices, in either direction, always. It is the way that
   never depends on anything else being in place.</p>
+
+  <h3>When more than one address is offered</h3>
+
+  <p>A computer can be on several networks at once without knowing it — your own network,
+  and the private ones that virtual machines, containers and VPNs quietly add. It cannot
+  tell which of those your phone is on, so it does not guess: while a pairing code is
+  open it lists <strong>every address it is reachable at</strong>, best first. The same
+  list appears under <strong>This device</strong> on the Sync page, whether or not a
+  pairing is open.</p>
+
+  <p>Type whichever one belongs to the network the other device is on. The first in the
+  list is the best guess and is usually right; trying another costs nothing — a wrong
+  address simply does not connect, and the code stays good until it expires. Scanning the
+  QR skips the question entirely: the phone is handed every address the code carries and
+  tries them in turn.</p>
 
   <p>A code is good for <strong>one pairing only</strong>, it <strong>expires after a
   few minutes</strong>, and <strong>a few wrong tries cancels it</strong>. If any of
@@ -198,6 +214,24 @@
   plainly on the Sync page when it happens, the original device is unaffected, and you
   can revoke whichever one you did not mean to have.</p>
 
+  <h3>Starting again after a restored backup (phone)</h3>
+
+  <p>Each device proves which device it is with a key that its phone or its computer
+  keeps for it, locked away outside your vault. That key does not travel: restore a
+  backup onto a new phone, reset the phone's secure storage, or move the app to another
+  handset, and the proof comes across but the thing that unlocks it does not.</p>
+
+  <p>When that happens the phone's Sync page says so in as many words, and offers
+  <strong>Reset sync on this phone</strong>. This button is on the <strong>phone
+  only</strong> — a desktop in the same state tells you what is wrong on its own Sync
+  page, and its identity is rebuilt by pairing again from scratch.</p>
+
+  <p>Pressing it throws away the identity this phone holds, its list of paired devices
+  and its on-or-off setting, and enrols the phone afresh. It <strong>touches nothing in
+  your vault</strong>: every note, recording and edit is exactly where it was. Your other
+  devices will not recognise this phone afterwards, so pair each of them again — a new
+  introduction, not an undo.</p>
+
   <h2>When something is not working</h2>
 
   <ul>
@@ -219,6 +253,32 @@
     than accept something it cannot make sense of or verify, and it tells you what it was
     and why. Nothing is lost by this: once the problem clears, it picks up exactly where
     it left off.</li>
+  </ul>
+
+  <h3>Messages that are not a problem</h3>
+
+  <p>Some of what the Sync page tells you is simply news. These are the ones that sound
+  like faults and are not — nothing has stopped, and there is nothing to fix.</p>
+
+  <ul>
+    <li><strong>A change referred to something from a device you removed.</strong> It was
+    set aside, and nothing is lost. Something arrived that was about a device you have
+    revoked — an edit to one of its notes, say — so there was nothing left for it to be
+    about. What that device sent you before you revoked it stays in your vault, and
+    everything else carries on as normal.</li>
+
+    <li><strong>A note's text file could not be read.</strong> Gilune left the note alone
+    rather than rewriting it with a gap where the words should be. If you moved or renamed
+    the file with another app, put it back and it reappears. Nothing was lost: Gilune's
+    own record of the note is untouched, and the rest of your vault is unaffected.</li>
+
+    <li><strong>Something from another device is waiting for the rest of its
+    history.</strong> Two devices met in the wrong order, which happens. It sorts itself
+    out at the next sync without anybody doing anything.</li>
+
+    <li><strong>Something a newer version wrote came through.</strong> This device kept it
+    exactly as it arrived and passed it on to your other devices unread. Nothing is lost;
+    it becomes readable here when this device is running that version too.</li>
   </ul>
 
 </main>

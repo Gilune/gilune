@@ -231,12 +231,18 @@ const val NOTHING_FOUND =
 /// full sentences, beside the button that fixes it. Drawing the kernel's
 /// own wording above that as well would be the same news twice, once in a
 /// form nobody can act on.
-fun syncNotice(message: String): String? = message.takeUnless {
-    it.isBlank() ||
-        it.startsWith("vault: ") ||
-        it == "opening vault…" ||
-        identityUnreadable(it)
-}
+///
+/// [identityUnreadable] is that state as the **typed** answer the state
+/// holds, passed in rather than sniffed out of the message: the sentence
+/// this drops is the kernel's, and reading its words to decide would make
+/// its phrasing part of the contract.
+fun syncNotice(message: String, identityUnreadable: Boolean = false): String? =
+    message.takeUnless {
+        it.isBlank() ||
+            it.startsWith("vault: ") ||
+            it == "opening vault…" ||
+            identityUnreadable
+    }
 
 @Composable
 fun SyncSection(state: GiluneState) {
@@ -261,7 +267,7 @@ fun SyncSection(state: GiluneState) {
     // that failed, a code that expired and a declined camera all report
     // through the shared message line, which is drawn above the composer
     // two navigations away.
-    syncNotice(state.message.value)?.let { notice ->
+    syncNotice(state.message.value, state.identityUnreadable.value)?.let { notice ->
         Text(
             notice,
             style = MaterialTheme.typography.bodyMedium,
@@ -274,7 +280,10 @@ fun SyncSection(state: GiluneState) {
         // The one unavailable state a person can get out of, and the way
         // out. Everything else here is a bug or a transient; this is a
         // restored backup, and until this round it was a dead end (§ 4).
-        if (identityUnreadable(state.message.value)) {
+        // The typed answer the enrolment recorded, not a phrase read back
+        // out of the message line: a destructive button may not be gated on
+        // wording somebody might improve.
+        if (state.identityUnreadable.value) {
             Text(
                 identityUnreadableSentence("this phone"),
                 style = MaterialTheme.typography.bodyMedium,
@@ -346,6 +355,11 @@ fun SyncSection(state: GiluneState) {
             modifier = Modifier.testTag("sync-bind-failed"),
         )
     }
+    // One line under the switch, and the full ranked list under "This
+    // device" — `sync-addresses` there is where every address this phone
+    // answers on is drawn, with the sentence saying which to try first.
+    // Listing them twice on one screen would be two answers to one
+    // question, so this stays the single best-ranked fact.
     status.listeningOn?.let { address ->
         Text(
             "Listening on $address",
@@ -413,6 +427,11 @@ private fun resetSyncOnThisPhone(state: GiluneState, context: Context) {
     state.syncAction("sync was reset — this phone is a new device and has to be paired again") {
         clearSyncState(java.io.File(syncDir(context)))
         state.syncStatus.value = setup(it)
+        // The state that offered this button is over: a fresh identity was
+        // minted and it opens. Clearing the flag here rather than leaving
+        // it to the next vault open is what takes the destructive button
+        // off the screen the moment it has nothing left to fix.
+        state.identityUnreadable.value = false
     }
 }
 
@@ -429,7 +448,7 @@ private fun resetSyncOnThisPhone(state: GiluneState, context: Context) {
 private fun SyncAlerts(state: GiluneState) {
     if (state.syncAlerts.isEmpty()) return
     val colours = MaterialTheme.colorScheme
-    val damage = state.syncAlerts.any { alertIsDamage(it.kind) }
+    val damage = state.syncAlerts.any { alertIsDamage(it) }
     Surface(
         color = if (damage) colours.errorContainer else colours.surfaceVariant,
         shape = MaterialTheme.shapes.medium,
@@ -440,7 +459,7 @@ private fun SyncAlerts(state: GiluneState) {
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             Text(
-                alertsHeading(state.syncAlerts.map { it.kind }),
+                alertsHeading(state.syncAlerts.toList()),
                 style = MaterialTheme.typography.titleSmall,
                 color = if (damage) colours.onErrorContainer else colours.onSurfaceVariant,
                 modifier = Modifier.testTag("sync-alerts-heading"),
@@ -573,6 +592,36 @@ private fun ThisDevice(status: SyncStatus) {
         color = if (status.keyProtection == "none") colours.error else colours.onSurfaceVariant,
         modifier = Modifier.testTag("sync-protection"),
     )
+    // Where this phone answers, in the kernel's own ranking (§ 1). Shown
+    // because the other device may have to be told it: discovery is
+    // filtered on plenty of networks, and the typed-address fallback needs
+    // an address to type. A phone on Wi-Fi and a VPN at once has more than
+    // one and cannot know which the desktop shares, so it lists them all
+    // rather than picking — `deviceAddresses` is the same rule the desktop
+    // draws from. Nothing is drawn while it is not listening: an address it
+    // does not answer on is worse than none.
+    val reachableAt = deviceAddresses(status)
+    if (reachableAt.isNotEmpty()) {
+        Text(
+            reachableAt.joinToString("\n"),
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.onSurfaceVariant,
+            modifier = Modifier.testTag("sync-addresses"),
+        )
+        Text(
+            if (reachableAt.size == 1) {
+                "That is where this phone answers. Type it into the other device if it " +
+                    "cannot find this one on its own."
+            } else {
+                "That is where this phone answers — it is on more than one network, and " +
+                    "it cannot tell which one your other device is on. The first is the " +
+                    "likeliest; if it does not work, try the next."
+            },
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.onSurfaceVariant,
+        )
+    }
     // Reachable and findable are two facts, and the honest case is the
     // one where they disagree (§ 1).
     Text(

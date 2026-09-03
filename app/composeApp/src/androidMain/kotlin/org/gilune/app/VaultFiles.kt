@@ -215,13 +215,33 @@ fun formatDuration(ms: Long): String {
     return "${total / 60}:${(total % 60).toString().padStart(2, '0')}"
 }
 
-private fun ByteArray.matches(at: Int, ascii: String): Boolean =
+// ---------------------------------------------------------------------
+// Reading a WAV's fields, in one place.
+//
+// `internal` rather than private because `canonicalWavComplaint` needs the
+// same three readers to check the same header, and had its own local copies
+// — `ascii`, `u16`, `u32` — written inside the function. Two readings of
+// one file format is one reading that can disagree with itself, and the
+// half that disagreed would be the one deciding whether a person's
+// recording is decodable at all. Bounds-safe by contract: a read past the
+// end answers false or -1 rather than throwing, because every caller here
+// is looking at bytes it did not write.
+// ---------------------------------------------------------------------
+
+internal fun ByteArray.matches(at: Int, ascii: String): Boolean =
     at + ascii.length <= size && String(this, at, ascii.length, Charsets.US_ASCII) == ascii
 
-private fun ByteArray.littleEndianInt(at: Int): Int {
+internal fun ByteArray.littleEndianInt(at: Int): Int {
     if (at + 4 > size) return -1
     return (this[at].toInt() and 0xFF) or
         ((this[at + 1].toInt() and 0xFF) shl 8) or
         ((this[at + 2].toInt() and 0xFF) shl 16) or
         ((this[at + 3].toInt() and 0xFF) shl 24)
+}
+
+/// The 16-bit fields — channel count and bit depth — which the duration
+/// reader never needed and the shape check does.
+internal fun ByteArray.littleEndianShort(at: Int): Int {
+    if (at + 2 > size) return -1
+    return (this[at].toInt() and 0xFF) or ((this[at + 1].toInt() and 0xFF) shl 8)
 }

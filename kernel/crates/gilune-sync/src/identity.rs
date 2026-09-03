@@ -54,6 +54,164 @@ pub trait KeyWrap: Send + Sync {
 /// not there.
 pub const UNWRAPPED: &str = "none";
 
+/// Why a file holds its contents in the clear. ADR 0019 § 4 allows the
+/// fallback and asks for the reason to be recorded rather than assumed
+/// away — for the roster as much as for the key, since a roster holds a
+/// pair secret for every peer.
+const UNWRAPPED_REASON: &str =
+    "no platform key wrapper was registered by this host, so this file is stored \
+     unwrapped and protected only by the permissions of its directory";
+
+/// The field the sealed half is written under.
+const SEALED: &str = "sealed";
+
+/// What earlier builds called it. The identity file used `secret` and the
+/// roster used `payload` — two names for one thing, which is how the two
+/// readers came to drift apart. New files carry `SEALED`; old ones are
+/// still read, because the alternative is a user's pairings vanishing on
+/// the update that tidied the field name.
+const SEALED_WAS: [&str; 2] = ["payload", "secret"];
+
+/// How many earlier device ids one identity file remembers. A device that
+/// has been restored from a backup four times has four ancestors and a
+/// bound is a bound; the oldest are dropped first, because it is the
+/// recent ones a peer still holds unapplied history from.
+pub const MAX_PREVIOUS_DEVICE_IDS: usize = 8;
+
+// ------------------------------------------------------- the sealed file
+
+/// A device-local file whose body is key material.
+///
+/// **One envelope, read and written in one place.** The identity and the
+/// roster had a copy each — same version check, same `wrap` field, same
+/// hex payload, same four error messages — and they had already diverged:
+/// only one of them recorded why an unwrapped file was unwrapped, and they
+/// spelled the payload field differently, so neither could ever read the
+/// other's compat case. A file format that exists twice is a file format
+/// that is checked once and a half.
+pub(crate) struct SealedFile {
+    /// The adapter that sealed it, or `UNWRAPPED`.
+    pub protection: String,
+    /// The whole envelope, so a caller can read the plain fields it wrote
+    /// beside the sealed half.
+    pub document: serde_json::Value,
+    sealed: Vec<u8>,
+}
+
+impl SealedFile {
+    /// The contents, unsealed. Fails rather than guessing when the
+    /// adapter that sealed the file is not registered on this host —
+    /// quietly returning nothing would look exactly like an empty file.
+    pub fn open(&self, wrap: Option<&dyn KeyWrap>, what: &str) -> Result<Vec<u8>> {
+        if self.protection == UNWRAPPED {
+            return Ok(self.sealed.clone());
+        }
+        // The file is here and sealed, and this host cannot open it. Both
+        // arms raise `IdentityUnreadable` rather than `Identity` so that
+        // the boundary can tell it from "there is nothing here yet",
+        // which is enrolment: minting over a sealed key would throw away
+        // every pairing made with it (ADR 0019 § 4).
+        let Some(wrap) = wrap else {
+            return Err(SyncError::IdentityUnreadable {
+                detail: format!(
+                    "the {what} was wrapped by {}, and no key wrapper is registered on this \
+                     host to open it",
+                    self.protection
+                ),
+            });
+        };
+        wrap.unwrap(&self.sealed).map_err(|detail| SyncError::IdentityUnreadable {
+            detail: format!("{} could not unwrap the {what}: {detail}", self.protection),
+        })
+    }
+
+    pub fn strings(&self, field: &str) -> Vec<String> {
+        self.document
+            .get(field)
+            .and_then(|v| v.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+/// Read one, or `None` when there is no file yet — which is a first run,
+/// not a failure. The version is checked **here**, once, for both callers.
+pub(crate) fn read_sealed(path: &Path, what: &str) -> Result<Option<SealedFile>> {
+    let raw = match std::fs::read(path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => {
+            return Err(SyncError::Identity {
+                detail: format!("reading {}: {e}", path.display()),
+            })
+        }
+    };
+    let document: serde_json::Value = serde_json::from_slice(&raw)
+        .map_err(|e| SyncError::Identity { detail: format!("{what} file: {e}") })?;
+    let version = document.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
+    if version != FILE_VERSION {
+        return Err(SyncError::Identity {
+            detail: format!("{what} file version {version} is not one this build reads"),
+        });
+    }
+    let protection = document
+        .get("wrap")
+        .and_then(|v| v.as_str())
+        .unwrap_or(UNWRAPPED)
+        .to_string();
+    let hex_text = std::iter::once(SEALED)
+        .chain(SEALED_WAS)
+        .find_map(|field| document.get(field).and_then(|v| v.as_str()))
+        .ok_or_else(|| SyncError::Identity {
+            detail: format!("the {what} file holds nothing"),
+        })?;
+    let sealed = hex::decode(hex_text)
+        .map_err(|e| SyncError::Identity { detail: format!("{what} contents: {e}") })?;
+    Ok(Some(SealedFile { protection, document, sealed }))
+}
+
+/// Write one: whole, atomically, sealed by the registered adapter if there
+/// is one, and carrying the reason when there is not. `plain_fields` are
+/// written beside the sealed half in the clear — the public key, a device
+/// id, the ancestry — because they are not secrets and a file that cannot
+/// be opened should still be able to say whose it is.
+pub(crate) fn write_sealed(
+    path: &Path,
+    what: &str,
+    wrap: Option<&dyn KeyWrap>,
+    plain: &[u8],
+    plain_fields: serde_json::Value,
+) -> Result<()> {
+    let (protection, sealed, reason) = match wrap {
+        Some(wrap) => {
+            let sealed = wrap.wrap(plain).map_err(|detail| SyncError::Identity {
+                detail: format!("{} could not wrap the {what}: {detail}", wrap.name()),
+            })?;
+            (wrap.name(), sealed, None)
+        }
+        None => (UNWRAPPED.to_string(), plain.to_vec(), Some(UNWRAPPED_REASON)),
+    };
+    let mut document = serde_json::json!({
+        "version": FILE_VERSION,
+        "wrap": protection,
+        SEALED: hex::encode(&sealed),
+    });
+    if let Some(reason) = reason {
+        document["unwrapped_reason"] = serde_json::Value::String(reason.to_string());
+    }
+    if let Some(fields) = plain_fields.as_object() {
+        for (key, value) in fields {
+            document[key] = value.clone();
+        }
+    }
+    write_private(path, document.to_string().as_bytes())
+}
+
 /// This device's static keypair.
 #[derive(Clone)]
 pub struct Identity {
@@ -194,46 +352,16 @@ impl IdentityStore {
     /// holds none — which is the whole of "the vault came from
     /// elsewhere".
     pub fn load(&self, device_id: &str, wrap: Option<&dyn KeyWrap>) -> Result<Option<Identity>> {
-        let path = self.identity_path(device_id);
-        let raw = match std::fs::read(&path) {
-            Ok(raw) => raw,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => {
-                return Err(SyncError::Identity {
-                    detail: format!("reading {}: {e}", path.display()),
-                })
-            }
+        let Some(file) = read_sealed(&self.identity_path(device_id), "identity")? else {
+            return Ok(None);
         };
-        let document: serde_json::Value = serde_json::from_slice(&raw)
-            .map_err(|e| SyncError::Identity { detail: format!("identity file: {e}") })?;
-        let version = document.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
-        if version != FILE_VERSION {
-            return Err(SyncError::Identity {
-                detail: format!("identity file version {version} is not one this build reads"),
-            });
-        }
-        let public = hex_field(&document, "public")?;
-        let sealed = hex_field(&document, "secret")?;
-        let protection = document
-            .get("wrap")
-            .and_then(|v| v.as_str())
-            .unwrap_or(UNWRAPPED)
-            .to_string();
-        let private = if protection == UNWRAPPED {
-            sealed
-        } else {
-            let Some(wrap) = wrap else {
-                return Err(SyncError::Identity {
-                    detail: format!(
-                        "this key was wrapped by {protection}, and no key wrapper is \
-                         registered on this host to open it"
-                    ),
-                });
-            };
-            wrap.unwrap(&sealed).map_err(|detail| SyncError::Identity {
-                detail: format!("{protection} could not unwrap the identity key: {detail}"),
-            })?
-        };
+        let public = hex_field(&file.document, "public")?;
+        // A sealed file that will not open raises `IdentityUnreadable`
+        // from `open` itself: "this machine holds it and cannot use it" is
+        // a different answer from "there is nothing here yet", which is
+        // enrolment, and minting over a sealed key would throw away the
+        // identity every existing pairing is with.
+        let private = file.open(wrap, "identity key")?;
         if private.len() != 32 || public.len() != 32 {
             return Err(SyncError::Identity {
                 detail: "the identity file does not hold an X25519 keypair".to_string(),
@@ -243,14 +371,35 @@ impl IdentityStore {
     }
 
     /// What protected the stored key, for the settings screen to show.
+    /// Lenient by design: a screen asking what guards a key must not fail
+    /// to draw because the answer is "nothing this build understands".
     pub fn protection(&self, device_id: &str) -> String {
-        let Ok(raw) = std::fs::read(self.identity_path(device_id)) else {
-            return UNWRAPPED.to_string();
-        };
-        serde_json::from_slice::<serde_json::Value>(&raw)
+        read_sealed(&self.identity_path(device_id), "identity")
             .ok()
-            .and_then(|d| d.get("wrap").and_then(|v| v.as_str()).map(str::to_string))
+            .flatten()
+            .map(|file| file.protection)
             .unwrap_or_else(|| UNWRAPPED.to_string())
+    }
+
+    /// The device ids this machine used for this vault **before** it
+    /// re-enrolled, newest first (ADR 0019 § 4 meeting § 9).
+    ///
+    /// A re-enrolled device is the same machine with a new name for
+    /// itself, and the history it wrote under the old name is still in the
+    /// vault and still travelling between replicas. Without this a peer
+    /// that revoked the old device and then re-paired the new one had no
+    /// way to know they were the same device, so the old stream stayed
+    /// refused for ever and a third replica relaying it raised an alert
+    /// nobody could clear.
+    ///
+    /// Lenient like `protection`: a file that will not parse costs a peer
+    /// one piece of ancestry, not an open.
+    pub fn previous_device_ids(&self, device_id: &str) -> Vec<String> {
+        read_sealed(&self.identity_path(device_id), "identity")
+            .ok()
+            .flatten()
+            .map(|file| file.strings("previous_device_ids"))
+            .unwrap_or_default()
     }
 
     /// Mint and store an identity for `device_id`, replacing anything
@@ -259,49 +408,43 @@ impl IdentityStore {
     /// either.
     pub fn mint(&self, device_id: &str, wrap: Option<&dyn KeyWrap>) -> Result<Identity> {
         let identity = mint_identity()?;
-        self.write(device_id, &identity, wrap)?;
+        self.write(device_id, &identity, wrap, &[])?;
         Ok(identity)
     }
 
-    fn write(&self, device_id: &str, identity: &Identity, wrap: Option<&dyn KeyWrap>) -> Result<()> {
-        std::fs::create_dir_all(&self.root).map_err(|e| SyncError::Identity {
-            detail: format!("creating {}: {e}", self.root.display()),
-        })?;
-        let (protection, sealed, reason) = match wrap {
-            Some(wrap) => {
-                let sealed = wrap.wrap(identity.private()).map_err(|detail| {
-                    SyncError::Identity {
-                        detail: format!("{} could not wrap the identity key: {detail}", wrap.name()),
-                    }
-                })?;
-                (wrap.name(), sealed, None)
-            }
-            // ADR 0019 § 4 allows the fallback and asks for the reason to
-            // be recorded rather than assumed away.
-            None => (
-                UNWRAPPED.to_string(),
-                identity.private().to_vec(),
-                Some(
-                    "no platform key wrapper was registered by this host, so the key is \
-                     stored unwrapped and protected only by the permissions of its \
-                     directory"
-                        .to_string(),
-                ),
-            ),
-        };
-        let mut document = serde_json::json!({
-            "version": FILE_VERSION,
-            "device_id": device_id,
-            "public": hex::encode(identity.public()),
-            "wrap": protection,
-            "secret": hex::encode(&sealed),
-            "created_ms": gilune_kernel::ids::now_ms(),
-        });
-        if let Some(reason) = reason {
-            document["unwrapped_reason"] = serde_json::Value::String(reason);
-        }
-        write_private(&self.identity_path(device_id), document.to_string().as_bytes())
+    fn write(
+        &self,
+        device_id: &str,
+        identity: &Identity,
+        wrap: Option<&dyn KeyWrap>,
+        previous_device_ids: &[String],
+    ) -> Result<()> {
+        write_sealed(
+            &self.identity_path(device_id),
+            "identity key",
+            wrap,
+            identity.private(),
+            serde_json::json!({
+                "device_id": device_id,
+                "public": hex::encode(identity.public()),
+                "created_ms": gilune_kernel::ids::now_ms(),
+                "previous_device_ids": previous_device_ids,
+            }),
+        )
     }
+}
+
+/// The device ids one machine has used for one vault, newest first,
+/// deduplicated and bounded.
+fn ancestry(previous_device_id: &str, older: Vec<String>) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    for id in std::iter::once(previous_device_id.to_string()).chain(older) {
+        if !id.is_empty() && !chain.contains(&id) {
+            chain.push(id);
+        }
+    }
+    chain.truncate(MAX_PREVIOUS_DEVICE_IDS);
+    chain
 }
 
 fn hex_field(document: &serde_json::Value, field: &str) -> Result<Vec<u8>> {
@@ -452,6 +595,14 @@ pub fn enrol(
         (_, Some(_)) => {
             let identity = mint_identity()?;
             let fresh = gilune_kernel::ids::new_id();
+            // What this machine used to call itself, carried forward so a
+            // peer can learn it at the next pairing. § 9 refuses by
+            // originating device id; § 4 changes that id under a machine
+            // that has not changed at all. Without the ancestry those two
+            // rules together mean a re-enrolled device's older history
+            // stays refused by a peer that has already welcomed the device
+            // back — visibly, as a standing alert nobody can clear.
+            let previous = ancestry(&device_id, identities.previous_device_ids(&device_id));
             // The key file is written **before** the vault is told about
             // it. The failure that order avoids is the expensive one: a
             // vault that has taken a new device id with no local identity
@@ -459,7 +610,7 @@ pub fn enrol(
             // after that. This order can only leave an unused key file
             // for a device id nothing claims, which costs a few hundred
             // bytes and nothing else.
-            identities.write(&fresh, &identity, wrap)?;
+            identities.write(&fresh, &identity, wrap, &previous)?;
             let previous_device_id = store.reenrol_as_new_device(&fresh)?;
             store.set_identity_pub(&identity.public_hex())?;
             Ok((identity, Enrolment::Reenrolled { previous_device_id }))
@@ -540,8 +691,13 @@ mod tests {
         identities.mint(&device, Some(&Reversing)).expect("mint");
         assert!(matches!(
             identities.load(&device, None),
-            Err(SyncError::Identity { .. })
+            Err(SyncError::IdentityUnreadable { .. })
         ));
+        // The second-order case, and the reason the variant is its own:
+        // no identity file at all is *enrolment*, not a sealed key. If
+        // both read the same, a host cannot tell "mint one" from "do not
+        // dare mint one".
+        assert!(matches!(identities.load("never-enrolled", None), Ok(None)));
     }
 
     #[test]
@@ -552,6 +708,146 @@ mod tests {
         let raw = std::fs::read_to_string(identities.identity_path(&device)).expect("read");
         assert!(raw.contains("unwrapped_reason"));
         assert_eq!(identities.protection(&device), UNWRAPPED);
+    }
+
+    /// **The shared envelope, both ways.** One writer, one reader, one
+    /// version check — and `protection` reads through the same function
+    /// rather than picking the `wrap` field out of the JSON on its own,
+    /// which is how the two copies came to answer differently about what
+    /// an unopenable file was.
+    #[test]
+    fn a_sealed_file_round_trips_through_the_shared_envelope() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("thing.json");
+        let wrap: Option<&dyn KeyWrap> = Some(&Reversing);
+
+        assert!(
+            read_sealed(&path, "thing").expect("absent is not an error").is_none(),
+            "no file yet is a first run, not a failure"
+        );
+
+        write_sealed(
+            &path,
+            "thing",
+            wrap,
+            b"the body",
+            serde_json::json!({ "who": "a device" }),
+        )
+        .expect("write");
+        let file = read_sealed(&path, "thing").expect("read").expect("a file");
+        assert_eq!(file.protection, "reversing-test-wrapper");
+        assert_eq!(
+            file.document.get("who").and_then(|v| v.as_str()),
+            Some("a device"),
+            "plain fields ride beside the seal"
+        );
+        assert_eq!(file.open(wrap, "thing").expect("open"), b"the body");
+        assert!(
+            file.open(None, "thing").is_err(),
+            "and the seal is a seal: no wrapper, no contents"
+        );
+
+        // Unwrapped files say why, whatever kind of file they are.
+        write_sealed(&path, "thing", None, b"the body", serde_json::json!({})).expect("write");
+        let file = read_sealed(&path, "thing").expect("read").expect("a file");
+        assert_eq!(file.protection, UNWRAPPED);
+        assert!(file
+            .document
+            .get("unwrapped_reason")
+            .and_then(|v| v.as_str())
+            .is_some_and(|why| why.contains("unwrapped")));
+        assert_eq!(file.open(None, "thing").expect("open"), b"the body");
+    }
+
+    /// **Second-order: the field rename must not cost anybody their key.**
+    /// The identity file used to spell the sealed half `secret` and the
+    /// roster spelled it `payload`. A build that read only the new name
+    /// would meet every existing installation as a file it could not open
+    /// — which for the roster means every pairing gone, silently, on the
+    /// update that tidied a name.
+    #[test]
+    fn a_file_written_by_the_previous_layout_still_opens() {
+        let dir = tempfile::tempdir().expect("dir");
+        for old_name in ["secret", "payload"] {
+            let path = dir.path().join(format!("{old_name}.json"));
+            let document = serde_json::json!({
+                "version": FILE_VERSION,
+                "wrap": UNWRAPPED,
+                old_name: hex::encode(b"what an older build wrote"),
+                "public": hex::encode([7u8; 32]),
+            });
+            std::fs::write(&path, document.to_string()).expect("write");
+
+            let file = read_sealed(&path, "thing").expect("read").expect("a file");
+            assert_eq!(
+                file.open(None, "thing").expect("open"),
+                b"what an older build wrote",
+                "{old_name} was the field name in the field"
+            );
+            assert_eq!(
+                file.document.get("public").and_then(|v| v.as_str()),
+                Some(hex::encode([7u8; 32]).as_str())
+            );
+        }
+    }
+
+    /// A re-enrolled machine remembers what it used to be called, so a
+    /// peer can stop refusing the history it wrote then.
+    #[test]
+    fn re_enrolment_records_the_device_id_this_machine_used_before() {
+        let (_vault, _local, store, identities) = vault();
+        enrol(&store, &identities, None).expect("adopt");
+        let first_device = store.device_id().expect("device");
+
+        let elsewhere_dir = tempfile::tempdir().expect("elsewhere");
+        let elsewhere = IdentityStore::new(elsewhere_dir.path());
+        enrol(&store, &elsewhere, None).expect("re-enrol");
+        let second_device = store.device_id().expect("device");
+        assert_ne!(second_device, first_device);
+        assert_eq!(
+            elsewhere.previous_device_ids(&second_device),
+            vec![first_device.clone()],
+            "the new identity has to be able to say whose history it inherited"
+        );
+
+        // The chain extends when one machine re-enrols the same vault
+        // twice — a backup restored, and then restored again: the vault is
+        // overwritten by another copy of itself, so its marker stops
+        // naming the key this machine holds for it.
+        store
+            .set_identity_pub(&mint_identity().expect("mint").public_hex())
+            .expect("a copy from elsewhere lands on top");
+        enrol(&store, &elsewhere, None).expect("re-enrol again");
+        let third_device = store.device_id().expect("device");
+        assert_eq!(
+            elsewhere.previous_device_ids(&third_device),
+            vec![second_device, first_device],
+            "two ancestors, newest first"
+        );
+
+        // **What a machine cannot know, stated exactly.** The ancestry is
+        // read from the identity file *this* machine holds, so a vault
+        // that hops from machine to machine gives each of them one hop —
+        // a third machine never held the second's key and cannot vouch
+        // for what it inherited. A real limit, in the safe direction.
+        let far_dir = tempfile::tempdir().expect("a third machine");
+        let far = IdentityStore::new(far_dir.path());
+        enrol(&store, &far, None).expect("re-enrol somewhere new");
+        assert_eq!(
+            far.previous_device_ids(&store.device_id().expect("device")),
+            vec![third_device],
+            "a machine names the device id it took over from, and no further"
+        );
+    }
+
+    #[test]
+    fn the_ancestry_is_bounded_and_says_each_device_once() {
+        let older: Vec<String> = (0..20).map(|n| format!("device-{n}")).collect();
+        let chain = ancestry("device-0", older);
+        assert_eq!(chain.len(), MAX_PREVIOUS_DEVICE_IDS);
+        assert_eq!(chain[0], "device-0");
+        assert_eq!(chain[1], "device-1", "the duplicate of the head is not repeated");
+        assert!(ancestry("", vec![String::new()]).is_empty());
     }
 
     #[test]

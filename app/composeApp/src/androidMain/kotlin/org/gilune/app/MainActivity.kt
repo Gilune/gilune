@@ -200,7 +200,17 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
         GiluneLog.sink = { message, cause -> android.util.Log.w("Gilune", message, cause) }
         state.syncSetup = { gilune -> gilune.configureSync(syncDir(context), deviceName(), keyWrap) }
         state.syncDiscovery = { gilune -> gilune.setDiscovery(NsdDiscovery(context.applicationContext)) }
-        state.openVault { gilune -> registerMoonshine(state, gilune) }
+        state.openVault { gilune ->
+            // A vault that *had* the realtime provider on and has just had
+            // it switched off is owed more than a message line that the
+            // next thing to happen replaces: the caption stopping is a
+            // change somebody will notice hours later. The flag persists;
+            // Settings ▸ Plugins and the provider's own screen show it
+            // until it is dismissed. A fresh install sets nothing.
+            if (registerMoonshine(state, gilune).switchedOffOnUpgrade) {
+                scope.launch { prefs.raiseProviderOffNotice() }
+            }
+        }
     }
 
     // Sync on open (§ 10). `shouldSyncOnForeground` is the whole rule and
@@ -275,6 +285,13 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     // the plugin is enabled, it is **the** active transcriber (whisper
     // being off is what makes it so), and its model is on disk. Short of
     // that this returns zero and the jobs wait — parked, not lost.
+    //
+    // **The whole pass crosses, not just its word count.** Until this round
+    // this returned `.transcribed`, so a pass that claimed five recordings
+    // and failed all five was indistinguishable from a pass that found
+    // nothing — the sentence under the composer said "0 transcribed" and a
+    // person read it as *nothing to do*. `ProcessingPass` folds the failures
+    // into what it says.
     LaunchedEffect(state) {
         state.externalProcessing = { gilune ->
             val plugins = state.plugins.toList()
@@ -282,12 +299,12 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                 val dir = moonshine.modelDir
                 val arch = moonshine.model?.arch
                 if (dir == null || arch == null) {
-                    0L
+                    ProviderPass()
                 } else {
-                    runMoonshineJobs(gilune, { MoonshineDecoder(dir, arch) }).transcribed
+                    runMoonshineJobs(gilune, { MoonshineDecoder(dir, arch) })
                 }
             } else {
-                0L
+                ProviderPass()
             }
         }
     }

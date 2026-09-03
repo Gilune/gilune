@@ -349,6 +349,96 @@ gates promises) are ratified. **Next: application-level engineering — see
      LESSON: S4's scenarios never crossed device streams out of causal
      order — every future sync scenario must include a third replica
      that pulls the streams in the WRONG order.
+   - **Second review + fix round two (2026-09-03, Fable 5.1
+     coordinating; 8 seeded finder angles → 7 verifiers → 3 fixers +
+     integrator, Opus)** — `/code-review high a2607eb..HEAD` over the
+     FIRST fix round + every set-aside candidate: 35 verified, 33 real,
+     2 refuted. VERDICT ON ROUND ONE: it fixed what it targeted and
+     introduced ten regressions, each tested only against its brief's
+     scenario and not the adjacent one. **RULE ADOPTED: a fix ships
+     with its SECOND-ORDER test (the case one step past the obvious)
+     or it is not done — falsified by reverting the fix.** Regressions
+     fixed: awaiting-referent had NO exit when the referent's device
+     was REVOKED (innocent stream wedged forever, worded "nothing is
+     wrong") → naming ops now carry `object_origin_device` +
+     `supersedes_origin` (additive codec keys, 2 new vectors, 37
+     byte-identical) and an absent referent is Awaited / Refused
+     (forward-only, `sync-referent-refused` not-damage, withdrawn if
+     re-admitted) / Uninterpreted (forward-only); `canonical_sha`
+     re-render orphaned every revise-then-delete note → TOMBSTONE NAMES
+     THE HEADS IT SAW, withdraw iff disk==recorded AND every local head
+     named (legacy tombstones: projection revision not an external
+     edit); `publishable` picked the numerically LOWEST IPv4 (VPN/
+     Hyper-V over LAN) → EVERY routable candidate published+ranked,
+     QR field five `h1,h2,h3:port` (≤4 hosts; single host byte-
+     identical), joiner dials in turn 2 s each, `addressing.rs` one
+     classifier both sides (SameSegment<Routable<LinkLocal<Loopback;
+     unusable DROPPED — discovery's dialability had ranked 0.0.0.0/
+     224.x ahead of the LAN); roster reconcile RE-REFUSED a re-paired
+     device each launch → `previous_device_ids` (identity records
+     ancestry ≤8, encrypted greeting carries, pairing withdraws every
+     name, reconcile never re-adds a Paired peer's names; nothing adds
+     a refusal from a greeting); `syncNeedsProjection` ignored
+     blobsCompleted (placeholder body forever) → both counted;
+     render→None hid unreadable local txt silently → `vault-content-
+     unreadable` (not damage, self-clearing); `vault-deleted-note-
+     edited` never cleared → observed resolution per reconcile (file
+     gone / words back as new; no schema — nothing turns an import
+     into an object yet); `sync_now` ignored persisted `wanted` →
+     honours it, outbound flag initialised from it; incomplete()
+     store-wide-sticky + max() merge → per-SESSION pending, sum;
+     `finish_blob` vs `promote` had DIVERGED (promote left the stage →
+     lost+found duplicate under multi-instance) → one `promote`
+     pub(crate), correct branch; Moonshine per-job failJob path read as
+     "0 transcribed" → `ProviderPass` carried through both handles.
+     FFI ADDITIONS (bindings CHANGED, android==desktop):
+     `GiluneStatus.jobsParked`, `IntegrityAlert.damage` (kernel
+     `alerts::is_damage` is THE classification — shells' kind table
+     dropped; `AlertKindCouplingTest` reads alerts.rs at desktopTest),
+     `GiluneException.IdentityUnreadable` (typed; a sealed roster that
+     won't open raises it too; the "Reset sync" prose matcher is GONE),
+     `registerPluginDisabled` (opt-in provider never enabled even
+     briefly; register-then-disable survives only for both-on upgrades,
+     which get a persisted one-time notice), `ProposedOutput.
+     expectedHead` + `ClaimedJob.subjectHead()` (kernel CAS — a moved
+     head refuses the revise; Moonshine passes it), `PairingOffer.
+     addresses` + `listening_addresses`. Cleanup landed: one
+     `SealedFile` envelope (reads `sealed`/`payload`/`secret` — old
+     installs keep keys+pairings), `Handshaken::establish` (no flow can
+     forget the timeout swap), one streamed `digest_of`/`digest_reader`
+     (verify/find_stage/BlobStream — no whole-blob reads), halt_transfer
+     + blobs_awaiting_count + sync_frontiers deleted, `external-
+     interpret`, `foldCaption(retain)` shared by the collector,
+     `captionEventOf` one flattener, VaultFiles byte readers shared,
+     LuminanceScratch reused frame buffer, wordlessRecordings off
+     `preview` (one query not N), device_id + refused-set cached per
+     pull (refused keyed on raw meta text so a second process's
+     revocation is never missed), alert clearing 10 DELETEs → 1
+     existence SELECT, project() skips record_projection when
+     sha+path+revision unchanged, pairing window refresh on IO every
+     3rd tick. Docs: sync guide gains Reset (Android-only), the
+     not-a-problem messages, multi-address section; plugins guide
+     model size corrected (57 MiB). RIG: paired-device test port band
+     moved 52000–59999 → 20000–27999 (old band inside the OS ephemeral
+     range — a client socket could squat a restarting device's port,
+     1-in-15 flake); gate_c's 5 s budget test is load-sensitive while
+     agents build — judge it on a quiet machine. INTEGRATION PROOF
+     (rebuilt dll + both ABIs; bindings +26 lines, android==desktop):
+     cargo 334/0 + clippy silent; desktop 527/0 (--rerun-tasks);
+     instrumented 769 = 768/1-failed/1-skipped on a FRESH boot with
+     the failure being Ms1ImeSpikeTest's 2000 ms keyboard-teardown
+     row, green 32/32 class-alone on the same emulator minutes later
+     — that row is load-sensitive EVEN ON A FRESH BOOT when the host
+     is compiling (it bounds a platform behaviour in wall time);
+     the shell fixer's earlier run of the identical tree was 769/0.
+     Two integration-agent API 500s mid-run; the coordinator finished
+     steps 6–8 by hand (a gradle attach during an adb daemon restart
+     fails with "No services running on device" — re-run). Documented gaps: a
+     pre-key naming op whose refused-origin referent never arrived
+     still halts (origin unknowable); legacy tombstone fallback can't
+     see an edit made elsewhere; jobs with an enabled plugin but no
+     engine in THIS build are unclaimable and uncounted (no row records
+     the absence); `blobsAwaiting` still read by no shell.
      Gaps: GiluneStatus lacks blobs_awaiting/alerts (deliberate, no
      FFI change — `gilune-cli alerts` meanwhile, M5c wires shells);
      per-peer establishment rate limits → M5b (no peer identity yet);

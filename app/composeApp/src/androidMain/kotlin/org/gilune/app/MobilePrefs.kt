@@ -28,6 +28,12 @@ private val THEME = stringPreferencesKey("theme")
 private val IDLE_MINUTES = intPreferencesKey("composerIdleMinutes")
 private val VAULT_NOTICE_SEEN = booleanPreferencesKey("vaultNoticeSeen")
 
+/// Set exactly once, by the upgrade that takes the realtime provider away
+/// from a vault that had it switched on, and cleared by the person
+/// dismissing it. Absent means there is nothing to say — so a fresh
+/// install, which never had the provider on, never shows it.
+private val PROVIDER_OFF_NOTICE = booleanPreferencesKey("providerSwitchedOffNotice")
+
 class MobilePrefs(context: Context) {
     private val store = context.applicationContext.giluneDataStore
 
@@ -58,6 +64,19 @@ class MobilePrefs(context: Context) {
 
     suspend fun markVaultNoticeSeen() {
         store.edit { it[VAULT_NOTICE_SEEN] = true }
+    }
+
+    /// Whether the "realtime transcription was switched off" notice is
+    /// standing. **False by default**, which is what makes it invisible on
+    /// a fresh install: nothing was taken away there.
+    val providerOffNotice: Flow<Boolean> = read { prefs -> prefs[PROVIDER_OFF_NOTICE] ?: false }
+
+    suspend fun raiseProviderOffNotice() {
+        store.edit { it[PROVIDER_OFF_NOTICE] = true }
+    }
+
+    suspend fun dismissProviderOffNotice() {
+        store.edit { it[PROVIDER_OFF_NOTICE] = false }
     }
 }
 

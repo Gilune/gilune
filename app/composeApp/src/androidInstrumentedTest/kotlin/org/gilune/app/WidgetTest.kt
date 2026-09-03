@@ -104,6 +104,23 @@ class WidgetTest {
     }
 
     @Test
+    fun theWidgetsNotificationIsTheOnlyPlaceAFailedTranscriptionCanBeSaid() {
+        // This path has no screen and no message line. Until this round the
+        // provider pass was computed and dropped where it stood, so a
+        // recording whose words failed was announced exactly like one whose
+        // words landed. The recording itself is never in doubt — it
+        // committed before a processor was asked anything — so the sentence
+        // says what is safe and what is outstanding, and never that
+        // something was lost.
+        assertEquals("Morning notes", recordedNotificationDetail("Morning notes", 0L))
+        assertEquals("Saved to your vault.", recordedNotificationDetail(null, 0L))
+        val troubled = recordedNotificationDetail("Morning notes", 1L)
+        assertTrue(troubled.contains("Saved"), troubled)
+        assertTrue(troubled.contains("could not be written yet"), troubled)
+        assertTrue(troubled.contains("try again"), troubled)
+    }
+
+    @Test
     fun aStreamedRecordingsDurationComesOffTheFileNotTheHeader() {
         // One second of the canonical shape, streamed: the header cannot
         // know its own length, so the file's length is the answer.

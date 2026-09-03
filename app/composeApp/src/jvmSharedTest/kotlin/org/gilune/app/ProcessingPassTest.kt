@@ -81,11 +81,73 @@ class ProcessingPassTest {
         val vault = scratch()
         Gilune.open(vault).use { gilune ->
             val subject = state(vault)
-            subject.externalProcessing = { 3L }
+            subject.externalProcessing = { ProviderPass(transcribed = 3L) }
             val pass = subject.processAll(gilune)
             assertEquals(3L, pass.outputs)
             assertNull(pass.providerFailure)
-            assertEquals("", providerFailureSuffix(pass.providerFailure))
+            assertEquals("", pass.trouble())
+            assertEquals(false, pass.anyFailed)
         }
+    }
+
+    // ------------------------------------------------------------------
+    // The second-order case: a provider that fails without throwing
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aProviderThatFailsJobsWithoutThrowingStillSaysSo() {
+        // The ordinary shape of a failure. The provider loop catches a
+        // decode that goes wrong and calls `failJob`, so nothing propagates
+        // — and the first round of this fix carried only the thrown case,
+        // which left "0 transcribed" in front of a person whose recordings
+        // had all failed.
+        val vault = scratch()
+        Gilune.open(vault).use { gilune ->
+            val subject = state(vault)
+            subject.externalProcessing = { ProviderPass(skipped = 1L, failed = 2L) }
+            val pass = subject.processAll(gilune)
+            assertEquals(0L, pass.outputs)
+            assertNull(pass.providerFailure, "nothing was thrown")
+            assertEquals(2L, pass.providerFailed)
+            assertTrue(pass.anyFailed)
+            val said = pass.trouble()
+            assertTrue(said.contains("2 recordings could not be transcribed"), "'$said'")
+            assertTrue(said.contains("try again"), "'$said'")
+        }
+    }
+
+    @Test
+    fun aProviderThatThrowsStillSaysSoAndBothCanHappenAtOnce() {
+        val vault = scratch()
+        Gilune.open(vault).use { gilune ->
+            val subject = state(vault)
+            // A pass that failed a job and then died: both facts survive,
+            // and the count comes first because it is the one about the
+            // person's own recordings.
+            subject.externalProcessing = { error("the caption model could not be loaded") }
+            val thrownOnly = subject.processAll(gilune)
+            assertTrue(thrownOnly.trouble().contains("transcription provider failed"))
+
+            val both = GiluneState.ProcessingPass(
+                outputs = 0L,
+                failed = 0L,
+                providerFailed = 1L,
+                providerFailure = "the engine went away",
+            )
+            val said = both.trouble()
+            assertTrue(
+                said.indexOf("1 recording could not be transcribed") <
+                    said.indexOf("the engine went away"),
+                "the count comes first: '$said'",
+            )
+            assertTrue(said.contains("the engine went away"), "'$said'")
+        }
+    }
+
+    @Test
+    fun oneFailureReadsAsOneRatherThanAsPlural() {
+        assertEquals("", providerFailedSuffix(0L))
+        assertTrue(providerFailedSuffix(1L).contains("1 recording could not"))
+        assertTrue(providerFailedSuffix(4L).contains("4 recordings could not"))
     }
 }

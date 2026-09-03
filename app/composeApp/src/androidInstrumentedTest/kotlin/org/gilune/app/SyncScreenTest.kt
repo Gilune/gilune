@@ -41,6 +41,12 @@ internal fun syncStatus(
     discovery: String = DISCOVERY_NAME,
     keyProtection: String = KEY_PROTECTION_KEYSTORE,
     listeningOn: String? = "192.168.1.20:51837",
+    /// Every address the phone answers on. Defaults to whatever
+    /// `listeningOn` is, because that is the contract — the single field is
+    /// the first of the list — so a scenario that does not care about
+    /// addresses keeps meaning exactly what it meant before the list
+    /// existed.
+    listeningAddresses: List<String> = listOfNotNull(listeningOn),
     peers: List<PeerInfo> = emptyList(),
     /// The persisted choice, which is a different fact from `enabled` and
     /// the only one a fresh process has. It follows `enabled` unless a
@@ -57,6 +63,7 @@ internal fun syncStatus(
     enrolment = "continued",
     enrolmentNotice = null,
     listeningOn = listeningOn,
+    listeningAddresses = listeningAddresses,
     wanted = wanted,
     advertising = advertising,
     discovery = discovery,
@@ -196,6 +203,15 @@ class SyncScreenTest {
         assertNull(syncNotice("opening vault…"))
         assertEquals("paired", syncNotice("paired"))
         assertEquals("device sync: 3 received, 0 sent", syncNotice("device sync: 3 received, 0 sent"))
+
+        // The unreadable-identity state drops the line too, because the
+        // screen says that one properly beside the button that fixes it.
+        // It is the **typed** answer that decides, not the words: the same
+        // sentence is kept when the flag is false and dropped when it is
+        // true, which is the whole of this round's fix.
+        val said = "sync unavailable: sealed elsewhere"
+        assertEquals(said, syncNotice(said, identityUnreadable = false))
+        assertNull(syncNotice(said, identityUnreadable = true))
     }
 
     // ----------------------------------------- the adapter's pure corners

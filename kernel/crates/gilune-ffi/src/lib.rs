@@ -25,6 +25,14 @@ pub enum GiluneError {
     Incompatible { detail: String },
     #[error("invalid: {detail}")]
     Invalid { detail: String },
+    /// This machine holds a sealed identity for this vault and cannot
+    /// open it (ADR 0019 § 4). Its own variant because the answer is
+    /// neither "retry" nor "enrol": minting a fresh identity over a
+    /// sealed one throws away every pairing made with it, so a shell must
+    /// stop and say what happened — the key was protected by something
+    /// this machine no longer has.
+    #[error("identity unreadable: {detail}")]
+    IdentityUnreadable { detail: String },
 }
 
 impl From<gilune_kernel::KernelError> for GiluneError {
@@ -42,6 +50,7 @@ impl From<gilune_kernel::KernelError> for GiluneError {
             | K::PluginRequired { .. }
             | K::UndeclaredCapability { .. }
             | K::ProcessorNotClaimable { .. }
+            | K::SubjectMoved { .. }
             | K::SyncHalted { .. } => GiluneError::Invalid { detail: e.to_string() },
             K::Storage(_) | K::Io { .. } | K::Encoding(_) | K::Corrupt { .. } => {
                 GiluneError::Storage { detail: e.to_string() }
@@ -61,6 +70,13 @@ impl From<gilune_sync::SyncError> for GiluneError {
             // gains variants, never reshaped ones (ADR 0019 § 6).
             S::Protocol { .. } | S::OversizeFrame { .. } | S::Refused { .. } => {
                 GiluneError::Invalid { detail: e.to_string() }
+            }
+            // A sealed identity this machine cannot open is neither a
+            // peer's fault nor a storage fault: it is a decision a person
+            // has to be shown, so it keeps its own variant all the way to
+            // the shell rather than becoming one more "storage" string.
+            S::IdentityUnreadable { .. } => {
+                GiluneError::IdentityUnreadable { detail: e.to_string() }
             }
             // This device could not do its part — a socket that would not
             // open, an identity file that would not read.
@@ -120,6 +136,13 @@ pub struct SyncStatus {
     /// this machine meant something the user should know about.
     pub enrolment_notice: Option<String>,
     pub listening_on: Option<String>,
+    /// Every address this device is reachable at, best first;
+    /// `listening_on` is the first of them. A machine with a VPN or a
+    /// hypervisor has several and cannot know which one a phone shares,
+    /// so a settings screen with room shows them all — that is the
+    /// difference between a person reading the right one off the screen
+    /// and giving up. Empty exactly when `listening_on` is `None`.
+    pub listening_addresses: Vec<String>,
     /// Whether the user has switched sync **on**, which survives a
     /// restart — as opposed to `enabled`, which is whether it is
     /// listening at this instant. They differ exactly when a machine was
@@ -187,12 +210,22 @@ pub struct IntegrityAlert {
     pub alert_id: String,
     /// `sync-gap`, `sync-corrupt-operation`, `sync-unsupported-version`,
     /// `sync-unknown-op-kind`, `sync-limit-exceeded`,
-    /// `sync-blob-digest-mismatch` or `sync-revoked-device`.
+    /// `sync-blob-digest-mismatch`, `sync-revoked-device`,
+    /// `sync-awaiting-referent`, `sync-referent-refused`,
+    /// `vault-deleted-note-edited` or `vault-content-unreadable`.
     pub kind: String,
     /// What the alert is about — a device id, an operation id, a blob id.
     pub subject: String,
     pub detail: String,
     pub raised_ms: i64,
+    /// Whether this condition means something is **damaged**, as opposed
+    /// to pending, refused by policy, or waiting on a person.
+    ///
+    /// Supplied by the kernel, which owns the kinds. Each shell used to
+    /// keep its own copy of the damage set, so a kind added here read as
+    /// damage in two places that had never been told about it. A shell
+    /// asks this and does not restate the list.
+    pub damage: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -214,7 +247,14 @@ pub struct PeerInfo {
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct PairingOffer {
     pub code: String,
+    /// The best-ranked address, for a screen with room for one line and
+    /// for a person who is going to type it.
     pub address: String,
+    /// Every address this device published for the window, best first —
+    /// `address` is the first of them. The QR carries all of them, so a
+    /// joiner reaches the device at whichever one answers rather than at
+    /// the one that happened to rank highest here.
+    pub addresses: Vec<String>,
     pub fingerprint: String,
     pub expires_ms: i64,
     pub attempts_left: u32,
@@ -267,6 +307,7 @@ impl From<gilune_sync::service::PairingOffer> for PairingOffer {
         PairingOffer {
             code: o.code,
             address: o.address,
+            addresses: o.addresses,
             fingerprint: o.fingerprint,
             expires_ms: o.expires_ms,
             attempts_left: o.attempts_left,
@@ -286,6 +327,7 @@ impl From<gilune_sync::service::SyncFacts> for SyncStatus {
             enrolment: f.enrolment,
             enrolment_notice: f.enrolment_notice,
             listening_on: f.listening_on,
+            listening_addresses: f.listening_addresses,
             wanted: f.wanted,
             advertising: f.advertising,
             discovery: f.discovery,
@@ -315,6 +357,7 @@ impl From<gilune_kernel::alerts::Alert> for IntegrityAlert {
             subject: a.subject,
             detail: a.detail,
             raised_ms: a.raised_ms,
+            damage: a.damage,
         }
     }
 }
@@ -424,7 +467,18 @@ pub struct GiluneStatus {
     /// without asking for the list.
     pub alerts: i64,
     pub events: i64,
+    /// Work that is waiting, parked work included.
     pub jobs_pending: i64,
+    /// Of that, how much belongs to a plugin that is switched off. A
+    /// subset of `jobs_pending`: subtract it and what is left is work an
+    /// enabled plugin could run now. It is what lets a status line say
+    /// "three captures waiting on transcription, which is off" instead of
+    /// leaving a person to wonder why nothing is happening.
+    ///
+    /// It does **not** count work whose plugin is on but whose engine
+    /// this build does not carry (ADR 0006) — that job is claimable and
+    /// simply never claimed here, and no row records the absence.
+    pub jobs_parked: i64,
     pub jobs_quarantined: i64,
     pub operations: i64,
     pub projections: i64,
@@ -632,6 +686,18 @@ pub struct ProposedOutput {
     /// Canonical JSON document.
     pub payload: String,
     pub target: OutputTarget,
+    /// The subject head this output was written over — `subject_head()`
+    /// on the claim it came from. Supply it and a `ReviseSubject` is
+    /// **refused** if the note moved on while the engine was working:
+    /// compare-and-set, so a slow transcription cannot silently delete
+    /// what somebody typed in the meantime, and a second engine cannot
+    /// silently replace the first one's answer.
+    ///
+    /// Defaulted to `None`, which is the behaviour everything shipped
+    /// with: the output lands whatever the subject has become. Ignored
+    /// for `NewObject`, which replaces nothing.
+    #[uniffi(default = None)]
+    pub expected_head: Option<String>,
 }
 
 impl From<ProposedOutput> for gilune_kernel::processor::ProposedOutput {
@@ -640,6 +706,7 @@ impl From<ProposedOutput> for gilune_kernel::processor::ProposedOutput {
             type_id: o.type_id,
             type_schema: o.type_schema,
             payload: o.payload,
+            expected_head: o.expected_head,
             target: match o.target {
                 OutputTarget::NewObject => gilune_kernel::processor::OutputTarget::NewObject,
                 OutputTarget::ReviseSubject => {
@@ -1044,6 +1111,7 @@ impl Gilune {
             alerts: s.alerts,
             events: s.events,
             jobs_pending: s.jobs_pending,
+            jobs_parked: s.jobs_parked,
             jobs_quarantined: s.jobs_quarantined,
             operations: s.operations,
             projections: s.projections,
@@ -1088,6 +1156,26 @@ impl Gilune {
     pub fn register_plugin(&self, declaration: PluginDeclaration) -> FfiResult<String> {
         let descriptor = gilune_kernel::plugins::PluginDescriptor::try_from(declaration)?;
         Ok(self.store().register_plugin(&descriptor)?.as_str().to_string())
+    }
+
+    /// Declare an implementation this host carries, but leave it **off**
+    /// until somebody turns it on — for a provider that is opt-in rather
+    /// than bundled-and-running.
+    ///
+    /// Idempotent in exactly the way `register_plugin` is: a plugin this
+    /// vault already knows keeps the state it has, so calling this on
+    /// every launch never switches off something the user switched on.
+    /// What it removes is the window: registering and then disabling is
+    /// two calls, and between them the plugin is live, so a capture
+    /// landing at that instant queues work for a provider nobody agreed
+    /// to. Returns the state the plugin is now in.
+    pub fn register_plugin_disabled(&self, declaration: PluginDeclaration) -> FfiResult<String> {
+        let descriptor = gilune_kernel::plugins::PluginDescriptor::try_from(declaration)?;
+        Ok(self
+            .store()
+            .register_plugin_disabled(&descriptor)?
+            .as_str()
+            .to_string())
     }
 
     pub fn plugins(&self) -> FfiResult<Vec<PluginInfo>> {
@@ -1426,6 +1514,20 @@ impl ClaimedJob {
                 bytes: b.bytes,
             }),
         }
+    }
+
+    /// Which revision `job().subject_payload` is — the subject's head at
+    /// the moment of the claim.
+    ///
+    /// Hand it back as an output's `expected_head` and the submission is
+    /// refused if the note moved on while the engine was working. That is
+    /// the whole of it: a transcription that takes eight seconds must not
+    /// silently delete what somebody typed in the seventh, and where two
+    /// engines are both allowed to run, the second must not silently
+    /// replace the first one's words. `None` only for a subject with no
+    /// head at all.
+    pub fn subject_head(&self) -> Option<String> {
+        self.claim.subject_head.clone()
     }
 
     /// The next chunk of the subject's preserved bytes, or `None` once

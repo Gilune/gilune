@@ -42,3 +42,19 @@ object GiluneLog {
 /// Pure, so the wording is asserted without a kernel.
 fun providerFailureSuffix(failure: String?): String =
     if (failure.isNullOrBlank()) "" else " — the transcription provider failed: $failure"
+
+/// And what it must add when the provider ran and **failed jobs** without
+/// throwing — which is the ordinary shape of a failure, not the exotic one.
+///
+/// The provider loop catches a decode that goes wrong and calls `failJob`,
+/// so nothing propagates and [providerFailureSuffix] stays empty: a pass
+/// that failed every recording it was handed produced "0 transcribed" and
+/// read as *there was nothing to do*. The jobs are not lost — a failed job
+/// backs off and is retried, and is quarantined only after repeated
+/// attempts — so the sentence says both halves: it did not happen, and it
+/// will be tried again.
+fun providerFailedSuffix(failed: Long): String = when {
+    failed <= 0L -> ""
+    failed == 1L -> " — 1 recording could not be transcribed; Gilune will try again"
+    else -> " — $failed recordings could not be transcribed; Gilune will try again"
+}

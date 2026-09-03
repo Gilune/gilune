@@ -39,22 +39,28 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.kernelVersion
@@ -189,7 +195,7 @@ private fun VaultSection(state: GiluneState, onExport: () -> Unit) {
                     // switched off: disabled is parked, not destroyed, so
                     // this number can hold jobs nobody will ever claim —
                     // which reads as a backlog and is not one.
-                    val parked = waitingJobsNote(state.plugins, status.jobsPending)
+                    val parked = waitingJobsNote(state.plugins, status.jobsPending, status.jobsParked)
                     appendLine("waiting jobs: ${status.jobsPending}${parked?.let { " ($it)" } ?: ""}")
                     appendLine("open proposals: ${status.proposalsOpen}")
                 }
@@ -209,9 +215,54 @@ const val VAULT_TRUTH: String =
         "Export a copy is how the files leave this phone; Settings ▸ Sync is how " +
         "they reach the devices you have paired, and nothing else."
 
+/// The notice an upgrade leaves behind when the one-transcriber rule takes
+/// the realtime provider away from a vault that had it on (ADR 0018 § 3).
+///
+/// **Why it is a persisted banner and not a message line.** The rule fires
+/// once, during an open, and reports on `state.message` — a line under the
+/// composer that the next thing to happen replaces. A person who had the
+/// live caption running found it gone with no explanation they could still
+/// find, on any screen. This stays until they dismiss it, and it sits on
+/// the two screens that can act on it: the plugin list and the provider's
+/// own screen.
+///
+/// It never appears on a fresh install. Nothing was taken away there — the
+/// provider arrives switched off, and the screen offering it says so.
+@Composable
+private fun ProviderOffNotice(prefs: MobilePrefs, plugins: List<PluginInfo>) {
+    val scope = rememberCoroutineScope()
+    val standing by prefs.providerOffNotice.collectAsState(initial = false)
+    if (!standing) return
+    val colours = MaterialTheme.colorScheme
+    val name = { id: String -> plugins.firstOrNull { it.pluginId == id }?.name ?: id }
+    Surface(
+        color = colours.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().testTag("provider-off-notice"),
+    ) {
+        Column(
+            Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                providerUpgradeNotice(name(MOONSHINE_PLUGIN), name(TRANSCRIPTION_PLUGIN)),
+                style = MaterialTheme.typography.bodySmall,
+                color = colours.onSurfaceVariant,
+            )
+            TextButton(
+                onClick = { scope.launch { prefs.dismissProviderOffNotice() } },
+                modifier = Modifier.heightIn(min = TouchTarget).testTag("provider-off-dismiss"),
+            ) { Text("Got it") }
+        }
+    }
+}
+
 @Composable
 private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {
     val colours = MaterialTheme.colorScheme
+    val context = LocalContext.current
+    val prefs = remember(context) { MobilePrefs(context) }
+    ProviderOffNotice(prefs, state.plugins)
     Text("Installed plugins", style = MaterialTheme.typography.titleSmall)
     for (plugin in state.plugins) {
         Row(
@@ -590,6 +641,12 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
 @Composable
 private fun MoonshineSettings(state: GiluneState, plugin: PluginInfo, moonshine: MoonshineRuntime) {
     val colours = MaterialTheme.colorScheme
+    // The upgrade notice appears here as well as on the plugin list,
+    // because this is the screen with the switch it is telling somebody
+    // about. Same flag, so dismissing it on either screen dismisses it.
+    val context = LocalContext.current
+    val prefs = remember(context) { MobilePrefs(context) }
+    ProviderOffNotice(prefs, state.plugins)
     val settings = listOf(plugin)
     val caption = remember(plugin.settings) { settings.moonshineCaption() }
     val wifiOnly = remember(plugin.settings) { settings.moonshineWifiOnly() }

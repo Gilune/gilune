@@ -29,14 +29,50 @@ use std::time::Duration;
 /// fallback chain is what happens next.
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The same, per candidate, when there is a *list* of addresses to try.
+///
+/// A machine with a hypervisor, a VPN and a LAN offers three or four
+/// addresses and only one of them is the device (`addressing` explains why
+/// nothing here can say which). Trying each at the full timeout would put
+/// twenty seconds behind a pairing that should take one, so a list gets a
+/// short wait each: an address that answers answers immediately on a LAN,
+/// and an address with nothing behind it costs this and not five seconds.
+pub const CANDIDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub fn split_peer(peer: &str) -> Result<(&str, &str)> {
     peer.split_once('@').ok_or(SyncError::Refused {
         detail: "a paired peer is named <key>@<host:port>".to_string(),
     })
 }
 
+/// `host:port`, split once and in one place.
+///
+/// This was open-coded as `rsplit_once(':')` in five places — the
+/// publisher, the settings list, the advertiser, the listener's wake-up
+/// knock and the greeting's port — each with its own idea of what to do
+/// with a bracketed IPv6 host and with a port that does not parse. A
+/// device that publishes one thing and advertises another is not a bug
+/// anybody sees until two machines disagree, so there is one function.
+pub fn split_address(address: &str) -> Option<(&str, u16)> {
+    let (host, port) = address.rsplit_once(':')?;
+    let port: u16 = port.parse().ok()?;
+    Some((host.trim_matches(['[', ']']), port))
+}
+
+/// The port an address names, if it names one.
+pub fn port_of(address: &str) -> Option<u16> {
+    split_address(address).map(|(_, port)| port)
+}
+
 /// Open a socket with a bounded wait, resolving the name first.
 pub fn dial(address: &str) -> Result<TcpStream> {
+    dial_within(address, CONNECT_TIMEOUT)
+}
+
+/// The same, with the wait named. A caller working down a list of
+/// candidates wants a short one; a caller with the single address a person
+/// typed wants the patient one.
+pub fn dial_within(address: &str, timeout: Duration) -> Result<TcpStream> {
     let mut last: Option<std::io::Error> = None;
     let resolved = address
         .to_socket_addrs()
@@ -44,7 +80,7 @@ pub fn dial(address: &str) -> Result<TcpStream> {
             detail: format!("{address} is not an address this device can reach: {e}"),
         })?;
     for candidate in resolved {
-        match TcpStream::connect_timeout(&candidate, CONNECT_TIMEOUT) {
+        match TcpStream::connect_timeout(&candidate, timeout) {
             Ok(stream) => return Ok(stream),
             Err(e) => last = Some(e),
         }
@@ -55,6 +91,35 @@ pub fn dial(address: &str) -> Result<TcpStream> {
             None => format!("{address} resolved to nowhere"),
         },
     })
+}
+
+/// Dial the first of several candidates that answers, and say which one
+/// it was.
+///
+/// **The device decides, because nothing else can.** A machine publishes
+/// every address it has (`addressing::local_addresses` says why it cannot
+/// pick), so a QR carries a list and this is the side that resolves it:
+/// the candidates are tried in the order they were ranked, and the one
+/// that answers is the one recorded in the roster. A single-candidate list
+/// behaves exactly as `dial` always did, including the patient timeout,
+/// because one address is what a person typed and there is nothing to
+/// hurry on to.
+pub fn dial_first(addresses: &[String]) -> Result<(TcpStream, String)> {
+    let timeout = if addresses.len() > 1 {
+        CANDIDATE_CONNECT_TIMEOUT
+    } else {
+        CONNECT_TIMEOUT
+    };
+    let mut last: Option<SyncError> = None;
+    for address in addresses {
+        match dial_within(address, timeout) {
+            Ok(stream) => return Ok((stream, address.clone())),
+            Err(e) => last = Some(e),
+        }
+    }
+    Err(last.unwrap_or(SyncError::Refused {
+        detail: "that pairing code names no address this device can reach".to_string(),
+    }))
 }
 
 pub struct SecureTransport {

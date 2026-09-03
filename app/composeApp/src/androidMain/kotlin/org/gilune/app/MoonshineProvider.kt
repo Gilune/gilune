@@ -64,16 +64,6 @@ private const val SOURCE_TYPE = "org.memory.source"
 /// pass simply continues.
 const val MOONSHINE_JOB_LIMIT = 25
 
-/// What one pass did. `transcribed` is words written; `skipped` is jobs
-/// completed with nothing to say — both are successes.
-data class ProviderPass(
-    val transcribed: Long = 0,
-    val skipped: Long = 0,
-    val failed: Long = 0,
-) {
-    val claimed: Long get() = transcribed + skipped + failed
-}
-
 /// What the provider should do with a claimed job, decided from the
 /// subject's own document alone — no engine, no bytes, no clock.
 sealed interface ProviderAction {
@@ -118,28 +108,24 @@ fun providerAction(subjectPayload: String): ProviderAction {
 fun transcriptDocument(subjectPayload: String, text: String): String =
     JSONObject(subjectPayload).put("text", text).toString()
 
-/// One completed line of a decode, in arrival order.
-private data class DecodedLine(val text: String, val settled: Boolean)
-
 /// The transcript as the engine's events build it. Deliberately **not**
 /// `CaptionBuffer`: that one keeps the last six lines because a caption is
 /// three rows tall, and a transcript that dropped everything said before
 /// the last six sentences would be a data loss dressed as a display cap.
 ///
-/// The fold is otherwise the caption's, for the same measured reasons (R0
-/// § Question 5): a settled line never changes again, a blank line never
-/// opens, and completion is read off the flag rather than the event name.
+/// The fold **is** the caption's — `foldCaption` with nothing thrown away —
+/// for the same measured reasons (R0 § Question 5): a settled line never
+/// changes again, a blank line never opens, and completion is read off the
+/// flag rather than the event name. It was a second hand-written copy of
+/// those rules until this round, which is one copy that could drift from the
+/// spike that measured them; retention was always the only difference, so
+/// retention is now the only parameter.
 class TranscriptCollector {
-    private val lines = LinkedHashMap<Long, DecodedLine>()
+    private var lines: List<CaptionLine> = emptyList()
 
     @Synchronized
     fun accept(event: CaptionEvent) {
-        if (event.kind == CaptionEvent.ERROR) return
-        val existing = lines[event.lineId]
-        if (existing != null && existing.settled) return
-        if (existing == null && event.text.isBlank()) return
-        lines[event.lineId] =
-            DecodedLine(event.text, event.complete || event.kind == CaptionEvent.COMPLETED)
+        lines = foldCaption(lines, event, retain = Int.MAX_VALUE)
     }
 
     /// The words, in the order they were spoken. Whitespace is collapsed
@@ -157,13 +143,13 @@ class TranscriptCollector {
     /// engine has never been observed to produce.
     @Synchronized
     fun text(): String =
-        lines.values.joinToString(" ") { it.text.trim() }.split(WHITESPACE)
+        lines.joinToString(" ") { it.text.trim() }.split(WHITESPACE)
             .filter { it.isNotEmpty() }
             .joinToString(" ")
 
     @Synchronized
     fun clear() {
-        lines.clear()
+        lines = emptyList()
     }
 
     private companion object {
@@ -251,24 +237,17 @@ class MoonshineDecoder(modelDir: File, arch: Int) : TranscriptEngine {
     }
 
     /// The vendor's events, flattened onto the provider-neutral
-    /// [CaptionEvent] the caption already speaks. R0 found these fire
-    /// inline inside `addAudioToStream`, on the thread that called it.
+    /// [CaptionEvent] the caption already speaks by the one shared
+    /// [captionEventOf]. R0 found these fire inline inside
+    /// `addAudioToStream`, on the thread that called it.
+    ///
+    /// **This caller's null policy**: ignore it. An event with no line
+    /// carries no words, and an engine error here is answered by the
+    /// decode throwing — which the loop turns into `failJob`, a retry and
+    /// eventually a quarantine. There is nothing to tear down.
     private fun accept(event: TranscriptEvent) {
-        val line = when (event) {
-            is TranscriptEvent.LineStarted -> event.line
-            is TranscriptEvent.LineUpdated -> event.line
-            is TranscriptEvent.LineTextChanged -> event.line
-            is TranscriptEvent.LineCompleted -> event.line
-            else -> null
-        } ?: return
-        collector?.accept(
-            CaptionEvent(
-                kind = event.javaClass.simpleName,
-                lineId = line.id,
-                text = line.text.orEmpty(),
-                complete = line.isComplete,
-            ),
-        )
+        val flattened = captionEventOf(event) ?: return
+        collector?.accept(flattened)
     }
 
     override fun close() {
@@ -341,14 +320,15 @@ const val WAV_HEADER_BYTES = 44
 /// meeting the same complaint.
 fun canonicalWavComplaint(header: ByteArray): String? {
     if (header.size < WAV_HEADER_BYTES) return "not a canonical Gilune WAV"
-    fun ascii(at: Int, text: String) =
-        String(header, at, text.length, Charsets.US_ASCII) == text
-    if (!ascii(0, "RIFF") || !ascii(8, "WAVE")) return "not a canonical Gilune WAV"
-    fun u16(at: Int) = (header[at].toInt() and 0xFF) or ((header[at + 1].toInt() and 0xFF) shl 8)
-    fun u32(at: Int) = u16(at) or (u16(at + 2) shl 16)
-    val channels = u16(22)
-    val rate = u32(24)
-    val bits = u16(34)
+    if (!header.matches(0, "RIFF") || !header.matches(8, "WAVE")) {
+        return "not a canonical Gilune WAV"
+    }
+    // `VaultFiles`' readers rather than three local copies: the duration
+    // row and this check read the same header, and a disagreement between
+    // them would be one of them wrong about somebody's recording.
+    val channels = header.littleEndianShort(22)
+    val rate = header.littleEndianInt(24)
+    val bits = header.littleEndianShort(34)
     if (channels != WAV_CHANNELS || rate != WAV_SAMPLE_RATE || bits != WAV_BITS_PER_SAMPLE) {
         return "unsupported WAV shape: ${channels}ch ${rate}Hz ${bits}bit " +
             "(expected ${WAV_CHANNELS}ch ${WAV_SAMPLE_RATE}Hz ${WAV_BITS_PER_SAMPLE}bit)"
@@ -456,17 +436,55 @@ private fun transcribe(
         gilune.submitOutput(claim, emptyList())
         return pass.copy(skipped = pass.skipped + 1)
     }
-    val receipt = gilune.submitOutput(
-        claim,
-        listOf(
-            ProposedOutput(
-                typeId = SOURCE_TYPE,
-                typeSchema = 1,
-                payload = transcriptDocument(job.subjectPayload, text),
-                target = OutputTarget.REVISE_SUBJECT,
+    // **Compare-and-set on the subject's head.** A decode takes seconds,
+    // and the note it is about is a file a person can be typing in — or
+    // that a sync can be revising — for the whole of them. Without this the
+    // revision was written over whatever the note had become, so words
+    // typed in the seventh second of an eight-second transcription were
+    // gone, silently, and the only trace was a revision nobody asked for.
+    //
+    // The head is the one the claim handed over with the payload this
+    // transcript was written from, so "unchanged" means exactly "still the
+    // document these words belong to".
+    val expected = claim.subjectHead()
+    val receipt = runCatching {
+        gilune.submitOutput(
+            claim,
+            listOf(
+                ProposedOutput(
+                    typeId = SOURCE_TYPE,
+                    typeSchema = 1,
+                    payload = transcriptDocument(job.subjectPayload, text),
+                    target = OutputTarget.REVISE_SUBJECT,
+                    expectedHead = expected,
+                ),
             ),
-        ),
-    )
+        )
+    }.getOrElse { refusal ->
+        // The note moved on. That is **not** a failure: nothing is wrong
+        // with the recording, the engine or this device — somebody else's
+        // words are simply newer than ours, and rule 1 says theirs win over
+        // an interpretation. So the job is completed with nothing written,
+        // which is the same "nothing to do" a job whose subject already had
+        // words gets, and no retry is queued for work that would be refused
+        // again for the same reason.
+        //
+        // **Narrowed as far as the boundary allows**: only when this
+        // submission asked for a compare-and-set, and only for the refusal
+        // class the kernel raises for it. The FFI has one `Invalid`
+        // variant, so a malformed payload would land here too — the detail
+        // is logged verbatim rather than swallowed, and the payload is
+        // derived from the subject's own document, so there is one way in.
+        if (expected != null && refusal is uniffi.gilune_ffi.GiluneException.Invalid) {
+            Log.i(TAG, "the note changed while ${job.subjectId} was being transcribed: ${refusal.message}")
+            runCatching { gilune.submitOutput(claim, emptyList()) }
+            return pass.copy(skipped = pass.skipped + 1)
+        }
+        val why = refusal.message ?: refusal.javaClass.simpleName
+        Log.w(TAG, "submitting the transcript for ${job.subjectId} failed: $why", refusal)
+        runCatching { gilune.failJob(claim, why) }
+        return pass.copy(failed = pass.failed + 1)
+    }
     // A skipped duplicate is at-least-once working as promised, not a
     // failure: another claimant landed these words first.
     return pass.copy(transcribed = pass.transcribed + receipt.outputs)

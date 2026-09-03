@@ -176,7 +176,13 @@ internal fun SyncSection(state: GiluneState) {
     Fact("name", status.deviceName)
     Fact("fingerprint", status.fingerprint)
     Fact("key protection", status.keyProtection)
-    status.listeningOn?.let { Fact("listening on", it) }
+    // Every address this machine answers on, not just the best-ranked one.
+    // A laptop with a hypervisor or a VPN has several and cannot know which
+    // one the other device shares; showing one was the difference between
+    // somebody reading the right address off this screen and giving up.
+    for (address in deviceAddresses(status)) {
+        Fact("listening on", address)
+    }
     Fact("found by others", discoveryFact(status.enabled, status.advertising, status.discovery))
     Text(
         discoveryNote(status.enabled, status.advertising, status.discovery),
@@ -291,7 +297,7 @@ internal fun SyncSection(state: GiluneState) {
 private fun AlertsBanner(alerts: List<IntegrityAlert>) {
     if (alerts.isEmpty()) return
     val colours = MaterialTheme.colorScheme
-    val damage = alerts.any { alertIsDamage(it.kind) }
+    val damage = alerts.any { alertIsDamage(it) }
     val ground = if (damage) colours.errorContainer else colours.surfaceVariant
     val ink = if (damage) colours.onErrorContainer else colours.onSurfaceVariant
     Column(
@@ -303,7 +309,7 @@ private fun AlertsBanner(alerts: List<IntegrityAlert>) {
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
-            alertsHeading(alerts.map { it.kind }),
+            alertsHeading(alerts),
             style = MaterialTheme.typography.titleSmall,
             color = ink,
         )
@@ -317,6 +323,48 @@ private fun AlertsBanner(alerts: List<IntegrityAlert>) {
         }
     }
 }
+
+/// How many countdown ticks pass between two reads of the kernel's facts
+/// while a pairing window is open.
+///
+/// Three seconds is the whole argument: the facts that change under this
+/// window come from the *other* device — a peer that pairs, an attempt it
+/// burns — so they arrive at human speed, and a second-by-second query
+/// bought nothing but a blocked frame.
+internal const val PAIRING_FACTS_EVERY_TICKS = 3
+
+/// Every address a pairing window should offer, in the kernel's own order
+/// (best first).
+///
+/// A machine cannot know which of its addresses a phone shares a network
+/// with, so it publishes every candidate and lets the joiner dial. The
+/// order is the kernel's ranking — same segment first, then routable, and
+/// an unusable address is dropped before it ever gets here — so the first
+/// row is the one to try first.
+///
+/// `address` is the first of `addresses` by contract. It is kept as the
+/// fallback rather than assumed away: a kernel that could name only one
+/// must still put that one on the screen, because a pairing window with no
+/// address on it is a window that cannot be used.
+///
+/// Blank is dropped rather than drawn: an empty `address:` row is a fact
+/// nobody can act on.
+///
+/// The listening half of the same question is [deviceAddresses], which is
+/// shared with the phone; this one stays here because only the desktop
+/// shows a window's addresses as text a person reads out.
+internal fun pairingAddresses(offer: PairingOffer): List<String> {
+    val published = offer.addresses.filter { it.isNotBlank() }
+    return published.ifEmpty { listOf(offer.address).filter { it.isNotBlank() } }
+}
+
+/// Whether this tick of the countdown should also re-read the facts.
+///
+/// Pure, so the two rates can be asserted without a window: the clock at
+/// 1 Hz, the kernel every [PAIRING_FACTS_EVERY_TICKS], and always once at
+/// expiry — the last read is what takes an unusable code off the screen.
+internal fun pairingShouldRefresh(tick: Int, expired: Boolean): Boolean =
+    expired || tick % PAIRING_FACTS_EVERY_TICKS == 0
 
 /// The listening half of a pairing: this device shows a code, and shows
 /// the same secret as a QR beside it for a phone that would rather scan
@@ -363,13 +411,33 @@ private fun PairADevice(state: GiluneState, offer: PairingOffer?, enabled: Boole
     // leaves the screen when it stops working rather than at the next
     // thing the user happens to click. Nothing polls once the window has
     // closed.
+    // **Two rates, and the kernel is never asked on the UI thread.** The
+    // first round of this window ticked once a second and called
+    // `refreshSync` on every tick — from the composition's own dispatcher,
+    // which is the main thread. `refreshSync` opens the identity file and
+    // reads the peer roster, so a pairing window sat there stalling the
+    // frame clock once a second for the whole three minutes a code lives,
+    // on the one screen where a person is watching a countdown.
+    //
+    // The countdown is a second hand and stays at 1 Hz; it needs nothing
+    // but the clock. The facts are a query and go to a background
+    // dispatcher every third tick (`pairingShouldRefresh`) — and always
+    // once more the moment the code expires, so the window stops offering
+    // something that no longer works.
     var nowMs by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(offer.code) {
+        var tick = 0
         while (true) {
             nowMs = System.currentTimeMillis()
-            state.refreshSync()
-            if (nowMs >= offer.expiresMs) break
+            val expired = nowMs >= offer.expiresMs
+            if (pairingShouldRefresh(tick, expired)) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    state.refreshSync()
+                }
+            }
+            if (expired) break
             delay(1000)
+            tick += 1
         }
     }
     val remaining = offer.expiresMs - nowMs
@@ -399,7 +467,28 @@ private fun PairADevice(state: GiluneState, offer: PairingOffer?, enabled: Boole
                 fontFamily = FontFamily.Monospace,
                 color = if (remaining > 0) colours.onSurface else colours.error,
             )
-            Fact("address", offer.address)
+            // **Every address this machine publishes, not a guess at one.**
+            // A laptop can be on its own network, a hypervisor's, a
+            // container bridge's and a VPN's at once, and it cannot tell
+            // which of them the phone shares — so it does not choose. The
+            // list is what the kernel offers; the pick is the joiner's,
+            // which is the only place the question can be answered.
+            val addresses = pairingAddresses(offer)
+            for (address in addresses) {
+                Fact(if (addresses.size == 1) "address" else "addresses", address)
+            }
+            if (addresses.size > 1) {
+                Text(
+                    "This machine is on more than one network. Type whichever address " +
+                        "belongs to the network the other device is on — a wrong one simply " +
+                        "does not connect, and the code stays good until it expires. " +
+                        "Scanning the code instead skips the question: the phone is handed " +
+                        "all of them.",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = colours.onSurfaceVariant,
+                )
+            }
             Text(
                 if (remaining > 0) {
                     "Expires in ${countdown(remaining)} · ${offer.attemptsLeft} attempts left · " +

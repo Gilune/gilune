@@ -62,7 +62,7 @@ data class CaptionLine(val id: Long, val text: String, val settled: Boolean)
 /// How many lines are kept at all. The display shows [CAPTION_LINES] of
 /// them; a couple more are retained so that a line completing while
 /// another is in flight does not pop the block's height about.
-private const val CAPTION_RETAINED = 6
+const val CAPTION_RETAINED = 6
 
 /// "Capped at about three lines, older lines scrolling off" (§ 1).
 const val CAPTION_LINES = 3
@@ -70,7 +70,20 @@ const val CAPTION_LINES = 3
 /// Fold one event into the caption. Total and order-independent within a
 /// line: replaying the same event twice is a no-op, which is what makes
 /// the redundant `LineUpdated`/`LineTextChanged` pair harmless.
-fun foldCaption(lines: List<CaptionLine>, event: CaptionEvent): List<CaptionLine> {
+///
+/// [retain] is how many lines survive the fold, and it is a parameter
+/// rather than a constant because the **same five findings** govern a
+/// committed transcript, where dropping anything would be a data loss
+/// dressed as a display cap. The caption keeps six; the provider's
+/// collector keeps everything (`Int.MAX_VALUE`). Until this round the
+/// provider had a second, hand-written copy of this fold — a
+/// `LinkedHashMap` obeying the same rules — and two copies of a fold is one
+/// copy that quietly drifts from the spike that measured it.
+fun foldCaption(
+    lines: List<CaptionLine>,
+    event: CaptionEvent,
+    retain: Int = CAPTION_RETAINED,
+): List<CaptionLine> {
     // An engine error says nothing about the words already on screen. The
     // session kills the caption on error (`Moonshine.kt`); the fold's job
     // is only to not corrupt what is showing on the way out.
@@ -88,7 +101,7 @@ fun foldCaption(lines: List<CaptionLine>, event: CaptionEvent): List<CaptionLine
 
     val line = CaptionLine(event.lineId, event.text, settled)
     val next = if (existing == null) lines + line else lines.map { if (it.id == line.id) line else it }
-    return next.takeLast(CAPTION_RETAINED)
+    return next.takeLast(retain)
 }
 
 /// What the caption block draws: frozen lines in the settled role, and

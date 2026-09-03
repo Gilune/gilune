@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -70,6 +71,43 @@ class SyncScreenUiTest {
         // an empty list.
         rule.onNodeWithTag("no-peers").assertExists()
         rule.onNodeWithTag("revoke-truth").assertDoesNotExist()
+    }
+
+    /// Where this phone answers, so the other device can be told it when
+    /// discovery is filtered (§ 1's typed-address step). A phone on Wi-Fi
+    /// and a VPN at once has more than one and cannot know which the
+    /// desktop shares, so it shows them all rather than picking.
+    @Test
+    fun thePhoneListsEveryAddressItAnswersOnAndSaysWhichToTryFirst() {
+        val state = state()
+        state.syncStatus.value = syncStatus(
+            listeningOn = "192.168.1.20:51837",
+            listeningAddresses = listOf("192.168.1.20:51837", "10.8.0.3:51837"),
+        )
+        show(state)
+
+        // Asserted against the row itself rather than by searching the
+        // screen for the text: the addresses are drawn as one block, and a
+        // search that missed would not say what the block actually held.
+        rule.onNodeWithTag("sync-addresses")
+            .assertTextContains("192.168.1.20:51837", substring = true)
+        rule.onNodeWithTag("sync-addresses")
+            .assertTextContains("10.8.0.3:51837", substring = true)
+        rule.onNodeWithText("The first is the likeliest", substring = true).assertExists()
+    }
+
+    /// And the case that must draw nothing: an address a phone does not
+    /// answer on is worse than none, because somebody will type it in.
+    @Test
+    fun aPhoneThatIsNotListeningShowsNoAddressAtAll() {
+        val state = state()
+        state.syncStatus.value = syncStatus(
+            enabled = false,
+            listeningOn = null,
+            listeningAddresses = emptyList(),
+        )
+        show(state)
+        rule.onNodeWithTag("sync-addresses").assertDoesNotExist()
     }
 
     /// A vault whose sync never configured — the honest failure the ADR
@@ -128,6 +166,8 @@ class SyncScreenUiTest {
                 subject = "device-1",
                 detail = "sequence 7 arrived after 5",
                 raisedMs = 0,
+                // Damage is the kernel's call and travels on the row.
+                damage = true,
             ),
         )
         show(state)
@@ -152,10 +192,12 @@ class SyncScreenUiTest {
     @Test
     fun aSealedIdentityWhoseKeyIsGoneOffersTheResetAndSaysWhatItCosts() {
         val state = state()
-        state.message.value =
-            "sync unavailable: the Keystore key that sealed this device's identity is no " +
-                "longer on this phone — a restored backup is a new device and has to be " +
-                "paired again"
+        // The typed answer enrolment recorded — **not** a phrase for the
+        // screen to recognise. The message line still carries the kernel's
+        // words, and deliberately in a shape the old prose matcher would
+        // not have matched: the button is offered because of the type.
+        state.identityUnreadable.value = true
+        state.message.value = "sync unavailable: sealed elsewhere"
         show(state)
 
         rule.onNodeWithTag("sync-identity-unreadable").assertExists()
@@ -180,6 +222,23 @@ class SyncScreenUiTest {
 
         rule.onNodeWithTag("sync-unavailable").assertExists()
         rule.onNodeWithTag("sync-reset").assertDoesNotExist()
+    }
+
+    /// **The second-order case for typing this signal.** A failure that is
+    /// not the identity one, whose *words* read exactly like the identity
+    /// one. Under the shipped prose matching this offered to throw away a
+    /// working identity and its whole roster.
+    @Test
+    fun aFailureThatMerelySoundsLikeTheIdentityOneIsOfferedNothing() {
+        val state = state()
+        state.identityUnreadable.value = false
+        state.message.value =
+            "sync unavailable: could not open the identity key file — the disk is full"
+        show(state)
+
+        rule.onNodeWithTag("sync-reset").assertDoesNotExist()
+        rule.onNodeWithTag("sync-identity-unreadable").assertDoesNotExist()
+        rule.onNodeWithTag("sync-unavailable").assertExists()
     }
 
     @Test
@@ -222,10 +281,14 @@ class SyncScreenUiTest {
     fun aDeviceSeenOnTheNetworkGetsARow() {
         val state = state()
         state.syncStatus.value = syncStatus()
+        // A different address from this phone's own, because it is a
+        // different machine — and because the screen now shows both. The
+        // fixture reused one string, so an assertion for it matched the
+        // row *and* this phone's own "listening on" block.
         state.discovered.add(
             FoundDevice(
                 fingerprint = "ABCD-EFGH",
-                address = "192.168.1.20:51837",
+                address = "192.168.1.44:51837",
                 compatible = true,
                 staticPub = "",
                 state = "unknown",
@@ -234,7 +297,7 @@ class SyncScreenUiTest {
         show(state)
 
         rule.onNodeWithTag("found-row").assertExists()
-        rule.onNodeWithText("192.168.1.20:51837").assertExists()
+        rule.onNodeWithText("192.168.1.44:51837").assertExists()
         rule.onNodeWithText("not paired yet").assertExists()
     }
 }

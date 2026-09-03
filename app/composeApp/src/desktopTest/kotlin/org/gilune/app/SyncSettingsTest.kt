@@ -173,4 +173,80 @@ class SyncSettingsTest {
         assertFalse(said.contains("never"), "'$said'")
         assertFalse(said.endsWith("last synced "), "the stamp itself must be there: '$said'")
     }
+
+    // ------------------------------------------------------------------
+    // The pairing window's two rates
+    //
+    // The countdown is a second hand and needs nothing but the clock; the
+    // facts are a query into the kernel that opens the identity file. The
+    // first round of this ran both at 1 Hz **on the composition's own
+    // thread**, so a pairing window stalled the frame clock once a second
+    // for the whole three minutes a code lives — on the one screen where
+    // somebody is watching a countdown tick.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theKernelIsAskedEveryThirdTickRatherThanEverySecond() {
+        assertEquals(3, PAIRING_FACTS_EVERY_TICKS)
+        val asked = (0 until 12).count { pairingShouldRefresh(it, expired = false) }
+        assertEquals(4, asked, "twelve seconds of countdown cost four reads, not twelve")
+        assertTrue(pairingShouldRefresh(0, expired = false), "the window opens with a read")
+        assertFalse(pairingShouldRefresh(1, expired = false))
+        assertFalse(pairingShouldRefresh(2, expired = false))
+        assertTrue(pairingShouldRefresh(3, expired = false))
+    }
+
+    // ------------------------------------------------------------------
+    // The addresses a pairing window offers
+    // ------------------------------------------------------------------
+
+    private fun offer(
+        address: String = "192.168.1.20:51837",
+        addresses: List<String> = listOf("192.168.1.20:51837"),
+    ) = uniffi.gilune_ffi.PairingOffer(
+        code = "123456",
+        address = address,
+        addresses = addresses,
+        fingerprint = "ABCD-EFGH",
+        expiresMs = 0L,
+        attemptsLeft = 5u,
+    )
+
+    @Test
+    fun theWindowOffersEveryAddressTheKernelPublishedInItsOwnOrder() {
+        // A machine on a LAN, a hypervisor bridge and a VPN cannot know
+        // which of them the phone shares, so it publishes all of them and
+        // the person picks. The kernel's ranking is the order — same
+        // segment first — so the top row is the one to try first, and the
+        // screen must not re-sort or de-duplicate it into its own opinion.
+        val several = listOf("192.168.1.20:51837", "172.17.0.1:51837", "10.8.0.3:51837")
+        assertEquals(several, pairingAddresses(offer(addresses = several)))
+    }
+
+    @Test
+    fun aWindowThatNamedOnlyOneAddressStillPutsItOnTheScreen() {
+        // `address` is the first of `addresses` by contract, but a window
+        // with no address on it cannot be used — so the single field is the
+        // fallback rather than an assumption.
+        assertEquals(
+            listOf("192.168.1.20:51837"),
+            pairingAddresses(offer(addresses = emptyList())),
+        )
+        // And nothing at all is drawn rather than an empty row.
+        assertEquals(emptyList(), pairingAddresses(offer(address = "", addresses = emptyList())))
+        assertEquals(emptyList(), pairingAddresses(offer(address = "  ", addresses = listOf(" "))))
+    }
+
+    // The listening half of the same question is `deviceAddresses`, which
+    // both shells draw from — so it is pinned in `SyncAddressesTest`
+    // (jvmSharedTest) and runs in this suite and on the device.
+
+    @Test
+    fun anExpiringCodeIsAlwaysReadOneLastTime() {
+        // Whatever the tick count happens to be: the last read is what
+        // takes a code that no longer works off the screen.
+        for (tick in 0 until 5) {
+            assertTrue(pairingShouldRefresh(tick, expired = true), "tick $tick at expiry")
+        }
+    }
 }

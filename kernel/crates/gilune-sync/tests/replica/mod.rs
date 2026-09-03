@@ -153,6 +153,11 @@ pub enum Fault {
     /// Claim a chunk of content belongs somewhere it does not, so the
     /// receiver is offered bytes that would leave a hole.
     MisplaceChunk,
+    /// Hand over operations but no content. Not hostile: a peer that has
+    /// applied an operation and is still waiting for its bytes has
+    /// nothing to give, and that is the ordinary state of a mesh where a
+    /// note reaches a device before its recording does.
+    WithholdBlobs,
     /// Do not offer this device's stream at all, so the peer's own
     /// operations arrive while the history they refer to does not. Not a
     /// hostile transport: a full replica offers several devices' streams
@@ -212,8 +217,8 @@ impl Session for FaultySession {
                 .iter()
                 .flat_map(|f| [f.clone(), f.clone()])
                 .collect(),
-            // These two damage content, not operations.
-            Fault::MisplaceChunk | Fault::WithholdDevice(_) => frames,
+            // These damage content, or nothing at all — not operations.
+            Fault::MisplaceChunk | Fault::WithholdBlobs | Fault::WithholdDevice(_) => frames,
         })
     }
 
@@ -223,6 +228,9 @@ impl Session for FaultySession {
         offset: u64,
         max_bytes: usize,
     ) -> gilune_sync::Result<Vec<Frame>> {
+        if let Fault::WithholdBlobs = &self.fault {
+            return Ok(Vec::new());
+        }
         let frames = self.inner.have_blob(blob_id, offset, max_bytes)?;
         let Fault::MisplaceChunk = &self.fault else { return Ok(frames) };
         Ok(frames

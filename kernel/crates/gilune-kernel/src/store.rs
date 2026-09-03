@@ -15,6 +15,25 @@ pub const SCHEMA_VERSION: i64 = 5;
 pub struct Store {
     conn: rusqlite::Connection,
     vault: PathBuf,
+    cache: std::cell::RefCell<Cache>,
+}
+
+/// Two facts the apply path asks for on **every** operation and which
+/// almost never change: this device's own id, and the set of devices
+/// whose operations it refuses.
+///
+/// Neither is cached blindly, because multi-instance is supported use
+/// (owner decision 2026-08-31) and a second process may revoke a device
+/// on the same vault. `device_id` is invalidated by the only thing that
+/// changes it here (`reenrol_as_new_device`), and the refused set is
+/// keyed on the raw stored text: the primary-key read still happens every
+/// time and only the JSON parse is saved. A cache that outlived another
+/// process's revocation would be a revoked device's operations applying.
+#[derive(Default)]
+struct Cache {
+    device_id: Option<String>,
+    refused_raw: Option<String>,
+    refused: Vec<String>,
 }
 
 impl Store {
@@ -48,7 +67,7 @@ impl Store {
             "INSERT OR IGNORE INTO meta (key, value) VALUES ('device_id', ?1)",
             [ids::new_id()],
         )?;
-        let store = Store { conn, vault };
+        let store = Store { conn, vault, cache: std::cell::RefCell::default() };
         capture::recover(&store)?;
         // A data merge, not a schema step: it depends on object state that
         // recovery may still have been completing (ADR 0013), and it is
@@ -66,12 +85,64 @@ impl Store {
     }
 
     pub fn device_id(&self) -> Result<String> {
-        let id = self.conn.query_row(
+        let cached = self.cache.borrow().device_id.clone();
+        if let Some(id) = cached {
+            return Ok(id);
+        }
+        let id: String = self.conn.query_row(
             "SELECT value FROM meta WHERE key = 'device_id'",
             [],
             |row| row.get(0),
         )?;
+        self.cache.borrow_mut().device_id = Some(id.clone());
         Ok(id)
+    }
+
+    /// Forget the cached device id. Called by the one thing that changes
+    /// it (`reenrol_as_new_device`), so re-enrolment cannot leave this
+    /// handle answering with the identity it has just left behind.
+    pub(crate) fn forget_device_id(&self) {
+        self.cache.borrow_mut().device_id = None;
+    }
+
+    /// Run something against the refused-device set, refreshing it from
+    /// the store first. The read is a primary-key lookup and happens
+    /// every time; only the parse is cached, keyed on the text it parsed.
+    pub(crate) fn with_refused<T>(&self, act: impl FnOnce(&[String]) -> T) -> Result<T> {
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                [crate::operations::REFUSED_DEVICES],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(KernelError::from(e)),
+            })?;
+        let Some(raw) = raw else { return Ok(act(&[])) };
+        {
+            let cache = self.cache.borrow();
+            if cache.refused_raw.as_deref() == Some(raw.as_str()) {
+                return Ok(act(&cache.refused));
+            }
+        }
+        let parsed: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+        let devices: Vec<String> = parsed
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut cache = self.cache.borrow_mut();
+        cache.refused_raw = Some(raw);
+        cache.refused = devices;
+        Ok(act(&cache.refused))
     }
 
     /// The public half of the identity key belonging to the device that
@@ -139,6 +210,11 @@ impl Store {
             alerts: count("SELECT COUNT(*) FROM integrity_alerts")?,
             events: count("SELECT COUNT(*) FROM events")?,
             jobs_pending: count("SELECT COUNT(*) FROM jobs WHERE state IN ('pending','leased')")?,
+            jobs_parked: count(
+                "SELECT COUNT(*) FROM jobs j
+                 JOIN subscriptions s ON s.subscription_id = j.subscription_id
+                 WHERE j.state IN ('pending','leased') AND s.enabled = 0",
+            )?,
             jobs_quarantined: count("SELECT COUNT(*) FROM jobs WHERE state = 'quarantined'")?,
             operations: count("SELECT COUNT(*) FROM operations")?,
             projections: count("SELECT COUNT(*) FROM projections")?,
@@ -179,15 +255,20 @@ impl Store {
                 continue;
             }
             let path = self.vault.join(&rel_path);
-            match std::fs::read(&path) {
+            // Streamed, never resident: a full check of a vault holding
+            // hour-long recordings must not need the largest of them in
+            // memory. The length comes back from the same pass, so the
+            // file is opened once and read once.
+            match std::fs::File::open(&path)
+                .and_then(|mut file| crate::blobs::digest_reader(&mut file))
+            {
                 Err(_) => problems.push(format!("blob {blob_id} missing at {rel_path}")),
-                Ok(data) => {
-                    if data.len() as i64 != bytes {
+                Ok((digest, len)) => {
+                    if len as i64 != bytes {
                         problems.push(format!(
-                            "blob {blob_id} size mismatch at {rel_path}: {} != {bytes}",
-                            data.len()
+                            "blob {blob_id} size mismatch at {rel_path}: {len} != {bytes}"
                         ));
-                    } else if ids::sha256_hex(&data) != sha256 {
+                    } else if digest != sha256 {
                         problems.push(format!("blob {blob_id} content hash mismatch at {rel_path}"));
                     }
                 }
@@ -207,7 +288,22 @@ pub struct Status {
     pub blobs_awaiting: i64,
     pub alerts: i64,
     pub events: i64,
+    /// Work that is waiting, whether or not anything can currently take
+    /// it. Deliberately unchanged in meaning: a status line that quietly
+    /// stopped counting parked work would make "nothing is happening"
+    /// look like "there is nothing to do".
     pub jobs_pending: i64,
+    /// Of the waiting work, how much belongs to a subscription that is
+    /// switched off — parked by a disabled plugin, not stuck (ADR 0011:
+    /// off means nothing is queued and waiting jobs are parked). A subset
+    /// of `jobs_pending`, so the two are read together: `jobs_pending`
+    /// minus `jobs_parked` is what an enabled plugin could run now.
+    ///
+    /// It does **not** count work whose plugin is enabled but whose
+    /// implementation this build does not carry — Android with no local
+    /// whisper, say. That job is claimable and simply never claimed here,
+    /// which is by design (ADR 0006) and is not visible as a row.
+    pub jobs_parked: i64,
     pub jobs_quarantined: i64,
     pub operations: i64,
     pub projections: i64,

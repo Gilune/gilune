@@ -12,12 +12,10 @@
 //! revoked device's operations by originating device), but it is never
 //! what authenticates anybody.
 
-use crate::identity::{write_private, KeyWrap, UNWRAPPED};
+use crate::identity::{read_sealed, write_sealed, KeyWrap};
 use crate::{Result, SyncError};
 use std::path::PathBuf;
 use std::sync::Arc;
-
-const FILE_VERSION: i64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerState {
@@ -49,6 +47,17 @@ pub struct Peer {
     /// Last known `host:port`. Refreshed after every successful session,
     /// which is what M5c's "try the cached address first" will read.
     pub address: String,
+    /// The device ids this peer used **before** it re-enrolled, learned
+    /// inside the encrypted channel like the current one (ADR 0019 § 4
+    /// meeting § 9).
+    ///
+    /// A machine that re-enrols takes a new `device_id` and stays the same
+    /// machine. Its older history is still in every replica and still
+    /// arrives; without this, welcoming the device back would welcome only
+    /// the operations it writes from now on, and everything it wrote
+    /// before would stay refused for ever behind an alert nobody could
+    /// clear.
+    pub previous_device_ids: Vec<String>,
     pub state: PeerState,
     pub paired_ms: i64,
     pub last_seen_ms: i64,
@@ -84,6 +93,22 @@ impl Peer {
         key.copy_from_slice(&self.secret);
         Some(key)
     }
+
+    /// Every device id this peer has ever originated operations under —
+    /// what it calls itself now, and what it called itself before it
+    /// re-enrolled. The unit § 9's refusal actually works in: refusing or
+    /// welcoming *a device* means all of them or none.
+    pub fn device_ids(&self) -> Vec<String> {
+        std::iter::once(self.device_id.clone())
+            .chain(self.previous_device_ids.iter().cloned())
+            .filter(|id| !id.is_empty())
+            .collect()
+    }
+
+    /// Whether this row is that device under any of its names.
+    fn claims(&self, device_id: &str) -> bool {
+        !device_id.is_empty() && self.device_ids().iter().any(|id| id == device_id)
+    }
 }
 
 pub struct Roster {
@@ -97,51 +122,10 @@ impl Roster {
     /// cannot be decrypted is an error rather than an empty list: quietly
     /// forgetting every pairing would look exactly like working.
     pub fn open(path: PathBuf, wrap: Option<Arc<dyn KeyWrap>>) -> Result<Roster> {
-        let raw = match std::fs::read(&path) {
-            Ok(raw) => raw,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Roster { path, wrap, peers: Vec::new() })
-            }
-            Err(e) => {
-                return Err(SyncError::Identity {
-                    detail: format!("reading {}: {e}", path.display()),
-                })
-            }
+        let Some(file) = read_sealed(&path, "roster")? else {
+            return Ok(Roster { path, wrap, peers: Vec::new() });
         };
-        let envelope: serde_json::Value = serde_json::from_slice(&raw)
-            .map_err(|e| SyncError::Identity { detail: format!("roster file: {e}") })?;
-        let version = envelope.get("version").and_then(|v| v.as_i64()).unwrap_or(0);
-        if version != FILE_VERSION {
-            return Err(SyncError::Identity {
-                detail: format!("roster file version {version} is not one this build reads"),
-            });
-        }
-        let protection = envelope
-            .get("wrap")
-            .and_then(|v| v.as_str())
-            .unwrap_or(UNWRAPPED)
-            .to_string();
-        let sealed = envelope
-            .get("payload")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| SyncError::Identity { detail: "roster file has no payload".into() })?;
-        let sealed = hex::decode(sealed)
-            .map_err(|e| SyncError::Identity { detail: format!("roster payload: {e}") })?;
-        let plain = if protection == UNWRAPPED {
-            sealed
-        } else {
-            let Some(wrapper) = wrap.as_ref() else {
-                return Err(SyncError::Identity {
-                    detail: format!(
-                        "the roster was wrapped by {protection}, and no key wrapper is \
-                         registered on this host to open it"
-                    ),
-                });
-            };
-            wrapper.unwrap(&sealed).map_err(|detail| SyncError::Identity {
-                detail: format!("{protection} could not unwrap the roster: {detail}"),
-            })?
-        };
+        let plain = file.open(wrap.as_deref(), "roster")?;
         let document: serde_json::Value = serde_json::from_slice(&plain)
             .map_err(|e| SyncError::Identity { detail: format!("roster contents: {e}") })?;
         let peers = document
@@ -229,21 +213,54 @@ impl Roster {
     }
 
     /// Device ids whose operations this device refuses on apply (§ 9).
+    ///
+    /// **Never one a paired device answers to.** This list is folded into
+    /// the vault's durable refusal set at every open, and the set only
+    /// grows — so a single stale name in here is a refusal that comes back
+    /// on the next launch and never leaves. That is what a re-pairing
+    /// produced: revoking recorded a device id, the peer re-enrolled under
+    /// a new one, re-pairing welcomed the new id, and the *old* row still
+    /// named the old id — so the peer's earlier history, which every other
+    /// replica still relays, was refused for ever by a device that had
+    /// just deliberately welcomed it back.
+    ///
+    /// So a peer that is paired now, under any name it has ever used,
+    /// silences every revoked row that names it. `pair` also retires those
+    /// rows outright; this is the half that holds even for a roster
+    /// written before that ran.
     pub fn revoked_device_ids(&self) -> Vec<String> {
-        self.peers
+        let welcomed: Vec<String> = self
+            .peers
             .iter()
-            .filter(|p| p.state == PeerState::Revoked && !p.device_id.is_empty())
-            .map(|p| p.device_id.clone())
-            .collect()
+            .filter(|p| p.state == PeerState::Paired)
+            .flat_map(|p| p.device_ids())
+            .collect();
+        let mut refused: Vec<String> = Vec::new();
+        for peer in self.peers.iter().filter(|p| p.state == PeerState::Revoked) {
+            for id in peer.device_ids() {
+                if !welcomed.contains(&id) && !refused.contains(&id) {
+                    refused.push(id);
+                }
+            }
+        }
+        refused
     }
 
     /// Record a completed pairing. Re-pairing a device that was revoked
     /// is a **new** pairing, not a restoration: the row is replaced
     /// whole, with the secret the new exchange produced.
+    ///
+    /// **Replaced by device, not merely by key.** A peer that re-enrols
+    /// arrives with a new static key *and* a new device id, so replacing
+    /// only the row with the same key left the revoked row behind — and a
+    /// revoked row is a standing refusal. Any revoked row this peer
+    /// answers to, under its current name or any earlier one, is retired
+    /// by the pairing that welcomed it.
     pub fn pair(
         &mut self,
         static_pub: &str,
         device_id: &str,
+        previous_device_ids: &[String],
         name: &str,
         address: &str,
         secret: [u8; 32],
@@ -252,6 +269,7 @@ impl Roster {
         let peer = Peer {
             static_pub: static_pub.to_string(),
             device_id: device_id.to_string(),
+            previous_device_ids: previous_device_ids.to_vec(),
             name: name.to_string(),
             address: address.to_string(),
             state: PeerState::Paired,
@@ -261,7 +279,11 @@ impl Roster {
         };
         let stored = peer.clone();
         self.mutate(move |peers| {
-            peers.retain(|p| p.static_pub != stored.static_pub);
+            let names = stored.device_ids();
+            peers.retain(|p| {
+                p.static_pub != stored.static_pub
+                    && !(p.state == PeerState::Revoked && names.iter().any(|id| p.claims(id)))
+            });
             peers.push(stored);
         })?;
         Ok(peer)
@@ -325,6 +347,7 @@ impl Roster {
                 .map(|p| serde_json::json!({
                     "static_pub": p.static_pub,
                     "device_id": p.device_id,
+                    "previous_device_ids": p.previous_device_ids,
                     "name": p.name,
                     "address": p.address,
                     "state": p.state.as_str(),
@@ -334,24 +357,16 @@ impl Roster {
                 }))
                 .collect::<Vec<_>>(),
         });
-        let plain = document.to_string();
-        let (protection, sealed) = match self.wrap.as_ref() {
-            Some(wrap) => {
-                let sealed = wrap.wrap(plain.as_bytes()).map_err(|detail| {
-                    SyncError::Identity {
-                        detail: format!("{} could not wrap the roster: {detail}", wrap.name()),
-                    }
-                })?;
-                (wrap.name(), sealed)
-            }
-            None => (UNWRAPPED.to_string(), plain.into_bytes()),
-        };
-        let envelope = serde_json::json!({
-            "version": FILE_VERSION,
-            "wrap": protection,
-            "payload": hex::encode(&sealed),
-        });
-        write_private(&self.path, envelope.to_string().as_bytes())
+        write_sealed(
+            &self.path,
+            "roster",
+            self.wrap.as_deref(),
+            document.to_string().as_bytes(),
+            // Nothing rides outside the seal. A roster's plain fields
+            // would be a list of who this device talks to, which is the
+            // one thing an advertisement is careful not to say either.
+            serde_json::Value::Null,
+        )
     }
 }
 
@@ -407,6 +422,17 @@ fn peer_from(row: &serde_json::Value) -> Option<Peer> {
     Some(Peer {
         static_pub,
         device_id: text("device_id"),
+        previous_device_ids: row
+            .get("previous_device_ids")
+            .and_then(|v| v.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str())
+                    .filter(|id| !id.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
         name: text("name"),
         address: text("address"),
         state: match text("state").as_str() {
@@ -453,7 +479,7 @@ mod tests {
         let wrap: Arc<dyn KeyWrap> = Arc::new(Reversing);
         let mut first = roster(&dir, Some(wrap.clone()));
         first
-            .pair("aa".repeat(32).as_str(), "device-b", "Laptop", "127.0.0.1:9", [7u8; 32])
+            .pair("aa".repeat(32).as_str(), "device-b", &[], "Laptop", "127.0.0.1:9", [7u8; 32])
             .expect("pair");
 
         let second = roster(&dir, Some(wrap));
@@ -470,7 +496,7 @@ mod tests {
         let wrap: Arc<dyn KeyWrap> = Arc::new(Reversing);
         let mut roster = roster(&dir, Some(wrap));
         roster
-            .pair(&"bb".repeat(32), "device-b", "Phone", "127.0.0.1:9", [9u8; 32])
+            .pair(&"bb".repeat(32), "device-b", &[], "Phone", "127.0.0.1:9", [9u8; 32])
             .expect("pair");
         let raw = std::fs::read_to_string(dir.path().join("roster.json")).expect("read");
         assert!(!raw.contains(&hex::encode([9u8; 32])));
@@ -483,7 +509,7 @@ mod tests {
         let mut roster = roster(&dir, None);
         let key = "cc".repeat(32);
         roster
-            .pair(&key, "device-b", "Phone", "127.0.0.1:9", [3u8; 32])
+            .pair(&key, "device-b", &[], "Phone", "127.0.0.1:9", [3u8; 32])
             .expect("pair");
         assert!(roster.revoke(&key).expect("revoke"));
 
@@ -505,7 +531,7 @@ mod tests {
         {
             let mut roster = roster(&dir, None);
             roster
-                .pair(&key, "device-b", "Phone", "127.0.0.1:9", [3u8; 32])
+                .pair(&key, "device-b", &[], "Phone", "127.0.0.1:9", [3u8; 32])
                 .expect("pair");
             roster.revoke(&key).expect("revoke");
         }
@@ -519,9 +545,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         let mut roster = roster(&dir, None);
         let key = "ee".repeat(32);
-        roster.pair(&key, "device-b", "Phone", "a:1", [1u8; 32]).expect("pair");
+        roster.pair(&key, "device-b", &[], "Phone", "a:1", [1u8; 32]).expect("pair");
         roster.revoke(&key).expect("revoke");
-        roster.pair(&key, "device-b", "Phone", "a:1", [2u8; 32]).expect("re-pair");
+        roster.pair(&key, "device-b", &[], "Phone", "a:1", [2u8; 32]).expect("re-pair");
 
         assert_eq!(roster.peers().len(), 1, "one row, replaced whole");
         assert_eq!(roster.secret_for(&key), Some([2u8; 32]));
@@ -547,10 +573,10 @@ mod tests {
         let mut second = roster(&dir, None);
 
         first
-            .pair(&first_key, "device-a", "Laptop", "10.0.0.5:51837", [1u8; 32])
+            .pair(&first_key, "device-a", &[], "Laptop", "10.0.0.5:51837", [1u8; 32])
             .expect("the first handle pairs a device");
         second
-            .pair(&second_key, "device-b", "Phone", "10.0.0.6:51837", [2u8; 32])
+            .pair(&second_key, "device-b", &[], "Phone", "10.0.0.6:51837", [2u8; 32])
             .expect("the second handle pairs another");
         // And now the first handle, which has never heard of the second's
         // peer, changes something about its own.
@@ -585,9 +611,9 @@ mod tests {
         let other = "4d".repeat(32);
         let mut first = roster(&dir, None);
         first
-            .pair(&revoked, "device-b", "Phone", "a:1", [5u8; 32])
+            .pair(&revoked, "device-b", &[], "Phone", "a:1", [5u8; 32])
             .expect("pair");
-        first.pair(&other, "device-c", "Tablet", "b:2", [6u8; 32]).expect("pair");
+        first.pair(&other, "device-c", &[], "Tablet", "b:2", [6u8; 32]).expect("pair");
 
         // A second handle reads the file, then the first revokes, then
         // the second writes something about a different peer entirely.
@@ -605,18 +631,159 @@ mod tests {
         assert_eq!(after.find(&other).expect("the other peer").address, "b:3");
     }
 
+    /// **Second-order: re-pairing a device that re-enrolled must not leave
+    /// a refusal behind.**
+    ///
+    /// The revoked row is keyed by the *old* static key and names the
+    /// *old* device id. Re-pairing writes a new row under a new key, and
+    /// the old one used to survive — so `revoked_device_ids` still named a
+    /// device the user had just welcomed back, and every open folded that
+    /// name into the vault's durable refusal set again.
+    #[test]
+    fn re_pairing_a_re_enrolled_device_retires_the_row_that_revoked_it() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut writing = roster(&dir, None);
+        let roster = &mut writing;
+        let before = "1a".repeat(32);
+        let after = "2b".repeat(32);
+
+        roster
+            .pair(&before, "device-old", &[], "Phone", "a:1", [1u8; 32])
+            .expect("pair");
+        assert!(roster.revoke(&before).expect("revoke"));
+        assert_eq!(roster.revoked_device_ids(), vec!["device-old".to_string()]);
+
+        // The phone's vault arrived on a machine holding no identity for
+        // it: a new key, a new device id, and the old id as its ancestry.
+        roster
+            .pair(
+                &after,
+                "device-new",
+                &["device-old".to_string()],
+                "Phone",
+                "a:1",
+                [2u8; 32],
+            )
+            .expect("re-pair");
+
+        assert!(
+            roster.revoked_device_ids().is_empty(),
+            "the device was welcomed back under both its names, so neither is refused"
+        );
+        assert_eq!(roster.peers().len(), 1, "and the revoked row is gone, not merely quiet");
+        assert_eq!(
+            roster.find(&after).expect("the peer").device_ids(),
+            vec!["device-new".to_string(), "device-old".to_string()]
+        );
+
+        // It survives a reopen as one row with its ancestry intact.
+        let reopened = Roster::open(dir.path().join("roster.json"), None).expect("reopen");
+        assert!(reopened.revoked_device_ids().is_empty());
+        assert_eq!(
+            reopened.find(&after).expect("the peer").previous_device_ids,
+            vec!["device-old".to_string()]
+        );
+    }
+
+    /// And the same fact from the other side: a device that is *still*
+    /// revoked stays refused when somebody else re-enrols. The fix must
+    /// not be "stop refusing anybody".
+    #[test]
+    fn re_enrolling_one_peer_leaves_another_peers_revocation_standing() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut roster = roster(&dir, None);
+        let banished = "3c".repeat(32);
+        let before = "4d".repeat(32);
+        let after = "5e".repeat(32);
+
+        roster
+            .pair(&banished, "device-gone", &[], "Old tablet", "a:1", [1u8; 32])
+            .expect("pair");
+        roster
+            .pair(&before, "device-old", &[], "Phone", "b:2", [2u8; 32])
+            .expect("pair");
+        roster.revoke(&banished).expect("revoke");
+        roster.revoke(&before).expect("revoke");
+
+        roster
+            .pair(
+                &after,
+                "device-new",
+                &["device-old".to_string()],
+                "Phone",
+                "b:2",
+                [3u8; 32],
+            )
+            .expect("re-pair");
+
+        assert_eq!(
+            roster.revoked_device_ids(),
+            vec!["device-gone".to_string()],
+            "welcoming one device back must not amnesty another"
+        );
+    }
+
+    /// **Second-order for the shared envelope: nobody loses their
+    /// pairings to a field rename.** A roster written by the build that
+    /// spelled the sealed half `payload` is a roster on a real machine.
+    #[test]
+    fn a_roster_written_by_the_previous_layout_still_opens() {
+        let dir = tempfile::tempdir().expect("dir");
+        let path = dir.path().join("roster.json");
+        let key = "6f".repeat(32);
+        let body = serde_json::json!({
+            "peers": [{
+                "static_pub": key,
+                "device_id": "device-b",
+                "name": "Phone",
+                "address": "10.0.0.6:51837",
+                "state": "paired",
+                "paired_ms": 17,
+                "last_seen_ms": 18,
+                "secret": hex::encode([4u8; 32]),
+            }],
+        });
+        let envelope = serde_json::json!({
+            "version": 1,
+            "wrap": "none",
+            "payload": hex::encode(body.to_string().as_bytes()),
+        });
+        std::fs::write(&path, envelope.to_string()).expect("write");
+
+        let mut opened = Roster::open(path.clone(), None).expect("open the old layout");
+        let peer = opened.find(&key).expect("the pairing survived the update");
+        assert_eq!(peer.secret(), Some([4u8; 32]), "and so did its pair secret");
+        assert_eq!(peer.name, "Phone");
+        assert!(peer.previous_device_ids.is_empty(), "an old row has no ancestry");
+
+        // And once this build writes it back, it is in the new shape and
+        // still holds everything.
+        opened.set_address(&key, "10.0.0.9:51837").expect("write it back");
+        let raw = std::fs::read_to_string(&path).expect("read");
+        assert!(raw.contains("\"sealed\""), "written under the one field name now");
+        let again = Roster::open(path, None).expect("reopen");
+        assert_eq!(again.find(&key).expect("the peer").secret(), Some([4u8; 32]));
+    }
+
     #[test]
     fn a_roster_that_cannot_be_opened_is_an_error_rather_than_an_empty_list() {
         let dir = tempfile::tempdir().expect("dir");
         let wrap: Arc<dyn KeyWrap> = Arc::new(Reversing);
         let mut roster = roster(&dir, Some(wrap));
-        roster.pair(&"ff".repeat(32), "b", "Phone", "a:1", [1u8; 32]).expect("pair");
+        roster.pair(&"ff".repeat(32), "b", &[], "Phone", "a:1", [1u8; 32]).expect("pair");
+        // A `Roster` has no `Debug` and should not grow one — it holds
+        // pair secrets — so the outcome is reduced to something a failure
+        // message can print.
+        //
+        // `IdentityUnreadable` and not `Identity`: a sealed roster this
+        // host cannot open is the same condition as a sealed key it cannot
+        // open — the file is *here*, and the answer is neither "start
+        // empty" nor "mint a new one". Both go through one envelope now,
+        // so both say the same thing.
+        let outcome = Roster::open(dir.path().join("roster.json"), None).map(|r| r.peers().len());
         assert!(
-            matches!(
-                Roster::open(dir.path().join("roster.json"), None),
-                Err(SyncError::Identity { .. })
-            ),
-            "silently forgetting every pairing would look exactly like working"
+            matches!(outcome, Err(SyncError::IdentityUnreadable { .. })),
+            "silently forgetting every pairing would look exactly like working: {outcome:?}"
         );
     }
 }

@@ -54,6 +54,12 @@ fn main() {
                 .expect("an address");
             let offer = service.start_pairing().expect("open a pairing window");
             println!("ADDRESS {address}");
+            // Every address this machine answers on, best first. On a
+            // laptop with a hypervisor or a VPN the first is a guess and
+            // the others are the reason a real two-machine run works: the
+            // QR carries them all, and a person typing one by hand needs
+            // to be able to see them.
+            println!("ADDRESSES {}", offer.addresses.join(" "));
             println!("CODE {}", offer.code);
             println!("READY");
             // Serve until stdin closes — the driver keeps it open for as

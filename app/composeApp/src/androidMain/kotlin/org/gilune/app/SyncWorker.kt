@@ -127,12 +127,13 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
                     return Result.success()
                 }
                 val report = gilune.syncNow()
-                // Only when something arrived (`syncNeedsProjection`).
-                // Projection walks every object in the vault; an exchange
-                // that received nothing has given it nothing to walk, and
-                // this job runs on a fifteen-minute floor with the phone
-                // in somebody's pocket.
-                if (syncNeedsProjection(report.applied)) gilune.project()
+                // Only when something arrived (`syncNeedsProjection`) —
+                // operations, or the bytes an earlier session's operations
+                // were still waiting for. Projection walks every object in
+                // the vault; an exchange that received neither has given it
+                // nothing to walk, and this job runs on a fifteen-minute
+                // floor with the phone in somebody's pocket.
+                if (syncNeedsProjection(report.applied, report.blobsCompleted)) gilune.project()
                 if (report.halted.isNotEmpty()) {
                     // Halting is visible in Settings through the integrity
                     // alerts the kernel raised; the job itself succeeded

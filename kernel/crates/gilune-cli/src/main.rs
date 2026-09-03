@@ -75,6 +75,10 @@ fn run() -> Result<(), String> {
                     "blobs_committed": s.blobs_committed,
                     "events": s.events,
                     "jobs_pending": s.jobs_pending,
+                    // A subset of jobs_pending: work whose plugin is
+                    // switched off. Waiting because nothing may take it,
+                    // as against waiting for its turn.
+                    "jobs_parked": s.jobs_parked,
                     "jobs_quarantined": s.jobs_quarantined,
                     "operations": s.operations,
                     "blobs_awaiting": s.blobs_awaiting,
@@ -182,6 +186,9 @@ fn run() -> Result<(), String> {
                         "subject": a.subject,
                         "detail": a.detail,
                         "raised_ms": a.raised_ms,
+                        // The kernel says which conditions are damage, so
+                        // no reader keeps its own copy of the kind set.
+                        "damage": a.damage,
                     })
                 })
                 .collect();

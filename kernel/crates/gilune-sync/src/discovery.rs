@@ -235,12 +235,15 @@ impl PeerDiscovery for MdnsDiscovery {
         let receiver = daemon.browse(SERVICE_TYPE_FQ).map_err(|e| SyncError::Refused {
             detail: format!("this device could not look for others: {e}"),
         })?;
+        // Read once per browse, not once per answer: the interface table
+        // is a system call and it does not change between two packets.
+        let local = crate::addressing::local_addresses();
         let deadline = std::time::Instant::now() + timeout;
         let mut found: Vec<Discovered> = Vec::new();
         while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
             let Ok(event) = receiver.recv_timeout(remaining) else { break };
             let mdns_sd::ServiceEvent::ServiceResolved(info) = event else { continue };
-            let Some(address) = first_address(&info) else { continue };
+            let Some(address) = first_address(&info, &local) else { continue };
             let fingerprint = property(&info, TXT_FINGERPRINT);
             if fingerprint.is_empty() {
                 continue;
@@ -277,34 +280,37 @@ fn property(info: &mdns_sd::ResolvedService, key: &str) -> String {
 /// that routes Gilune at all routes v4. A device reachable only over IPv6
 /// is therefore not discovered, and § 1's manual `host:port` entry is
 /// what answers it.
-fn first_address(info: &mdns_sd::ResolvedService) -> Option<String> {
-    let port = info.get_port();
-    let mut v4: Vec<_> = info.get_addresses_v4().into_iter().collect();
-    // A machine answers on every interface it has, and the order matters
-    // because only one address gets dialled.
-    //
-    // **The loopback must sort last**, and this was found by running the
-    // live test rather than by reading: a responder advertises 127.0.0.1
-    // alongside its real address, and a plain numeric sort puts the
-    // loopback first — so a peer on *another* machine would be recorded
-    // at 127.0.0.1 and every dial to it would arrive at ourselves. It is
-    // invisible on one machine, where the loopback happens to work, and
-    // fatal on two. Link-local (169.254.x.x) sorts second-last for the
-    // same reason: it is what an interface has when DHCP has not
-    // answered, and it routes to almost nothing.
-    v4.sort_by_key(|ip| (dialability(ip), *ip));
-    v4.into_iter().next().map(|ip| format!("{ip}:{port}"))
+fn first_address(info: &mdns_sd::ResolvedService, local: &[std::net::Ipv4Addr]) -> Option<String> {
+    best_address(
+        &info.get_addresses_v4().into_iter().collect::<Vec<_>>(),
+        info.get_port(),
+        local,
+    )
 }
 
-/// How willing this crate is to dial an address, lowest first.
-pub(crate) fn dialability(ip: &std::net::Ipv4Addr) -> u8 {
-    if ip.is_loopback() {
-        2
-    } else if ip.is_link_local() {
-        1
-    } else {
-        0
-    }
+/// The one address to record for a peer that answered on several.
+///
+/// A machine answers on every interface it has, and the order matters
+/// because only one address gets dialled. **The loopback must sort last**,
+/// which was found by running the live test rather than by reading: a
+/// responder advertises 127.0.0.1 alongside its real address, and a plain
+/// numeric sort puts the loopback first — so a peer on *another* machine
+/// would be recorded at 127.0.0.1 and every dial to it would arrive back
+/// at ourselves. Invisible on one machine, fatal on two.
+///
+/// The rest of the ordering, and the dropping of addresses that name no
+/// device at all, is `addressing`'s — the same ranking this machine
+/// publishes itself by, so the two sides of a dial cannot disagree about
+/// what a good address is.
+pub(crate) fn best_address(
+    offered: &[std::net::Ipv4Addr],
+    port: u16,
+    local: &[std::net::Ipv4Addr],
+) -> Option<String> {
+    crate::addressing::ranked(offered, local)
+        .into_iter()
+        .next()
+        .map(|ip| format!("{ip}:{port}"))
 }
 
 #[cfg(test)]
@@ -360,16 +366,45 @@ mod tests {
         let loopback: std::net::Ipv4Addr = "127.0.0.1".parse().expect("ip");
         let link_local: std::net::Ipv4Addr = "169.254.3.4".parse().expect("ip");
 
-        let mut addresses = vec![loopback, real, link_local];
-        addresses.sort_by_key(|ip| (dialability(ip), *ip));
         assert_eq!(
-            addresses,
-            vec![real, link_local, loopback],
-            "a routable address first, then one that DHCP never answered for, and the \
-             loopback last of all"
+            best_address(&[loopback, real, link_local], 51837, &[]).as_deref(),
+            Some("192.168.1.20:51837"),
+            "a routable address first, never the loopback of the machine doing the dialling"
         );
-        assert!(dialability(&loopback) > dialability(&link_local));
-        assert!(dialability(&link_local) > dialability(&real));
+        assert_eq!(
+            best_address(&[loopback, link_local], 51837, &[]).as_deref(),
+            Some("169.254.3.4:51837"),
+            "and what DHCP never answered for beats what reaches only ourselves"
+        );
+    }
+
+    /// **Second-order test for the shared classifier**, from the side that
+    /// dials. The publishing side offers every candidate it has; this
+    /// decides which of them a peer on *this* machine's network is
+    /// actually at, and it must not be answered by a numeric sort.
+    #[test]
+    fn a_resolved_peer_is_dialled_on_this_machines_own_segment_first() {
+        let vpn: std::net::Ipv4Addr = "10.8.0.2".parse().expect("ip");
+        let lan: std::net::Ipv4Addr = "192.168.1.20".parse().expect("ip");
+        let mine: std::net::Ipv4Addr = "192.168.1.77".parse().expect("ip");
+        assert_eq!(
+            best_address(&[vpn, lan], 51837, &[mine]).as_deref(),
+            Some("192.168.1.20:51837"),
+            "the peer is on the LAN in front of us; the 10.x is somebody's VPN"
+        );
+
+        // And a response carrying an address that names no device is never
+        // what gets dialled, whatever else it arrived with.
+        let bogus: std::net::Ipv4Addr = "0.0.0.0".parse().expect("ip");
+        assert_eq!(
+            best_address(&[bogus, lan], 51837, &[mine]).as_deref(),
+            Some("192.168.1.20:51837")
+        );
+        assert_eq!(
+            best_address(&[bogus], 51837, &[mine]),
+            None,
+            "a peer that offered only that offered nothing to dial"
+        );
     }
 
     #[test]

@@ -24,6 +24,7 @@
 //! diagnostic that names what is probably wrong with the network instead
 //! of spinning.
 
+pub mod addressing;
 pub mod discovery;
 pub mod exchange;
 pub mod handshake;
@@ -81,6 +82,19 @@ pub enum SyncError {
     /// pairing with it.
     #[error("identity: {detail}")]
     Identity { detail: String },
+    /// The identity file for this vault **is here** and could not be
+    /// opened: the key was sealed by a platform wrapper, and this host
+    /// either registers no wrapper or the wrapper refused.
+    ///
+    /// Distinct from `Identity` because the two need opposite answers.
+    /// A missing identity is enrolment — mint one and carry on. A sealed
+    /// one that will not open is a machine that still holds the key but
+    /// cannot use it (a restored Windows profile, a reset Android
+    /// keystore, a build with no adapter), and minting over it would
+    /// silently throw away the identity every existing pairing is with.
+    /// The boundary maps it to its own error so a shell can say so.
+    #[error("identity unreadable: {detail}")]
+    IdentityUnreadable { detail: String },
     /// The peer is not one this device will talk to — unpaired, revoked,
     /// or asking to pair when no pairing window is open. Deliberately one
     /// variant: the far end learns that it was refused and nothing more.

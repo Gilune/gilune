@@ -56,7 +56,11 @@ const ID_JOINER: &[u8] = b"gilune:pair:v1:joiner";
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// And once established. Long enough for a chunk of a large blob on a
 /// slow link, short enough that a dead peer is eventually noticed.
-const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
+///
+/// Public so that "every flow ends up on this one and not on the
+/// handshake's" can be a test rather than four places a reviewer has to
+/// compare by eye.
+pub const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long a connection may be idle before the kernel probes it.
 /// Deliberately shorter than `SESSION_TIMEOUT`: the read timeout answers
@@ -85,6 +89,17 @@ pub struct Greeting {
     /// the peer actually arrived on, so a peer cannot make this device
     /// record an address it chose.
     pub address: String,
+    /// What this device called itself before it re-enrolled, newest first
+    /// (ADR 0019 § 4 meeting § 9).
+    ///
+    /// A claim, like the device id beside it, and it is used for exactly
+    /// one thing: **taking a refusal away** when the user pairs this
+    /// device. A peer cannot use it to be trusted — the pairing is what
+    /// does that — and it cannot use it to have somebody else refused,
+    /// because nothing anywhere adds a refusal from a greeting. The worst
+    /// a lying peer achieves is un-refusing a device id it names, which it
+    /// could do anyway by claiming that id as its own.
+    pub previous_device_ids: Vec<String>,
 }
 
 impl Greeting {
@@ -93,12 +108,24 @@ impl Greeting {
             device_id: device_id.to_string(),
             name: name.to_string(),
             address: address.to_string(),
+            previous_device_ids: Vec::new(),
         }
+    }
+
+    /// The same, for a device that has re-enrolled at some point.
+    pub fn with_previous(mut self, previous_device_ids: &[String]) -> Greeting {
+        self.previous_device_ids = previous_device_ids
+            .iter()
+            .filter(|id| !id.is_empty())
+            .take(crate::identity::MAX_PREVIOUS_DEVICE_IDS)
+            .cloned()
+            .collect();
+        self
     }
 
     /// The port this peer says it listens on, if it said anything usable.
     pub fn advertised_port(&self) -> Option<u16> {
-        self.address.rsplit_once(':').and_then(|(_, p)| p.parse().ok())
+        crate::secure::port_of(&self.address)
     }
 
     fn encode(&self) -> Vec<u8> {
@@ -106,6 +133,7 @@ impl Greeting {
             "device_id": self.device_id,
             "name": self.name,
             "address": self.address,
+            "previous_device_ids": self.previous_device_ids,
         })
         .to_string()
         .into_bytes()
@@ -129,10 +157,25 @@ impl Greeting {
             }
             Ok(text)
         };
+        let previous = value
+            .get("previous_device_ids")
+            .and_then(|v| v.as_array())
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str())
+                    .filter(|id| {
+                        !id.is_empty() && id.chars().count() <= 128 && !id.chars().any(char::is_control)
+                    })
+                    .take(crate::identity::MAX_PREVIOUS_DEVICE_IDS)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
         Ok(Greeting {
             device_id: field("device_id", 128)?,
             name: field("name", 64)?,
             address: field("address", 128)?,
+            previous_device_ids: previous,
         })
     }
 }
@@ -198,6 +241,47 @@ pub struct Established {
 impl Established {
     pub fn remote_static_hex(&self) -> String {
         hex::encode(&self.remote_static)
+    }
+}
+
+/// A finished Noise handshake, before its socket becomes a session.
+///
+/// **The four flows used to end in the same nine lines**, copied: take the
+/// socket back off the plain channel, swap the establishment timeout for
+/// the session one, ask for a keepalive, and build an `Established` out of
+/// a four-tuple whose members were only distinguishable by position. Four
+/// copies of a step is four places for one of them to be forgotten — and
+/// the step being forgotten here is the timeout swap, which leaves a live
+/// session on a fifteen-second read timeout: a blob chunk on a slow link
+/// then fails as if the peer had gone away.
+pub struct Handshaken {
+    transport: snow::TransportState,
+    /// The peer's static identity **as the handshake transmitted it** —
+    /// not as the peer claimed it.
+    pub remote: Vec<u8>,
+    pub peer: Greeting,
+    /// Derived from the handshake hash, so both sides compute it without
+    /// either sending it.
+    pub derived: [u8; 32],
+}
+
+impl Handshaken {
+    /// Hand the socket over to the session. One place, so the timeout a
+    /// session runs on is one fact.
+    fn establish(self, channel: PlainChannel, limits: Limits) -> Result<Established> {
+        let stream = channel.into_stream();
+        timed(&stream, SESSION_TIMEOUT)?;
+        keepalive(&stream);
+        Ok(Established {
+            channel: NoiseChannel::new(stream, self.transport, limits),
+            remote_static: self.remote,
+            peer: self.peer,
+            derived_secret: self.derived,
+        })
+    }
+
+    fn remote_hex(&self) -> String {
+        hex::encode(&self.remote)
     }
 }
 
@@ -372,7 +456,7 @@ fn noise_initiator(
     psk: &[u8; 32],
     prologue: &[u8],
     me: &Greeting,
-) -> Result<(snow::TransportState, Vec<u8>, Greeting, [u8; 32])> {
+) -> Result<Handshaken> {
     let mut state = builder(identity, psk, prologue)?
         .build_initiator()
         .map_err(noise_fault)?;
@@ -408,7 +492,7 @@ fn noise_responder(
     candidates: &[(String, [u8; 32])],
     prologue: &[u8],
     me: &Greeting,
-) -> Result<(snow::TransportState, Vec<u8>, Greeting, [u8; 32])> {
+) -> Result<Handshaken> {
     let Some(first) = channel.recv()? else {
         return Err(SyncError::Protocol { detail: "the caller left".to_string() });
     };
@@ -446,10 +530,7 @@ fn noise_responder(
     finish_noise(state, peer)
 }
 
-fn finish_noise(
-    state: snow::HandshakeState,
-    peer: Greeting,
-) -> Result<(snow::TransportState, Vec<u8>, Greeting, [u8; 32])> {
+fn finish_noise(state: snow::HandshakeState, peer: Greeting) -> Result<Handshaken> {
     let remote = state
         .get_remote_static()
         .ok_or(SyncError::Protocol {
@@ -459,9 +540,9 @@ fn finish_noise(
     // Taken before transport mode, which is the only place it is
     // reachable. Both sides compute the same value from the same
     // transcript, so the pair secret is agreed without being sent.
-    let secret = derive(b"gilune:pair-secret:v1", state.get_handshake_hash());
+    let derived = derive(b"gilune:pair-secret:v1", state.get_handshake_hash());
     let transport = state.into_transport_mode().map_err(noise_fault)?;
-    Ok((transport, remote, peer, secret))
+    Ok(Handshaken { transport, remote, peer, derived })
 }
 
 // ------------------------------------------------------------ the two flows
@@ -487,14 +568,6 @@ fn keepalive(stream: &TcpStream) {
     let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&probe);
 }
 
-/// Everything an established session wants on its socket: a bounded wait
-/// and a probe for a peer that vanished.
-fn established(stream: &TcpStream) -> Result<()> {
-    timed(stream, SESSION_TIMEOUT)?;
-    keepalive(stream);
-    Ok(())
-}
-
 /// Dial a device and pair with it. The joiner's side of § 3.
 pub fn dial_pairing(
     stream: TcpStream,
@@ -511,16 +584,8 @@ pub fn dial_pairing(
     send_hello(&mut channel, intent)?;
     read_answer(&mut channel)?;
     let psk = pake(&mut channel, secret, false)?;
-    let (transport, remote, peer, derived) =
-        noise_initiator(&mut channel, identity, &psk, &prologue(intent), me)?;
-    let stream = channel.into_stream();
-    established(&stream)?;
-    Ok(Established {
-        channel: NoiseChannel::new(stream, transport, limits),
-        remote_static: remote,
-        peer,
-        derived_secret: derived,
-    })
+    let shook = noise_initiator(&mut channel, identity, &psk, &prologue(intent), me)?;
+    shook.establish(channel, limits)
 }
 
 /// Answer a pairing, having already read the hello and decided to serve
@@ -536,21 +601,14 @@ pub fn accept_pairing(
     let intent = Intent::Pair(credential);
     answer_ready(&mut channel)?;
     let psk = pake(&mut channel, secret, true)?;
-    let (transport, remote, peer, derived) = noise_responder(
+    let shook = noise_responder(
         &mut channel,
         identity,
         &[(String::new(), psk)],
         &prologue(intent),
         me,
     )?;
-    let stream = channel.into_stream();
-    established(&stream)?;
-    Ok(Established {
-        channel: NoiseChannel::new(stream, transport, limits),
-        remote_static: remote,
-        peer,
-        derived_secret: derived,
-    })
+    shook.establish(channel, limits)
 }
 
 /// Dial a peer this device is already paired with.
@@ -567,7 +625,7 @@ pub fn dial_session(
     let mut channel = PlainChannel::new(stream, limits);
     send_hello(&mut channel, Intent::Session)?;
     read_answer(&mut channel)?;
-    let (transport, remote, peer, derived) = noise_initiator(
+    let shook = noise_initiator(
         &mut channel,
         identity,
         &psk,
@@ -576,19 +634,12 @@ pub fn dial_session(
     )?;
     // Belt and braces over the pinning the `psk` already enforces: the
     // key the handshake transmitted must be the key the roster holds.
-    if hex::encode(&remote) != expected_static {
+    if shook.remote_hex() != expected_static {
         return Err(SyncError::Refused {
             detail: "that address answered with a different device".to_string(),
         });
     }
-    let stream = channel.into_stream();
-    established(&stream)?;
-    Ok(Established {
-        channel: NoiseChannel::new(stream, transport, limits),
-        remote_static: remote,
-        peer,
-        derived_secret: derived,
-    })
+    shook.establish(channel, limits)
 }
 
 /// Answer a session from a paired peer, working out which one it is by
@@ -608,27 +659,20 @@ pub fn accept_session(
         });
     }
     answer_ready(&mut channel)?;
-    let (transport, remote, peer, derived) = noise_responder(
+    let shook = noise_responder(
         &mut channel,
         identity,
         candidates,
         &prologue(Intent::Session),
         me,
     )?;
-    let hex_remote = hex::encode(&remote);
+    let hex_remote = shook.remote_hex();
     if !candidates.iter().any(|(pinned, _)| *pinned == hex_remote) {
         return Err(SyncError::Refused {
             detail: "the caller's identity is not the one its pair secret belongs to".to_string(),
         });
     }
-    let stream = channel.into_stream();
-    established(&stream)?;
-    Ok(Established {
-        channel: NoiseChannel::new(stream, transport, limits),
-        remote_static: remote,
-        peer,
-        derived_secret: derived,
-    })
+    shook.establish(channel, limits)
 }
 
 #[cfg(test)]
@@ -1043,6 +1087,108 @@ mod tests {
             expected,
             "a frame spanning several noise messages arrives byte-exact"
         );
+    }
+
+    /// **Second-order test for the shared tail.** Every flow — both
+    /// pairing halves and both session halves — must hand its socket over
+    /// on `SESSION_TIMEOUT`. The four copies of the tail meant four places
+    /// this could be dropped, and dropping it leaves a live session with a
+    /// fifteen-second read: a blob chunk on a slow link then fails as
+    /// though the peer had gone away, which is the kind of fault that only
+    /// ever shows up on somebody else's network.
+    #[test]
+    fn every_flow_hands_its_socket_over_on_the_session_timeout() {
+        // Both pairing halves, from one exchange.
+        let (joined, served) = pair_with(b"481902", b"481902");
+        let joined = joined.expect("the joiner pairs");
+        let served = served.expect("the listener pairs");
+        assert_eq!(
+            joined.channel.read_timeout(),
+            Some(SESSION_TIMEOUT),
+            "the joiner's socket is still on the handshake timeout"
+        );
+        assert_eq!(
+            served.channel.read_timeout(),
+            Some(SESSION_TIMEOUT),
+            "the listener's socket is still on the handshake timeout"
+        );
+        assert_ne!(SESSION_TIMEOUT, HANDSHAKE_TIMEOUT, "or this proves nothing");
+
+        // And both session halves, from a second connection.
+        let secret = [21u8; 32];
+        let (client, server) = pair_of_sockets();
+        let listener_identity = mint_identity().expect("mint");
+        let dialer_identity = mint_identity().expect("mint");
+        let listener_static = hex::encode(listener_identity.public());
+        let candidates = vec![(hex::encode(dialer_identity.public()), secret)];
+
+        let listening = std::thread::spawn(move || {
+            let mut channel = PlainChannel::new(server, Limits::DEFAULT);
+            let _ = read_hello(&mut channel)?;
+            let established = accept_session(
+                channel,
+                Limits::DEFAULT,
+                &listener_identity,
+                &greeting("listener"),
+                &candidates,
+            )?;
+            Ok::<Option<Duration>, SyncError>(established.channel.read_timeout())
+        });
+        let dialled = dial_session(
+            client,
+            Limits::DEFAULT,
+            &dialer_identity,
+            &greeting("dialer"),
+            &listener_static,
+            secret,
+        )
+        .expect("session");
+
+        assert_eq!(dialled.channel.read_timeout(), Some(SESSION_TIMEOUT));
+        assert_eq!(
+            listening.join().expect("thread").expect("served"),
+            Some(SESSION_TIMEOUT)
+        );
+    }
+
+    /// A re-enrolled device says what it used to be called, and the claim
+    /// crosses inside the encrypted handshake like the name beside it.
+    #[test]
+    fn a_greeting_carries_the_device_ids_a_peer_used_before_it_re_enrolled() {
+        let previous = vec!["device-before".to_string(), "device-earlier".to_string()];
+        let mine = greeting("joiner").with_previous(&previous);
+        let decoded = Greeting::decode(&mine.encode()).expect("decode");
+        assert_eq!(decoded.previous_device_ids, previous);
+
+        // Bounded like every other claim a peer makes, and empties are
+        // not names.
+        let many: Vec<String> = (0..40).map(|n| format!("device-{n}")).collect();
+        assert_eq!(
+            greeting("joiner").with_previous(&many).previous_device_ids.len(),
+            crate::identity::MAX_PREVIOUS_DEVICE_IDS
+        );
+        assert!(greeting("joiner")
+            .with_previous(&[String::new()])
+            .previous_device_ids
+            .is_empty());
+        let hostile = serde_json::json!({
+            "device_id": "d",
+            "name": "n",
+            "previous_device_ids": ["fine", "", "with\u{0}control", 7],
+        });
+        assert_eq!(
+            Greeting::decode(hostile.to_string().as_bytes())
+                .expect("a hostile list is filtered, not fatal")
+                .previous_device_ids,
+            vec!["fine".to_string()]
+        );
+        // A greeting from a build that never had the field is a device
+        // that has never re-enrolled.
+        let older = serde_json::json!({ "device_id": "d", "name": "n" });
+        assert!(Greeting::decode(older.to_string().as_bytes())
+            .expect("decode")
+            .previous_device_ids
+            .is_empty());
     }
 
     #[test]

@@ -101,6 +101,45 @@ fn the_vector_set_covers_every_kind_this_codec_writes() {
     );
 }
 
+#[test]
+fn the_origin_keys_are_additive_and_a_decoder_must_read_both_shapes() {
+    // The contract the whole `sync-awaiting-referent` exit rests on: a
+    // naming operation *may* say whose the thing it names is, and one
+    // written before the key existed says nothing and is still valid.
+    // A decoder that required the keys would refuse every operation any
+    // shipped device has ever written.
+    let read = |name: &str| -> serde_json::Value {
+        let bytes = std::fs::read(vectors().join("valid").join(name))
+            .unwrap_or_else(|e| panic!("reading {name}: {e}"));
+        let envelope = operations::decode(&bytes, &Limits::DEFAULT)
+            .unwrap_or_else(|e| panic!("{name} must decode: {e}"));
+        envelope.payload
+    };
+    for name in ["object-revised-concurrent.json", "tombstone.json"] {
+        let payload = read(name);
+        assert!(
+            payload.get(operations::OBJECT_ORIGIN_DEVICE).is_none(),
+            "{name} is the pre-key shape and must stay that way"
+        );
+    }
+    let named = read("object-revised-named-origins.json");
+    assert!(named.get(operations::OBJECT_ORIGIN_DEVICE).is_some());
+    assert_eq!(
+        named[operations::SUPERSEDES_ORIGIN]
+            .as_object()
+            .expect("a map from head to origin")
+            .len(),
+        2,
+        "every superseded head whose origin is known is named"
+    );
+    let tombstone = read("tombstone-named-origins.json");
+    assert!(
+        tombstone["supersedes"].as_array().is_some_and(|h| !h.is_empty()),
+        "a tombstone names the heads the deleter saw"
+    );
+    assert!(tombstone.get(operations::OBJECT_ORIGIN_DEVICE).is_some());
+}
+
 /// Regenerate the vector set and its manifest. Ignored by default: the
 /// committed files are the contract, and a change that alters them is a
 /// change to a public format which must be a deliberate act, not a side
@@ -341,6 +380,73 @@ fn canonical_examples() -> Vec<(&'static str, Envelope)> {
                 target_id: "01a06436-9a71-7000-8000-000000000002".to_string(),
                 created_ms: created + 4,
                 payload: serde_json::json!({ "to": [3, 4], "by": "someone else's plugin" }),
+            },
+        ),
+        // The origin keys, added deliberately. A naming operation says
+        // whose the thing it names is, so a receiver that has never seen
+        // that thing can still tell "it has not arrived yet" from "it
+        // belongs to a device I have revoked and can never arrive".
+        // Without them a revoked device silences a healthy one for ever.
+        //
+        // Both are **additive and optional**: the two vectors above name
+        // no origins and must still decode, because that is what every
+        // operation written before this key existed looks like.
+        (
+            "object-revised-named-origins.json",
+            Envelope {
+                version: ENVELOPE_VERSION,
+                op_id: "01a06436-9a69-74b0-9ff9-85cedc4221c6".to_string(),
+                device_id: device.to_string(),
+                op_seq: 6,
+                kind: operations::OBJECT_REVISED.to_string(),
+                target_id: "01a06436-9a6f-79b1-94c9-a3513c0c693a".to_string(),
+                created_ms: created + 5,
+                payload: serde_json::json!({
+                    "object_id": "01a06436-9a6f-79b1-94c9-a3513c0c693a",
+                    "revision": {
+                        "revision_id": "01a06436-9a75-7000-8000-000000000006",
+                        "payload": "{\"text\":\"written over two heads\"}",
+                        "origin": "external-edit",
+                        "created_ms": created + 5,
+                    },
+                    "supersedes": [
+                        "01a06436-9a70-7000-8000-000000000001",
+                        "01a06436-9a74-7000-8000-000000000005",
+                    ],
+                    // The object is this device's own; one of the heads it
+                    // supersedes came from somewhere else entirely.
+                    (operations::OBJECT_ORIGIN_DEVICE): device,
+                    (operations::SUPERSEDES_ORIGIN): {
+                        "01a06436-9a70-7000-8000-000000000001": device,
+                        "01a06436-9a74-7000-8000-000000000005":
+                            "01a06435-51a7-7653-b4f4-000000000009",
+                    },
+                    "event_type": "org.memory.revision-added",
+                }),
+            },
+        ),
+        (
+            "tombstone-named-origins.json",
+            Envelope {
+                version: ENVELOPE_VERSION,
+                op_id: "01a06436-9a69-74b0-9ff9-85cedc4221c7".to_string(),
+                device_id: device.to_string(),
+                op_seq: 7,
+                kind: operations::TOMBSTONE.to_string(),
+                target_id: "01a06436-9a6f-79b1-94c9-a3513c0c693a".to_string(),
+                created_ms: created + 6,
+                payload: serde_json::json!({
+                    // A tombstone names the heads the deleter could see,
+                    // exactly as a revision names the heads it supersedes.
+                    // A head it does not name was written concurrently
+                    // with the deletion, and the projection keeps that
+                    // file rather than destroying somebody's words.
+                    "supersedes": ["01a06436-9a75-7000-8000-000000000006"],
+                    (operations::OBJECT_ORIGIN_DEVICE): device,
+                    (operations::SUPERSEDES_ORIGIN): {
+                        "01a06436-9a75-7000-8000-000000000006": device,
+                    },
+                }),
             },
         ),
     ]

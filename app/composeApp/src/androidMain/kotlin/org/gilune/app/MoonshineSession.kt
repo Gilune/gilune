@@ -58,6 +58,34 @@ import java.util.function.Consumer
 /// ARM64 before anyone quotes it as ours.
 const val MOONSHINE_INTERVAL_SECONDS = 0.25
 
+/// **The one place the vendor's event shape is read.** Both listeners in
+/// this shell — the live caption's session and the committed decode's
+/// collector — want the same four fields, and both had their own `when`
+/// over the same four subclasses until this round. Two copies of a
+/// vendor's shape is one copy that goes stale on the next AAR bump, and
+/// the failure would be silent in the half nobody was looking at.
+///
+/// Null means the event carries no line, which is deliberately **not**
+/// interpreted here: the caption treats an `Error` as the end of its
+/// session and tears down, while a committed decode ignores it and lets
+/// the job's own failure path answer. Each caller keeps its own null
+/// policy; only the flattening is shared.
+fun captionEventOf(event: TranscriptEvent): CaptionEvent? {
+    val line = when (event) {
+        is TranscriptEvent.LineStarted -> event.line
+        is TranscriptEvent.LineUpdated -> event.line
+        is TranscriptEvent.LineTextChanged -> event.line
+        is TranscriptEvent.LineCompleted -> event.line
+        else -> null
+    } ?: return null
+    return CaptionEvent(
+        kind = event.javaClass.simpleName,
+        lineId = line.id,
+        text = line.text.orEmpty(),
+        complete = line.isComplete,
+    )
+}
+
 /// About four seconds of 16 kHz mono audio at the recorder's 4 KiB reads.
 /// Deep enough to ride out a slow decode pass, shallow enough that the
 /// caption cannot drift minutes behind the speaker while claiming to be
@@ -217,15 +245,14 @@ class MoonshineSession(
     /// The vendor's events, flattened onto [CaptionEvent] and folded. Runs
     /// inline on this thread inside `addAudioToStream`, which is what makes
     /// the caption's timestamps honest and a plain buffer safe.
+    ///
+    /// The flattening is [captionEventOf]; what null means is this
+    /// caller's own policy — here an error ends the caption, because a
+    /// screen showing words that will never continue is worse than a screen
+    /// showing none.
     private fun accept(event: TranscriptEvent) {
-        val line = when (event) {
-            is TranscriptEvent.LineStarted -> event.line
-            is TranscriptEvent.LineUpdated -> event.line
-            is TranscriptEvent.LineTextChanged -> event.line
-            is TranscriptEvent.LineCompleted -> event.line
-            else -> null
-        }
-        if (line == null) {
+        val flattened = captionEventOf(event)
+        if (flattened == null) {
             // An `Error` event is the engine telling us it has stopped
             // being useful. The words already on screen stay put; nothing
             // new will arrive.
@@ -233,15 +260,7 @@ class MoonshineSession(
             return
         }
         if (stopping.get()) return
-        val display = buffer.accept(
-            CaptionEvent(
-                kind = event.javaClass.simpleName,
-                lineId = line.id,
-                text = line.text.orEmpty(),
-                complete = line.isComplete,
-            ),
-        )
-        onDisplay(display)
+        onDisplay(buffer.accept(flattened))
     }
 
     /// One report, whatever went wrong and however often. The caption goes

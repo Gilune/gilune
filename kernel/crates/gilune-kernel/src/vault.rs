@@ -76,6 +76,14 @@ impl Store {
     /// tombstone-proposed objects are never touched.
     pub fn project(&self) -> Result<ProjectSummary> {
         let mut summary = ProjectSummary::default();
+        // Which objects are already reported as unreadable. Read once, so
+        // the ordinary pass — where nothing is wrong — clears nothing and
+        // writes nothing.
+        let unreadable: std::collections::BTreeSet<String> = self
+            .integrity_alerts_of(crate::alerts::VAULT_CONTENT_UNREADABLE)?
+            .into_iter()
+            .map(|a| a.subject)
+            .collect();
         for head in self.live_heads()? {
             if is_attached(&head.payload) {
                 // An attached capture belongs to a note that already
@@ -95,26 +103,68 @@ impl Store {
                 // vouch for would put a placeholder where the words were,
                 // and reconcile would then ingest it as an edit. Hold the
                 // object back and leave whatever is on disk alone.
+                //
+                // And **say so**. Holding back silently was the whole of
+                // the fault: `held_back` is one number on a summary
+                // nothing displays, so a note whose recording had gone
+                // missing simply stopped being maintained, with nothing
+                // anywhere naming the note or the file.
                 summary.held_back += 1;
+                crate::alerts::raise(
+                    self.conn(),
+                    crate::alerts::VAULT_CONTENT_UNREADABLE,
+                    &head.object_id,
+                    &format!(
+                        "this note's own preserved bytes could not be read, so the note at \
+                         {rel_path} is being left exactly as it is rather than rewritten \
+                         around a gap"
+                    ),
+                )?;
                 continue;
             };
+            if unreadable.contains(&head.object_id) {
+                // It renders again: whatever was standing about it stops
+                // being reported without anyone dismissing it.
+                crate::alerts::clear(
+                    self.conn(),
+                    crate::alerts::VAULT_CONTENT_UNREADABLE,
+                    &head.object_id,
+                )?;
+            }
             let canonical_sha = ids::sha256_hex(canonical.as_bytes());
             let target = self.vault().join(&rel_path);
-            let recorded: Option<String> = self
+            let row: Option<(String, String, String)> = self
                 .conn()
                 .query_row(
-                    "SELECT content_sha256 FROM projections WHERE object_id = ?1",
+                    "SELECT content_sha256, rel_path, revision_id FROM projections
+                     WHERE object_id = ?1",
                     [&head.object_id],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .map(Some)
                 .or_else(no_rows_none)?;
+            let recorded = row.as_ref().map(|(sha, _, _)| sha.clone());
+            // The disk read stays: it is what detects an external edit,
+            // and skipping it would be skipping reconciliation's input.
             let on_disk = std::fs::read(&target).ok();
             let disk_sha = on_disk.as_deref().map(ids::sha256_hex);
 
             match (&disk_sha, &recorded) {
                 (Some(d), _) if *d == canonical_sha => {
-                    self.record_projection(&head, &rel_path, &canonical_sha)?;
+                    // Nothing about the projection has changed, so there
+                    // is nothing to record. This used to write the same
+                    // row back on every pass — one INSERT OR REPLACE per
+                    // note per project, which for the steady state of a
+                    // vault is the whole vault rewritten to say that
+                    // nothing happened.
+                    let unchanged = row.as_ref().is_some_and(|(sha, path, revision)| {
+                        sha == &canonical_sha
+                            && path == &rel_path
+                            && revision == &head.revision_id
+                    });
+                    if !unchanged {
+                        self.record_projection(&head, &rel_path, &canonical_sha)?;
+                    }
                     summary.unchanged += 1;
                 }
                 (Some(d), Some(r)) if d != r => {
@@ -143,32 +193,51 @@ impl Store {
     /// must not silently destroy words written on another, and reconcile
     /// preserves it as an import candidate (constitution rule 1).
     ///
-    /// "The kernel wrote these bytes" is asked twice, and it has to be.
-    /// The recorded hash alone is not the question: `ingest_external_edit`
-    /// records the *edited disk bytes* against the projection so that the
-    /// next projection may canonicalise over them, and that made an edit
-    /// look, one tick later, exactly like the kernel's own output — so a
-    /// tombstone arriving afterwards deleted the words the person had
-    /// just written. The second question is the one that cannot be
-    /// spoofed: are these bytes what this kernel would render right now?
+    /// Two questions, and both have to be asked.
+    ///
+    /// **Did the kernel write these bytes?** `disk_sha == recorded_sha`.
+    /// Not sufficient on its own: `ingest_external_edit` records the
+    /// *edited disk bytes* against the projection so the next projection
+    /// may canonicalise over them, so one tick after an edit the hash
+    /// matches again.
+    ///
+    /// **Did the deleter see everything that is here?** Every local head
+    /// of the object must be among the heads the tombstone names. That is
+    /// the question that cannot be spoofed by a hash, and it is the same
+    /// question a revision answers with `supersedes`: a head the deleter
+    /// did not name was concurrent with the deletion, which is somebody
+    /// keeping the note while somebody else deleted it.
+    ///
+    /// What it replaced was a second hash — "are these bytes what this
+    /// kernel would render right now?" — which was cheap to state and
+    /// wrong in both directions. It kept a file whose object had merely
+    /// been revised before the delete arrived (a revise-then-delete in one
+    /// pull left an orphan for ever), and it would have deleted an edit
+    /// that happened to canonicalise to the same bytes.
+    ///
+    /// A tombstone written before the key existed names nothing, and for
+    /// those the old proxy is kept in its narrowest form: withdraw unless
+    /// the projection's own revision came from an external edit.
     fn withdraw_tombstoned(&self) -> Result<i64> {
-        let doomed: Vec<(String, String, String)> = {
+        let doomed: Vec<(String, String, String, String)> = {
             let mut stmt = self.conn().prepare(
-                "SELECT p.object_id, p.rel_path, p.content_sha256
+                "SELECT p.object_id, p.rel_path, p.content_sha256, p.revision_id
                  FROM projections p JOIN objects o ON o.object_id = p.object_id
                  WHERE o.deleted = 1",
             )?;
-            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })?;
             rows.collect::<std::result::Result<_, _>>()?
         };
         let mut removed = 0;
-        for (object_id, rel_path, recorded_sha) in doomed {
+        for (object_id, rel_path, recorded_sha, projected_revision) in doomed {
             let target = self.vault().join(&rel_path);
             match std::fs::read(&target) {
                 Ok(bytes) => {
                     let disk_sha = ids::sha256_hex(&bytes);
                     let ours = disk_sha == recorded_sha
-                        && self.canonical_sha(&object_id)?.as_deref() == Some(disk_sha.as_str());
+                        && self.deleter_saw_everything(&object_id, &projected_revision)?;
                     if !ours {
                         // Somebody's words, not ours. The file stays and
                         // so does the projection row, so reconcile finds
@@ -203,6 +272,14 @@ impl Store {
     pub fn reconcile(&self) -> Result<ReconcileSummary> {
         let mut summary = ReconcileSummary::default();
         let mut seen_paths: Vec<String> = Vec::new();
+        // Objects whose `vault-deleted-note-edited` notice is still true
+        // at the end of this pass: a file is still in the vault, still
+        // carrying that object's id, and still unclaimed by the kernel.
+        // Anything standing that is *not* in here has been resolved — the
+        // person deleted the file, or brought it back as something new —
+        // and a notice about a decision already taken is a notice nobody
+        // can act on.
+        let mut kept: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         for rel_path in self.markdown_files()? {
             seen_paths.push(rel_path.clone());
@@ -248,6 +325,13 @@ impl Store {
                         .map(Some)
                         .or_else(no_rows_none)?;
                     let Some((recorded_path, recorded_sha)) = known else {
+                        // A file carrying an id the kernel no longer
+                        // claims. When that object was deleted elsewhere,
+                        // this is the note being kept because it was
+                        // edited here, and its notice is still true.
+                        if self.is_deleted(&object_id)? {
+                            kept.insert(object_id.clone());
+                        }
                         summary.imports += self.record_import(&rel_path)?;
                         continue;
                     };
@@ -275,6 +359,7 @@ impl Store {
                             // the very hash that authorises deleting the
                             // file (constitution rule 1: never destroy
                             // what the kernel did not write).
+                            kept.insert(object_id.clone());
                             summary.imports += self.keep_edit_of_deleted(&object_id, &rel_path)?;
                         } else {
                             self.ingest_external_edit(&object_id, &body, text.as_bytes())?;
@@ -313,6 +398,26 @@ impl Store {
                 summary.tombstone_proposals += 1;
             }
         }
+
+        // Withdraw every kept-edit notice the vault no longer bears out.
+        // The alert had no exit at all: it was raised when the edit was
+        // first noticed and stood for ever, so a person who read it and
+        // then deleted the file — or brought the words back as a new note
+        // — was left with a standing notice about a decision they had
+        // already made. Resolution is *observed* here rather than
+        // recorded in a column, so it cannot go stale: the question is
+        // asked of the vault on every pass.
+        for alert in self
+            .integrity_alerts_of(crate::alerts::VAULT_DELETED_NOTE_EDITED)?
+        {
+            if !kept.contains(&alert.subject) {
+                crate::alerts::clear(
+                    self.conn(),
+                    crate::alerts::VAULT_DELETED_NOTE_EDITED,
+                    &alert.subject,
+                )?;
+            }
+        }
         Ok(summary)
     }
 
@@ -342,6 +447,17 @@ impl Store {
                 rusqlite::params![proposal_id, if accept { "accepted" } else { "rejected" }],
             )?;
             if accept {
+                // The heads the deleter could see, named in the operation
+                // exactly as a revision names the heads it supersedes.
+                // Without them a tombstone says only "this object is
+                // gone", and the receiving projection had no way to tell
+                // "the deleter saw everything that is here" from "somebody
+                // else wrote something the deleter never had in front of
+                // them" — so it fell back to re-rendering the object and
+                // comparing hashes, which an ingested edit could match.
+                let superseded = crate::revisions::heads(conn, &object_id)?;
+                let mut carried = serde_json::json!({ "supersedes": superseded });
+                crate::operations::name_origins(conn, &object_id, &superseded, &mut carried)?;
                 conn.execute(
                     "UPDATE objects SET deleted = 1 WHERE object_id = ?1",
                     [&object_id],
@@ -351,7 +467,7 @@ impl Store {
                     conn,
                     crate::operations::TOMBSTONE,
                     &object_id,
-                    serde_json::json!({}),
+                    carried,
                     ids::now_ms(),
                 )?;
             }
@@ -378,7 +494,7 @@ impl Store {
     // ---------------------------------------------------------- internals
 
     fn live_heads(&self) -> Result<Vec<Head>> {
-        let mut stmt = self.conn().prepare(&head_sql("o.deleted = 0"))?;
+        let mut stmt = self.conn().prepare(&head_sql())?;
         let rows = stmt.query_map([], read_head)?;
         let mut heads: Vec<Head> = Vec::new();
         for row in rows {
@@ -391,20 +507,61 @@ impl Store {
         Ok(heads)
     }
 
-    /// One object's head, deleted or not. The deleted case is the point:
-    /// withdrawing a projection has to know what the kernel would render
-    /// for an object whose file it is about to remove.
-    fn head_of(&self, object_id: &str) -> Result<Option<Head>> {
-        let mut stmt = self.conn().prepare(&head_sql("o.object_id = ?1"))?;
-        let mut rows = stmt.query_map([object_id], read_head)?;
-        rows.next().transpose().map_err(KernelError::from)
-    }
-
-    /// The digest of what this kernel would write for an object right
-    /// now, or `None` when it has no head or cannot be rendered.
-    fn canonical_sha(&self, object_id: &str) -> Result<Option<String>> {
-        let Some(head) = self.head_of(object_id)? else { return Ok(None) };
-        Ok(self.render(&head)?.map(|text| ids::sha256_hex(text.as_bytes())))
+    /// Whether every head this device holds for the object is named by a
+    /// tombstone about it — "the deleter saw everything that is here".
+    ///
+    /// The union across every tombstone the object has: with several
+    /// deletions from several devices, a head any one of them named was
+    /// seen by a deleter, and a head none of them named was concurrent
+    /// with all of them.
+    ///
+    /// A tombstone written before the key existed names nothing at all,
+    /// and cannot be told from one that legitimately named no heads. For
+    /// those the older, weaker proxy stands: the projection's own revision
+    /// is not an external edit. It is not exact — it cannot see an edit
+    /// made on another device — but it is the question the key now
+    /// answers properly, and a vault holding pre-key tombstones has by
+    /// definition never synced under a kernel that wrote them.
+    fn deleter_saw_everything(
+        &self,
+        object_id: &str,
+        projected_revision: &str,
+    ) -> Result<bool> {
+        let mut named: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut any_key = false;
+        {
+            let mut stmt = self.conn().prepare(
+                "SELECT payload FROM operations WHERE kind = ?1 AND target_id = ?2",
+            )?;
+            let rows = stmt.query_map(
+                rusqlite::params![crate::operations::TOMBSTONE, object_id],
+                |row| row.get::<_, String>(0),
+            )?;
+            for row in rows {
+                let payload: serde_json::Value =
+                    serde_json::from_str(&row?).unwrap_or(serde_json::Value::Null);
+                let Some(heads) = payload.get("supersedes").and_then(|v| v.as_array()) else {
+                    continue;
+                };
+                any_key = true;
+                named.extend(heads.iter().filter_map(|v| v.as_str()).map(str::to_string));
+            }
+        }
+        if !any_key {
+            let origin: Option<String> = self
+                .conn()
+                .query_row(
+                    "SELECT origin FROM revisions WHERE revision_id = ?1",
+                    [projected_revision],
+                    |row| row.get(0),
+                )
+                .map(Some)
+                .or_else(no_rows_none)?;
+            return Ok(origin.as_deref() != Some("external-edit"));
+        }
+        Ok(crate::revisions::heads(self.conn(), object_id)?
+            .iter()
+            .all(|head| named.contains(head)))
     }
 
     fn is_deleted(&self, object_id: &str) -> Result<bool> {
@@ -674,11 +831,10 @@ impl Store {
     }
 }
 
-/// The head selection every projection reads, with one `WHERE` clause
-/// swapped. `where_clause` is always a literal from this module — never
-/// host-supplied text — so replicas cannot disagree about which head
-/// renders, whichever caller asked.
-fn head_sql(where_clause: &str) -> String {
+/// The head selection the projection reads. One statement, ordered by the
+/// one rule every reader takes (`newest_head_first`), so replicas cannot
+/// disagree about which head renders.
+fn head_sql() -> String {
     format!(
         "SELECT o.object_id, o.type_id, o.type_schema, o.created_ms,
                 r.revision_id, r.payload,
@@ -686,7 +842,7 @@ fn head_sql(where_clause: &str) -> String {
          FROM objects o
          JOIN heads h ON h.object_id = o.object_id
          JOIN revisions r ON r.revision_id = h.revision_id
-         WHERE {where_clause}
+         WHERE o.deleted = 0
          ORDER BY o.object_id, {}",
         crate::revisions::newest_head_first("r").trim_start_matches("ORDER BY ")
     )
@@ -792,22 +948,59 @@ mod tests {
         std::fs::read_to_string(store.vault().join(rel)).expect("read projection")
     }
 
-    /// A tombstone for `object_id`, delivered the way one really arrives:
-    /// as another device's operation, applied through `apply_operation`.
-    fn tombstone_from_elsewhere(store: &Store, object_id: &str) {
+    /// One operation from another device, applied the way one really
+    /// arrives — through `apply_operation`, not by poking the database.
+    fn from_elsewhere(
+        store: &Store,
+        seq: i64,
+        kind: &str,
+        target: &str,
+        payload: serde_json::Value,
+    ) {
         let bytes = crate::operations::encode(&crate::operations::Envelope {
             version: crate::operations::ENVELOPE_VERSION,
-            op_id: "elsewhere-1".to_string(),
+            op_id: format!("elsewhere-{seq}"),
             device_id: "device-elsewhere".to_string(),
-            op_seq: 1,
-            kind: crate::operations::TOMBSTONE.to_string(),
-            target_id: object_id.to_string(),
-            created_ms: 1_700_000_000_000,
-            payload: serde_json::json!({}),
+            op_seq: seq,
+            kind: kind.to_string(),
+            target_id: target.to_string(),
+            created_ms: 1_700_000_000_000 + seq,
+            payload,
         });
         store
             .apply_operation("test", &bytes, crate::limits::Limits::DEFAULT)
-            .expect("the tombstone applies");
+            .expect("the operation applies");
+    }
+
+    /// A tombstone written before tombstones named the heads they saw —
+    /// which is every tombstone in every vault that already exists.
+    fn tombstone_from_elsewhere(store: &Store, object_id: &str) {
+        from_elsewhere(
+            store,
+            1,
+            crate::operations::TOMBSTONE,
+            object_id,
+            serde_json::json!({}),
+        );
+    }
+
+    /// A tombstone that names what the deleter could see.
+    fn tombstone_naming(store: &Store, seq: i64, object_id: &str, heads: &[&str]) {
+        from_elsewhere(
+            store,
+            seq,
+            crate::operations::TOMBSTONE,
+            object_id,
+            serde_json::json!({ "supersedes": heads }),
+        );
+    }
+
+    fn head_of(store: &Store, object_id: &str) -> String {
+        crate::revisions::heads(store.conn(), object_id)
+            .expect("heads")
+            .first()
+            .expect("a head")
+            .clone()
     }
 
     fn alert_kinds(store: &Store) -> Vec<String> {
@@ -817,6 +1010,95 @@ mod tests {
             .into_iter()
             .map(|a| a.kind)
             .collect()
+    }
+
+    #[test]
+    fn a_revision_and_then_a_deletion_in_one_pull_withdraws_the_file() {
+        // The regression the second hash caused. A device revised the note
+        // and then deleted it, and both operations arrived before this
+        // device projected anything. The file on disk is still the bytes
+        // the kernel wrote — nobody here touched it — but re-rendering the
+        // object now produces the *revised* text, so "are these the bytes
+        // I would write today" answered no and the file was kept for ever
+        // as an orphan of a note that had been deleted.
+        let (_dir, store, rel) = captured("first words");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let seen = head_of(&store, &object_id);
+
+        from_elsewhere(
+            &store,
+            1,
+            crate::operations::OBJECT_REVISED,
+            &object_id,
+            serde_json::json!({
+                "object_id": object_id,
+                "revision": {
+                    "revision_id": "rev-elsewhere",
+                    "payload": serde_json::json!({ "text": "second words" }).to_string(),
+                    "origin": "external-edit",
+                    "created_ms": 1_700_000_000_500i64,
+                },
+                "supersedes": [seen],
+            }),
+        );
+        tombstone_naming(&store, 2, &object_id, &["rev-elsewhere"]);
+
+        assert_eq!(store.project().expect("project").removed, 1);
+        assert!(!store.vault().join(&rel).exists(), "the deletion is carried out");
+        assert!(alert_kinds(&store).is_empty(), "and it is not reported as a decision");
+    }
+
+    #[test]
+    fn an_edit_the_deleter_had_already_seen_is_withdrawn() {
+        // The other half of the same rule, and the one that says this is a
+        // question about *what the deleter saw* rather than about who
+        // wrote the bytes. The edit was made here, synced, and only then
+        // deleted — so the deleter had it in front of them, named it, and
+        // the deletion is a decision about the edited note.
+        let (_dir, store, rel) = captured("written here");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let edited = read_rel(&store, &rel).replace("written here", "and edited here");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+        assert_eq!(store.reconcile().expect("reconcile").edits, 1);
+        let mine = head_of(&store, &object_id);
+
+        tombstone_naming(&store, 1, &object_id, &[mine.as_str()]);
+        assert_eq!(store.project().expect("project").removed, 1);
+        assert!(!store.vault().join(&rel).exists());
+    }
+
+    #[test]
+    fn an_edit_the_deleter_never_saw_keeps_the_file_even_when_the_hash_matches() {
+        // The second-order case, and the reason the head question exists:
+        // `ingest_external_edit` records the *edited disk bytes* against
+        // the projection, so one tick after an edit "did the kernel write
+        // these bytes" answers yes. Only the head the tombstone does not
+        // name says that somebody wrote something the deleter never had.
+        let (_dir, store, rel) = captured("written here");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let seen = head_of(&store, &object_id);
+        let edited = read_rel(&store, &rel).replace("written here", "and edited here");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+        assert_eq!(store.reconcile().expect("reconcile").edits, 1);
+
+        // The deleter names only the head it had — the capture — not the
+        // edit that happened concurrently here.
+        tombstone_naming(&store, 1, &object_id, &[seen.as_str()]);
+        assert_eq!(store.project().expect("project").removed, 0);
+        assert_eq!(
+            read_rel(&store, &rel),
+            edited,
+            "the words a person wrote survive a deletion made elsewhere"
+        );
     }
 
     #[test]
@@ -850,6 +1132,84 @@ mod tests {
         assert_eq!(store.reconcile().expect("again").imports, 0);
         assert_eq!(store.project().expect("again").removed, 0);
         assert!(store.vault().join(&rel).exists());
+    }
+
+    #[test]
+    fn the_kept_note_notice_is_withdrawn_once_the_person_deletes_the_file() {
+        // The notice had no exit: it was raised when the edit was first
+        // noticed and stood for ever, so somebody who read it and then
+        // chose — deleted the file, having decided the deletion was right
+        // — was left with a standing notice about a decision they had
+        // already made.
+        let (_dir, store, rel) = captured("worth keeping");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        tombstone_from_elsewhere(&store, &object_id);
+        let edited = read_rel(&store, &rel).replace("worth keeping", "still worth keeping");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+        store.reconcile().expect("reconcile");
+        assert_eq!(alert_kinds(&store), vec![crate::alerts::VAULT_DELETED_NOTE_EDITED]);
+
+        std::fs::remove_file(store.vault().join(&rel)).expect("the person decides");
+        store.reconcile().expect("reconcile");
+        assert!(
+            alert_kinds(&store).is_empty(),
+            "a notice about a decision already taken is one nobody can act on"
+        );
+    }
+
+    #[test]
+    fn the_kept_note_notice_is_withdrawn_once_the_words_come_back_as_something_new() {
+        // The other resolution, and the second-order case: the person
+        // keeps the words by making them a note of their own. The old id
+        // is gone from the vault, so the notice about the old object is
+        // finished — and this is *observed* on every pass rather than
+        // recorded once, so it cannot go stale.
+        let (_dir, store, rel) = captured("worth keeping");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        tombstone_from_elsewhere(&store, &object_id);
+        let edited = read_rel(&store, &rel).replace("worth keeping", "still worth keeping");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+        store.reconcile().expect("reconcile");
+        assert_eq!(alert_kinds(&store), vec![crate::alerts::VAULT_DELETED_NOTE_EDITED]);
+
+        // Brought back as a plain note: no front matter, no old identity.
+        std::fs::write(store.vault().join(&rel), "still worth keeping\n").expect("adopt");
+        store.reconcile().expect("reconcile");
+        assert!(alert_kinds(&store).is_empty());
+        assert!(
+            store.vault().join(&rel).exists(),
+            "and nothing on disk was touched to achieve it"
+        );
+    }
+
+    #[test]
+    fn the_kept_note_notice_stands_while_the_file_is_still_there_unclaimed() {
+        // The case that must NOT clear: the person has not decided yet.
+        // A sweep that cleared everything it did not recognise would make
+        // the notice vanish on the very next reconcile.
+        let (_dir, store, rel) = captured("worth keeping");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        tombstone_from_elsewhere(&store, &object_id);
+        let edited = read_rel(&store, &rel).replace("worth keeping", "still worth keeping");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+        store.reconcile().expect("reconcile");
+        for _ in 0..3 {
+            store.reconcile().expect("reconcile again");
+            assert_eq!(
+                alert_kinds(&store),
+                vec![crate::alerts::VAULT_DELETED_NOTE_EDITED],
+                "the decision is still waiting to be made"
+            );
+        }
     }
 
     #[test]
@@ -908,6 +1268,26 @@ mod tests {
         assert_eq!(summary.written, 0);
         assert_eq!(read_rel(&store, &rel), before, "the note is left exactly as it was");
         assert!(!read_rel(&store, &rel).contains("![["), "and never becomes a link");
+
+        // And it is **said**. Holding back silently was the whole of the
+        // fault: `held_back` is a number on a summary nothing displays, so
+        // a note whose recording had gone missing simply stopped being
+        // maintained with nothing anywhere naming it.
+        let alerts = store.integrity_alerts().expect("alerts");
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].kind, crate::alerts::VAULT_CONTENT_UNREADABLE);
+        assert!(!alerts[0].damage, "the note is intact; something beside it is not");
+        assert!(alerts[0].detail.contains(&rel), "a person has to be told which note");
+
+        // The second-order half: it has to stop being reported when the
+        // bytes come back, without anyone dismissing it.
+        std::fs::write(store.vault().join(&blob_rel), b"the only copy of these words")
+            .expect("restore the bytes");
+        assert_eq!(store.project().expect("project").held_back, 0);
+        assert!(
+            store.integrity_alerts().expect("alerts").is_empty(),
+            "a condition that clears stops being reported"
+        );
     }
 
     #[test]
@@ -1007,6 +1387,45 @@ mod tests {
             )
             .expect("count");
         assert_eq!(rows, 0, "a file that is simply gone needs no withdrawing");
+    }
+
+    #[test]
+    fn a_settled_projection_is_not_rewritten_but_never_goes_stale_either() {
+        // Projection used to write the whole vault back on every pass to
+        // say that nothing had happened: one `INSERT OR REPLACE` per note
+        // per project. Skipping that is only safe if the skip asks about
+        // *everything* the row holds — the path and the revision as well
+        // as the hash — and this is the second-order case where it does
+        // not: the file is byte-identical, so the hash matches, and the
+        // path has changed underneath it.
+        let (_dir, store, rel) = captured("settled");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let row = |store: &Store| -> (String, String) {
+            store
+                .conn()
+                .query_row(
+                    "SELECT rel_path, revision_id FROM projections WHERE object_id = ?1",
+                    [&object_id],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("row")
+        };
+        let before = row(&store);
+        assert_eq!(store.project().expect("again").written, 0, "a settled vault writes nothing");
+        assert_eq!(row(&store), before, "and the row it did not write is still right");
+
+        let moved = "Renamed/settled.md";
+        std::fs::create_dir_all(store.vault().join("Renamed")).expect("mkdir");
+        std::fs::rename(store.vault().join(&rel), store.vault().join(moved)).expect("rename");
+        assert_eq!(store.reconcile().expect("reconcile").renames, 1);
+
+        store.project().expect("project");
+        assert_eq!(row(&store).0, moved, "the row followed the file rather than being skipped");
+        assert!(!store.vault().join(&rel).exists(), "and nothing was rebuilt at the old path");
+        assert!(store.verify().expect("verify").is_empty());
     }
 
     #[test]

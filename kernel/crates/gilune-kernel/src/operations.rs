@@ -39,6 +39,23 @@ pub const TOMBSTONE: &str = "tombstone";
 const MAX_ID_CHARS: usize = 128;
 const MAX_KIND_CHARS: usize = 64;
 
+/// Payload key naming the device that originated the object an operation
+/// is *about* — written by `object-revised` and by `tombstone`.
+///
+/// Additive, and the whole of `sync-awaiting-referent`'s exit. Waiting
+/// for something to arrive is only correct while it still might: a
+/// revision or a tombstone of an object belonging to a device this vault
+/// has revoked names something that can never come, and without this key
+/// the receiver has no way to know that — it has never seen the object,
+/// so it cannot look up whose it was. Naming the origin in the operation
+/// is what turns "wait for ever" into "this is moot, carry on".
+pub const OBJECT_ORIGIN_DEVICE: &str = "object_origin_device";
+
+/// Payload key mapping each superseded revision id to the device that
+/// originated it. Same reasoning as `OBJECT_ORIGIN_DEVICE`, for the heads
+/// a revision names rather than the object it belongs to.
+pub const SUPERSEDES_ORIGIN: &str = "supersedes_origin";
+
 /// One operation on the wire. Field order in the encoded form is
 /// alphabetical and fixed; see `encode`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -255,6 +272,84 @@ pub(crate) fn record(
     Ok(envelope.op_id)
 }
 
+/// Which device originated an object, and which originated each of its
+/// revisions, as far as the operations this replica holds can say.
+///
+/// Read from the operations themselves rather than from `objects` or
+/// `revisions`, because those tables record *what* exists here and never
+/// *whose* it was. A full replica holds a third device's history, so the
+/// answer is frequently not this device.
+#[derive(Debug, Default, Clone)]
+pub(crate) struct Origins {
+    /// The device whose `object-created` brought the object into being.
+    pub object: Option<String>,
+    /// revision id -> the device whose operation carried it.
+    pub revisions: std::collections::BTreeMap<String, String>,
+}
+
+pub(crate) fn origins_of(conn: &rusqlite::Connection, object_id: &str) -> Result<Origins> {
+    let mut origins = Origins::default();
+    let mut stmt = conn.prepare(
+        "SELECT device_id, kind, payload FROM operations
+         WHERE target_id = ?1 AND kind IN (?2, ?3) ORDER BY op_seq",
+    )?;
+    let rows = stmt.query_map(
+        rusqlite::params![object_id, OBJECT_CREATED, OBJECT_REVISED],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        },
+    )?;
+    for row in rows {
+        let (device_id, kind, payload) = row?;
+        let payload: serde_json::Value =
+            serde_json::from_str(&payload).unwrap_or(serde_json::Value::Null);
+        if kind == OBJECT_CREATED {
+            origins.object = Some(device_id.clone());
+        }
+        let revision_id = text(
+            payload.get("revision").unwrap_or(&serde_json::Value::Null),
+            "revision_id",
+        );
+        if !revision_id.is_empty() {
+            origins.revisions.insert(revision_id, device_id);
+        }
+    }
+    Ok(origins)
+}
+
+/// Add the origin keys to a naming operation's payload. Only what is
+/// known is written: the canonical bytes say what is true and nothing
+/// else, and a receiver that finds no key falls back to inferring the
+/// origin from operations it already holds.
+pub(crate) fn name_origins(
+    conn: &rusqlite::Connection,
+    object_id: &str,
+    superseded: &[String],
+    carried: &mut serde_json::Value,
+) -> Result<()> {
+    let origins = origins_of(conn, object_id)?;
+    if let Some(device) = &origins.object {
+        carried[OBJECT_ORIGIN_DEVICE] = serde_json::Value::String(device.clone());
+    }
+    let named: serde_json::Map<String, serde_json::Value> = superseded
+        .iter()
+        .filter_map(|head| {
+            origins
+                .revisions
+                .get(head)
+                .map(|device| (head.clone(), serde_json::Value::String(device.clone())))
+        })
+        .collect();
+    if !named.is_empty() {
+        carried[SUPERSEDES_ORIGIN] = serde_json::Value::Object(named);
+    }
+    Ok(())
+}
+
 fn next_seq(conn: &rusqlite::Connection, device_id: &str) -> Result<i64> {
     let highest: i64 = conn.query_row(
         "SELECT COALESCE(MAX(op_seq), 0) FROM operations WHERE device_id = ?1",
@@ -305,6 +400,21 @@ pub struct Applied {
     pub blob_wanted: Option<BlobNeed>,
 }
 
+/// What to do about a referent an operation names that is not held here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Referent {
+    /// It may still arrive: halt this stream at the naming operation and
+    /// resume, unchanged, once it does.
+    Awaited,
+    /// Its origin device is refused by this vault, so it never will:
+    /// a revision or a tombstone of an object this vault excludes is moot.
+    Refused(String),
+    /// This replica holds the operation that carries it and does not
+    /// interpret that kind (rule 9). Waiting would be waiting for a plugin
+    /// rather than for a peer, and the peer cannot help.
+    Uninterpreted,
+}
+
 /// A blob referenced by an applied operation whose content has not
 /// arrived. `received` is how many bytes are already staged, so a
 /// transfer resumes where it stopped rather than starting again.
@@ -326,17 +436,6 @@ impl Store {
             [device_id],
             |row| row.get(0),
         )?)
-    }
-
-    /// Every device this one has applied anything from, with its
-    /// frontier. The local device is absent: it has no frontier because
-    /// it never applies its own operations.
-    pub fn sync_frontiers(&self) -> Result<Vec<(String, i64)>> {
-        let mut stmt = self
-            .conn()
-            .prepare("SELECT device_id, applied_seq FROM sync_frontiers ORDER BY device_id")?;
-        let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// Every device whose operations this replica holds, with the highest
@@ -509,15 +608,28 @@ impl Store {
 
         // The stream is healthy again: whatever was standing about it
         // stops being reported without anyone dismissing it.
-        for kind in [
-            alerts::SYNC_GAP,
-            alerts::SYNC_CORRUPT_OPERATION,
-            alerts::SYNC_UNSUPPORTED_VERSION,
-            alerts::SYNC_LIMIT_EXCEEDED,
-            alerts::SYNC_AWAITING_REFERENT,
-        ] {
-            alerts::clear(conn, kind, &envelope.device_id)?;
-            alerts::clear(conn, kind, stream)?;
+        //
+        // Guarded by one read, because the healthy case is the common one
+        // and this was ten DELETE statements per applied operation — ten
+        // writes, in WAL mode, to withdraw notices that were almost never
+        // standing. A peer catching up with a thousand operations paid
+        // ten thousand of them.
+        let standing: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM integrity_alerts WHERE subject = ?1 OR subject = ?2",
+            rusqlite::params![envelope.device_id, stream],
+            |row| row.get(0),
+        )?;
+        if standing > 0 {
+            for kind in [
+                alerts::SYNC_GAP,
+                alerts::SYNC_CORRUPT_OPERATION,
+                alerts::SYNC_UNSUPPORTED_VERSION,
+                alerts::SYNC_LIMIT_EXCEEDED,
+                alerts::SYNC_AWAITING_REFERENT,
+            ] {
+                alerts::clear(conn, kind, &envelope.device_id)?;
+                alerts::clear(conn, kind, stream)?;
+            }
         }
         Ok(applied)
     }
@@ -525,7 +637,11 @@ impl Store {
     /// Raise the alert and name the halt. Split out so every refusal
     /// takes exactly one path to being visible, and so the alert kind a
     /// person is shown is the one the refusal chose.
-    fn halt(&self, kind: &str, subject: &str, detail: &str) -> KernelError {
+    ///
+    /// `pub(crate)` because content refusals are refusals too: `blobs.rs`
+    /// had its own byte-identical copy of this, so "every refusal takes
+    /// exactly one path" was true of operations and not of transfers.
+    pub(crate) fn halt(&self, kind: &str, subject: &str, detail: &str) -> KernelError {
         if let Err(e) = alerts::raise(self.conn(), kind, subject, detail) {
             return e;
         }
@@ -534,6 +650,140 @@ impl Store {
             subject: subject.to_string(),
             reason: detail.to_string(),
         }
+    }
+
+    /// What to do about something an operation names that is not here.
+    ///
+    /// Three answers, and only one of them waits. `sync-awaiting-referent`
+    /// shipped with no exit at all: a stream halted on a naming operation
+    /// and resumed *only* when the referent arrived, so a referent that
+    /// could never arrive halted that device's stream for ever, and in a
+    /// full-replica mesh that is one revoked device silencing a healthy
+    /// one. These are the two ways it can be known that waiting is futile.
+    fn object_verdict(
+        &self,
+        conn: &rusqlite::Connection,
+        object_id: &str,
+        named_origin: Option<&str>,
+    ) -> Result<Referent> {
+        if let Some(device) = self.refused_origin(named_origin)? {
+            return Ok(Referent::Refused(device));
+        }
+        // Nothing was named — a naming operation written before the key
+        // existed — or what was named is welcome here. Fall back to what
+        // this replica already holds about the object. If the object is
+        // absent while an operation about it is present, that operation
+        // is one this build does not interpret: an `object-created` it
+        // could read would have created the row.
+        let held = self.uninterpreted_ops_for(conn, object_id)?;
+        for (device, _) in &held {
+            if self.is_refused(device)? {
+                return Ok(Referent::Refused(device.clone()));
+            }
+        }
+        if held.is_empty() {
+            Ok(Referent::Awaited)
+        } else {
+            Ok(Referent::Uninterpreted)
+        }
+    }
+
+    /// The same question about a superseded head rather than an object.
+    ///
+    /// It cannot share `object_verdict`'s fallback: here the object *does*
+    /// exist, so operations about it are always present and "held ⇒
+    /// uninterpreted" would answer `Uninterpreted` for every head still
+    /// in flight — which is exactly the late-arrival case that must wait.
+    /// So the fallback asks the narrower question: is the revision named
+    /// inside an operation this build did not interpret?
+    fn head_verdict(
+        &self,
+        conn: &rusqlite::Connection,
+        object_id: &str,
+        revision_id: &str,
+        named_origin: Option<&str>,
+    ) -> Result<Referent> {
+        if let Some(device) = self.refused_origin(named_origin)? {
+            return Ok(Referent::Refused(device));
+        }
+        for (device, payload) in self.uninterpreted_ops_for(conn, object_id)? {
+            // Identifiers are UUIDs, so naming one is a substring match
+            // over a payload whose shape this build cannot parse — which
+            // is the whole point of it being uninterpreted.
+            if payload.contains(revision_id) {
+                if self.is_refused(&device)? {
+                    return Ok(Referent::Refused(device));
+                }
+                return Ok(Referent::Uninterpreted);
+            }
+        }
+        Ok(Referent::Awaited)
+    }
+
+    fn refused_origin(&self, named_origin: Option<&str>) -> Result<Option<String>> {
+        let Some(device) = named_origin.filter(|d| !d.is_empty()) else {
+            return Ok(None);
+        };
+        if self.is_refused(device)? {
+            return Ok(Some(device.to_string()));
+        }
+        Ok(None)
+    }
+
+    /// Operations this replica holds about an object whose kind it does
+    /// not interpret — a `legacy-operation` from adoption, or a kind
+    /// belonging to a plugin that is not installed here (rule 9).
+    fn uninterpreted_ops_for(
+        &self,
+        conn: &rusqlite::Connection,
+        object_id: &str,
+    ) -> Result<Vec<(String, String)>> {
+        let mut stmt = conn.prepare(
+            "SELECT device_id, payload FROM operations
+             WHERE target_id = ?1 AND kind NOT IN (?2, ?3, ?4) ORDER BY op_seq",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::params![object_id, OBJECT_CREATED, OBJECT_REVISED, TOMBSTONE],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Record that a referent will never arrive.
+    ///
+    /// The standing `sync-awaiting-referent` about it is **withdrawn**,
+    /// because a notice saying "waiting for this" about something that
+    /// cannot come is worse than no notice at all. Where the reason is
+    /// policy rather than a missing plugin, `sync-referent-refused` takes
+    /// its place — informational, never damage: it says why a stream did
+    /// *not* stop. A referent held under a kind this build cannot read
+    /// needs no second notice, because `sync-unknown-op-kind` is already
+    /// standing about that kind.
+    fn referent_moot(
+        &self,
+        conn: &rusqlite::Connection,
+        referent_id: &str,
+        detail: Option<String>,
+    ) -> Result<()> {
+        alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, referent_id)?;
+        if let Some(detail) = detail {
+            alerts::raise(conn, alerts::SYNC_REFERENT_REFUSED, referent_id, &detail)?;
+        }
+        Ok(())
+    }
+
+    /// As `referent_moot`, and the operation itself is then preserved and
+    /// forwarded without being interpreted: the frontier moves, nothing
+    /// local is written, and this stream carries on.
+    fn forward_only(
+        &self,
+        conn: &rusqlite::Connection,
+        applied: &mut Applied,
+        referent_id: &str,
+        detail: Option<String>,
+    ) -> Result<()> {
+        applied.uninterpreted = true;
+        self.referent_moot(conn, referent_id, detail)
     }
 
     /// The refusal an apply arm makes when what it names has not arrived.
@@ -640,9 +890,16 @@ impl Store {
                 }
                 self.announce(conn, envelope, &object_id, text(revision, "payload").as_str())?;
                 // Whatever was waiting on this object or this revision is
-                // waiting no longer.
-                alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &object_id)?;
-                alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &revision_id)?;
+                // waiting no longer — and so is anything that said it
+                // could never come. The second is not hypothetical: a
+                // device that was revoked can be paired again
+                // (`unrefuse_device`), and then the very history this
+                // vault declared moot starts arriving. A notice saying it
+                // never will is then a lie standing over real data.
+                for referent in [&object_id, &revision_id] {
+                    alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, referent)?;
+                    alerts::clear(conn, alerts::SYNC_REFERENT_REFUSED, referent)?;
+                }
             }
             OBJECT_REVISED => {
                 let revision = payload.get("revision").unwrap_or(&serde_json::Value::Null);
@@ -656,7 +913,27 @@ impl Store {
                     });
                 }
                 if !row_exists(conn, "objects", "object_id", &object_id)? {
-                    return Err(Self::awaiting(&object_id, envelope));
+                    match self.object_verdict(
+                        conn,
+                        &object_id,
+                        payload.get(OBJECT_ORIGIN_DEVICE).and_then(|v| v.as_str()),
+                    )? {
+                        Referent::Awaited => return Err(Self::awaiting(&object_id, envelope)),
+                        Referent::Refused(device) => {
+                            let detail = format!(
+                                "{} at seq {} revises an object originated by {device}, which \
+                                 this device has revoked; the operation is kept and forwarded \
+                                 but nothing here changes",
+                                envelope.kind, envelope.op_seq
+                            );
+                            self.forward_only(conn, &mut applied, &object_id, Some(detail))?;
+                            return Ok(applied);
+                        }
+                        Referent::Uninterpreted => {
+                            self.forward_only(conn, &mut applied, &object_id, None)?;
+                            return Ok(applied);
+                        }
+                    }
                 }
                 let known: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM revisions WHERE revision_id = ?1",
@@ -689,9 +966,37 @@ impl Store {
                     // already superseded here is present in `revisions`
                     // and deletes nothing, which is right.
                     if let Some(superseded) = payload.get("supersedes").and_then(|v| v.as_array()) {
+                        let named = payload.get(SUPERSEDES_ORIGIN);
                         for head in superseded.iter().filter_map(|v| v.as_str()) {
                             if !row_exists(conn, "revisions", "revision_id", head)? {
-                                return Err(Self::awaiting(head, envelope));
+                                let origin = named
+                                    .and_then(|m| m.get(head))
+                                    .and_then(|v| v.as_str());
+                                match self.head_verdict(conn, &object_id, head, origin)? {
+                                    Referent::Awaited => {
+                                        return Err(Self::awaiting(head, envelope))
+                                    }
+                                    // A head from an origin this vault
+                                    // refuses, or one carried by an
+                                    // operation nothing here reads, is
+                                    // **satisfied**: it will never stand
+                                    // as a head, so there is nothing left
+                                    // for this revision to supersede.
+                                    Referent::Refused(device) => {
+                                        let detail = format!(
+                                            "a head superseded by {} at seq {} was originated by \
+                                             {device}, which this device has revoked; it can \
+                                             never arrive, so the supersession is complete",
+                                            envelope.kind, envelope.op_seq
+                                        );
+                                        self.referent_moot(conn, head, Some(detail))?;
+                                        continue;
+                                    }
+                                    Referent::Uninterpreted => {
+                                        self.referent_moot(conn, head, None)?;
+                                        continue;
+                                    }
+                                }
                             }
                             conn.execute(
                                 "DELETE FROM heads WHERE object_id = ?1 AND revision_id = ?2",
@@ -711,10 +1016,38 @@ impl Store {
                     )?;
                 }
                 alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &revision_id)?;
+                alerts::clear(conn, alerts::SYNC_REFERENT_REFUSED, &revision_id)?;
             }
             TOMBSTONE => {
                 if !row_exists(conn, "objects", "object_id", &envelope.target_id)? {
-                    return Err(Self::awaiting(&envelope.target_id, envelope));
+                    match self.object_verdict(
+                        conn,
+                        &envelope.target_id,
+                        payload.get(OBJECT_ORIGIN_DEVICE).and_then(|v| v.as_str()),
+                    )? {
+                        Referent::Awaited => {
+                            return Err(Self::awaiting(&envelope.target_id, envelope))
+                        }
+                        Referent::Refused(device) => {
+                            let detail = format!(
+                                "a tombstone at seq {} deletes an object originated by {device}, \
+                                 which this device has revoked; the object was never accepted \
+                                 here, so deleting it is moot",
+                                envelope.op_seq
+                            );
+                            self.forward_only(
+                                conn,
+                                &mut applied,
+                                &envelope.target_id,
+                                Some(detail),
+                            )?;
+                            return Ok(applied);
+                        }
+                        Referent::Uninterpreted => {
+                            self.forward_only(conn, &mut applied, &envelope.target_id, None)?;
+                            return Ok(applied);
+                        }
+                    }
                 }
                 conn.execute(
                     "UPDATE objects SET deleted = 1 WHERE object_id = ?1",
@@ -882,34 +1215,12 @@ impl Store {
 /// — and now so that it outlives the identity that made the decision.
 ///
 /// Device ids only. No key material ever reaches the vault.
-const REFUSED_DEVICES: &str = "refused_devices";
+pub(crate) const REFUSED_DEVICES: &str = "refused_devices";
 
 impl Store {
     /// Devices whose operations this one refuses to apply.
     pub fn refused_devices(&self) -> Result<Vec<String>> {
-        let raw: Option<String> = self
-            .conn()
-            .query_row(
-                "SELECT value FROM meta WHERE key = ?1",
-                [REFUSED_DEVICES],
-                |row| row.get(0),
-            )
-            .map(Some)
-            .or_else(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => Ok(None),
-                e => Err(KernelError::from(e)),
-            })?;
-        let Some(raw) = raw else { return Ok(Vec::new()) };
-        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
-        Ok(parsed
-            .as_array()
-            .map(|rows| {
-                rows.iter()
-                    .filter_map(|v| v.as_str())
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default())
+        self.with_refused(<[String]>::to_vec)
     }
 
     /// Refuse everything a device originates, from now on (ADR 0019 § 9).
@@ -989,8 +1300,10 @@ impl Store {
         Ok(())
     }
 
+    /// Asked once per applied operation, and now once per naming
+    /// operation's referent too, so it answers without copying the list.
     fn is_refused(&self, device_id: &str) -> Result<bool> {
-        Ok(self.refused_devices()?.iter().any(|d| d == device_id))
+        self.with_refused(|refused| refused.iter().any(|d| d == device_id))
     }
 
     /// Take on a new device identity for this vault, because the vault
@@ -1035,6 +1348,11 @@ impl Store {
         match done {
             Ok(previous) => {
                 conn.execute_batch("COMMIT;")?;
+                // The one thing that changes this device's id, so the one
+                // place the cached answer has to be dropped — otherwise
+                // this handle would keep applying its own new operations
+                // under the identity it has just left behind.
+                self.forget_device_id();
                 Ok(previous)
             }
             Err(e) => {
@@ -1408,6 +1726,356 @@ mod tests {
             decode(raw.as_bytes(), &Limits::DEFAULT),
             Err(DecodeError::Field { field: "op_seq", .. })
         ));
+    }
+
+    // ------------------------------------ the exit from waiting for ever
+
+    fn store() -> (tempfile::TempDir, Store) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        (dir, store)
+    }
+
+    fn deliver(
+        store: &Store,
+        device: &str,
+        seq: i64,
+        kind: &str,
+        target: &str,
+        payload: serde_json::Value,
+    ) -> Result<Applied> {
+        let bytes = encode(&Envelope {
+            version: ENVELOPE_VERSION,
+            op_id: format!("{device}-{seq}"),
+            device_id: device.to_string(),
+            op_seq: seq,
+            kind: kind.to_string(),
+            target_id: target.to_string(),
+            created_ms: 1_700_000_000_000 + seq,
+            payload,
+        });
+        store.apply_operation("peer", &bytes, Limits::DEFAULT)
+    }
+
+    fn a_note(object_id: &str, revision_id: &str, text: &str) -> serde_json::Value {
+        serde_json::json!({
+            "object": {
+                "object_id": object_id,
+                "type_id": crate::capture::SOURCE_TYPE,
+                "type_schema": 1,
+                "created_ms": 1_700_000_000_000i64,
+            },
+            "revision": {
+                "revision_id": revision_id,
+                "payload": serde_json::json!({ "text": text }).to_string(),
+                "origin": "capture",
+                "created_ms": 1_700_000_000_000i64,
+            },
+        })
+    }
+
+    fn a_revision(
+        object_id: &str,
+        revision_id: &str,
+        text: &str,
+        extra: serde_json::Value,
+    ) -> serde_json::Value {
+        let mut payload = serde_json::json!({
+            "object_id": object_id,
+            "revision": {
+                "revision_id": revision_id,
+                "payload": serde_json::json!({ "text": text }).to_string(),
+                "origin": "external-edit",
+                "created_ms": 1_700_000_000_100i64,
+            },
+        });
+        for (key, value) in extra.as_object().expect("an object") {
+            payload[key] = value.clone();
+        }
+        payload
+    }
+
+    fn alerts_of(store: &Store) -> Vec<(String, String)> {
+        store
+            .integrity_alerts()
+            .expect("alerts")
+            .into_iter()
+            .map(|a| (a.kind, a.subject))
+            .collect()
+    }
+
+    #[test]
+    fn a_revision_of_a_revoked_devices_object_carries_on_instead_of_waiting_for_ever() {
+        // The fault this whole exit exists for. Device A's object never
+        // reached this vault and never will, because A is revoked here —
+        // so B's revision of it names something that cannot arrive, and
+        // waiting for it halted B's stream permanently. One revoked
+        // device silencing a healthy one, in a full-replica mesh.
+        let (_dir, store) = store();
+        store.refuse_device("device-a").expect("revoke A");
+
+        let applied = deliver(
+            &store,
+            "device-b",
+            1,
+            OBJECT_REVISED,
+            "obj-1",
+            a_revision(
+                "obj-1",
+                "rev-2",
+                "what b made of it",
+                serde_json::json!({ OBJECT_ORIGIN_DEVICE: "device-a" }),
+            ),
+        )
+        .expect("B's stream carries on rather than halting");
+        assert!(applied.uninterpreted, "preserved and forwarded, never interpreted");
+        assert_eq!(
+            store.sync_frontier("device-b").expect("frontier"),
+            1,
+            "the frontier moves, which is what lets the rest of B's history through"
+        );
+        assert_eq!(
+            alerts_of(&store),
+            vec![(alerts::SYNC_REFERENT_REFUSED.to_string(), "obj-1".to_string())],
+            "and it says why the stream did not stop"
+        );
+        assert!(
+            !crate::alerts::is_damage(alerts::SYNC_REFERENT_REFUSED),
+            "carrying on past a revoked device's history is policy, not damage"
+        );
+
+        // The second-order half, and the whole point: B's own history
+        // still arrives behind it.
+        deliver(&store, "device-b", 2, OBJECT_CREATED, "obj-2", a_note("obj-2", "rev-3", "b's own"))
+            .expect("apply");
+        assert_eq!(store.status().expect("status").sources, 1, "B is not silenced by A");
+    }
+
+    #[test]
+    fn a_revision_whose_object_may_still_arrive_waits_exactly_as_it_always_did() {
+        // The second-order case for the exit: it must not swallow the
+        // ordinary one. A referent from a device this vault is happy to
+        // hear from is in flight, not moot, and the stream halts for it.
+        let (_dir, store) = store();
+        let halted = deliver(
+            &store,
+            "device-b",
+            1,
+            OBJECT_REVISED,
+            "obj-1",
+            a_revision(
+                "obj-1",
+                "rev-2",
+                "what b made of it",
+                serde_json::json!({ OBJECT_ORIGIN_DEVICE: "device-a" }),
+            ),
+        );
+        assert!(matches!(
+            halted,
+            Err(KernelError::SyncHalted { ref kind, .. })
+                if kind == alerts::SYNC_AWAITING_REFERENT
+        ));
+        assert_eq!(store.sync_frontier("device-b").expect("frontier"), 0);
+        assert_eq!(
+            alerts_of(&store),
+            vec![(alerts::SYNC_AWAITING_REFERENT.to_string(), "obj-1".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_referent_held_under_a_kind_this_build_cannot_read_is_not_waited_for() {
+        // The legacy shape: the operation that would have created the
+        // object is here, stored and forwarded, under a kind nothing here
+        // interprets (rule 9) — a `legacy-operation` from adoption, or a
+        // plugin's kind this build does not carry. The object will never
+        // appear however long the stream waits, because what is missing
+        // is a plugin and not a peer.
+        let (_dir, store) = store();
+        deliver(
+            &store,
+            "device-a",
+            1,
+            "com.example.thing-made",
+            "obj-1",
+            serde_json::json!({ "revision_id": "rev-1", "shape": "square" }),
+        )
+        .expect("an unknown kind applies and forwards");
+
+        let applied = deliver(
+            &store,
+            "device-a",
+            2,
+            OBJECT_REVISED,
+            "obj-1",
+            // No origin key at all: the pre-key shape, so the fallback
+            // has to work this out from what is already held.
+            a_revision("obj-1", "rev-2", "changed", serde_json::json!({})),
+        )
+        .expect("the stream carries on");
+        assert!(applied.uninterpreted);
+        assert_eq!(store.sync_frontier("device-a").expect("frontier"), 2);
+        let kinds: Vec<String> = alerts_of(&store).into_iter().map(|(k, _)| k).collect();
+        assert!(kinds.contains(&alerts::SYNC_UNKNOWN_OP_KIND.to_string()));
+        assert!(
+            !kinds.contains(&alerts::SYNC_AWAITING_REFERENT.to_string()),
+            "nothing is being waited for: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn a_superseded_head_from_a_revoked_device_is_treated_as_already_gone() {
+        let (_dir, store) = store();
+        store.refuse_device("device-a").expect("revoke A");
+        deliver(&store, "device-b", 1, OBJECT_CREATED, "obj-1", a_note("obj-1", "rev-1", "first"))
+            .expect("the object arrives");
+
+        let applied = deliver(
+            &store,
+            "device-b",
+            2,
+            OBJECT_REVISED,
+            "obj-1",
+            a_revision(
+                "obj-1",
+                "rev-3",
+                "second",
+                serde_json::json!({
+                    // One head B saw that this vault never will.
+                    "supersedes": ["rev-2-from-a"],
+                    SUPERSEDES_ORIGIN: { "rev-2-from-a": "device-a" },
+                }),
+            ),
+        )
+        .expect("the revision lands rather than waiting for a head that cannot come");
+        assert!(
+            !applied.uninterpreted,
+            "the revision itself was interpreted; only the head it named was moot"
+        );
+        assert_eq!(
+            crate::revisions::heads(store.conn(), "obj-1").expect("heads").len(),
+            2,
+            "rev-1 was not named, so it survives as a concurrent head"
+        );
+        assert!(alerts_of(&store)
+            .contains(&(alerts::SYNC_REFERENT_REFUSED.to_string(), "rev-2-from-a".to_string())));
+    }
+
+    #[test]
+    fn a_superseded_head_that_may_still_arrive_still_halts_the_stream() {
+        // The second-order case for the head arm: an unnamed origin, or a
+        // named one this vault is happy to hear from, is a revision in
+        // flight — and applying over it would leave it standing as a head
+        // nothing ever superseded, which is a conflict nobody made.
+        let (_dir, store) = store();
+        deliver(&store, "device-b", 1, OBJECT_CREATED, "obj-1", a_note("obj-1", "rev-1", "first"))
+            .expect("the object arrives");
+        let halted = deliver(
+            &store,
+            "device-b",
+            2,
+            OBJECT_REVISED,
+            "obj-1",
+            a_revision(
+                "obj-1",
+                "rev-3",
+                "second",
+                serde_json::json!({
+                    "supersedes": ["rev-2-in-flight"],
+                    SUPERSEDES_ORIGIN: { "rev-2-in-flight": "device-a" },
+                }),
+            ),
+        );
+        assert!(matches!(
+            halted,
+            Err(KernelError::SyncHalted { ref subject, .. }) if subject == "rev-2-in-flight"
+        ));
+        assert_eq!(store.sync_frontier("device-b").expect("frontier"), 1);
+    }
+
+    #[test]
+    fn a_tombstone_for_a_revoked_devices_object_is_moot_rather_than_a_halt() {
+        let (_dir, store) = store();
+        store.refuse_device("device-a").expect("revoke A");
+        let applied = deliver(
+            &store,
+            "device-b",
+            1,
+            TOMBSTONE,
+            "obj-1",
+            serde_json::json!({ OBJECT_ORIGIN_DEVICE: "device-a", "supersedes": ["rev-1"] }),
+        )
+        .expect("deleting something this vault never accepted is not a fault");
+        assert!(applied.uninterpreted);
+        assert_eq!(store.sync_frontier("device-b").expect("frontier"), 1);
+        assert_eq!(
+            alerts_of(&store),
+            vec![(alerts::SYNC_REFERENT_REFUSED.to_string(), "obj-1".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_notice_that_something_is_awaited_is_withdrawn_once_it_can_never_come() {
+        // Revocation can happen *after* a stream has already halted
+        // waiting. The standing notice then names something that will
+        // never arrive, which is worse than no notice: it asks a person
+        // to wait for a thing they themselves made impossible.
+        let (_dir, store) = store();
+        let revision = a_revision(
+            "obj-1",
+            "rev-2",
+            "what b made of it",
+            serde_json::json!({ OBJECT_ORIGIN_DEVICE: "device-a" }),
+        );
+        assert!(deliver(&store, "device-b", 1, OBJECT_REVISED, "obj-1", revision.clone()).is_err());
+        assert_eq!(
+            alerts_of(&store),
+            vec![(alerts::SYNC_AWAITING_REFERENT.to_string(), "obj-1".to_string())]
+        );
+
+        store.refuse_device("device-a").expect("revoke A, having given up on it");
+        deliver(&store, "device-b", 1, OBJECT_REVISED, "obj-1", revision).expect("carries on now");
+        assert_eq!(
+            alerts_of(&store),
+            vec![(alerts::SYNC_REFERENT_REFUSED.to_string(), "obj-1".to_string())],
+            "one notice replaces the other rather than both standing"
+        );
+    }
+
+    #[test]
+    fn a_notice_that_something_can_never_come_is_withdrawn_when_it_comes_after_all() {
+        // The second-order case for the exit itself. Revocation is not
+        // final: `unrefuse_device` exists because a device can be paired
+        // again, and then the very history this vault declared moot
+        // starts arriving. A standing "this can never come" over data
+        // that has come is a worse lie than the one it replaced.
+        let (_dir, store) = store();
+        store.refuse_device("device-a").expect("revoke A");
+        deliver(
+            &store,
+            "device-b",
+            1,
+            OBJECT_REVISED,
+            "obj-1",
+            a_revision(
+                "obj-1",
+                "rev-2",
+                "what b made of it",
+                serde_json::json!({ OBJECT_ORIGIN_DEVICE: "device-a" }),
+            ),
+        )
+        .expect("carries on");
+        assert_eq!(
+            alerts_of(&store),
+            vec![(alerts::SYNC_REFERENT_REFUSED.to_string(), "obj-1".to_string())]
+        );
+
+        store.unrefuse_device("device-a").expect("A is paired again");
+        deliver(&store, "device-a", 1, OBJECT_CREATED, "obj-1", a_note("obj-1", "rev-1", "a's"))
+            .expect("A's history is welcome again");
+        assert!(
+            alerts_of(&store).is_empty(),
+            "the object arrived, so the notice that it never would is withdrawn"
+        );
     }
 
     #[test]

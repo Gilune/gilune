@@ -529,6 +529,216 @@ fn re_pairing_a_revoked_device_lets_its_operations_in_again() {
     assert!(a.holds_from(&b.device_id()) > 0);
 }
 
+/// **Second-order: welcoming a device back must survive the next launch.**
+///
+/// Re-pairing takes a device out of the vault's refusal set, and the next
+/// `configure` folds the device-local roster's revocations back **into**
+/// that set. Those two are one mechanism with two ends, and a fix to
+/// either end that is tested alone passes while the pair is broken: the
+/// revoked row stayed in the roster after the re-pairing, so the very next
+/// launch refused the device again, for good, with no action left that
+/// could clear it.
+#[test]
+fn re_pairing_a_device_survives_the_next_launch() {
+    let vault = tempfile::tempdir().expect("vault");
+    let local = tempfile::tempdir().expect("local");
+    let phone = Device::new("Phone").listening();
+
+    let was_at = {
+        let desktop = Device::open("Desktop", vault.path(), local.path()).listening();
+        phone.pair_by_code(&desktop).expect("pair");
+        desktop
+            .service
+            .revoke_peer(&desktop.store, &phone.identity_pub())
+            .expect("revoke");
+        assert_eq!(
+            desktop.store.refused_devices().expect("refusals"),
+            vec![phone.device_id()]
+        );
+        phone.pair_by_code(&desktop).expect("re-pair");
+        assert!(desktop.store.refused_devices().expect("refusals").is_empty());
+        desktop.address()
+    };
+
+    // The process ends and starts again, which is where the refusal came
+    // back from.
+    let after = Device::open("Desktop", vault.path(), local.path()).listening();
+    // A restarted device takes its port back (gate C proves that on its
+    // own). Said here so that a suite run where something else in the
+    // machine had taken the port fails as *that* rather than as a
+    // mysterious halt three assertions later.
+    assert_eq!(after.address(), was_at, "the restarted device moved port");
+    assert!(
+        after.store.refused_devices().expect("refusals").is_empty(),
+        "the next launch refused a device the user had deliberately paired again"
+    );
+
+    phone.capture("written after being welcomed back");
+    let report = phone.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert!(after.holds_from(&phone.device_id()) > 0);
+    assert!(after.alerts_of(alerts::SYNC_REVOKED_DEVICE).is_empty());
+}
+
+/// **The same, for a device that re-enrolled in between** — the case the
+/// two ends could not agree about at all.
+///
+/// § 9 refuses by originating device id. § 4 gives a machine a *new*
+/// device id when its vault arrives somewhere holding no identity for it.
+/// So a revoked phone that comes back as a restored backup is the same
+/// device under a new name, carrying history written under the old one —
+/// and re-pairing used to welcome only the new name. The old stream
+/// stayed refused however it arrived, and the alert that said so could
+/// not be cleared by anything the user could do.
+#[test]
+fn re_pairing_a_peer_that_re_enrolled_welcomes_the_history_it_wrote_before() {
+    let vault = tempfile::tempdir().expect("vault");
+    let local = tempfile::tempdir().expect("local");
+    let phone = Device::new("Phone").listening();
+    let tablet = Device::new("Tablet").listening();
+    let phone_device = phone.device_id();
+
+    let was_at = {
+        let desktop = Device::open("Desktop", vault.path(), local.path()).listening();
+        phone.pair_by_code(&desktop).expect("the desktop and the phone pair");
+        tablet.pair_by_code(&phone).expect("the tablet and the phone pair");
+
+        // The phone writes something and only the tablet has a copy: the
+        // desktop must be able to refuse it later, so it must not have it
+        // already.
+        phone.capture("written before any of this");
+        tablet.sync();
+        assert!(tablet.holds_from(&phone_device) > 0, "the tablet is a full replica");
+
+        desktop
+            .service
+            .revoke_peer(&desktop.store, &phone.identity_pub())
+            .expect("the desktop revokes the phone");
+
+        // The tablet relays the phone's work; the desktop refuses it and
+        // raises the alert that says so.
+        tablet.pair_by_code(&desktop).expect("the tablet and the desktop pair");
+        let refused = tablet.sync();
+        assert!(
+            refused.halted.iter().any(|h| h.device_id == phone_device),
+            "the phone's stream should have been refused: {:?}",
+            refused.halted
+        );
+        assert_eq!(desktop.alerts_of(alerts::SYNC_REVOKED_DEVICE).len(), 1);
+        assert_eq!(desktop.holds_from(&phone_device), 0);
+
+        // The phone's vault arrives on a machine holding no identity for
+        // it — a restored backup, a replacement handset. It re-enrols: a
+        // new identity, a new device id, and the old id as its ancestry.
+        let restored_vault = tempfile::tempdir().expect("restored");
+        copy_tree(phone.vault_path.as_path(), restored_vault.path());
+        let rephone = Device::at(
+            "Phone again",
+            restored_vault,
+            tempfile::tempdir().expect("a machine with no identity for it"),
+        )
+        .listening();
+        assert_eq!(rephone.service.enrolment().as_str(), "re-enrolled");
+        assert_ne!(rephone.device_id(), phone_device, "a new name for one device");
+
+        // The user pairs it again. That is the welcome — and it has to
+        // welcome the device, not merely the name it happens to use now.
+        rephone.pair_by_code(&desktop).expect("re-pair the re-enrolled phone");
+        assert!(
+            desktop.store.refused_devices().expect("refusals").is_empty(),
+            "welcoming a device back must welcome the history it wrote before it \
+             re-enrolled: {:?}",
+            desktop.store.refused_devices()
+        );
+        assert!(
+            desktop.alerts_of(alerts::SYNC_REVOKED_DEVICE).is_empty(),
+            "and nobody should have to dismiss a notice about a device just paired"
+        );
+        desktop.address()
+    };
+
+    // The process ends and starts again — the launch that used to fold
+    // the stale revocation straight back in.
+    let after = Device::open("Desktop", vault.path(), local.path()).listening();
+    // Said out loud so that a run where something else took the port
+    // fails as that, rather than as a halt further down.
+    assert_eq!(after.address(), was_at, "the restarted device moved port");
+    assert!(
+        after.store.refused_devices().expect("refusals").is_empty(),
+        "the next launch refused both names of a device that had been paired again"
+    );
+
+    // Proof rather than inference: the tablet, which knows nothing about
+    // anybody's revocations, delivers the phone's older history and it
+    // now applies.
+    let report = tablet.sync();
+    assert!(
+        !report.halted.iter().any(|h| h.device_id == phone_device),
+        "the phone's stream is still being refused: {:?}",
+        report.halted
+    );
+    assert!(
+        after.holds_from(&phone_device) > 0,
+        "the work the phone wrote before it re-enrolled never arrived"
+    );
+    assert!(after.alerts_of(alerts::SYNC_REVOKED_DEVICE).is_empty());
+}
+
+/// And the fix must not be "stop refusing anybody": a device that is
+/// **still** revoked stays refused when a different peer re-enrols.
+#[test]
+fn a_still_revoked_device_stays_refused_when_another_peer_re_enrols() {
+    let vault = tempfile::tempdir().expect("vault");
+    let local = tempfile::tempdir().expect("local");
+    let banished = Device::new("Old tablet").listening();
+    let phone = Device::new("Phone").listening();
+    let banished_device = banished.device_id();
+
+    let was_at = {
+        let desktop = Device::open("Desktop", vault.path(), local.path()).listening();
+        banished.pair_by_code(&desktop).expect("pair");
+        phone.pair_by_code(&desktop).expect("pair");
+        desktop
+            .service
+            .revoke_peer(&desktop.store, &banished.identity_pub())
+            .expect("revoke the tablet");
+
+        // A different device re-enrols and is paired again.
+        let restored_vault = tempfile::tempdir().expect("restored");
+        copy_tree(phone.vault_path.as_path(), restored_vault.path());
+        let rephone = Device::at(
+            "Phone again",
+            restored_vault,
+            tempfile::tempdir().expect("local"),
+        )
+        .listening();
+        rephone.pair_by_code(&desktop).expect("re-pair the phone");
+
+        assert_eq!(
+            desktop.store.refused_devices().expect("refusals"),
+            vec![banished_device.clone()],
+            "welcoming one device back must not amnesty another"
+        );
+        desktop.address()
+    };
+
+    let after = Device::open("Desktop", vault.path(), local.path()).listening();
+    assert_eq!(after.address(), was_at, "the restarted device moved port");
+    assert_eq!(
+        after.store.refused_devices().expect("refusals"),
+        vec![banished_device.clone()],
+        "and the revocation still survives a restart"
+    );
+    banished.capture("written after being revoked");
+    let report = banished.sync();
+    assert!(
+        report.halted.iter().any(|h| h.device_id == banished_device)
+            || !report.halted.is_empty(),
+        "a revoked device got somewhere: {report:?}"
+    );
+    assert_eq!(after.holds_from(&banished_device), 0);
+}
+
 /// **A revocation must survive the vault arriving somewhere else.**
 ///
 /// Points 8 and 9 meeting, which is where the defect lived. The roster is
@@ -816,26 +1026,12 @@ fn the_identity_key_is_nowhere_inside_the_vault() {
     // records — never mind the private one. `meta.identity_pub` is the
     // marker and lives in the kernel database, which is the one place it
     // belongs; the *file* must not be reachable by copying the folder.
-    let mut found = Vec::new();
-    walk(&device.vault_path, &mut found);
-    for path in found {
+    for path in paired::files_under(&device.vault_path) {
         let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
         assert!(
             !name.contains("identity") && !name.contains("roster"),
             "{} is inside the vault, and a copied vault is a cloned identity",
             path.display()
         );
-    }
-}
-
-fn walk(dir: &std::path::Path, into: &mut Vec<std::path::PathBuf>) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            walk(&path, into);
-        } else {
-            into.push(path);
-        }
     }
 }

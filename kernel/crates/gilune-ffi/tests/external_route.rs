@@ -68,6 +68,7 @@ fn revise(payload: &str, text: &str) -> Vec<ProposedOutput> {
         type_schema: 1,
         payload: document.to_string(),
         target: OutputTarget::ReviseSubject,
+        expected_head: None,
     }]
 }
 
@@ -146,6 +147,103 @@ fn a_retried_submit_after_a_lost_reply_lands_exactly_once() {
         gilune.object_text(source_id).expect("text").as_deref(),
         Some("first"),
         "the retry changed nothing"
+    );
+}
+
+/// The same output, but naming the head it was written over.
+fn revise_over(payload: &str, text: &str, head: Option<String>) -> Vec<ProposedOutput> {
+    let mut outputs = revise(payload, text);
+    outputs[0].expected_head = head;
+    outputs
+}
+
+/// Somebody types into the note while the engine is running — by the real
+/// path, not a poke at the database: the projection is edited on disk and
+/// reconciled, which is exactly what a person with the vault open does.
+const TYPED: &str = "typed while the engine was thinking";
+
+fn somebody_types(gilune: &Arc<Gilune>, dir: &tempfile::TempDir, source_id: &str) {
+    gilune.project().expect("project");
+    let rel = gilune
+        .recent_sources(20)
+        .expect("sources")
+        .into_iter()
+        .find(|s| s.object_id == source_id)
+        .and_then(|s| s.projection_rel_path)
+        .expect("the capture has a note");
+    let path = dir.path().join(&rel);
+    let text = std::fs::read_to_string(&path).expect("read");
+    std::fs::write(&path, format!("{text}{TYPED}\n")).expect("edit");
+    gilune.reconcile().expect("reconcile");
+    assert!(
+        gilune.object_text(source_id.to_string()).expect("text").unwrap_or_default().contains(TYPED),
+        "the edit really did become the note's newest revision"
+    );
+}
+
+#[test]
+fn an_output_that_names_the_head_it_read_is_refused_once_the_note_has_moved_on() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (gilune, source_id, _) = engine(&dir);
+    let claim = gilune.clone().claim_job(PROCESSOR.to_string()).expect("claim").expect("job");
+    let payload = claim.job().subject_payload;
+    let head = claim.subject_head().expect("a claimed subject has a head");
+
+    somebody_types(&gilune, &dir, &source_id);
+
+    let refused =
+        gilune.submit_output(claim, revise_over(&payload, "what the engine heard", Some(head)));
+    assert!(
+        refused.is_err(),
+        "a submission that named a head must not overwrite an answer that landed after it"
+    );
+    assert!(
+        gilune.object_text(source_id).expect("text").unwrap_or_default().contains(TYPED),
+        "the words a person wrote are still the words on the note"
+    );
+}
+
+#[test]
+fn an_output_that_names_no_head_still_lands_whatever_the_note_has_become() {
+    // The second-order case, and the one that decides whether this is a
+    // change of behaviour or an addition: compare-and-set is *asked for*.
+    // Everything that shipped names no head and must keep working exactly
+    // as it did — last writer wins, ADR 0013's original contract.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (gilune, source_id, _) = engine(&dir);
+    let claim = gilune.clone().claim_job(PROCESSOR.to_string()).expect("claim").expect("job");
+    let payload = claim.job().subject_payload;
+
+    somebody_types(&gilune, &dir, &source_id);
+
+    let receipt = gilune
+        .submit_output(claim, revise_over(&payload, "what the engine heard", None))
+        .expect("a submission that asked for nothing is refused nothing");
+    assert_eq!(receipt.outputs, 1);
+    assert_eq!(
+        gilune.object_text(source_id).expect("text").as_deref(),
+        Some("what the engine heard")
+    );
+}
+
+#[test]
+fn a_head_that_has_not_moved_is_no_obstacle() {
+    // The other second-order case: the check must not refuse the ordinary
+    // path. Nothing happened while the engine ran, so naming the head is
+    // free and the output lands exactly as it always did.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (gilune, source_id, _) = engine(&dir);
+    let claim = gilune.clone().claim_job(PROCESSOR.to_string()).expect("claim").expect("job");
+    let payload = claim.job().subject_payload;
+    let head = claim.subject_head().expect("head");
+
+    let receipt = gilune
+        .submit_output(claim, revise_over(&payload, "remember the milk", Some(head)))
+        .expect("submit");
+    assert_eq!(receipt.outputs, 1);
+    assert_eq!(
+        gilune.object_text(source_id).expect("text").as_deref(),
+        Some("remember the milk")
     );
 }
 

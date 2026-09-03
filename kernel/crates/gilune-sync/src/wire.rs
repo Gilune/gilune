@@ -140,6 +140,18 @@ impl NoiseChannel {
     // — one place a roster entry can be pinned against, rather than two
     // that could disagree.
 
+    /// How long this session will wait on a silent peer.
+    ///
+    /// Exists so that "an established session runs on the session timeout
+    /// and not on the handshake's" can be asserted. Every flow reaches
+    /// this through one function now, and the assertion is what keeps it
+    /// that way: a flow that grew its own tail again would leave a live
+    /// session on a fifteen-second read, and a blob chunk on a slow link
+    /// would then fail as though the peer had gone away.
+    pub fn read_timeout(&self) -> Option<std::time::Duration> {
+        self.stream.read_timeout().ok().flatten()
+    }
+
     fn read_segment(&mut self) -> Result<Option<Vec<u8>>> {
         let mut length = [0u8; 2];
         match self.stream.read_exact(&mut length) {

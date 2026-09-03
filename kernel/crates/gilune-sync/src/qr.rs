@@ -49,9 +49,13 @@ mod tests {
     use super::*;
     use crate::pairing::{decode_qr_payload, encode_qr_payload};
 
+    fn at(address: &str) -> Vec<String> {
+        vec![address.to_string()]
+    }
+
     #[test]
     fn a_pairing_payload_encodes_to_a_square_matrix() {
-        let payload = encode_qr_payload(&[7u8; 16], "a1b2c3d4e5f67890", "192.168.1.20:51837");
+        let payload = encode_qr_payload(&[7u8; 16], "a1b2c3d4e5f67890", &at("192.168.1.20:51837"));
         let matrix = encode(&payload).expect("encode");
         assert!(matrix.width >= 21, "no QR version is smaller than 21 modules");
         assert_eq!(
@@ -64,7 +68,7 @@ mod tests {
 
     #[test]
     fn the_finder_pattern_is_where_a_scanner_expects_it() {
-        let payload = encode_qr_payload(&[1u8; 16], "0123456789abcdef", "10.0.0.2:51837");
+        let payload = encode_qr_payload(&[1u8; 16], "0123456789abcdef", &at("10.0.0.2:51837"));
         let matrix = encode(&payload).expect("encode");
         // The top-left finder is a 7x7 dark ring with a 3x3 dark centre.
         for x in 0..7 {
@@ -80,11 +84,24 @@ mod tests {
         // The encoder is not re-implemented here; what this pins is that
         // the payload handed to it is the payload the pairing module
         // agreed on, so a change to one is caught against the other.
-        let payload = encode_qr_payload(&[5u8; 16], "0123456789abcdef", "10.0.0.2:51837");
+        let payload = encode_qr_payload(&[5u8; 16], "0123456789abcdef", &at("10.0.0.2:51837"));
         assert!(encode(&payload).is_ok());
         let decoded = decode_qr_payload(&payload).expect("decode");
-        assert_eq!(decoded.address, "10.0.0.2:51837");
+        assert_eq!(decoded.addresses, at("10.0.0.2:51837"));
         assert_eq!(decoded.secret, vec![5u8; 16]);
+
+        // And a machine offering several still fits a scannable matrix,
+        // which is the reason the hosts share one port in the field.
+        let several = encode_qr_payload(
+            &[5u8; 16],
+            "0123456789abcdef",
+            &[
+                "192.168.1.20:51837".to_string(),
+                "172.20.0.1:51837".to_string(),
+                "10.8.0.2:51837".to_string(),
+            ],
+        );
+        assert!(encode(&several).is_ok(), "a four-address payload has to still encode");
     }
 
     #[test]

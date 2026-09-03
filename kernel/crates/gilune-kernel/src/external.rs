@@ -37,6 +37,11 @@ pub struct ExternalClaim {
     pub job: Job,
     /// The subject's head document at the moment of the claim.
     pub subject_payload: String,
+    /// **Which** revision that document was — the head at the claim.
+    /// A claimant that hands it back as an output's `expected_head` is
+    /// refused rather than overwriting an answer that landed while its
+    /// engine was running. `None` only for a subject with no head at all.
+    pub subject_head: Option<String>,
     /// `None` when the subject has no preserved bytes.
     pub blob: Option<BlobFacts>,
 }
@@ -58,6 +63,7 @@ impl Store {
         let ctx = ProcessorCtx::new(self, job.subject_id.clone());
         let claim = ExternalClaim {
             subject_payload: ctx.subject_payload()?,
+            subject_head: ctx.subject_head()?,
             blob: ctx.subject_blob_facts()?,
             job,
         };
@@ -236,26 +242,16 @@ pub struct BlobStream {
 
 impl BlobStream {
     fn open(store: &Store, subject_id: &str, facts: BlobFacts) -> Result<Self> {
-        use sha2::Digest;
         let path = store.vault().join(&facts.rel_path);
         let mut file =
             std::fs::File::open(&path).map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
         // The verification pass: streamed, so a large blob is never
-        // resident even to be checked.
-        let mut hasher = sha2::Sha256::new();
-        let mut buffer = vec![0u8; CHUNK_BYTES];
-        let mut total = 0u64;
-        loop {
-            let n = file
-                .read(&mut buffer)
-                .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
-            if n == 0 {
-                break;
-            }
-            hasher.update(&buffer[..n]);
-            total += n as u64;
-        }
-        if hex::encode(hasher.finalize()) != facts.sha256 || total != facts.bytes {
+        // resident even to be checked. The kernel's one hashing loop —
+        // there were three of these, and the day one of them grew a
+        // whole-file read is the day a recording stopped fitting.
+        let (digest, total) = crate::blobs::digest_reader(&mut file)
+            .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
+        if digest != facts.sha256 || total != facts.bytes {
             return Err(KernelError::VaultUnusable {
                 reason: format!("blob for {subject_id} fails its digest"),
             });
@@ -264,7 +260,13 @@ impl BlobStream {
         // handle cannot be swapped for another file underneath us.
         use std::io::Seek;
         file.rewind().map_err(|e| KernelError::Io { path, source: e })?;
-        Ok(Self { file, facts, hasher: sha2::Sha256::new(), read: 0, drained: false })
+        Ok(Self {
+            file,
+            facts,
+            hasher: <sha2::Sha256 as sha2::Digest>::new(),
+            read: 0,
+            drained: false,
+        })
     }
 
     /// What the caller should expect to receive, so a truncated read is
@@ -314,7 +316,13 @@ pub fn digest_of(bytes: &[u8]) -> String {
 }
 
 pub const FAKE_EXTERNAL_PLUGIN: &str = "org.memory.fake-external";
-pub const FAKE_EXTERNAL_PROCESSOR: &str = "external-transcribe";
+/// The stand-in's processor id. Deliberately **not** named after
+/// transcription: the kernel names no domain type (constitution rule 4),
+/// and a stand-in that exists to prove a transport called itself
+/// `external-transcribe` — putting a domain word in kernel code, and
+/// implying that this route is for speech when it is for any
+/// interpretation at all.
+pub const FAKE_EXTERNAL_PROCESSOR: &str = "external-interpret";
 
 /// The stand-in *external* provider: a declaration whose implementation
 /// deliberately does not exist in this binary as a `Processor`, so the
@@ -369,7 +377,7 @@ pub fn run_external_once(
     }
     let digest = hex::encode(hasher.finalize());
     document["text"] = serde_json::Value::String(format!(
-        "[external transcript of {bytes} bytes, sha {}]",
+        "[external interpretation of {bytes} bytes, sha {}]",
         &digest[..12]
     ));
     let delivered = store.submit_external_outputs(
@@ -380,6 +388,7 @@ pub fn run_external_once(
             type_schema: 1,
             payload: document.to_string(),
             target: crate::processor::OutputTarget::ReviseSubject,
+            expected_head: None,
         }],
     )?;
     Ok(Some(delivered))
@@ -447,6 +456,7 @@ mod tests {
                     type_schema: 1,
                     payload: document.to_string(),
                     target: OutputTarget::ReviseSubject,
+                    expected_head: None,
                 }],
             )
             .expect("submit")
@@ -577,6 +587,7 @@ mod tests {
                 type_schema: 1,
                 payload: serde_json::json!({ "media": "wav", "text": text }).to_string(),
                 target: OutputTarget::ReviseSubject,
+                expected_head: None,
             }]
         };
         let first = store
@@ -622,6 +633,7 @@ mod tests {
                 type_schema: 1,
                 payload: serde_json::json!({ "media": "wav", "text": text }).to_string(),
                 target: OutputTarget::ReviseSubject,
+                expected_head: None,
             }]
         };
         let quick_delivery = store
@@ -661,6 +673,7 @@ mod tests {
                 type_schema: 1,
                 payload: serde_json::json!({ "text": "too late" }).to_string(),
                 target: OutputTarget::ReviseSubject,
+                expected_head: None,
             }],
         );
         assert!(matches!(refused, Err(KernelError::ProcessorNotClaimable { .. })));
@@ -815,6 +828,7 @@ mod tests {
                     type_schema: 1,
                     payload: serde_json::json!({ "text": "a summary" }).to_string(),
                     target: OutputTarget::NewObject,
+                    expected_head: None,
                 }],
             )
             .expect("submit");

@@ -22,6 +22,24 @@ class SyncAlertsTest {
 
     private val shells = listOf(DESKTOP_ALERT_WORDS, PHONE_ALERT_WORDS)
 
+    /// One row as the kernel hands it over. [damage] is the kernel's own
+    /// classification travelling on the alert — the shell has no copy of
+    /// the rule any more, which is the whole point of the field, so a test
+    /// that wants a damaging condition says so here.
+    private fun alert(
+        kind: String,
+        damage: Boolean = false,
+        subject: String = "",
+        detail: String = "",
+    ) = uniffi.gilune_ffi.IntegrityAlert(
+        alertId = "alert-$kind",
+        kind = kind,
+        subject = subject,
+        detail = detail,
+        raisedMs = 0L,
+        damage = damage,
+    )
+
     // ------------------------------------------------------------------
     // True of every kind, on every shell
     // ------------------------------------------------------------------
@@ -90,6 +108,8 @@ class SyncAlertsTest {
         assertEquals("sync-revoked-device", SYNC_REVOKED_DEVICE)
         assertEquals("sync-awaiting-referent", SYNC_AWAITING_REFERENT)
         assertEquals("vault-deleted-note-edited", VAULT_DELETED_NOTE_EDITED)
+        assertEquals("sync-referent-refused", SYNC_REFERENT_REFUSED)
+        assertEquals("vault-content-unreadable", VAULT_CONTENT_UNREADABLE)
         assertEquals(ALERT_KINDS.size, ALERT_KINDS.toSet().size, "no kind is listed twice")
     }
 
@@ -177,7 +197,6 @@ class SyncAlertsTest {
             assertTrue(said.contains("kept exactly as it arrived"), "it must say it is kept")
             assertTrue(said.contains("passed on"), "a full replica forwards it: '$said'")
         }
-        assertFalse(alertIsDamage(SYNC_UNKNOWN_OP_KIND))
     }
 
     @Test
@@ -221,7 +240,6 @@ class SyncAlertsTest {
                 "a self-clearing condition must say it is self-clearing: '$said'",
             )
         }
-        assertFalse(alertIsDamage(SYNC_AWAITING_REFERENT))
     }
 
     @Test
@@ -244,7 +262,6 @@ class SyncAlertsTest {
                 assertFalse(said.contains(alarm), "a kept file read as damage: '$said'")
             }
         }
-        assertFalse(alertIsDamage(VAULT_DELETED_NOTE_EDITED))
         // The desktop's aside earns its place most here: the detail is a
         // path, which is the one identifier a person can act on.
         assertTrue(
@@ -254,14 +271,46 @@ class SyncAlertsTest {
     }
 
     @Test
-    fun everyOtherKindIsTreatedAsDamage() {
-        // Including one this build has never heard of: assuming a newer
-        // kernel's condition is harmless is the assumption that could hide
-        // a real one.
-        for (kind in ALERT_KINDS - NON_DAMAGE_ALERT_KINDS) {
-            assertTrue(alertIsDamage(kind), "$kind stopped counting as damage")
+    fun aRefusedReferentReadsAsATidyUpRatherThanALoss() {
+        // The exit from `sync-awaiting-referent`, not another way in: the
+        // thing named belongs to a removed device and is never coming, so
+        // the change is set aside and the stream carries on.
+        for (words in shells) {
+            val said = alertSentence(SYNC_REFERENT_REFUSED, "op-3", "", words)
+            assertTrue(said.contains("device you removed"), "'$said'")
+            assertTrue(said.contains("nothing is lost"), "'$said'")
+            assertTrue(said.contains("set aside"), "'$said'")
+            for (alarm in listOf("damaged", "corrupt", "thrown away")) {
+                assertFalse(said.contains(alarm), "a tidy-up read as damage: '$said'")
+            }
         }
-        assertTrue(alertIsDamage("sync-something-from-2027"))
+    }
+
+    @Test
+    fun anUnreadableNoteFileSaysWhatToDoAboutIt() {
+        // Raised by the vault, about bytes beside the note rather than the
+        // note itself — and the person is the only one who can put them
+        // back, so the sentence says where to look.
+        for (words in shells) {
+            val said = alertSentence(VAULT_CONTENT_UNREADABLE, "object-1", "Notes/milk.md", words)
+            assertTrue(said.contains("could not be read"), "'$said'")
+            assertTrue(said.contains("put it back"), "the way out is the point: '$said'")
+            assertTrue(said.contains("Nothing was lost"), "'$said'")
+        }
+    }
+
+    @Test
+    fun damageIsWhateverTheKernelSaidAndNothingHereSecondGuessesIt() {
+        // The classification moved to the kernel, which owns the kinds.
+        // Two copies of it — one per shell — meant a kind the kernel added
+        // read as breakage in both until somebody remembered to edit them.
+        assertTrue(alertIsDamage(alert(SYNC_GAP, damage = true)))
+        assertFalse(alertIsDamage(alert(SYNC_UNKNOWN_OP_KIND, damage = false)))
+        // Including for a kind this build has never heard of, where the
+        // kernel's answer is "not damage": a newer condition is not
+        // knowable here, and calling it breakage is an over-claim.
+        assertFalse(alertIsDamage(alert("sync-something-from-2027", damage = false)))
+        assertTrue(alertIsDamage(alert("sync-something-from-2027", damage = true)))
     }
 
     // ------------------------------------------------------------------
@@ -311,10 +360,11 @@ class SyncAlertsTest {
     fun aBannerHoldingARealHaltSaysSoAndCountsItsReasonsWhenThereAreSeveral() {
         assertEquals(
             "Sync stopped short of taking everything in",
-            alertsHeading(listOf(SYNC_GAP)),
+            alertsHeading(listOf(alert(SYNC_GAP, damage = true))),
         )
         assertTrue(
-            alertsHeading(listOf(SYNC_GAP, SYNC_UNKNOWN_OP_KIND)).contains("2 reasons"),
+            alertsHeading(listOf(alert(SYNC_GAP, damage = true), alert(SYNC_UNKNOWN_OP_KIND)))
+                .contains("2 reasons"),
             "a mixed banner counts what it holds",
         )
     }
@@ -323,7 +373,7 @@ class SyncAlertsTest {
     fun aBannerOfOnlyUnknownKindsDoesNotOpenBySayingSyncStopped() {
         assertEquals(
             "Sync kept something it could not read",
-            alertsHeading(listOf(SYNC_UNKNOWN_OP_KIND, SYNC_UNKNOWN_OP_KIND)),
+            alertsHeading(listOf(alert(SYNC_UNKNOWN_OP_KIND), alert(SYNC_UNKNOWN_OP_KIND))),
         )
     }
 
@@ -331,20 +381,51 @@ class SyncAlertsTest {
     fun aBannerOfOnlyWaitsAndKeepsNeverSaysSyncStopped() {
         assertEquals(
             "Sync is waiting for the rest of another device's history",
-            alertsHeading(listOf(SYNC_AWAITING_REFERENT)),
+            alertsHeading(listOf(alert(SYNC_AWAITING_REFERENT))),
         )
         assertEquals(
             "A note deleted on another device was kept here",
-            alertsHeading(listOf(VAULT_DELETED_NOTE_EDITED)),
+            alertsHeading(listOf(alert(VAULT_DELETED_NOTE_EDITED))),
         )
-        val mixed = alertsHeading(listOf(SYNC_AWAITING_REFERENT, SYNC_UNKNOWN_OP_KIND))
+        assertEquals(
+            "Sync set aside a change about a device you removed",
+            alertsHeading(listOf(alert(SYNC_REFERENT_REFUSED))),
+        )
+        assertEquals(
+            "A note's text file could not be read",
+            alertsHeading(listOf(alert(VAULT_CONTENT_UNREADABLE))),
+        )
+        val mixed = alertsHeading(listOf(alert(SYNC_AWAITING_REFERENT), alert(SYNC_UNKNOWN_OP_KIND)))
         assertTrue(mixed.startsWith("Nothing has stopped"), "'$mixed'")
         assertFalse(mixed.contains("stopped short"), "'$mixed'")
     }
 
     @Test
     fun oneRealHaltAmongTheHarmlessOnesStillOpensBySayingSyncStopped() {
-        val said = alertsHeading(listOf(SYNC_AWAITING_REFERENT, SYNC_GAP, SYNC_UNKNOWN_OP_KIND))
+        val said = alertsHeading(
+            listOf(
+                alert(SYNC_AWAITING_REFERENT),
+                alert(SYNC_GAP, damage = true),
+                alert(SYNC_UNKNOWN_OP_KIND),
+            ),
+        )
         assertTrue(said.startsWith("Sync stopped short"), "'$said'")
+    }
+
+    @Test
+    fun aBannerOfKindsThisBuildNeverHeardOfDoesNotClaimBreakage() {
+        // The second-order case for taking damage off the kind: an unknown
+        // kind the kernel called harmless must not paint the banner red or
+        // open by saying sync stopped.
+        val unknown = listOf(alert("sync-something-from-2027"))
+        assertFalse(alertsHeading(unknown).contains("stopped short"), alertsHeading(unknown))
+        assertFalse(unknown.any { alertIsDamage(it) })
+        // And it counts in English. One unrecognised harmless condition is
+        // now a reachable state — it was not while every unknown kind was
+        // treated as damage — and it must not read "1 things".
+        assertEquals("Nothing has stopped — one thing worth knowing", alertsHeading(unknown))
+        assertTrue(
+            alertsHeading(unknown + alert(SYNC_AWAITING_REFERENT)).contains("2 things"),
+        )
     }
 }

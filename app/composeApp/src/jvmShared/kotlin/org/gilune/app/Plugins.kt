@@ -722,6 +722,70 @@ fun providerRegistration(plugins: List<PluginInfo>, pluginId: String): ProviderR
     )
 }
 
+/// Register a transcription provider **already switched off** when another
+/// transcriber is writing the notes (ADR 0018 § 3).
+///
+/// **The window this closes.** `registerPlugin` defaults a plugin the vault
+/// has never seen to Enabled, so the shipped order was: register (on) →
+/// read the registry → switch off. Between the first and the last, this
+/// vault has two enabled transcribers and a live subscription for the new
+/// one — and the vault is shared: the recording service holds its own
+/// handle, and multi-instance on one vault is supported use. A capture
+/// committed by that other handle inside the window queues a job for a
+/// provider that is about to be switched off, and a job queued for a
+/// disabled provider is parked rather than run — an orphan nobody claims,
+/// counted in Settings ▸ About as work waiting on the person.
+///
+/// So a provider arriving into a vault that already has an active
+/// transcriber is registered disabled in **one** call, and there is no
+/// moment when both are on.
+///
+/// [applyOneTranscriberRule] stays, and is not made redundant by this: it
+/// answers the *other* case, an upgraded vault whose provider row already
+/// exists and is already enabled. Registration cannot fix that one, because
+/// there the plugin's state is a decision the vault has already recorded.
+///
+/// [installed] is the row **before** this registration — null when the vault
+/// has never seen this plugin.
+fun registerProviderRespectingTheRule(
+    gilune: Gilune,
+    declaration: PluginDeclaration,
+    installed: PluginInfo?,
+): String {
+    val fresh = installed == null
+    val occupied = runCatching { gilune.plugins().activeTranscriber() }.getOrNull()
+    val displaced = fresh &&
+        declaration.pluginId in TRANSCRIPTION_PROVIDERS &&
+        occupied != null &&
+        occupied != declaration.pluginId
+    return if (displaced) {
+        gilune.registerPluginDisabled(declaration)
+    } else {
+        gilune.registerPlugin(declaration)
+    }
+}
+
+/// What an **upgraded** vault is told, once, when the one-transcriber rule
+/// takes a provider away from it.
+///
+/// [providerRegistration]'s message is a message-line sentence: it goes
+/// under the composer, is replaced by the next thing that happens, and is
+/// gone before anybody who was not looking at the screen at that second
+/// could read it. That is right for a fresh install, where nothing was ever
+/// taken away — the provider simply arrived switched off.
+///
+/// It is wrong for the case this exists for. A person who had the live
+/// caption running found it silently gone after an update, with no sentence
+/// they could still find and nothing on the plugin's own screen saying why.
+/// So the upgrade case persists a notice that stays until it is dismissed,
+/// and says the one thing a message line cannot: **where to get it back**.
+///
+/// Pure, and phrased in the plugins' own names so a renamed plugin cannot
+/// leave the sentence naming something the screen does not show.
+fun providerUpgradeNotice(switchedOffName: String, incumbentName: String): String =
+    "$switchedOffName was switched off because one transcriber writes your notes — " +
+        "switch it on here to use the live caption instead of $incumbentName"
+
 /// Apply that rule on one handle, and answer with what to say — or null
 /// when nothing changed, which is every open after the first.
 ///
@@ -753,15 +817,36 @@ fun applyOneTranscriberRule(gilune: Gilune, pluginId: String): String? {
 /// somebody has to clear. An upgraded vault that had both transcribers on
 /// for a while carries exactly that.
 ///
-/// So the count keeps its number and gains a sentence. Null when there is
-/// nothing to explain: no jobs waiting, or nothing switched off to have
-/// parked them.
-fun waitingJobsNote(plugins: List<PluginInfo>, jobsPending: Long): String? {
-    if (jobsPending <= 0L) return null
-    val parked = plugins.filter { it.state != "enabled" && !it.processorId.isNullOrBlank() }
-    if (parked.isEmpty()) return null
-    return "some are parked for ${parked.joinToString(" and ") { it.name }}, which is " +
-        "switched off — they wait rather than run, and nothing is waiting on you"
+/// **Two numbers, both counted by the kernel.** The first round of this
+/// said "some are parked" — a hedge, because the shell could see which
+/// plugins were off but not how much work belonged to them, and a sentence
+/// that says "some" of a number a person is looking at answers nothing. The
+/// kernel counts parked work directly now ([jobsParked], a subset of
+/// [jobsPending]), so the sentence says how many are waiting on a switch and
+/// how many an enabled plugin could run this minute.
+///
+/// Null when there is nothing to explain: no jobs waiting, or none of them
+/// parked. A vault where every waiting job is parked and a vault where none
+/// is are different states and read differently.
+fun waitingJobsNote(plugins: List<PluginInfo>, jobsPending: Long, jobsParked: Long): String? {
+    if (jobsPending <= 0L || jobsParked <= 0L) return null
+    val off = plugins.filter { it.state != "enabled" && !it.processorId.isNullOrBlank() }
+    // The kernel says work is parked, so it is — even if this shell cannot
+    // name the plugin holding it (one it does not know about, or one
+    // removed since). The number is the fact; the name is a courtesy.
+    val whose = if (off.isEmpty()) {
+        "a plugin that is switched off"
+    } else {
+        off.joinToString(" and ") { it.name }
+    }
+    val running = jobsPending - jobsParked
+    val rest = when {
+        running <= 0L -> "nothing else is waiting"
+        running == 1L -> "1 more is waiting on Gilune rather than on you"
+        else -> "$running more are waiting on Gilune rather than on you"
+    }
+    return "$jobsParked parked for $whose, which is switched off — they wait rather than " +
+        "run, and nothing is waiting on you; $rest"
 }
 
 /// A capture that preserved audio — the only kind a transcriber has
@@ -787,9 +872,29 @@ const val WORDLESS_SCAN_LIMIT: UInt = 2000u
 /// is the same question the provider loop asks of each job it claims — one
 /// definition of "has no words yet", asked in both places.
 fun wordlessRecordings(gilune: Gilune, limit: UInt = WORDLESS_SCAN_LIMIT): List<SourceSummary> =
-    gilune.recentSources(limit)
-        .filter { it.isRecording() }
-        .filter { runCatching { gilune.objectText(it.objectId) }.getOrNull().isNullOrBlank() }
+    gilune.recentSources(limit).filter { it.isRecording() && it.hasNoWords() }
+
+/// Whether this summary's own preview says the capture has no words yet.
+///
+/// **One query rather than one per recording.** This used to ask
+/// `objectText` for every recording in the list — up to two thousand calls
+/// across the boundary, each opening its own read, behind a settings tap on
+/// a phone. The answer was already in hand: `recent_sources` builds
+/// `preview` from the head document's own `text`, and falls back to a
+/// bracketed stand-in naming the media (`[wav capture]`) precisely when
+/// there is no text to show.
+///
+/// So the two shapes that mean "no words" are a blank preview — a document
+/// whose `text` is empty — and that stand-in. Anything else is words
+/// somebody or something wrote, and the catch-up leaves it alone.
+///
+/// **The coupling is to the kernel's preview and is deliberate**: this is
+/// the same judgement the provider makes per job from the document itself,
+/// so a drift shows up as the catch-up count disagreeing with what the
+/// catch-up does, and `wordlessRecordingsCountTheSameSetTheProviderSkips`
+/// asserts the two agree against a real kernel.
+fun SourceSummary.hasNoWords(): Boolean =
+    preview.isBlank() || (preview.startsWith("[") && preview.endsWith(" capture]"))
 
 /// Local capabilities this declaration introduces that the installed one
 /// never offered, and so that nobody has ever been asked about or revoked

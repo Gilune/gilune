@@ -100,22 +100,26 @@ class SyncResetTest {
     }
 
     @Test
-    fun theKeystoreAdapterSaysTheThingTheClassifierLooksFor() {
-        // The two halves of the recovery are in different files — the
-        // adapter's message and the shell's classifier — so this is the
-        // seam between them. A reworded adapter that stopped matching
-        // would silently take the way out away again.
-        val message = runCatching {
+    fun theKeystoreAdapterRefusesRatherThanMintingAKeyThatCouldNotOpenIt() {
+        // The adapter's half of the recovery: `unwrap` must **fail** when
+        // the key that sealed the bytes is gone, because the alternative is
+        // overwriting an identity whose peers still pin it.
+        //
+        // This used to assert that the adapter's *sentence* matched the
+        // shell's phrase list, which made an error message part of the
+        // contract — reword it kindly and the way out disappeared. The
+        // shell now reads the kernel's error variant instead
+        // (`identityUnreadable`), so what is left to say here is that the
+        // refusal happens at all.
+        val failure = runCatching {
             // A ciphertext long enough to be one, sealed by nothing: the
-            // adapter refuses, and the sentence it refuses with is the
-            // subject here.
+            // adapter refuses, and that refusal is the subject here.
             KeystoreKeyWrapProbe.unwrapWithNoKey()
-        }.exceptionOrNull()?.message
-        assertTrue(
-            message == null || identityUnreadable("sync unavailable: $message"),
-            "the adapter's refusal must stay recognisable to the shell: '$message'",
-        )
-        assertFalse(identityUnreadable("sync unavailable: the port was already taken"))
+        }.exceptionOrNull()
+        assertTrue(failure != null, "the adapter unwrapped bytes no key of its own had sealed")
+        // And the typed classifier is not fooled by anything that merely
+        // reads like it.
+        assertFalse(identityUnreadable(IllegalStateException("could not open the identity key")))
     }
 }
 
