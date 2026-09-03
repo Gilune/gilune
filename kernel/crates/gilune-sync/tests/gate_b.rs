@@ -406,6 +406,59 @@ fn revoking_mid_session_closes_it_at_an_operation_boundary_with_nothing_half_app
     let _ = session.close();
 }
 
+/// The same property for the session this device **dialled**.
+///
+/// `serve` has always asked the roster between requests, so revoking on
+/// the listening side closed a live session at once. The dialling side
+/// asked once, at connect, and never again — so a device that revoked its
+/// peer while it was mid-push carried on pushing to it until the exchange
+/// loop ran out of work. § 9 puts revocation in either device's settings
+/// and calls it immediate; immediate has to mean immediate in the
+/// direction the connection was opened, too.
+#[test]
+fn revoking_mid_push_closes_the_session_this_device_dialled() {
+    let desktop = Device::new("Desktop").listening();
+    let phone = Device::new("Phone").listening();
+    phone.pair_by_code(&desktop).expect("pair");
+
+    for n in 0..3 {
+        phone.capture(&format!("thought {n}"));
+    }
+    let phone_device = phone.device_id();
+    let mine: Vec<Vec<u8>> = phone
+        .store
+        .operations_after(&phone_device, 0, 3)
+        .expect("operations");
+    assert!(mine.len() >= 3);
+
+    // The phone dials and starts pushing its own work, one operation at
+    // a time, so the revocation lands at a known point rather than a
+    // lucky one.
+    let mut session = phone.dial(&desktop).expect("dial");
+    session.devices().expect("the first request is served");
+    session.send_envelope(&mine[0]).expect("the first operation crosses");
+    assert_eq!(desktop.holds_from(&phone_device), 1);
+
+    // And now the person holding the phone revokes the desktop.
+    phone
+        .service
+        .revoke_peer(&phone.store, &desktop.identity_pub())
+        .expect("revoke mid-push");
+
+    let refused = session.send_envelope(&mine[1]);
+    assert!(
+        matches!(refused, Err(SyncError::Refused { .. })),
+        "the session this device opened kept pushing to a peer it had just revoked: {:?}",
+        refused.map(|_| "an acknowledgement")
+    );
+    assert_eq!(
+        desktop.holds_from(&phone_device),
+        1,
+        "what had already been applied stays; nothing crossed after the revocation"
+    );
+    let _ = session.close();
+}
+
 #[test]
 fn a_third_replica_refuses_a_revoked_devices_operations_however_they_arrive() {
     // A full-replica mesh: A knows B and C, and B knows C. That is the
@@ -474,6 +527,111 @@ fn re_pairing_a_revoked_device_lets_its_operations_in_again() {
     );
     b.sync();
     assert!(a.holds_from(&b.device_id()) > 0);
+}
+
+/// **A revocation must survive the vault arriving somewhere else.**
+///
+/// Points 8 and 9 meeting, which is where the defect lived. The roster is
+/// device-local and keyed by `device_id`; re-enrolment mints a new one
+/// (§ 4). So a vault restored from a backup — the case § 4 exists for —
+/// opened a roster belonging to an identity that had never paired with
+/// anybody, and the kernel's refusal list was rewritten from that empty
+/// roster. Every revocation the vault carried was erased, and the alerts
+/// that named them were dismissed, by the act of restoring a backup.
+/// A revoked phone would have been quietly welcomed back by a third
+/// replica relaying its work.
+#[test]
+fn a_revocation_survives_the_vault_arriving_on_a_machine_with_no_identity() {
+    let desktop = Device::new("Desktop").listening();
+    let phone = Device::new("Phone").listening();
+    let tablet = Device::new("Tablet").listening();
+    phone.pair_by_code(&desktop).expect("the desktop and the phone pair");
+    tablet.pair_by_code(&desktop).expect("the desktop and the tablet pair");
+    tablet.pair_by_code(&phone).expect("the tablet and the phone pair");
+
+    phone.capture("written by the phone");
+    tablet.sync();
+    let phone_device = phone.device_id();
+    assert!(
+        tablet.holds_from(&phone_device) > 0,
+        "the tablet holds the phone's history, as a full replica does"
+    );
+
+    desktop
+        .service
+        .revoke_peer(&desktop.store, &phone.identity_pub())
+        .expect("the desktop revokes the phone");
+    assert_eq!(
+        desktop.store.refused_devices().expect("refusals"),
+        vec![phone_device.clone()]
+    );
+    // The tablet relays the phone's work; the desktop refuses it and
+    // says so, which is the alert that must also survive.
+    tablet.sync();
+    assert_eq!(
+        desktop.alerts_of(alerts::SYNC_REVOKED_DEVICE).len(),
+        1,
+        "the refusal is visible before the vault travels"
+    );
+
+    // The vault travels, the way a backup does. The device-local
+    // identity and roster do not go with it — that is the whole design.
+    let restored_vault = tempfile::tempdir().expect("restored");
+    copy_tree(desktop.vault_path.as_path(), restored_vault.path());
+    let restored = Device::at(
+        "Desktop restored",
+        restored_vault,
+        tempfile::tempdir().expect("a machine with no identity for it"),
+    )
+    .listening();
+    assert_eq!(
+        restored.service.enrolment().as_str(),
+        "re-enrolled",
+        "this is the case § 4 is about, or the scenario is testing nothing"
+    );
+
+    assert!(
+        restored
+            .store
+            .refused_devices()
+            .expect("refusals")
+            .contains(&phone_device),
+        "restoring a backup welcomed a revoked device back"
+    );
+    assert_eq!(
+        restored.alerts_of(alerts::SYNC_REVOKED_DEVICE).len(),
+        1,
+        "and dismissed the notice that said so"
+    );
+
+    // Not merely recorded — enforced. The tablet, which holds the
+    // phone's work and knows nothing about anybody's revocations,
+    // offers it to the restored vault.
+    restored
+        .service
+        .revoke_peer(&restored.store, "not a device")
+        .expect("a no-op, and it must not disturb anything");
+    tablet
+        .pair_by_code(&restored)
+        .expect("the tablet pairs with the machine the vault arrived on");
+    tablet.capture("written by the tablet, which nobody has revoked");
+    let report = tablet.sync();
+
+    assert_eq!(
+        restored.holds_from(&phone_device),
+        0,
+        "a revoked device is excluded whoever delivers its operations, and a restored \
+         backup is not an amnesty"
+    );
+    assert!(
+        report.halted.iter().any(|h| h.device_id == phone_device),
+        "and the tablet is told which stream was refused: {:?}",
+        report.halted
+    );
+    assert!(
+        restored.holds_from(&tablet.device_id()) > 0,
+        "while the tablet's own work still arrives"
+    );
 }
 
 // ------------------------------------------------------------------ point 9

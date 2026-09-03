@@ -26,6 +26,10 @@ pub struct Job {
 enum JobFilter<'a> {
     Any,
     Only(&'a str),
+    /// Exactly the listed processors and no others. What the run loop
+    /// asks for: claiming is what spends an attempt and takes a lease, so
+    /// a loop must only claim what it can actually run.
+    Among(&'a [&'a str]),
     Excluding(&'a [String]),
 }
 
@@ -95,6 +99,28 @@ impl Store {
         self.claim_where(JobFilter::Only(processor_id), now_ms, lease_ms)
     }
 
+    /// Claim the next runnable job belonging to one of `processor_ids`.
+    ///
+    /// The rule this exists for: **a claim costs an attempt and a lease**,
+    /// so a host must never claim work it has no implementation for. It
+    /// used to, and five passes of a tool that carries no engine — the
+    /// CLI's `work`, a pass before an external provider had registered —
+    /// left an externally-implemented processor's job one real failure
+    /// away from quarantine.
+    pub fn claim_next_job_among(
+        &self,
+        processor_ids: &[&str],
+        now_ms: i64,
+        lease_ms: i64,
+    ) -> Result<Option<Job>> {
+        if processor_ids.is_empty() {
+            // A host with no implementations claims nothing. Not an
+            // empty filter that matches everything.
+            return Ok(None);
+        }
+        self.claim_where(JobFilter::Among(processor_ids), now_ms, lease_ms)
+    }
+
     /// Claim the next runnable job that no listed processor owns.
     pub fn claim_next_job_excluding(
         &self,
@@ -115,6 +141,14 @@ impl Store {
         let (clause, ids): (String, Vec<&str>) = match filter {
             JobFilter::Any => (String::new(), Vec::new()),
             JobFilter::Only(id) => (" AND j.subscription_id = ?2".to_string(), vec![id]),
+            JobFilter::Among(ids) => {
+                let holes: Vec<String> =
+                    (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();
+                (
+                    format!(" AND j.subscription_id IN ({})", holes.join(", ")),
+                    ids.to_vec(),
+                )
+            }
             JobFilter::Excluding(ids) => {
                 let holes: Vec<String> =
                     (0..ids.len()).map(|i| format!("?{}", i + 2)).collect();

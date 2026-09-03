@@ -18,9 +18,13 @@ use gilune_kernel::store::Store;
 use gilune_kernel::KernelError;
 use std::collections::BTreeMap;
 
-/// One peer's stream that stopped, and why. Not an error for the session
-/// as a whole: other devices' streams carry on, and this one resumes from
-/// its frontier when the condition clears.
+/// One stream that stopped, and why. Not an error for the session as a
+/// whole: everything else carries on, and this one resumes from its
+/// frontier when the condition clears.
+///
+/// `device_id` names the stream — the originating device for a stream of
+/// operations, and the blob id for a stream of content, which is the
+/// only identity a blob transfer has here.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Halted {
     pub device_id: String,
@@ -36,6 +40,11 @@ pub struct ExchangeReport {
     pub sent: usize,
     pub chunks: usize,
     pub blobs_completed: usize,
+    /// Blobs this device is still waiting for, store-wide — not "pending
+    /// with this peer". It is a count of rows, so a caller that syncs
+    /// several peers in a row must take the last (or the largest) rather
+    /// than adding them up: adding counts the same blob once per peer.
+    /// `service::sync_now` is that caller.
     pub blobs_pending: usize,
     pub bytes: u64,
     pub halted: Vec<Halted>,
@@ -106,13 +115,19 @@ pub fn push(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
                 break;
             }
             for envelope in envelopes {
-                report.bytes += envelope.len() as u64;
-                report.sent += 1;
                 match session.send_envelope(&envelope) {
-                    Ok(Some(need)) => {
-                        report.chunks += offer_blob(store, session, &need, limits, &mut report.bytes)?;
+                    // Charged on the way out, not on the way in: an
+                    // operation the peer refused was not sent, and
+                    // counting it spent this session's budget on a
+                    // delivery that never happened.
+                    Ok(need) => {
+                        report.bytes += envelope.len() as u64;
+                        report.sent += 1;
+                        if let Some(need) = need {
+                            report.chunks +=
+                                offer_blob(store, session, &need, limits, &mut report.bytes)?;
+                        }
                     }
-                    Ok(None) => {}
                     // The peer refused this operation. That is its halt,
                     // recorded here and not retried: it will ask again
                     // from its own frontier once the condition clears.
@@ -171,6 +186,12 @@ fn offer_blob(
 
 /// Take everything this device lacks, per originating device, in
 /// sequence order, halting one stream at a time and never the session.
+///
+/// "One stream at a time" is the same contract `push` keeps, and it now
+/// covers a peer that says no as well as an operation this device says
+/// no to: a refusal to hand over one device's history — because that
+/// peer has revoked it, say — stops that stream and leaves the rest of
+/// the session alone.
 pub fn pull(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<ExchangeReport> {
     let mut report = ExchangeReport::default();
     let local = store.device_id()?;
@@ -197,7 +218,17 @@ pub fn pull(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
                 return Ok(report);
             }
             let room = limits.max_ops_per_session - report.budget_spent();
-            let frames = session.have_after(&offer.device_id, frontier, BATCH.min(room))?;
+            let frames = match session.have_after(&offer.device_id, frontier, BATCH.min(room)) {
+                Ok(frames) => frames,
+                Err(SyncError::Protocol { detail }) => {
+                    report.halted.push(Halted {
+                        device_id: offer.device_id.clone(),
+                        reason: detail,
+                    });
+                    break;
+                }
+                Err(e) => return Err(e),
+            };
             if frames.is_empty() {
                 break;
             }
@@ -220,8 +251,15 @@ pub fn pull(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
                             report.uninterpreted += 1;
                         }
                     }
-                    Err(KernelError::SyncHalted { device_id, reason }) => {
-                        report.halted.push(Halted { device_id, reason });
+                    // Named by the stream that was carrying it, not by the
+                    // halt's own subject: a halt awaiting a referent is
+                    // about a missing object, and it is this device's
+                    // stream that stopped for it.
+                    Err(KernelError::SyncHalted { reason, .. }) => {
+                        report.halted.push(Halted {
+                            device_id: offer.device_id.clone(),
+                            reason,
+                        });
                         halted = true;
                         break;
                     }
@@ -238,33 +276,52 @@ pub fn pull(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
         }
     }
 
-    let (chunks, completed, pending) = fetch_blobs(store, session, limits, &mut report)?;
+    let (chunks, completed) = fetch_blobs(store, session, limits, &mut report)?;
     report.chunks += chunks;
     report.blobs_completed = completed;
-    report.blobs_pending = pending;
+    // Asked of the store, once, rather than counted through this loop:
+    // what is outstanding is a property of this device, not of the
+    // session that has just run, and a session that halted before it
+    // reached a blob must still say the blob is outstanding.
+    report.blobs_pending = store.blobs_awaiting_count()?;
     Ok(report)
 }
 
 /// Fetch the content of every blob whose operation has applied here but
 /// whose bytes have not arrived. Resumes from what is already staged, so
 /// an interrupted transfer costs only what it had not yet moved.
+///
+/// A refusal — this device's own bound, or a peer declining to give up
+/// the content — stops that transfer and nothing else. It used to end
+/// the session with an error, which is the one thing a bound must never
+/// do: a hostile chunk would have cost a peer every other stream too.
 fn fetch_blobs(
     store: &Store,
     session: &mut dyn Session,
     limits: Limits,
     report: &mut ExchangeReport,
-) -> Result<(usize, usize, usize)> {
+) -> Result<(usize, usize)> {
     let mut chunks = 0;
     let mut completed = 0;
-    let mut pending = 0;
     for need in store.blobs_awaiting_bytes()? {
+        let mut halted = false;
         let mut offset = need.received;
         while offset < need.bytes {
             if report.bytes >= limits.max_bytes_per_session {
                 report.ended_on_cap = true;
                 break;
             }
-            let frames = session.have_blob(&need.blob_id, offset, limits.chunk_bytes)?;
+            let frames = match session.have_blob(&need.blob_id, offset, limits.chunk_bytes) {
+                Ok(frames) => frames,
+                Err(SyncError::Protocol { detail }) => {
+                    report.halted.push(Halted {
+                        device_id: need.blob_id.clone(),
+                        reason: detail,
+                    });
+                    break;
+                }
+                Err(e) => return Err(e),
+            };
             let mut moved = false;
             for frame in frames {
                 let Frame::Chunk { blob_id, offset: at, bytes } = frame else { continue };
@@ -272,19 +329,25 @@ fn fetch_blobs(
                     continue;
                 }
                 report.bytes += bytes.len() as u64;
-                offset = store.write_blob_chunk(&blob_id, at, &bytes, limits)?;
+                match store.write_blob_chunk(&blob_id, at, &bytes, limits) {
+                    Ok(staged) => offset = staged,
+                    Err(KernelError::SyncHalted { subject, reason, .. }) => {
+                        report.halted.push(Halted { device_id: subject, reason });
+                        halted = true;
+                        break;
+                    }
+                    Err(e) => return Err(SyncError::Kernel(e)),
+                }
                 chunks += 1;
                 moved = true;
             }
-            if !moved {
-                break; // the peer has no more of this blob to give
+            if halted || !moved {
+                break; // refused, or the peer has no more of this blob to give
             }
         }
-        if store.finish_blob(&need.blob_id)? {
+        if !halted && store.finish_blob(&need.blob_id)? {
             completed += 1;
-        } else {
-            pending += 1;
         }
     }
-    Ok((chunks, completed, pending))
+    Ok((chunks, completed))
 }

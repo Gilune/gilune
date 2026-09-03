@@ -590,6 +590,99 @@ Each stage is shippable alone and in order.
   which the first session with the original would halt on operations
   both sides already have.
 
+- **2026-09-03 (post-delivery review, kernel).** A high-effort review of
+  the M5 delivery confirmed defects in exactly the areas § Context named
+  as new, and the fixes amend the decision as follows.
+  - **Absent referents halt one stream, never the session.** Per-device
+    sequences carry no causal parents, and pull orders streams by
+    `device_id`, so an `object-revised`, a `tombstone`, or a `supersedes`
+    name can arrive before the object or head it refers to. § 8's halt
+    policy now covers it: the apply arm halts that stream with kind
+    **`sync-awaiting-referent`** (subject = the missing id), frontier
+    unmoved, nothing half-applied; the next pass — after the other
+    device's stream has delivered the referent — resumes and clears it.
+    Before this, the revision case killed the session with no alert
+    (a foreign-key error, not a halt) and the other two applied silently
+    and diverged replicas for good.
+  - **`SyncHalted` carries `{kind, subject, reason}`.** Every refusal
+    inside the apply transaction names its own alert kind; the outer
+    handler republishes what it was given. Malformed envelopes and blob
+    declarations, including a vault-escaping path, are
+    `sync-corrupt-operation`; only size and free-space refusals are
+    `sync-limit-exceeded`. Before this every in-transaction halt was
+    relabelled as a size limit with its subject overwritten.
+  - **A synced tombstone never deletes a locally edited file.** An
+    external edit to a deleted object is the person keeping the note:
+    the file stays, is offered as an import, and alert
+    **`vault-deleted-note-edited`** says so; `withdraw_tombstoned`
+    additionally removes only bytes equal to what the kernel would render
+    now, so an ingested edit's hash can no longer authorise a deletion.
+  - **Zero-length blobs complete cleanly** (an empty recording is a
+    legitimate capture), and blob-chunk refusals take the one halt path
+    with an alert, halting the transfer rather than the session.
+  - **The `![[name]]` placeholder is only for content still crossing
+    from another device** (`blobs.origin = 'sync'`, not yet ready); a
+    local read failure holds the object back for that pass instead of
+    projecting a body reconcile would later ingest.
+- **2026-09-03 (post-delivery review, transport).**
+  - **The listener times out an unfinished handshake.** § 8's bounds
+    gain a pre-handshake read/write timeout on every accepted socket (the
+    dialling side always had one), TCP keepalive on established
+    sessions, and a rule that a handshake never finished counts as a
+    failure for the caller's address under the per-peer rate limit.
+    Before this, eight silent connections from any host on the LAN —
+    unauthenticated, before the handshake — held the session cap until
+    the process restarted, and a silent caller never registered with the
+    rate limiter at all.
+  - **The published address is one a peer can dial.** § 1's "actual port
+    is always published" now includes the host: when bound to an
+    unspecified address the service publishes a routable interface
+    address (never unspecified, loopback or link-local while anything
+    routable exists) to the pairing window, the QR and Settings; an
+    explicit bind is published verbatim. Before this the QR carried
+    `0.0.0.0:<port>`, so the QR and typed-address pairing legs failed on
+    real hardware while only the discovery leg worked.
+  - **The refusal set is durable vault state** (§ 9). Revocation adds to
+    it, re-pairing is the only removal, and `configure` reconciles the
+    roster's revoked ids *into* it rather than replacing it — so
+    re-enrolment on a new machine, which mints a new identity and finds
+    no roster, no longer silently re-admits every revoked device and
+    clears the alerts that would have said so.
+  - **Revocation and sync-off stop outbound sessions too.** The session
+    this device dialled checks permission at every operation boundary,
+    mirroring the listener's rule; before this only the inbound direction
+    was gated and tested.
+  - **The roster is edited under a file lock** with reload-merge-write,
+    because the activity and the background worker each hold a
+    `SyncService` over one roster file and a whole-file save from a stale
+    snapshot could discard a pairing made moments earlier.
+  - One browse per sync round, shared across unreachable peers; a
+    responder whose registration was not confirmed is retried on the
+    next round rather than left down.
+- **2026-09-03 (post-delivery review, shells).**
+  - **Device-local sync state is excluded from Android backup and
+    device-to-device transfer** (`dataExtractionRules` on API 31+,
+    `fullBackupContent` below). § 4 promised that a restored phone
+    becomes a new device *mechanically*; on Android the default backup
+    policy carried `filesDir/sync/` — the sealed identity and roster —
+    to the new phone while the Keystore key that seals them cannot
+    travel, so the identity was neither absent (re-mint) nor readable
+    (continue): sync was permanently "not set up" with no recovery short
+    of clearing app data. Excluding the directory makes the identity
+    absent on the new phone, which is the re-enrolment row § 4 intended.
+    For phones already in the stuck state the Sync screen offers "Reset
+    sync on this phone" — deletes the device-local sync state, re-enrols
+    as a new device, deletes no vault data, and says peers must re-pair.
+  - **The integrity-alert wording lives in one shared table** for both
+    shells, with the "is this damage" classification beside it, so a new
+    kernel kind is worded once and an unknown kind cannot be announced
+    as a stopped sync by one shell and a benign wait by the other.
+  - The desktop Sync section loads alerts on entry (a halted stream no
+    longer looks idle after a relaunch); the background worker consults
+    the persisted sync-enabled state before dialling anyone; vault open
+    no longer waits behind the responder's registration; a sync that
+    applied nothing skips the full re-projection.
+
 ## Ratification record
 
 Ratified by the owner on 2026-09-02, as proposed, with no

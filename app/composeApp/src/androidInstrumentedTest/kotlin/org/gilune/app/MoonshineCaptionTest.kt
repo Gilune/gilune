@@ -273,7 +273,15 @@ class MoonshineCaptionTest {
 
             val plugin = gilune.plugins().firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
             assertTrue(plugin != null, "the provider did not register")
-            assertEquals("enabled", plugin!!.state)
+            // **Registered and switched off**, because whisper is still the
+            // transcriber (ADR 0018 § 3, § 6). The kernel defaults an
+            // unseen plugin to Enabled, which for the *second* transcriber
+            // means bundling it switched it on for everybody — so the shell
+            // switches it back off and says so. Moonshine is opt-in until
+            // MS2. `MoonshineProviderTest` holds the rule itself; what
+            // matters here is that registration still grants and declares
+            // everything below whatever the switch ends up at.
+            assertEquals("disabled", plugin!!.state, "registering is not choosing")
             assertEquals(
                 listOf("blobs.read", "objects.write", NETWORK_CAPABILITY),
                 plugin.capabilities,
@@ -296,10 +304,22 @@ class MoonshineCaptionTest {
                 "a revoked capability was re-granted by a re-registration",
             )
 
-            // And with no model on disk, the plan asks for consent rather
-            // than reaching for the network.
-            val plan = moonshinePlan(gilune.plugins(), { false }, metered = false)
-            assertEquals(MoonshinePlan.NeedsConsent(moonshineModel(null)), plan)
+            // And nothing is fetched by registering. Switched off, there
+            // is no provider to plan for at all — which is the first half
+            // of "nothing downloads because the app opened".
+            assertEquals(
+                MoonshinePlan.NoProvider,
+                moonshinePlan(gilune.plugins(), { false }, metered = false),
+            )
+            // Switched on by a person, with no model on disk, the plan
+            // asks for consent rather than reaching for the network.
+            val switch = providerSwitch(gilune.plugins(), MOONSHINE_PLUGIN, enable = true)
+            for (displaced in switch.disable) gilune.setPluginEnabled(displaced, false)
+            gilune.setPluginEnabled(MOONSHINE_PLUGIN, true)
+            assertEquals(
+                MoonshinePlan.NeedsConsent(moonshineModel(null)),
+                moonshinePlan(gilune.plugins(), { false }, metered = false),
+            )
         }
     }
 

@@ -492,14 +492,15 @@ impl Store {
             Err(e) => {
                 let _ = conn.execute_batch("ROLLBACK;");
                 // The alert must outlive the rollback that the refusal
-                // caused, so it is raised here and not inside.
-                if let KernelError::SyncHalted { reason, .. } = &e {
-                    let reason = reason.clone();
-                    return Err(self.halt(
-                        alerts::SYNC_LIMIT_EXCEEDED,
-                        &envelope.device_id,
-                        &reason,
-                    ));
+                // caused, so it is raised here and not inside. What it
+                // says is the raise site's to decide: this handler
+                // publishes the kind and the subject it was given rather
+                // than relabelling every in-transaction refusal
+                // `sync-limit-exceeded` about the sending device, which
+                // is what it used to do.
+                if let KernelError::SyncHalted { kind, subject, reason } = &e {
+                    let (kind, subject, reason) = (kind.clone(), subject.clone(), reason.clone());
+                    return Err(self.halt(&kind, &subject, &reason));
                 }
                 return Err(e);
             }
@@ -513,6 +514,7 @@ impl Store {
             alerts::SYNC_CORRUPT_OPERATION,
             alerts::SYNC_UNSUPPORTED_VERSION,
             alerts::SYNC_LIMIT_EXCEEDED,
+            alerts::SYNC_AWAITING_REFERENT,
         ] {
             alerts::clear(conn, kind, &envelope.device_id)?;
             alerts::clear(conn, kind, stream)?;
@@ -521,14 +523,30 @@ impl Store {
     }
 
     /// Raise the alert and name the halt. Split out so every refusal
-    /// takes exactly one path to being visible.
+    /// takes exactly one path to being visible, and so the alert kind a
+    /// person is shown is the one the refusal chose.
     fn halt(&self, kind: &str, subject: &str, detail: &str) -> KernelError {
         if let Err(e) = alerts::raise(self.conn(), kind, subject, detail) {
             return e;
         }
         KernelError::SyncHalted {
-            device_id: subject.to_string(),
+            kind: kind.to_string(),
+            subject: subject.to_string(),
             reason: detail.to_string(),
+        }
+    }
+
+    /// The refusal an apply arm makes when what it names has not arrived.
+    /// Inside the transaction, so nothing is half-applied; the outer
+    /// handler rolls back and publishes this kind and subject verbatim.
+    fn awaiting(missing_id: &str, waiting: &Envelope) -> KernelError {
+        KernelError::SyncHalted {
+            kind: alerts::SYNC_AWAITING_REFERENT.to_string(),
+            subject: missing_id.to_string(),
+            reason: format!(
+                "{} at seq {} from {} names {missing_id}, which has not arrived here yet",
+                waiting.kind, waiting.op_seq, waiting.device_id
+            ),
         }
     }
 
@@ -536,6 +554,20 @@ impl Store {
     /// Unknown kinds are preserved and forwarded but never interpreted
     /// (constitution rule 9): forward compatibility is what lets a device
     /// carry a plugin's data it has no plugin for.
+    ///
+    /// **One rule for a referent that has not arrived.** Sequences are
+    /// per device and carry no causal parents, and a pull orders streams
+    /// by device id, so a revision, a tombstone or a named head can
+    /// legitimately reach here before the operation that created what it
+    /// names. Every arm answers that the same way: halt this stream at
+    /// the naming operation (`sync-awaiting-referent`), apply nothing,
+    /// leave the frontier where it was — exactly what a sequence gap
+    /// already does. The next pass, once the other device's stream has
+    /// delivered the referent, applies it and clears the alert. What it
+    /// replaced: a foreign-key error that killed the whole session with
+    /// no notice, a tombstone silently dropped by a nought-row UPDATE,
+    /// and a `supersedes` name that matched nothing and let a superseded
+    /// head come back as a conflict nobody made.
     fn interpret(
         &self,
         conn: &rusqlite::Connection,
@@ -559,7 +591,8 @@ impl Store {
                 let revision_id = text(revision, "revision_id");
                 if object_id.is_empty() || revision_id.is_empty() {
                     return Err(KernelError::SyncHalted {
-                        device_id: envelope.device_id.clone(),
+                        kind: alerts::SYNC_CORRUPT_OPERATION.to_string(),
+                        subject: envelope.device_id.clone(),
                         reason: "object-created names no object or no revision".to_string(),
                     });
                 }
@@ -606,6 +639,10 @@ impl Store {
                     )?;
                 }
                 self.announce(conn, envelope, &object_id, text(revision, "payload").as_str())?;
+                // Whatever was waiting on this object or this revision is
+                // waiting no longer.
+                alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &object_id)?;
+                alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &revision_id)?;
             }
             OBJECT_REVISED => {
                 let revision = payload.get("revision").unwrap_or(&serde_json::Value::Null);
@@ -613,9 +650,13 @@ impl Store {
                 let revision_id = text(revision, "revision_id");
                 if object_id.is_empty() || revision_id.is_empty() {
                     return Err(KernelError::SyncHalted {
-                        device_id: envelope.device_id.clone(),
+                        kind: alerts::SYNC_CORRUPT_OPERATION.to_string(),
+                        subject: envelope.device_id.clone(),
                         reason: "object-revised names no object or no revision".to_string(),
                     });
+                }
+                if !row_exists(conn, "objects", "object_id", &object_id)? {
+                    return Err(Self::awaiting(&object_id, envelope));
                 }
                 let known: i64 = conn.query_row(
                     "SELECT COUNT(*) FROM revisions WHERE revision_id = ?1",
@@ -639,8 +680,19 @@ impl Store {
                     // Any head it does not name was concurrent with it and
                     // is preserved — this line is the whole of ADR 0005's
                     // concurrent-heads contract on the receiving side.
+                    //
+                    // A name this device has never seen is not "no head to
+                    // delete": it is a revision still in flight, whose
+                    // arrival would then stand as a head nothing ever
+                    // superseded — a conflict on a note nobody conflicted
+                    // over. So the whole operation waits for it. A name
+                    // already superseded here is present in `revisions`
+                    // and deletes nothing, which is right.
                     if let Some(superseded) = payload.get("supersedes").and_then(|v| v.as_array()) {
                         for head in superseded.iter().filter_map(|v| v.as_str()) {
+                            if !row_exists(conn, "revisions", "revision_id", head)? {
+                                return Err(Self::awaiting(head, envelope));
+                            }
                             conn.execute(
                                 "DELETE FROM heads WHERE object_id = ?1 AND revision_id = ?2",
                                 [&object_id, &head.to_string()],
@@ -658,8 +710,12 @@ impl Store {
                         text(revision, "payload").as_str(),
                     )?;
                 }
+                alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &revision_id)?;
             }
             TOMBSTONE => {
+                if !row_exists(conn, "objects", "object_id", &envelope.target_id)? {
+                    return Err(Self::awaiting(&envelope.target_id, envelope));
+                }
                 conn.execute(
                     "UPDATE objects SET deleted = 1 WHERE object_id = ?1",
                     [&envelope.target_id],
@@ -731,21 +787,24 @@ impl Store {
         let declared = number(blob, "bytes").unwrap_or(-1);
         if blob_id.is_empty() || rel_path.is_empty() || sha256.is_empty() || declared < 0 {
             return Err(KernelError::SyncHalted {
-                device_id: object_id.to_string(),
+                kind: alerts::SYNC_CORRUPT_OPERATION.to_string(),
+                subject: object_id.to_string(),
                 reason: "a blob was declared without an id, a path, a digest or a length"
                     .to_string(),
             });
         }
         if rel_path.starts_with('/') || rel_path.contains("..") || rel_path.contains('\\') {
             return Err(KernelError::SyncHalted {
-                device_id: object_id.to_string(),
+                kind: alerts::SYNC_CORRUPT_OPERATION.to_string(),
+                subject: object_id.to_string(),
                 reason: format!("blob path {rel_path} escapes the vault"),
             });
         }
         let declared = declared as u64;
         if declared > limits.max_blob_bytes {
             return Err(KernelError::SyncHalted {
-                device_id: blob_id,
+                kind: alerts::SYNC_LIMIT_EXCEEDED.to_string(),
+                subject: blob_id,
                 reason: format!(
                     "declared blob length {declared} is over the {}-byte limit",
                     limits.max_blob_bytes
@@ -755,13 +814,27 @@ impl Store {
         let available = fs::available_space(&self.local_dir())?;
         if declared.saturating_add(limits.free_space_margin_bytes) > available {
             return Err(KernelError::SyncHalted {
-                device_id: blob_id,
+                kind: alerts::SYNC_LIMIT_EXCEEDED.to_string(),
+                subject: blob_id,
                 reason: format!(
                     "declared blob length {declared} does not fit in {available} bytes of \
                      free space with a {}-byte margin",
                     limits.free_space_margin_bytes
                 ),
             });
+        }
+        // A declaration this device refused before is a condition that has
+        // now cleared. The subjects are the raise sites' own — the blob
+        // for a bound, the object for a malformed declaration — so they
+        // are withdrawn here rather than by the stream-wide sweep, which
+        // only knows about devices.
+        for (kind, subject) in [
+            (alerts::SYNC_LIMIT_EXCEEDED, blob_id.as_str()),
+            (alerts::SYNC_CORRUPT_OPERATION, blob_id.as_str()),
+            (alerts::SYNC_LIMIT_EXCEEDED, object_id),
+            (alerts::SYNC_CORRUPT_OPERATION, object_id),
+        ] {
+            alerts::clear(conn, kind, subject)?;
         }
         conn.execute(
             "INSERT OR IGNORE INTO blobs
@@ -789,12 +862,24 @@ impl Store {
 // ------------------------------------------- refusal by originating device
 
 /// Meta key holding the device ids whose operations this device refuses.
-/// A **projection of the device-local roster**, never the authority: the
-/// roster lives outside the vault with the identity key (ADR 0019 § 4)
-/// and rewrites this list whenever it changes. It is kept here so that
-/// refusal is a property of `apply` itself rather than of a caller
-/// remembering to pass a policy — every delivery path, present and
-/// future, runs into it.
+///
+/// **Durable vault state, not a projection.** It was written as a mirror
+/// of the device-local roster, rewritten wholesale whenever that roster
+/// changed — and that made a revocation exactly as durable as the roster
+/// file, which is not durable at all across the one event ADR 0019 § 4
+/// plans for: a vault arriving on a machine that holds no identity for it
+/// re-enrols under a **new** `device_id`, opens the roster belonging to
+/// that new id, finds nothing, and rewrote this list from nothing. Every
+/// revocation the vault carried was erased by the act of restoring a
+/// backup, and the alerts that named them were dismissed with it.
+///
+/// So the direction of authority is inverted: revocation **adds** here
+/// (`refuse_device`), only an explicit re-pairing takes away
+/// (`unrefuse_device`), and a roster reconciles **into** it
+/// (`reconcile_refused_devices`). It is kept in the vault so that refusal
+/// is a property of `apply` itself rather than of a caller remembering to
+/// pass a policy — every delivery path, present and future, runs into it
+/// — and now so that it outlives the identity that made the decision.
 ///
 /// Device ids only. No key material ever reaches the vault.
 const REFUSED_DEVICES: &str = "refused_devices";
@@ -827,14 +912,70 @@ impl Store {
             .unwrap_or_default())
     }
 
-    /// Replace the refusal list wholesale — the roster is the authority,
-    /// so this is a write of the whole truth rather than an increment.
-    /// A device that stops being refused has its standing alert
-    /// withdrawn here: re-pairing is what clears the condition, and
-    /// nobody should have to dismiss a notice about a device they have
-    /// just welcomed back.
-    pub fn set_refused_devices(&self, devices: &[String]) -> Result<()> {
-        let previous = self.refused_devices()?;
+    /// Refuse everything a device originates, from now on (ADR 0019 § 9).
+    ///
+    /// Idempotent, and the **only** way in. Answers whether this changed
+    /// anything, so a caller can tell a fresh revocation from a repeat.
+    /// It does not retract history and it raises no alert: an alert says
+    /// something arrived and was refused, and nothing has arrived yet.
+    pub fn refuse_device(&self, device_id: &str) -> Result<bool> {
+        if device_id.is_empty() {
+            return Ok(false);
+        }
+        let mut devices = self.refused_devices()?;
+        if devices.iter().any(|d| d == device_id) {
+            return Ok(false);
+        }
+        devices.push(device_id.to_string());
+        self.write_refused(&devices)?;
+        Ok(true)
+    }
+
+    /// Welcome a device back, because it has been paired again.
+    ///
+    /// The **only** way out, and deliberately explicit: re-pairing is a
+    /// decision somebody took, where an empty roster is merely a machine
+    /// that has not been introduced yet. The standing alert goes with the
+    /// refusal — nobody should have to dismiss a notice about a device
+    /// they have just welcomed back.
+    pub fn unrefuse_device(&self, device_id: &str) -> Result<bool> {
+        if device_id.is_empty() {
+            return Ok(false);
+        }
+        let devices = self.refused_devices()?;
+        if !devices.iter().any(|d| d == device_id) {
+            return Ok(false);
+        }
+        let kept: Vec<String> = devices.into_iter().filter(|d| d != device_id).collect();
+        self.write_refused(&kept)?;
+        alerts::clear(self.conn(), alerts::SYNC_REVOKED_DEVICE, device_id)?;
+        Ok(true)
+    }
+
+    /// Fold a device-local roster's revocations into this vault's set.
+    ///
+    /// Union, never replacement. A roster knows about the pairings *this*
+    /// identity made; the vault knows about every device this vault has
+    /// ever refused, including ones decided under an identity that no
+    /// longer exists. Reconciling one into the other keeps both facts;
+    /// overwriting kept only the newer and quieter one.
+    pub fn reconcile_refused_devices(&self, revoked: &[String]) -> Result<()> {
+        let mut devices = self.refused_devices()?;
+        let mut added = false;
+        for device in revoked {
+            if device.is_empty() || devices.iter().any(|d| d == device) {
+                continue;
+            }
+            devices.push(device.clone());
+            added = true;
+        }
+        if added {
+            self.write_refused(&devices)?;
+        }
+        Ok(())
+    }
+
+    fn write_refused(&self, devices: &[String]) -> Result<()> {
         let document = serde_json::Value::Array(
             devices
                 .iter()
@@ -845,11 +986,6 @@ impl Store {
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
             rusqlite::params![REFUSED_DEVICES, document.to_string()],
         )?;
-        for device in previous {
-            if !devices.contains(&device) {
-                alerts::clear(self.conn(), alerts::SYNC_REVOKED_DEVICE, &device)?;
-            }
-        }
         Ok(())
     }
 
@@ -907,6 +1043,23 @@ impl Store {
             }
         }
     }
+}
+
+/// Whether a row this operation names is already held. `table` and
+/// `column` are always literals from kernel code — never host-supplied
+/// text — and the value is always a bound parameter.
+fn row_exists(
+    conn: &rusqlite::Connection,
+    table: &str,
+    column: &str,
+    value: &str,
+) -> Result<bool> {
+    let hit: i64 = conn.query_row(
+        &format!("SELECT COUNT(*) FROM {table} WHERE {column} = ?1"),
+        [value],
+        |row| row.get(0),
+    )?;
+    Ok(hit > 0)
 }
 
 fn conn_count(conn: &rusqlite::Connection, op_id: &str) -> Result<i64> {

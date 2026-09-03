@@ -84,6 +84,22 @@ import uniffi.gilune_ffi.SyncStatus
 fun syncDir(context: Context): String =
     context.filesDir.resolve("sync").absolutePath
 
+/// Throw this device's sync state away: identity, roster, and the
+/// remembered on-or-off. Answers how many entries it removed.
+///
+/// **Device-local and nothing else.** The vault is not here and is not
+/// touched — that is the whole point of § 4's placement — so this is
+/// recoverable in the only sense that matters: notes are unaffected, and
+/// what is lost is a pairing, which is a thing people re-do.
+///
+/// It exists for one state, described in `identityUnreadable`: a sealed
+/// identity file whose Keystore key did not survive. Before this round a
+/// phone in that state had no way out inside the app at all.
+fun clearSyncState(dir: java.io.File): Int {
+    val entries = dir.listFiles() ?: return 0
+    return entries.count { it.deleteRecursively() }
+}
+
 /// What this phone calls itself to the devices it pairs with. The human
 /// name is exchanged **inside** the encrypted handshake (§ 1), never in
 /// the advertisement, so this is a courtesy to the person reading their
@@ -126,73 +142,6 @@ fun keyProtectionSentence(protection: String): String = when (protection) {
 /// A six-digit code, as typed. Digits only and never more than six, so
 /// the button below can be honest about when it is ready.
 fun normalisedPairingCode(typed: String): String = typed.filter { it.isDigit() }.take(6)
-
-/// One standing integrity condition, in words (ADR 0019 § 8).
-///
-/// Every sentence answers the same three questions — what stopped, why,
-/// and what happens next — because a halt that is visible but
-/// unexplained is barely better than a silent one. **The raw kind never
-/// reaches the screen**, and neither do `subject` and `detail` except in
-/// the fallback below: a subject is a device id, an operation id or a
-/// blob id, and a detail is the kernel's own words for another kernel.
-/// Neither is something a person can act on.
-///
-/// Halting is never damage — § 8's policy is to apply nothing past the
-/// fault and resume from the frontier when the condition clears — so
-/// every sentence says so, and `sync-unknown-op-kind` says something
-/// stronger still: nothing stopped at all.
-fun alertSentence(kind: String, subject: String, detail: String): String = when (kind) {
-    "sync-gap" ->
-        "One of your devices sent its changes out of order, so Gilune stopped taking " +
-            "anything further from it. Everything that arrived before the missing change " +
-            "is already here, and it carries on from exactly that point once the missing " +
-            "one arrives — usually the next time the two devices are on the same network."
-
-    "sync-corrupt-operation" ->
-        "A change from one of your devices could not be read, so nothing after it has " +
-            "been taken from that device. Nothing was half-applied and nothing already in " +
-            "your vault was touched. Gilune picks up where it stopped as soon as that " +
-            "device sends a copy it can read."
-
-    "sync-unsupported-version" ->
-        "One of your devices is sending changes in a form this copy of Gilune cannot " +
-            "read, so it has stopped taking them rather than guessing. Everything received " +
-            "before that is already here. Updating Gilune on this phone clears it, and " +
-            "sync resumes from where it stopped."
-
-    "sync-unknown-op-kind" ->
-        "One of your devices sent something a newer version of Gilune understands and " +
-            "this one does not. Nothing stopped and nothing is lost: it is kept exactly as " +
-            "it arrived and passed on to your other devices untouched, and this phone will " +
-            "understand it once it is updated."
-
-    "sync-limit-exceeded" ->
-        "One of your devices sent more in a single exchange than Gilune accepts at once, " +
-            "so it stopped the exchange tidily rather than cutting it off. Everything up " +
-            "to that point is here, and the next sync continues from exactly there."
-
-    "sync-blob-digest-mismatch" ->
-        "A recording or attachment arrived with bytes that did not match what the sending " +
-            "device said they would be, so it was refused rather than saved — a partial or " +
-            "altered file never lands in your vault. Gilune fetches it again from where it " +
-            "stopped the next time that device is reachable."
-
-    "sync-revoked-device" ->
-        "Changes that started on a device you revoked reached this phone, and they were " +
-            "refused — whichever device carried them here. That is revocation doing its " +
-            "job. Everything from your other devices carries on as normal, and this clears " +
-            "once those changes stop being passed around."
-
-    // A condition raised by a newer kernel than this screen knows about.
-    // Its own words are the only ones there are, and saying nothing would
-    // be the silence this whole surface exists to end.
-    else -> {
-        val said = detail.ifBlank { subject }.ifBlank { "no further detail" }
-        "Something about syncing stopped, and this version of Gilune has no plain words " +
-            "for it: $said. Nothing past it was applied, and sync resumes from where it " +
-            "stopped when the condition clears."
-    }
-}
 
 /// What the "This device" block says about being findable (ADR 0019 § 1).
 ///
@@ -241,6 +190,24 @@ fun foundDeviceState(state: String, compatible: Boolean): String = when {
 fun shouldSyncOnForeground(status: SyncStatus?): Boolean =
     status != null && status.enabled && status.peers.any { it.state == "paired" }
 
+/// The same question for the **background** pass, and it reads a different
+/// field on purpose (ADR 0019 § 2, § 10).
+///
+/// `enabled` is a bound listener **in this process**. `SyncWorker` starts a
+/// process of its own, dials out and never listens — § 2 keeps the listener
+/// behind the switch in Settings — so `enabled` is false there whatever the
+/// person chose, and gating on it would mean the background sync never ran
+/// at all.
+///
+/// `wanted` is the persisted choice, kept device-local beside the identity.
+/// It is the only thing in a fresh process that can say whether sync is
+/// switched on, and a worker that did not consult it would exchange
+/// operations for somebody who had switched sync off — the kernel's own
+/// outbound permission is process-local and starts permissive by design, so
+/// nothing below this would have stopped it.
+fun shouldSyncInBackground(status: SyncStatus?): Boolean =
+    status != null && status.wanted && status.peers.any { it.state == "paired" }
+
 /// The sentence for a look that found nothing (§ 1's third step: words,
 /// not a spinner). Client isolation is named because it is the usual
 /// cause and because "wait a bit longer" is advice that never works.
@@ -258,8 +225,17 @@ const val NOTHING_FOUND =
 /// it. So the sync screen draws it too, filtered exactly as the composer
 /// filters it: the vault path and the opening line are a developer's
 /// facts, not an outcome.
+/// The unreadable-identity line is dropped too, and for the opposite
+/// reason to the others: it is not a developer's fact, it is the most
+/// important thing on the screen — and the screen says it properly, in
+/// full sentences, beside the button that fixes it. Drawing the kernel's
+/// own wording above that as well would be the same news twice, once in a
+/// form nobody can act on.
 fun syncNotice(message: String): String? = message.takeUnless {
-    it.isBlank() || it.startsWith("vault: ") || it == "opening vault…"
+    it.isBlank() ||
+        it.startsWith("vault: ") ||
+        it == "opening vault…" ||
+        identityUnreadable(it)
 }
 
 @Composable
@@ -295,6 +271,22 @@ fun SyncSection(state: GiluneState) {
     }
 
     if (status == null) {
+        // The one unavailable state a person can get out of, and the way
+        // out. Everything else here is a bug or a transient; this is a
+        // restored backup, and until this round it was a dead end (§ 4).
+        if (identityUnreadable(state.message.value)) {
+            Text(
+                identityUnreadableSentence("this phone"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colours.onSurfaceVariant,
+                modifier = Modifier.testTag("sync-identity-unreadable"),
+            )
+            Button(
+                onClick = { resetSyncOnThisPhone(state, context) },
+                modifier = Modifier.heightIn(min = TouchTarget).testTag("sync-reset"),
+            ) { Text("Reset sync on this phone") }
+            return
+        }
         Text(
             "Sync is not set up on this device yet. If this keeps saying so, the " +
                 "message at the bottom of Settings ▸ About says why.",
@@ -408,15 +400,38 @@ fun SyncSection(state: GiluneState) {
     )
 }
 
+/// Clear the device-local sync state and enrol again, on `syncAction`'s
+/// thread and with `syncAction`'s reporting.
+///
+/// Enrolment goes through `state.syncSetup` rather than through a second
+/// copy of the `configureSync` call: the shell nominates the directory and
+/// the `KeyWrap` in exactly one place (ADR 0019 § 4), and a recovery path
+/// that spelled them again is a recovery path that could disagree with the
+/// thing it is recovering.
+private fun resetSyncOnThisPhone(state: GiluneState, context: Context) {
+    val setup = state.syncSetup ?: return
+    state.syncAction("sync was reset — this phone is a new device and has to be paired again") {
+        clearSyncState(java.io.File(syncDir(context)))
+        state.syncStatus.value = setup(it)
+    }
+}
+
 /// The alerts banner (§ 8). Absent entirely when nothing stands, because
 /// a permanently drawn "all well" box is how people stop reading a
 /// surface that has to be read when it does appear.
+///
+/// The sentences are `SyncAlerts.kt`'s, shared with the desktop and
+/// carrying this shell's noun for itself. **The ground follows
+/// `alertIsDamage`**: an unread entry from a newer version and a note
+/// waiting for its own history are both worth saying and neither is a
+/// fault, and painting them red teaches a person to stop reading the box.
 @Composable
 private fun SyncAlerts(state: GiluneState) {
     if (state.syncAlerts.isEmpty()) return
     val colours = MaterialTheme.colorScheme
+    val damage = state.syncAlerts.any { alertIsDamage(it.kind) }
     Surface(
-        color = colours.errorContainer,
+        color = if (damage) colours.errorContainer else colours.surfaceVariant,
         shape = MaterialTheme.shapes.medium,
         modifier = Modifier.fillMaxWidth().testTag("sync-alerts"),
     ) {
@@ -424,11 +439,17 @@ private fun SyncAlerts(state: GiluneState) {
             Modifier.padding(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            Text(
+                alertsHeading(state.syncAlerts.map { it.kind }),
+                style = MaterialTheme.typography.titleSmall,
+                color = if (damage) colours.onErrorContainer else colours.onSurfaceVariant,
+                modifier = Modifier.testTag("sync-alerts-heading"),
+            )
             for (alert in state.syncAlerts) {
                 Text(
-                    alertSentence(alert.kind, alert.subject, alert.detail),
+                    alertSentence(alert.kind, alert.subject, alert.detail, PHONE_ALERT_WORDS),
                     style = MaterialTheme.typography.bodySmall,
-                    color = colours.onErrorContainer,
+                    color = if (damage) colours.onErrorContainer else colours.onSurfaceVariant,
                     modifier = Modifier.testTag("sync-alert"),
                 )
             }

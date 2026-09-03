@@ -255,20 +255,39 @@ class CaptionTest {
     }
 
     @Test
-    fun theCaptionSwitchNoLongerDecidesWhetherTheModelIsFetched() {
-        // **R1's rule, overturned by R3 and for the reason R3 exists.**
-        // While the caption was the model's only use, fetching 45 MB for a
+    fun theCaptionSwitchIsNotTheOnlyThingThatCanWantTheModel() {
+        // **R1's rule, overturned by R3, and half of it put back.** While
+        // the caption was the model's only use, fetching 45 MB for a
         // switched-off feature would have been a fault. The same model now
         // writes the note's committed words (ADR 0018 § 2), so gating the
-        // download on the caption would leave a person who turned the
+        // download on the caption alone would leave a person who turned the
         // caption off with a transcriber that can never transcribe.
+        //
+        // R3 dropped the condition outright, and that was the error: it
+        // made the fetch unconditional for an enabled plugin. The honest
+        // condition is the union, and this registry is its first half —
+        // Moonshine is the only provider here, so it IS the transcriber and
+        // the model is wanted whatever the caption says.
         val off = moonshineSettingsDocument(DEFAULT_MOONSHINE_MODEL, caption = false, wifiOnly = false)
+        val alone = listOf(plugin(settings = off))
+        assertTrue(moonshineModelWanted(alone), "it is the engine writing the transcripts")
         assertEquals(
             MoonshinePlan.Download(moonshineModel(null)),
-            moonshinePlan(listOf(plugin(settings = off)), { false }, metered = false),
+            moonshinePlan(alone, { false }, metered = false),
         )
         // The caption's own gate is untouched: it is off, so no caption.
-        assertFalse(captionOffered(listOf(plugin(settings = off)), modelPresent = true))
+        assertFalse(captionOffered(alone, modelPresent = true))
+
+        // The other half, which is where the silent 45 MB came from: put
+        // whisper back and Moonshine is neither the transcriber nor
+        // captioning, so nothing here would use the model and nothing
+        // fetches it. `MoonshinePlanTest` holds the full matrix.
+        val beside = listOf(plugin(id = TRANSCRIPTION_PLUGIN), plugin(settings = off))
+        assertFalse(moonshineModelWanted(beside))
+        assertEquals(
+            MoonshinePlan.Unused(moonshineModel(null)),
+            moonshinePlan(beside, { false }, metered = false),
+        )
     }
 
     @Test

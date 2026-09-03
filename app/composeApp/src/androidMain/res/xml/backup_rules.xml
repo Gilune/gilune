@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The same exclusion for Android 11 and earlier, which read
+    `fullBackupContent` rather than `dataExtractionRules`. minSdk is 29, so
+    both files ship and both say the same thing; the long version of why is
+    in `data_extraction_rules.xml` beside this one.
+
+    `filesDir/sync` holds this device's identity key, its pairing roster
+    and whether sync was switched on. All three are device-local by
+    decision (ADR 0019 § 4): an identity that travels is a cloned identity,
+    a roster is pairwise rather than vault state, and a restored copy of a
+    vault must not open a port because the phone it came from had one open.
+-->
+<full-backup-content>
+    <exclude domain="file" path="sync" />
+</full-backup-content>

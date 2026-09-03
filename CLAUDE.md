@@ -274,6 +274,81 @@ gates promises) are ratified. **Next: application-level engineering — see
      likewise. THREE WINDOWS FIREWALL DIALOGS from the routable-bind
      tests were left OPEN on the owner's desktop — allow/deny is the
      owner's click, never an agent's.**
+   - **Post-delivery review + fix round (2026-09-03, Fable 5.1
+     coordinating: 8 finder angles → 7 verifiers → 3 fixers + 1
+     integrator, all Opus)** — `/code-review high 16a88f4..HEAD`
+     over the Moonshine + MS1 + M5 range (~26k lines): 27 candidates
+     verified, 25 CONFIRMED/PLAUSIBLE, 2 refuted. The defects clustered
+     exactly where ADR 0019 said the risk was — three-replica apply
+     ordering (per-device seqs have NO causal parents; pull orders
+     streams by device_id = UUIDv7 = vault age, so a referent can
+     arrive AFTER the op that names it), listener hardening, and the
+     pairing address — plus one data-loss seam. KERNEL fixes (all with
+     falsified tests): a synced tombstone can no longer delete a
+     LOCALLY EDITED note (reconcile keeps the file as an import + alert
+     `vault-deleted-note-edited`; withdraw_tombstoned only removes
+     bytes equal to what the kernel would render NOW); absent referents
+     (object-revised/tombstone/supersedes before their object/head)
+     halt ONE stream with `sync-awaiting-referent`, frontier unmoved,
+     resume next pass (previously: FK error killed the session with no
+     alert / silent divergence / head resurrection — s4 scenario at
+     :362 had DEPENDED on the silent tombstone drop); SyncHalted is
+     `{kind, subject, reason}` so malformed/path-escaping envelopes are
+     `sync-corrupt-operation` not "limit exceeded"; zero-byte blobs
+     complete (an empty recording used to wedge sync with that peer
+     forever); run_exists restored BEFORE process() (post-commit crash +
+     failing retry no longer quarantines a delivered job); run loop
+     claims ONLY its own processor ids (JobFilter::Among — an
+     unregistered handle/`gilune-cli work` used to burn external
+     processors' attempts); `![[name]]` placeholder only for in-transit
+     sync blobs; NotFound vs other read errors distinguished; per-chunk
+     fsync removed. SYNC fixes: pre-handshake timeout on accepted
+     sockets + keepalive + silent callers count as rate-limit failures
+     (8 silent TCP connects used to wedge the listener till restart);
+     routable address published instead of 0.0.0.0 (QR/typed pairing
+     would have FAILED on real hardware — `service::publishable`,
+     if-addrs via existing lock edges); refusal set is DURABLE vault
+     state (`refuse_device`/`unrefuse_device`/
+     `reconcile_refused_devices`; `set_refused_devices` REMOVED —
+     re-enrolment used to wipe revocations + alerts); outbound sessions
+     check permission at op boundaries (revocation/sync-off stopped
+     only inbound before); roster reload-merge under a `.lock` sidecar
+     (activity + worker each hold a SyncService); one browse per
+     sync_now; advertise retried. SHELL fixes: a provider registered
+     while another transcriber is active registers DISABLED
+     (`applyOneTranscriberRule` — both transcribers were enabled by
+     default on EVERY fresh install and R1→R3 upgrade, queueing orphan
+     jobs per recording); Android backup/D2D EXCLUDES filesDir/sync
+     (data_extraction_rules + backup_rules — a transferred identity the
+     Keystore can't open left sync permanently "not set up") + "Reset
+     sync on this phone" recovery; one shared alert table
+     (jvmShared/SyncAlerts.kt, `alertIsDamage`, both new kinds worded
+     NOT-damage); provider failures surfaced (`ProcessingPass`,
+     `GiluneLog` hook); desktop Sync section loads alerts on entry;
+     discovery start-wait no longer eats the browse budget; QrScan
+     disposed-flag (`QrSession`); model downloads only if caption on OR
+     moonshine active + connectivity callback re-evaluates
+     WaitingForWifi; Keystore class-level lock (+ the on-device
+     round-trip test M5b lacked); MS1 rig restores a keyboard after a
+     hard-killed run; `QrAnalyser`; resumeSync off the vault-open path;
+     project() only if applied>0; SyncWorker gates on persisted
+     `wanted`. ADR 0019 + 0018 Amendments record every rule change;
+     08-open-questions closes three answered questions. Below-cap
+     cleanup left as debt: blobs::finish_blob re-implements
+     capture::promote; external.rs third digest reader; sealed-file
+     envelope written 4×; handshake 4-tuple; TranscriptCollector vs
+     foldCaption + event flattening duplicated; `Store::status()`
+     counts PARKED jobs in jobs_pending (shell shows a sentence; a
+     `jobs_parked` field is the real fix). INTEGRATION PROOF (rebuilt
+     dll 5.55 MB restaged, ABIs 6.26/6.40 MB, bindings BYTE-IDENTICAL
+     on both targets): cargo 273/0/2-ignored + clippy silent, desktop
+     504/0 (forced --rerun-tasks — gradle does NOT treat the staged dll
+     as a task input, so an unforced run re-reports the stale-dll
+     result), instrumented 733/0/1 fresh-boot with the repackaged APK,
+     zero MS1 flakes.
+     LESSON: S4's scenarios never crossed device streams out of causal
+     order — every future sync scenario must include a third replica
+     that pulls the streams in the WRONG order.
      Gaps: GiluneStatus lacks blobs_awaiting/alerts (deliberate, no
      FFI change — `gilune-cli alerts` meanwhile, M5c wires shells);
      per-peer establishment rate limits → M5b (no peer identity yet);

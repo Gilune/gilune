@@ -185,7 +185,12 @@ private fun VaultSection(state: GiluneState, onExport: () -> Unit) {
                 runCatching { gilune.status() }.getOrNull()?.let { status ->
                     appendLine("captures: ${status.sources}")
                     appendLine("projected notes: ${status.projections}")
-                    appendLine("waiting jobs: ${status.jobsPending}")
+                    // The count plus what it means when a plugin is
+                    // switched off: disabled is parked, not destroyed, so
+                    // this number can hold jobs nobody will ever claim —
+                    // which reads as a backlog and is not one.
+                    val parked = waitingJobsNote(state.plugins, status.jobsPending)
+                    appendLine("waiting jobs: ${status.jobsPending}${parked?.let { " ($it)" } ?: ""}")
                     appendLine("open proposals: ${status.proposalsOpen}")
                 }
             }.trim()

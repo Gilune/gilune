@@ -68,16 +68,97 @@ pub const DEFAULT_BIND_HOST: &str = "0.0.0.0";
 /// nothing but a retry.
 pub const MAX_CONCURRENT_SESSIONS: usize = 8;
 
+/// The IPv4 addresses this machine can actually be dialled at, best
+/// first.
+///
+/// Read from the interface table (`getifaddrs` / `GetAdaptersAddresses`)
+/// and **not** by opening a socket. The std-only way to answer this is to
+/// bind a UDP socket and `connect` it at a private-range address to learn
+/// the preferred outbound interface — and that is a bind, in a program
+/// whose § 2 discipline is that it binds when the user switches sync on
+/// and at no other moment. `listening_on` is read by every settings
+/// refresh; a socket opened behind a status query would be exactly the
+/// kind of surprise the firewall UX was designed to avoid.
+///
+/// **IPv4 only, for the reason `discovery::first_address` gives**: a
+/// link-local IPv6 address needs the scope id of the interface it was
+/// heard on, and `host:port` cannot carry one.
+///
+/// The honest limitation: a machine with Hyper-V, WSL or a VPN adapter
+/// has several routable addresses and this cannot know which one a phone
+/// shares a network with. That is why `listening_addresses` reports all
+/// of them for a settings screen to show, and why § 1's manual entry is
+/// the answer when the first guess is the wrong one.
+pub fn routable_addresses() -> Vec<std::net::Ipv4Addr> {
+    let Ok(interfaces) = if_addrs::get_if_addrs() else { return Vec::new() };
+    let mut addresses: Vec<std::net::Ipv4Addr> = interfaces
+        .into_iter()
+        .filter(|i| i.is_oper_up())
+        .filter_map(|i| match i.ip() {
+            std::net::IpAddr::V4(ip) => Some(ip),
+            std::net::IpAddr::V6(_) => None,
+        })
+        .filter(is_routable)
+        .collect();
+    addresses.sort();
+    addresses.dedup();
+    addresses
+}
+
+/// Whether an address is one a peer on a LAN could dial. Never the
+/// unspecified address, never the loopback, never what an interface has
+/// when DHCP did not answer.
+fn is_routable(ip: &std::net::Ipv4Addr) -> bool {
+    !ip.is_unspecified()
+        && !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_multicast()
+        && !ip.is_broadcast()
+        && !ip.is_documentation()
+}
+
+/// What a device should publish for a listener bound at `bound`.
+///
+/// **`0.0.0.0` is not an address.** The listener binds every interface
+/// (§ 2), and `local_addr` reports that bind verbatim — so the string
+/// that reached the pairing window, the QR's fourth field and both
+/// shells' settings screens was `0.0.0.0:51837`, which no peer can dial
+/// and nothing downstream substituted. A phone that scanned that QR was
+/// being told to connect to itself.
+///
+/// So an unspecified bind publishes a routable address of this machine
+/// instead, keeping the port the listener actually took. Anything else —
+/// a deliberate `127.0.0.1` for a test or a host that narrowed its own
+/// bind — is published exactly as it was asked for: substituting there
+/// would be overruling a caller who said what they meant.
+///
+/// A machine with no routable address at all publishes the loopback. It
+/// is not reachable from anywhere else, and saying `127.0.0.1` is the
+/// true description of that; `0.0.0.0` would be a false one.
+pub fn publishable(bound: &str, candidates: &[std::net::Ipv4Addr]) -> String {
+    let Some((host, port)) = bound.rsplit_once(':') else {
+        return bound.to_string();
+    };
+    let unspecified = match host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        Ok(ip) => ip.is_unspecified(),
+        Err(_) => false,
+    };
+    if !unspecified {
+        return bound.to_string();
+    }
+    match candidates.iter().find(|ip| is_routable(ip)) {
+        Some(ip) => format!("{ip}:{port}"),
+        None => format!("127.0.0.1:{port}"),
+    }
+}
+
 /// Why a peer could not be reached, in the words the user gets. § 1's
 /// last step is "a diagnostic that names AP client isolation as the
 /// likely cause" — words, not a spinner — and this is where those words
 /// are decided, once, rather than in each shell.
-pub fn unreachable_diagnostic(called: &str, cached: &str, looked: bool, seen: usize) -> String {
-    unreachable_because(called, cached, looked, seen, false)
-}
-
-/// The same, when the browse is able to say whether the wanted device was
-/// among what it saw.
+///
+/// Takes whether the browse was able to say the wanted device was among
+/// what it saw.
 ///
 /// A device that answered a browse but speaks a protocol this build
 /// cannot is **not** a device that is switched off, and telling someone
@@ -228,6 +309,24 @@ pub struct SyncShared {
     /// that has gone quiet, so switching sync off would freeze the
     /// settings screen for as long as that took.
     serving: Arc<AtomicBool>,
+    /// Whether this device will keep talking on connections **it** opened.
+    ///
+    /// Separate from `serving`, and it starts true rather than false,
+    /// because dialling out and answering are genuinely different states:
+    /// Android's background worker opens a kernel handle, configures sync
+    /// and calls `sync_now` **without ever binding a listener** (that is
+    /// § 2 working — a background pass must never open an inbound
+    /// socket), so a device that could only dial while it was listening
+    /// would be a phone that never synced in the background at all.
+    ///
+    /// What it does carry is the withdrawal: switching sync off clears
+    /// it, and an outbound session then ends at its next operation
+    /// boundary exactly as an inbound one does.
+    outbound: Arc<AtomicBool>,
+    /// How long an accepted caller has to get through establishment
+    /// before its socket is closed. Configuration with a documented
+    /// default, like every other bound in § 8.
+    handshake_timeout: Mutex<std::time::Duration>,
 }
 
 impl SyncShared {
@@ -237,6 +336,13 @@ impl SyncShared {
             &self.name,
             &self.advertised.lock().unwrap_or_else(|e| e.into_inner()),
         )
+    }
+
+    fn handshake_timeout(&self) -> std::time::Duration {
+        *self
+            .handshake_timeout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
     }
 }
 
@@ -313,9 +419,24 @@ impl SyncService {
         let (identity, enrolment) = identity::enrol(store, &identities, wrap.as_deref())?;
         let device_id = store.device_id()?;
         let roster = Roster::open(identities.roster_path(&device_id), wrap)?;
-        // The kernel's refusal list is a projection of the roster and is
-        // refreshed from it here, so a restart cannot lose a revocation.
-        store.set_refused_devices(&roster.revoked_device_ids())?;
+        // The roster's revocations are folded **into** the kernel's set,
+        // never over it.
+        //
+        // **The defect this closes.** The roster is device-local and keyed
+        // by `device_id`, and re-enrolment mints a new `device_id` (§ 4) —
+        // so a vault that arrives on a machine holding no identity for it
+        // opens a roster that does not exist yet, and rewriting the
+        // kernel's list from that empty roster erased every revocation the
+        // vault carried and dismissed the alerts that went with them. A
+        // revoked device would have been welcomed back by the act of
+        // restoring a backup, silently.
+        //
+        // The refusal set is therefore durable vault state that revocation
+        // adds to and only an explicit re-pairing takes from. The previous
+        // device's roster is gone with its identity, and that is fine: the
+        // kernel's set survived, which is the whole point of keeping it
+        // here.
+        store.reconcile_refused_devices(&roster.revoked_device_ids())?;
         let name = if device_name.trim().is_empty() {
             "this device".to_string()
         } else {
@@ -334,6 +455,8 @@ impl SyncService {
                 rate: Mutex::new(RateLimiter::default()),
                 live: Arc::new(AtomicUsize::new(0)),
                 serving: Arc::new(AtomicBool::new(false)),
+                outbound: Arc::new(AtomicBool::new(true)),
+                handshake_timeout: Mutex::new(handshake::HANDSHAKE_TIMEOUT),
             }),
             listening: Mutex::new(None),
             identities,
@@ -455,13 +578,16 @@ impl SyncService {
         self.shared.roster.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    /// Rewrite the kernel's refusal list from the roster. Called after
-    /// every roster change: the roster is the authority and this is the
-    /// projection of it that `apply` consults.
-    fn publish_refusals(&self, store: &Store) -> Result<()> {
-        let revoked = self.roster().revoked_device_ids();
-        store.set_refused_devices(&revoked)?;
-        Ok(())
+    /// Configure how long an accepted caller has to finish establishing
+    /// itself. § 8's rule about bounds: configuration with a documented
+    /// default, so "a silent caller is closed on" can be a test rather
+    /// than a fifteen-second wait.
+    pub fn configure_handshake_timeout(&self, timeout: std::time::Duration) {
+        *self
+            .shared
+            .handshake_timeout
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = timeout;
     }
 
     // ------------------------------------------------------------ the listener
@@ -473,12 +599,43 @@ impl SyncService {
             .is_some()
     }
 
+    /// Where a peer should be told to reach this device, or `None` when
+    /// it is not listening. Never the bind: see `publishable`.
     pub fn listening_on(&self) -> Option<String> {
         self.listening
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .as_ref()
             .map(|l| l.address.clone())
+    }
+
+    /// Every address this device could be reached at, best first.
+    ///
+    /// The QR and the pairing window carry exactly one (§ 3), because a
+    /// scanner has to be handed one thing to dial. A settings screen has
+    /// room to show them all, and on a machine with a VPN or a Hyper-V
+    /// adapter that is the difference between a person reading the right
+    /// address off the screen and giving up.
+    pub fn listening_addresses(&self) -> Vec<String> {
+        let Some(bound) = self.listening_on() else { return Vec::new() };
+        let Some((host, port)) = bound.rsplit_once(':') else { return vec![bound] };
+        // A host that narrowed its own bind is reachable at that and
+        // nowhere else; only an every-interface bind has candidates.
+        let unspecified = self
+            .bind_host
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_unspecified())
+            .unwrap_or(false);
+        if !unspecified {
+            return vec![format!("{host}:{port}")];
+        }
+        let routable = routable_addresses();
+        if routable.is_empty() {
+            return vec![format!("127.0.0.1:{port}")];
+        }
+        routable.iter().map(|ip| format!("{ip}:{port}")).collect()
     }
 
     /// Switch sync on or off. **This is the moment the socket is bound**
@@ -507,8 +664,10 @@ impl SyncService {
             // Live sessions stop at their next operation boundary rather
             // than being waited for: a peer that has gone quiet holds a
             // session open for a minute, and switching sync off must not
-            // take a minute.
+            // take a minute. **Both directions**: a session this device
+            // dialled is as much a live session as one it answered.
             self.shared.serving.store(false, Ordering::SeqCst);
+            self.shared.outbound.store(false, Ordering::SeqCst);
             if let Some(mut live) = listening.take() {
                 live.stop();
             }
@@ -523,7 +682,13 @@ impl SyncService {
         // whichever was actually taken is what gets published (§ 1).
         let socket = TcpListener::bind((host.as_str(), preferred))
             .or_else(|_| TcpListener::bind((host.as_str(), 0)))?;
-        let address = socket.local_addr()?.to_string();
+        // What was bound, and then what a peer can dial. `local_addr` on
+        // an every-interface bind answers `0.0.0.0:<port>`, which is the
+        // string that used to reach the pairing window, the QR and both
+        // shells' settings screens — and which no device on the network
+        // could ever connect to.
+        let address = publishable(&socket.local_addr()?.to_string(), &routable_addresses());
+        self.shared.outbound.store(true, Ordering::SeqCst);
         *self
             .shared
             .advertised
@@ -676,6 +841,7 @@ impl SyncService {
             self.shared.greeting(),
             Arc::clone(&self.shared.roster),
             self.shared.limits,
+            Arc::clone(&self.shared.outbound),
         )
     }
 
@@ -793,9 +959,11 @@ impl SyncService {
             established.derived_secret,
         )?;
         // Re-pairing a device that was revoked is a new pairing, so its
-        // operations stop being refused — which means the projection has
-        // to be rewritten here too.
-        self.publish_refusals(store)?;
+        // operations stop being refused. An explicit welcome back is the
+        // **only** thing that takes a device out of the kernel's refusal
+        // set, and it withdraws the standing alert with it: nobody should
+        // have to dismiss a notice about a device they have just paired.
+        store.unrefuse_device(&established.peer.device_id)?;
         Ok(summary(&peer))
     }
 
@@ -806,12 +974,22 @@ impl SyncService {
     }
 
     /// Revoke a peer: local, immediate, and it takes the pair secret with
-    /// it. A live session ends at the next operation boundary because
-    /// `serve` asks the roster between requests.
+    /// it. A live session ends at the next operation boundary — inbound
+    /// because `serve` asks the roster between requests, outbound because
+    /// a dialled session asks the same question before every request it
+    /// writes.
     pub fn revoke_peer(&self, store: &Store, static_pub: &str) -> Result<bool> {
+        let device_id = self
+            .roster()
+            .find(static_pub)
+            .map(|p| p.device_id.clone())
+            .unwrap_or_default();
         let revoked = self.roster().revoke(static_pub)?;
-        if revoked {
-            self.publish_refusals(store)?;
+        if revoked && !device_id.is_empty() {
+            // Added to the kernel's durable set, not written over it: a
+            // revocation is a decision this vault carries from here on,
+            // whatever happens to the device-local roster afterwards.
+            store.refuse_device(&device_id)?;
         }
         Ok(revoked)
     }
@@ -837,6 +1015,7 @@ impl SyncService {
         static_pub: &str,
         cached: &str,
         called: &str,
+        browsed: &mut Browsed,
     ) -> Result<Box<dyn crate::Session>> {
         if !cached.is_empty() {
             match transport.connect(&format!("{static_pub}@{cached}")) {
@@ -849,25 +1028,14 @@ impl SyncService {
                 Err(_) => {}
             }
         }
-        let discovery = self.discovery();
-        let looked = discovery.name() != "none";
-        let mine = identity::fingerprint_compact(self.shared.identity.public());
-        let seen: Vec<_> = if looked {
-            discovery
-                .browse(crate::discovery::DEFAULT_BROWSE)
-                .unwrap_or_default()
-                .into_iter()
-                // This device is advertising on the same network and
-                // answers its own browse. Counting it would make the
-                // diagnostic below say "1 other device is visible" on a
-                // network where this machine is entirely alone — which is
-                // the network the diagnostic most needs to describe
-                // correctly.
-                .filter(|d| d.fingerprint != mine)
-                .collect()
-        } else {
-            Vec::new()
-        };
+        let looked = self.discovery().name() != "none";
+        // **One browse per round, however many peers are unreachable.** A
+        // browse costs 2.5 s — measured, and twice what exchanging a
+        // hundred operations costs — so a laptop with three peers asleep
+        // used to spend seven and a half seconds asking the same question
+        // three times and getting the same answer. The answer describes
+        // the network, not the peer, so it is asked once and shared.
+        let seen = browsed.get(self);
         let wanted = self
             .roster()
             .find(static_pub)
@@ -899,7 +1067,18 @@ impl SyncService {
 
     /// Sync with every paired peer, reaching each down the chain in § 1.
     pub fn sync_now(&self, store: &Store) -> Result<ExchangeReport> {
+        // A responder that failed to start once is retried here rather
+        // than left down until somebody toggles the switch. An adapter
+        // can report failure for a registration that in fact completes
+        // late — the Android one waits a bounded time for
+        // `onServiceRegistered` — and a device that is listening but has
+        // given up on being findable is precisely the "reachable but not
+        // findable" state § 1's chain exists to avoid needing.
+        if self.enabled() && !self.advertising() {
+            self.begin_advertising();
+        }
         let transport = self.transport();
+        let mut browsed = Browsed::default();
         let targets: Vec<(String, String, String)> = self
             .roster()
             .peers()
@@ -912,7 +1091,13 @@ impl SyncService {
             .collect();
         let mut total = ExchangeReport::default();
         for (static_pub, address, called) in targets {
-            let mut session = match self.reach(&transport, &static_pub, &address, &called) {
+            let mut session = match self.reach(
+                &transport,
+                &static_pub,
+                &address,
+                &called,
+                &mut browsed,
+            ) {
                 Ok(session) => session,
                 Err(e) => {
                     // A connection that never opened is not one device's
@@ -934,7 +1119,16 @@ impl SyncService {
                     total.sent += report.sent;
                     total.chunks += report.chunks;
                     total.blobs_completed += report.blobs_completed;
-                    total.blobs_pending += report.blobs_pending;
+                    // **Not a sum.** Every other counter here is work this
+                    // round did, so adding is right; this one is a count
+                    // of rows still waiting in *this vault*, answered
+                    // once per session. Adding it across three peers
+                    // would report one outstanding blob as three, and
+                    // `incomplete()` reads it — so a shell would keep
+                    // being told there was more to come. The last session
+                    // has the most recent answer; taking the largest is
+                    // the same thing without depending on the order.
+                    total.blobs_pending = total.blobs_pending.max(report.blobs_pending);
                     total.bytes += report.bytes;
                     total.halted.extend(report.halted);
                     total.ended_on_cap |= report.ended_on_cap;
@@ -968,6 +1162,47 @@ impl SyncService {
             pairing: self.pairing(),
             peers: self.peers(),
         }
+    }
+}
+
+/// One round's answer to "what is on this network", asked at most once.
+///
+/// The measurement gate C recorded is the reason this type exists: a cold
+/// browse costs 2.5 s against an exchange's 1.2 s, so browsing per
+/// unreachable peer made the expensive half of a sync scale with how many
+/// devices were asleep. What a browse returns describes the network and
+/// not the peer that prompted it, so one answer serves every peer in the
+/// round — and it is still *lazy*, so a round in which every cached
+/// address works browses not at all, which is § 1's rule intact.
+#[derive(Default)]
+struct Browsed {
+    answer: Option<Vec<crate::discovery::Discovered>>,
+}
+
+impl Browsed {
+    fn get(&mut self, service: &SyncService) -> &[crate::discovery::Discovered] {
+        if self.answer.is_none() {
+            let discovery = service.discovery();
+            let mine = identity::fingerprint_compact(service.shared.identity.public());
+            let seen = if discovery.name() == "none" {
+                Vec::new()
+            } else {
+                discovery
+                    .browse(crate::discovery::DEFAULT_BROWSE)
+                    .unwrap_or_default()
+                    .into_iter()
+                    // This device is advertising on the same network and
+                    // answers its own browse. Counting it would make the
+                    // diagnostic say "1 other device is visible" on a
+                    // network where this machine is entirely alone —
+                    // which is the network the diagnostic most needs to
+                    // describe correctly.
+                    .filter(|d| d.fingerprint != mine)
+                    .collect()
+            };
+            self.answer = Some(seen);
+        }
+        self.answer.as_deref().unwrap_or_default()
     }
 }
 
@@ -1081,7 +1316,25 @@ fn answer(
     caller: &str,
 ) -> Result<()> {
     let now = ids::now_ms();
+    // **Before a byte is read.** An accepted socket carries no timeouts
+    // at all, and every read that follows blocks for as long as the
+    // caller likes — so eight sockets opened and left silent took every
+    // session slot this listener has and held them until the process
+    // ended. The dialling side has always bounded its own establishment;
+    // this is the same bound applied by the side that did not choose to
+    // be in the conversation. It is replaced by `SESSION_TIMEOUT` the
+    // moment a handshake completes.
+    //
+    // A failure to set it is not a reason to refuse the caller — some of
+    // these calls cannot fail on any platform we ship — but it is a
+    // reason not to pretend the bound is there, so it is best-effort and
+    // the slot cap remains the backstop.
+    let _ = handshake::timed(&stream, shared.handshake_timeout());
     let mut channel = PlainChannel::new(stream, shared.limits);
+    // A caller that connects and says nothing now fails here, on a
+    // timeout, which lands in the same arm a malformed hello does: it
+    // costs the caller's address one rate-limiter failure, so silence is
+    // no longer the one way to knock on this door for free.
     let intent = match handshake::read_hello(&mut channel) {
         Ok(intent) => intent,
         Err(e) => {
@@ -1157,12 +1410,11 @@ fn answer(
                             &address,
                             established.derived_secret,
                         )?;
-                    let revoked = shared
-                        .roster
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .revoked_device_ids();
-                    store.set_refused_devices(&revoked)?;
+                    // A device that has just been paired is welcome, and
+                    // that is the only thing that takes one out of the
+                    // kernel's durable refusal set — the standing alert
+                    // goes with it.
+                    store.unrefuse_device(&established.peer.device_id)?;
                     // Only now is the joiner told. Until this frame the
                     // pairing existed on one side only, and a joiner that
                     // returned before it would believe in a roster entry

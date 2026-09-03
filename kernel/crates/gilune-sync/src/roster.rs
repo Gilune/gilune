@@ -152,6 +152,59 @@ impl Roster {
         Ok(Roster { path, wrap, peers })
     }
 
+    /// Read the file again into this handle, discarding what was held.
+    ///
+    /// A roster that has gone missing since it was opened is an empty
+    /// one, not an error: that is a first write, and `open` already
+    /// treats it that way.
+    fn reload(&mut self) -> Result<()> {
+        let fresh = Roster::open(self.path.clone(), self.wrap.clone())?;
+        self.peers = fresh.peers;
+        Ok(())
+    }
+
+    /// Apply one change to the roster **as it is on disk right now**, and
+    /// write the result back, with nobody else in the file meanwhile.
+    ///
+    /// **The defect this closes.** Saving used to be a whole-file replace
+    /// of whatever this handle happened to be holding. One file, two
+    /// writers — the Android activity's service and the background
+    /// worker's, or two desktop instances on one vault, which is
+    /// sanctioned use since 2026-08-31 — and the second writer's save
+    /// erased the first's change entirely: a pairing recorded by the
+    /// worker vanished the next time the activity refreshed an address,
+    /// and nothing anywhere said so.
+    ///
+    /// So a write is now read-modify-write under an advisory exclusive
+    /// lock. The lock is on a sidecar rather than on the roster itself,
+    /// because the write is an atomic replace of that path and a lock
+    /// held on a file that is about to be replaced protects nothing.
+    /// A machine that will not give a lock is not a machine that should
+    /// stop pairing, so failing to take one is a reason to carry on
+    /// unlocked — the reload still merges, which is the larger half.
+    ///
+    /// This does **not** make two processes' reads consistent, and does
+    /// not claim to: a handle that has held a roster for an hour still
+    /// answers `peers()` from what it read. What it fixes is the write —
+    /// no change is silently thrown away by another writer's save.
+    fn mutate<T>(&mut self, change: impl FnOnce(&mut Vec<Peer>) -> T) -> Result<T> {
+        let _guard = FileGuard::acquire(&self.lock_path());
+        self.reload()?;
+        let outcome = change(&mut self.peers);
+        self.save()?;
+        Ok(outcome)
+    }
+
+    fn lock_path(&self) -> PathBuf {
+        let mut name = self
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "roster".to_string());
+        name.push_str(".lock");
+        self.path.with_file_name(name)
+    }
+
     pub fn peers(&self) -> &[Peer] {
         &self.peers
     }
@@ -206,22 +259,29 @@ impl Roster {
             last_seen_ms: now,
             secret: secret.to_vec(),
         };
-        self.peers.retain(|p| p.static_pub != static_pub);
-        self.peers.push(peer.clone());
-        self.save()?;
+        let stored = peer.clone();
+        self.mutate(move |peers| {
+            peers.retain(|p| p.static_pub != stored.static_pub);
+            peers.push(stored);
+        })?;
         Ok(peer)
     }
 
     /// Revoke, locally and immediately. The secret goes; the row stays so
     /// the refusal survives a restart.
     pub fn revoke(&mut self, static_pub: &str) -> Result<bool> {
-        let Some(peer) = self.peers.iter_mut().find(|p| p.static_pub == static_pub) else {
-            return Ok(false);
-        };
-        peer.state = PeerState::Revoked;
-        peer.secret.clear();
-        self.save()?;
-        Ok(true)
+        // The lookup happens **inside** the reload, not against what this
+        // handle was holding: another process may have paired this device
+        // since, and revoking somebody who was only just added is exactly
+        // the case that must not silently do nothing.
+        self.mutate(|peers| {
+            let Some(peer) = peers.iter_mut().find(|p| p.static_pub == static_pub) else {
+                return false;
+            };
+            peer.state = PeerState::Revoked;
+            peer.secret.clear();
+            true
+        })
     }
 
     /// Record where a peer can be reached, without claiming to have
@@ -231,31 +291,30 @@ impl Roster {
     /// which is what the cached-address rule means. Deliberately does
     /// **not** touch `last_seen_ms` — nothing has been seen.
     pub fn set_address(&mut self, static_pub: &str, address: &str) -> Result<bool> {
-        let Some(peer) = self.peers.iter_mut().find(|p| p.static_pub == static_pub) else {
-            return Ok(false);
-        };
-        if peer.address == address {
-            return Ok(true);
-        }
-        peer.address = address.to_string();
-        self.save()?;
-        Ok(true)
+        self.mutate(|peers| {
+            let Some(peer) = peers.iter_mut().find(|p| p.static_pub == static_pub) else {
+                return false;
+            };
+            peer.address = address.to_string();
+            true
+        })
     }
 
     /// Refresh what a successful session taught us: the peer's device id,
     /// the address it was actually reachable at, and when.
     pub fn seen(&mut self, static_pub: &str, device_id: &str, address: &str) -> Result<()> {
-        let Some(peer) = self.peers.iter_mut().find(|p| p.static_pub == static_pub) else {
-            return Ok(());
-        };
-        if !device_id.is_empty() {
-            peer.device_id = device_id.to_string();
-        }
-        if !address.is_empty() {
-            peer.address = address.to_string();
-        }
-        peer.last_seen_ms = gilune_kernel::ids::now_ms();
-        self.save()
+        self.mutate(|peers| {
+            let Some(peer) = peers.iter_mut().find(|p| p.static_pub == static_pub) else {
+                return;
+            };
+            if !device_id.is_empty() {
+                peer.device_id = device_id.to_string();
+            }
+            if !address.is_empty() {
+                peer.address = address.to_string();
+            }
+            peer.last_seen_ms = gilune_kernel::ids::now_ms();
+        })
     }
 
     fn save(&self) -> Result<()> {
@@ -293,6 +352,44 @@ impl Roster {
             "payload": hex::encode(&sealed),
         });
         write_private(&self.path, envelope.to_string().as_bytes())
+    }
+}
+
+/// An advisory exclusive lock held for the length of one read-modify-write.
+///
+/// Held on a sidecar, never on the roster: the roster is replaced by an
+/// atomic rename, and a lock on a file that is about to be replaced
+/// guards a handle nobody will be holding afterwards.
+///
+/// **A lock that cannot be taken is not a reason to refuse to pair.** A
+/// filesystem that will not lock — some network shares, some sandboxes —
+/// still gets the reload-and-merge, which is the half that turns a lost
+/// update into a rare interleaving rather than a routine one. So this
+/// carries an `Option` and never an error.
+/// Uses `std::fs::File`'s own `lock`/`unlock` — stable since Rust 1.89
+/// and well inside this workspace's floor — so the whole of this costs no
+/// dependency: `flock` on Unix, `LockFileEx` on Windows.
+struct FileGuard(Option<std::fs::File>);
+
+impl FileGuard {
+    fn acquire(path: &std::path::Path) -> FileGuard {
+        let opened = std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(path);
+        match opened {
+            Ok(file) if file.lock().is_ok() => FileGuard(Some(file)),
+            _ => FileGuard(None),
+        }
+    }
+}
+
+impl Drop for FileGuard {
+    fn drop(&mut self) {
+        if let Some(file) = self.0.take() {
+            let _ = file.unlock();
+        }
     }
 }
 
@@ -429,6 +526,83 @@ mod tests {
         assert_eq!(roster.peers().len(), 1, "one row, replaced whole");
         assert_eq!(roster.secret_for(&key), Some([2u8; 32]));
         assert!(roster.revoked_device_ids().is_empty());
+    }
+
+    /// **K2.** One roster file, two handles — the shape the Android
+    /// activity's service and its background worker actually have, and
+    /// two desktop instances on one vault (sanctioned use since
+    /// 2026-08-31). A save used to be a whole-file replace of whatever
+    /// the writing handle held, so whichever of these wrote last erased
+    /// the other's work: a pairing made by the worker disappeared the
+    /// next time the activity refreshed an address, silently.
+    #[test]
+    fn two_handles_over_one_file_do_not_overwrite_each_others_changes() {
+        let dir = tempfile::tempdir().expect("dir");
+        let first_key = "1a".repeat(32);
+        let second_key = "2b".repeat(32);
+
+        // Both opened before either wrote, which is what two processes
+        // starting up looks like.
+        let mut first = roster(&dir, None);
+        let mut second = roster(&dir, None);
+
+        first
+            .pair(&first_key, "device-a", "Laptop", "10.0.0.5:51837", [1u8; 32])
+            .expect("the first handle pairs a device");
+        second
+            .pair(&second_key, "device-b", "Phone", "10.0.0.6:51837", [2u8; 32])
+            .expect("the second handle pairs another");
+        // And now the first handle, which has never heard of the second's
+        // peer, changes something about its own.
+        assert!(first
+            .set_address(&first_key, "10.0.0.9:51837")
+            .expect("address"));
+
+        let after = roster(&dir, None);
+        assert_eq!(
+            after.peers().len(),
+            2,
+            "one handle's write erased the other's pairing"
+        );
+        assert_eq!(
+            after.find(&first_key).expect("the first peer").address,
+            "10.0.0.9:51837",
+            "and the change that came last is the one that stands"
+        );
+        assert_eq!(
+            after.secret_for(&second_key),
+            Some([2u8; 32]),
+            "the other handle's pair secret survived intact"
+        );
+    }
+
+    /// The same property for the change that matters most: a revocation
+    /// must not be undone by an unrelated write from another handle.
+    #[test]
+    fn a_revocation_survives_another_handles_write() {
+        let dir = tempfile::tempdir().expect("dir");
+        let revoked = "3c".repeat(32);
+        let other = "4d".repeat(32);
+        let mut first = roster(&dir, None);
+        first
+            .pair(&revoked, "device-b", "Phone", "a:1", [5u8; 32])
+            .expect("pair");
+        first.pair(&other, "device-c", "Tablet", "b:2", [6u8; 32]).expect("pair");
+
+        // A second handle reads the file, then the first revokes, then
+        // the second writes something about a different peer entirely.
+        let mut second = roster(&dir, None);
+        assert!(first.revoke(&revoked).expect("revoke"));
+        second.seen(&other, "device-c", "b:3").expect("seen");
+
+        let after = roster(&dir, None);
+        assert_eq!(
+            after.revoked_device_ids(),
+            vec!["device-b".to_string()],
+            "an unrelated write brought a revoked device back"
+        );
+        assert_eq!(after.secret_for(&revoked), None);
+        assert_eq!(after.find(&other).expect("the other peer").address, "b:3");
     }
 
     #[test]

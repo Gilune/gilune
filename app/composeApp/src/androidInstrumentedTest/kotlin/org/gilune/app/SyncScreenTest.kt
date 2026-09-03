@@ -19,19 +19,6 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/// The seven kinds the kernel raises (`gilune-kernel::alerts`). Named
-/// here so a kind added there and forgotten here shows up as a test that
-/// has to be written rather than as a screen that says nothing useful.
-internal val ALERT_KINDS = listOf(
-    "sync-gap",
-    "sync-corrupt-operation",
-    "sync-unsupported-version",
-    "sync-unknown-op-kind",
-    "sync-limit-exceeded",
-    "sync-blob-digest-mismatch",
-    "sync-revoked-device",
-)
-
 internal fun peer(
     name: String = "Davids laptop",
     state: String = "paired",
@@ -53,8 +40,13 @@ internal fun syncStatus(
     advertising: Boolean = true,
     discovery: String = DISCOVERY_NAME,
     keyProtection: String = KEY_PROTECTION_KEYSTORE,
-    listeningOn: String? = "0.0.0.0:51837",
+    listeningOn: String? = "192.168.1.20:51837",
     peers: List<PeerInfo> = emptyList(),
+    /// The persisted choice, which is a different fact from `enabled` and
+    /// the only one a fresh process has. It follows `enabled` unless a
+    /// scenario asks them apart — a phone that came back up and could not
+    /// bind, or a background worker that never binds at all.
+    wanted: Boolean = enabled,
 ) = SyncStatus(
     enabled = enabled,
     deviceId = "device-0",
@@ -65,11 +57,7 @@ internal fun syncStatus(
     enrolment = "continued",
     enrolmentNotice = null,
     listeningOn = listeningOn,
-    // What the user chose, as opposed to whether it is listening right
-    // now. The fixture follows `enabled` because the interesting split
-    // between them — meant to be on, could not bind — belongs to the
-    // scenario that asks for it rather than to every fixture.
-    wanted = enabled,
+    wanted = wanted,
     advertising = advertising,
     discovery = discovery,
     pairing = null,
@@ -79,62 +67,23 @@ internal fun syncStatus(
 class SyncScreenTest {
 
     // ------------------------------------------------------- alerts (§ 8)
+    //
+    // The sentences themselves moved to `SyncAlerts.kt` and are pinned in
+    // `SyncAlertsTest` (jvmSharedTest, so both suites run them). What is
+    // left here is the one thing that is this shell's own: it asks for the
+    // phone's noun, and it never shows a person the kernel's identifiers.
 
     @Test
-    fun everyKindHasWordsOfItsOwn() {
-        val sentences = ALERT_KINDS.map { alertSentence(it, "device-1", "seq 7 after 5") }
-        assertEquals(ALERT_KINDS.size, sentences.toSet().size, "each kind says something different")
-        for ((kind, sentence) in ALERT_KINDS.zip(sentences)) {
-            assertFalse(sentence.contains(kind), "the raw kind never reaches the screen: $sentence")
-            assertFalse(sentence.contains("sync-"), "nor any other identifier: $sentence")
+    fun thePhoneAsksForItsOwnNounAndKeepsTheKernelsIdentifiersOffTheScreen() {
+        for (kind in ALERT_KINDS) {
+            val sentence = alertSentence(kind, "device-1", "seq 7 after 5", PHONE_ALERT_WORDS)
             assertFalse(sentence.contains("device-1"), "nor the subject: $sentence")
-            assertTrue(sentence.length > 80, "a sentence, not a label: $sentence")
+            assertFalse(sentence.contains("seq 7 after 5"), "nor the detail: $sentence")
+            assertFalse(sentence.contains("this device"), "a phone is a phone: $sentence")
         }
-    }
-
-    /// § 8's policy is that nothing past the fault applies and everything
-    /// before it stands. Six of the seven say so; the seventh says
-    /// something stronger.
-    @Test
-    fun everyHaltSaysItResumesWhereItStopped() {
-        for (kind in ALERT_KINDS - "sync-unknown-op-kind") {
-            val sentence = alertSentence(kind, "device-1", "")
-            assertTrue(
-                sentence.contains("stopped") || sentence.contains("refused"),
-                "$kind should say what stopped: $sentence",
-            )
-            assertTrue(
-                sentence.contains("resumes") || sentence.contains("carries on") ||
-                    sentence.contains("picks up") || sentence.contains("continues") ||
-                    sentence.contains("again"),
-                "$kind should say it comes back: $sentence",
-            )
-        }
-    }
-
-    /// The one that is not damage. A person reading it must not come away
-    /// thinking something was lost, because nothing was: an operation this
-    /// build cannot interpret is preserved verbatim and forwarded
-    /// (constitution rule 9).
-    @Test
-    fun anUnknownKindIsNotDamage() {
-        val sentence = alertSentence("sync-unknown-op-kind", "task-status", "")
-        assertTrue(sentence.contains("Nothing stopped"), sentence)
-        assertTrue(sentence.contains("nothing is lost"), sentence)
-        assertTrue(sentence.contains("passed on"), sentence)
-    }
-
-    /// A kind a newer kernel raises and this build has never heard of.
-    /// The kernel's own words are the only ones there are, and saying
-    /// nothing would be the silence the whole surface exists to end.
-    @Test
-    fun anUnrecognisedKindFallsBackToWhatTheKernelSaid() {
-        val sentence = alertSentence("sync-something-new", "device-1", "the frobnicator overflowed")
-        assertTrue(sentence.contains("the frobnicator overflowed"), sentence)
-        assertFalse(sentence.contains("sync-something-new"), sentence)
         assertTrue(
-            alertSentence("sync-something-new", "", "").contains("no further detail"),
-            "with nothing to say it still says something",
+            alertSentence(SYNC_UNSUPPORTED_VERSION, "", "", PHONE_ALERT_WORDS)
+                .contains("this phone"),
         )
     }
 

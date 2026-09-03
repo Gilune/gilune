@@ -32,11 +32,15 @@ use crate::{Result, SyncError, PROTOCOL};
 use std::sync::Mutex;
 use std::time::Duration;
 
-/// The DNS-SD service type, as `mdns-sd` and `NsdManager` each want it
-/// spelled. `NsdManager` takes `_gilune._tcp`; `mdns-sd` wants the
-/// trailing domain, so both spellings live here rather than in two files
-/// that could drift apart.
-pub const SERVICE_TYPE: &str = "_gilune._tcp";
+/// The DNS-SD service type, as `mdns-sd` wants it spelled — with the
+/// trailing domain.
+///
+/// `NsdManager` wants the bare `_gilune._tcp`, and that spelling lives in
+/// the Kotlin adapter (`Discovery.kt`'s `SYNC_SERVICE_TYPE`) because that
+/// is the only place that can use it: it never crosses the FFI. The two
+/// therefore **can** drift, and this comment is where a reader finds out
+/// that they are a pair — a bare constant here that nothing referred to
+/// only made it look as though they could not.
 pub const SERVICE_TYPE_FQ: &str = "_gilune._tcp.local.";
 
 /// TXT keys. Two of them, and that is the whole record.

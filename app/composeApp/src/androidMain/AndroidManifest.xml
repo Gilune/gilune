@@ -40,8 +40,19 @@
          somebody decided to hold. It reads a flag; it opens nothing. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
+    <!-- Backup keeps the vault and leaves this device's identity behind
+         (ADR 0019 § 4). Both files say the same thing on either side of
+         API 31, and each carries its own reasoning: an identity that
+         travels with a backup is a cloned identity with a shared sequence
+         space, and the Keystore key that sealed it does not travel at all,
+         so a restored copy of the file is one nothing on the new phone can
+         open. Excluding `filesDir/sync` is what makes "a restored phone is
+         a new device" a consequence of where the bytes live rather than a
+         check somebody has to remember. -->
     <application
         android:label="Gilune"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:theme="@style/Theme.Gilune">
 
         <!-- The other half of that merge. The AAR declares an activity of

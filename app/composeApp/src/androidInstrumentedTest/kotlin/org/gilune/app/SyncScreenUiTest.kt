@@ -136,7 +136,50 @@ class SyncScreenUiTest {
         val drawn = rule.onNodeWithTag("sync-alert").assertExists()
         assertTrue(state.syncAlerts.isNotEmpty())
         drawn.assertIsDisplayed()
-        rule.onNodeWithText(alertSentence("sync-gap", "device-1", "")).assertExists()
+        // The phone's own wording, from the table both shells share. The
+        // subject and detail are deliberately absent from it — a device id
+        // is not something a person holding a phone can act on — which is
+        // why the sentence asked for here carries neither.
+        rule.onNodeWithText(alertSentence(SYNC_GAP, "device-1", "", PHONE_ALERT_WORDS))
+            .assertExists()
+        rule.onNodeWithTag("sync-alerts-heading").assertExists()
+    }
+
+    /// The one unavailable state with a way out (§ 4). Before this round a
+    /// phone that restored a backup got the generic "not set up yet" line
+    /// and no action at all — the identity file was there, the Keystore key
+    /// that sealed it was not, and nothing in the app could clear it.
+    @Test
+    fun aSealedIdentityWhoseKeyIsGoneOffersTheResetAndSaysWhatItCosts() {
+        val state = state()
+        state.message.value =
+            "sync unavailable: the Keystore key that sealed this device's identity is no " +
+                "longer on this phone — a restored backup is a new device and has to be " +
+                "paired again"
+        show(state)
+
+        rule.onNodeWithTag("sync-identity-unreadable").assertExists()
+        rule.onNodeWithTag("sync-reset").assertExists()
+        // And the generic line stands aside: two explanations of the same
+        // state is one too many.
+        rule.onNodeWithTag("sync-unavailable").assertDoesNotExist()
+        rule.onNodeWithText(identityUnreadableSentence("this phone")).assertExists()
+        // And the kernel's own wording is not drawn above it as well: the
+        // same news twice, once in a form nobody can act on.
+        rule.onNodeWithTag("sync-message").assertDoesNotExist()
+    }
+
+    /// Every other failure keeps the generic line and is offered nothing:
+    /// a reset throws away a pairing, and offering it for a fault it
+    /// cannot fix would cost somebody their roster for nothing.
+    @Test
+    fun anyOtherUnavailableStateIsNotOfferedAReset() {
+        val state = state()
+        state.message.value = "sync unavailable: the port was already taken"
+        show(state)
+
+        rule.onNodeWithTag("sync-unavailable").assertExists()
+        rule.onNodeWithTag("sync-reset").assertDoesNotExist()
     }
 
     @Test

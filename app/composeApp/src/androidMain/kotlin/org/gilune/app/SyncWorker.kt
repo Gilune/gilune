@@ -107,15 +107,32 @@ class SyncWorker(context: Context, params: WorkerParameters) : Worker(context, p
                 // binds nothing and browses nothing; it is only consulted
                 // when a direct connection fails.
                 runCatching { gilune.setDiscovery(NsdDiscovery(context)) }
-                // Nothing to sync with is not a failure and not a retry —
-                // it is the ordinary state of a phone that has never been
-                // paired, and burning a maintenance window on it would be
-                // the one background cost with nothing to show for it.
-                if (gilune.syncStatus().peers.none { it.state == "paired" }) {
+                // **Whether the person left sync on, and whether there is
+                // anybody to sync with.** Both are `shouldSyncInBackground`,
+                // and the first is the one that is easy to get wrong here:
+                // the kernel's outbound permission is process-local and
+                // starts permissive so that a background pass can dial
+                // without a listener, which means nothing below this would
+                // have stopped a worker syncing for somebody who had
+                // switched sync off. The persisted choice is `wanted` —
+                // `enabled` is a bound listener in this process, and this
+                // process binds nothing (§ 2).
+                //
+                // Neither case is a failure and neither is a retry: one is
+                // a switch somebody turned off, the other the ordinary
+                // state of a phone that has never been paired, and burning
+                // a maintenance window on either is the one background cost
+                // with nothing to show for it.
+                if (!shouldSyncInBackground(gilune.syncStatus())) {
                     return Result.success()
                 }
                 val report = gilune.syncNow()
-                gilune.project()
+                // Only when something arrived (`syncNeedsProjection`).
+                // Projection walks every object in the vault; an exchange
+                // that received nothing has given it nothing to walk, and
+                // this job runs on a fifteen-minute floor with the phone
+                // in somebody's pocket.
+                if (syncNeedsProjection(report.applied)) gilune.project()
                 if (report.halted.isNotEmpty()) {
                     // Halting is visible in Settings through the integrity
                     // alerts the kernel raised; the job itself succeeded

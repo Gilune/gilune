@@ -19,6 +19,19 @@ import uniffi.gilune_ffi.TombstoneProposal
 /// capture is chunk-by-chunk so a process kill loses only the tail.
 const val CAPTURE_CHUNK = 64 * 1024
 
+/// Whether a device exchange left this vault anything to re-project.
+///
+/// Projection is a full pass over the vault's objects. A sync that applied
+/// nothing changed nothing here, so there is nothing for it to write —
+/// and the phone's background schedule runs on a fifteen-minute floor,
+/// where a pointless full pass is the difference between a cheap job and a
+/// battery complaint. Sending deliberately does not count: what this
+/// device sent is already on its own disk.
+///
+/// Pure, and named rather than inlined, so the rule reads the same in the
+/// activity and in the worker.
+fun syncNeedsProjection(applied: Long): Boolean = applied > 0L
+
 class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     val gilune = mutableStateOf<Gilune?>(null)
     val message = mutableStateOf("opening vault…")
@@ -47,12 +60,43 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// both routes without knowing which engine produced them.
     var externalProcessing: ((Gilune) -> Long)? = null
 
+    /// What one processing pass did, both routes counted together — plus
+    /// the thing the count on its own cannot say.
+    ///
+    /// [providerFailure] is non-null exactly when this host's external
+    /// provider threw. It is separate from `failed` because the two are
+    /// different facts: `failed` is the kernel recording a job that ran and
+    /// did not succeed, and this is a provider that never got that far.
+    data class ProcessingPass(
+        val outputs: Long,
+        val failed: Long,
+        val providerFailure: String? = null,
+    )
+
     /// One processing pass: the kernel's own processors, then this host's
-    /// external ones. Returns the outputs both wrote.
-    private fun processAll(g: Gilune): uniffi.gilune_ffi.ProcessingSummary {
+    /// external ones.
+    ///
+    /// **A provider that throws is reported, not swallowed.** Until this
+    /// round the external half was wrapped in a bare `runCatching { }
+    /// .getOrNull() ?: 0L`, so a Moonshine session that failed to load its
+    /// model produced the same summary as a vault with nothing to
+    /// transcribe — "0 transcribed", which reads as *nothing to do*. The
+    /// callers below append [providerFailureSuffix] so the sentence says
+    /// which of the two it was, and the detail goes to the platform log.
+    internal fun processAll(g: Gilune): ProcessingPass {
         val summary = g.runProcessing()
-        val external = runCatching { externalProcessing?.invoke(g) }.getOrNull() ?: 0L
-        return summary.copy(outputs = summary.outputs + external)
+        val hook = externalProcessing
+            ?: return ProcessingPass(summary.outputs, summary.failed)
+        val outcome = runCatching { hook(g) }
+        val thrown = outcome.exceptionOrNull()
+        if (thrown != null) {
+            GiluneLog.warn("the external transcription provider failed", thrown)
+        }
+        return ProcessingPass(
+            outputs = summary.outputs + (outcome.getOrNull() ?: 0L),
+            failed = summary.failed,
+            providerFailure = thrown?.let { it.message?.takeIf(String::isNotBlank) ?: it.toString() },
+        )
     }
 
     // ------------------------------------------------------------ sync
@@ -106,29 +150,40 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
             // will not register is not a reason to fail enrolment: cached
             // and typed addresses both work without one.
             runCatching { syncDiscovery?.invoke(g) }
-            // Come back reachable if the user left sync switched on.
-            //
-            // **Not a weakening of § 2's lazy bind.** That rule is that
-            // nothing binds before the user first opts in, so a user who
-            // never turns sync on never meets the firewall prompt and
-            // capture is never behind it. Once they have opted in, coming
-            // back up reachable is the feature working — the prompt
-            // happened at the first enable, and a device that forgot it
-            // was reachable on every launch could never be synced with
-            // unprompted. On a device that never opted in this is a
-            // no-op, so the property is kept by the kernel rather than by
-            // each shell remembering to ask.
-            //
-            // After discovery is registered, so the responder comes up
-            // with the listener rather than a beat later. Failing to bind
-            // is not a reason to fail enrolment: a busy port leaves the
-            // choice recorded and the device simply not listening, which
-            // `SyncStatus` reports as `wanted` without `enabled`.
-            runCatching { g.resumeSync() }
             syncStatus.value = runCatching { g.syncStatus() }.getOrNull() ?: status
             status.enrolmentNotice
         } catch (e: Throwable) {
             "sync unavailable: ${e.message}"
+        }
+    }
+
+    /// Come back reachable if the user left sync switched on — **behind
+    /// the vault opening rather than in front of it**.
+    ///
+    /// **Not a weakening of § 2's lazy bind.** That rule is that nothing
+    /// binds before the user first opts in, so a user who never turns sync
+    /// on never meets the firewall prompt and capture is never behind it.
+    /// Once they have opted in, coming back up reachable is the feature
+    /// working. On a device that never opted in this is a no-op, so the
+    /// property is kept by the kernel rather than by each shell
+    /// remembering to ask.
+    ///
+    /// It moved off the open path because it is **slow by construction**:
+    /// binding is quick, but advertising waits on a registration latch —
+    /// up to four seconds on Android, and the desktop's responder is no
+    /// promise either — and until this round every vault open paid that
+    /// before the first note could be drawn. Nothing downstream needs it
+    /// to have finished: the facts are re-read when it lands, and a shell
+    /// that syncs on open watches `syncStatus` for the moment it does.
+    ///
+    /// Failing to bind is not a failure: a busy port leaves the choice
+    /// recorded and the device simply not listening, which `SyncStatus`
+    /// reports as `wanted` without `enabled`.
+    private fun resumeSyncInBackground(g: Gilune) {
+        if (syncSetup == null) return
+        scope.launch(Dispatchers.IO) {
+            runCatching { g.resumeSync() }
+            refreshSync()
         }
     }
 
@@ -220,7 +275,14 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) {
             try {
                 val report = g.syncNow()
-                g.project()
+                // Only when something arrived. Projection walks every
+                // object in the vault and rewrites what changed; an
+                // exchange that received nothing has given it nothing to
+                // walk, and on the phone's fifteen-minute schedule that
+                // was a full pass over the vault for no reason at all.
+                // Sending does not project: what this device sent is
+                // already on disk here.
+                if (syncNeedsProjection(report.applied)) g.project()
                 refresh()
                 refreshSync()
                 message.value = when {
@@ -272,6 +334,9 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 // has to be told.
                 message.value = notice ?: "vault: ${g.vaultPath()}"
                 onOpened(g)
+                // Last, and on a thread of its own: the vault is open and
+                // usable before this begins.
+                resumeSyncInBackground(g)
             } catch (e: Throwable) {
                 message.value = "failed to open vault: ${e.message}"
             }
@@ -316,7 +381,8 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 if (announce) {
                     message.value =
                         "synced: ${r.edits} edits, ${r.imports} imports, " +
-                            "${p.outputs} transcribed, ${r.tombstoneProposals} proposals"
+                            "${p.outputs} transcribed, ${r.tombstoneProposals} proposals" +
+                            providerFailureSuffix(p.providerFailure)
                 }
             } catch (e: Throwable) {
                 message.value = "sync failed: ${e.message}"
@@ -360,10 +426,14 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 val p = processAll(g)
                 g.project()
                 refresh()
-                message.value =
-                    if (p.outputs > 0) "spoken note ready"
-                    else if (p.failed > 0) "voice captured; transcription failed (will retry)"
-                    else "voice captured"
+                message.value = when {
+                    p.outputs > 0 -> "spoken note ready"
+                    p.failed > 0 -> "voice captured; transcription failed (will retry)"
+                    // Before the suffix existed this said plain "voice
+                    // captured", which is true and reads as complete — the
+                    // words were never coming.
+                    else -> "voice captured" + providerFailureSuffix(p.providerFailure)
+                }
                 if (onOpenNote != null) {
                     recent.firstOrNull { it.objectId == receipt.sourceId }
                         ?.projectionRelPath
@@ -396,7 +466,8 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 } else if (p.failed > 0) {
                     message.value = "dictation saved; transcription failed (will retry)"
                 } else {
-                    message.value = "dictation saved; no words recognised"
+                    message.value = "dictation saved; no words recognised" +
+                        providerFailureSuffix(p.providerFailure)
                 }
             } catch (e: Throwable) {
                 message.value = "dictation failed: ${e.message}"
@@ -453,8 +524,12 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 // capture may be queued while only the wordless ones gain
                 // words.
                 message.value =
-                    if (queued == 0L && p.outputs == 0L) "nothing was waiting"
-                    else "caught up $queued capture(s): ${p.outputs} transcribed"
+                    if (queued == 0L && p.outputs == 0L) {
+                        "nothing was waiting" + providerFailureSuffix(p.providerFailure)
+                    } else {
+                        "caught up $queued capture(s): ${p.outputs} transcribed" +
+                            providerFailureSuffix(p.providerFailure)
+                    }
             } catch (e: Throwable) {
                 message.value = "catch-up failed: ${e.message}"
             }

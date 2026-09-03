@@ -18,22 +18,68 @@ use gilune_kernel::limits::Limits;
 use gilune_kernel::operations::BlobNeed;
 use gilune_kernel::store::Store;
 
+/// Whether this device may still talk on a connection it opened.
+///
+/// Consulted at every operation boundary of the **dialling** side, which
+/// is the half the answering side's `permitted` hook never covered:
+/// `serve` asks the roster between requests, so a revocation on the
+/// listener stops it, but a device that had dialled *out* kept pushing
+/// until its own loop ran out. ADR 0019 § 9 puts revocation in either
+/// device's settings and makes it immediate on the device it happens on,
+/// so both directions need the same check.
+pub type Permission = Box<dyn Fn() -> bool + Send>;
+
 /// The asking half. Owns a channel and turns the `Session` verbs into
 /// frames on it.
 pub struct ChannelSession {
     channel: Box<dyn Channel + Send>,
     limits: Limits,
+    /// `None` for a transport with nothing to withdraw — the loopback,
+    /// where a peer is this machine. `Some` wherever a pairing can be
+    /// revoked or sync switched off underneath a live session.
+    permitted: Option<Permission>,
 }
 
 impl ChannelSession {
     pub fn new(channel: Box<dyn Channel + Send>, limits: Limits) -> ChannelSession {
-        ChannelSession { channel, limits }
+        ChannelSession { channel, limits, permitted: None }
+    }
+
+    /// The same, for a session that can be withdrawn while it is running.
+    pub fn with_permission(
+        channel: Box<dyn Channel + Send>,
+        limits: Limits,
+        permitted: Permission,
+    ) -> ChannelSession {
+        ChannelSession { channel, limits, permitted: Some(permitted) }
+    }
+
+    /// The boundary between two whole operations, on the dialling side.
+    ///
+    /// Checked **before a request is written**, which is the tightest
+    /// point available and the mirror of `serve`'s: apply is one
+    /// transaction per operation, so a session that stops here has
+    /// half-applied nothing. The channel is closed rather than merely
+    /// abandoned, because a revoked peer must stop receiving immediately
+    /// and not when a caller gets round to dropping the session.
+    fn boundary(&mut self) -> Result<()> {
+        let Some(check) = self.permitted.as_ref() else { return Ok(()) };
+        if check() {
+            return Ok(());
+        }
+        self.channel.close();
+        Err(SyncError::Refused {
+            detail: "this device stopped talking to that one part-way through — it was \
+                     revoked, or sync was switched off here"
+                .to_string(),
+        })
     }
 
     /// Send a request and gather the frames it answers with, up to the
     /// end marker. A refusal from the peer ends the call rather than the
     /// process: the peer is allowed to say no.
     fn ask(&mut self, tag: u8, header: serde_json::Value) -> Result<Vec<Frame>> {
+        self.boundary()?;
         write_frame(self.channel.as_mut(), tag, &header, &[])?;
         let mut frames = Vec::new();
         loop {
@@ -73,6 +119,7 @@ impl ChannelSession {
         header: serde_json::Value,
         payload: &[u8],
     ) -> Result<serde_json::Value> {
+        self.boundary()?;
         write_frame(self.channel.as_mut(), tag, &header, payload)?;
         let Some(incoming) = read_frame(self.channel.as_mut(), &self.limits)? else {
             return Err(SyncError::Protocol {
@@ -156,19 +203,6 @@ impl Session for ChannelSession {
     }
 }
 
-/// Why an answering loop stopped.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Served {
-    /// The peer said goodbye, or hung up.
-    Ended,
-    /// This device withdrew permission part-way through — a revocation
-    /// while a session was live (ADR 0019 § 9). The loop stops between
-    /// requests, so an operation is either applied whole or not at all:
-    /// nothing is half-done, because apply is one transaction and the
-    /// check sits on the boundary between two of them.
-    Withdrawn,
-}
-
 /// Answer one peer's requests until it leaves, or until `permitted` says
 /// this peer may no longer be served.
 ///
@@ -179,21 +213,25 @@ pub enum Served {
 /// consulted *inside* a request, and it does not need to be — apply is
 /// one transaction per operation, so the boundary between two requests is
 /// also a boundary between two whole operations. That is the whole of
-/// "revoking mid-session cannot half-apply anything".
+/// "revoking mid-session cannot half-apply anything" (ADR 0019 § 9).
+///
+/// Ending and being withdrawn are the same outcome to every caller —
+/// the session is over and the frontier says where to resume — so this
+/// deliberately reports no distinction between them.
 pub fn serve(
     store: &Store,
     channel: &mut dyn Channel,
     limits: &Limits,
     permitted: &dyn Fn() -> bool,
-) -> Result<Served> {
+) -> Result<()> {
     loop {
-        let Some(request) = read_frame(channel, limits)? else { return Ok(Served::Ended) };
+        let Some(request) = read_frame(channel, limits)? else { return Ok(()) };
         if !permitted() {
             channel.close();
-            return Ok(Served::Withdrawn);
+            return Ok(());
         }
         match request.tag {
-            TAG_CLOSE => return Ok(Served::Ended),
+            TAG_CLOSE => return Ok(()),
             TAG_WANT_DEVICES => {
                 let devices: Vec<serde_json::Value> = store
                     .operation_devices()?

@@ -86,6 +86,19 @@ internal fun SyncSection(state: GiluneState) {
     val colours = MaterialTheme.colorScheme
     val status = state.syncStatus.value
 
+    // Read the facts and the standing conditions **on entry**, on the
+    // phone's own idiom (`SyncScreen.SyncSection`). Without this the
+    // desktop showed whatever the last action had left behind: on a fresh
+    // launch, nothing — so a stream that halted overnight was invisible
+    // until somebody pressed a button, which is § 8's failure mode with a
+    // longer fuse. Off the main thread, because reading them touches the
+    // identity file.
+    LaunchedEffect(state.gilune.value) {
+        if (state.gilune.value != null) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { state.refreshSync() }
+        }
+    }
+
     Text("Sync between your devices", style = MaterialTheme.typography.titleSmall)
 
     if (status == null) {
@@ -265,33 +278,41 @@ internal fun SyncSection(state: GiluneState) {
 ///
 /// The kernel has raised these since M5a and nothing could show them,
 /// which meant a peer whose stream had halted looked exactly like a peer
-/// with nothing to send. Every sentence here has to answer the same two
-/// questions the kernel's own policy answers — what stopped, and why —
-/// and then say the thing that keeps this from reading as a loss:
-/// applying resumes from where it stopped when the condition clears.
+/// with nothing to send. The sentences themselves live in `SyncAlerts.kt`
+/// beside the phone's — one table, because a kind worded on one shell and
+/// silent on the other is the same failure in half the places.
+///
+/// **A banner holding nothing that is damage is not painted as an error.**
+/// An unread entry from a newer version and a note waiting for its own
+/// history are both worth saying and neither is a fault, and a red box is
+/// how a person learns to stop reading the surface that has to be read
+/// when it does go red.
 @Composable
 private fun AlertsBanner(alerts: List<IntegrityAlert>) {
     if (alerts.isEmpty()) return
     val colours = MaterialTheme.colorScheme
+    val damage = alerts.any { alertIsDamage(it.kind) }
+    val ground = if (damage) colours.errorContainer else colours.surfaceVariant
+    val ink = if (damage) colours.onErrorContainer else colours.onSurfaceVariant
     Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(colours.errorContainer)
+            .background(ground)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Text(
             alertsHeading(alerts.map { it.kind }),
             style = MaterialTheme.typography.titleSmall,
-            color = colours.onErrorContainer,
+            color = ink,
         )
         for (alert in alerts) {
             Text(
-                alertSentence(alert.kind, alert.subject, alert.detail),
+                alertSentence(alert.kind, alert.subject, alert.detail, DESKTOP_ALERT_WORDS),
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
-                color = colours.onErrorContainer,
+                color = ink,
             )
         }
     }
@@ -759,86 +780,6 @@ internal fun peerActivity(state: String, lastSeenMs: Long): String {
 // the point rather than a convenience: these sentences are the whole of
 // what § 8 asks for, and a sentence nothing tests is a sentence that
 // quietly becomes wrong.
-
-/// The alert's subject and detail, carried without claiming what kind of
-/// thing they are — a device id, an operation id and a blob id all
-/// arrive in the same field, and a sentence that guessed would sooner or
-/// later guess wrong.
-private fun aside(vararg parts: String): String {
-    val kept = parts.filter { it.isNotBlank() }
-    return if (kept.isEmpty()) "" else kept.joinToString(", ", prefix = " (", postfix = ")")
-}
-
-/// What a standing alert says (§ 8), in user words.
-///
-/// The kind string is the kernel's name for a policy, never a thing to
-/// show someone: each one maps to what stopped, why it stopped, and the
-/// fact that applying resumes from the frontier once the condition
-/// clears — which is why none of this is a loss. `sync-unknown-op-kind`
-/// is deliberately not written as damage, because it is not: it is a
-/// newer version's work, kept byte for byte and passed on unread.
-internal fun alertSentence(kind: String, subject: String, detail: String): String {
-    val about = aside(subject, detail)
-    return when (kind) {
-        "sync-gap" ->
-            "Changes from another device arrived with one of them missing$about, so " +
-                "nothing after the gap has been taken in: applying the rest would " +
-                "record a history that never happened. Everything before the gap is " +
-                "already here, and Gilune picks up where it left off as soon as the " +
-                "missing change arrives."
-        "sync-corrupt-operation" ->
-            "A change did not arrive as it was written$about, so it has been left " +
-                "where it is and nothing after it has been taken in — a damaged " +
-                "change is not something to guess at. Gilune picks up where it left " +
-                "off as soon as an undamaged copy arrives."
-        "sync-unsupported-version" ->
-            "Changes from another device are written in a version of Gilune's sync " +
-                "format this one does not understand$about, so none of them have " +
-                "been taken in. Bringing both devices to the same version is what " +
-                "clears it, and Gilune picks up where it left off when it does."
-        "sync-unknown-op-kind" ->
-            "Something a newer version of Gilune wrote came through$about, and this " +
-                "device does not know how to read that kind of entry. Nothing was " +
-                "lost and nothing has stopped: it is kept exactly as it arrived and " +
-                "passed on to your other devices unread, and Gilune picks up where " +
-                "it left off with it once this device is running a version that " +
-                "understands it."
-        "sync-limit-exceeded" ->
-            "One exchange reached the limit on how much a device may send at " +
-                "once$about, so it was ended tidily rather than cut off part way " +
-                "through a change. Nothing is half applied, and Gilune picks up " +
-                "where it left off at the next sync."
-        "sync-blob-digest-mismatch" ->
-            "A recording or attachment did not match the fingerprint it was sent " +
-                "with$about, so the bytes were thrown away rather than kept as if " +
-                "they were right. Nothing else stopped, and Gilune picks up where it " +
-                "left off when that file arrives intact."
-        "sync-revoked-device" ->
-            "Changes first made on a device you revoked were offered by another " +
-                "device$about, and this one refused them. What that device sent " +
-                "before you revoked it is still in your vault — revoking protects " +
-                "what comes next, it does not undo. Gilune picks up where it left " +
-                "off with every device you have not revoked."
-        // A kind this build has never heard of is still a halt, and a
-        // halt nobody is told about is the failure mode § 8 names. So
-        // there is a sentence for it, and it is still not the kind
-        // string.
-        else ->
-            "Something about a change from another device stopped it being taken " +
-                "in$about. Nothing past it has been applied and nothing is half " +
-                "done, and Gilune picks up where it left off once the condition " +
-                "clears."
-    }
-}
-
-/// The banner's heading. An unknown operation kind is not damage, so a
-/// screen holding nothing else must not open by saying sync stopped.
-internal fun alertsHeading(kinds: List<String>): String = when {
-    kinds.isEmpty() -> ""
-    kinds.all { it == "sync-unknown-op-kind" } -> "Sync kept something it could not read"
-    kinds.size == 1 -> "Sync stopped short of taking everything in"
-    else -> "Sync stopped short of taking everything in, for ${kinds.size} reasons"
-}
 
 /// Whether this device can be found, as against whether it can be
 /// reached. Two flags rather than one, because binding TCP can succeed

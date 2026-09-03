@@ -72,6 +72,19 @@ impl Store {
         Ok(needs)
     }
 
+    /// How many blobs are awaiting content, store-wide. The one place a
+    /// pending count comes from: `blobs_awaiting_bytes` is store-wide too,
+    /// so a caller that syncs several peers in a row and adds up what each
+    /// session reported counts the same blob once per peer.
+    pub fn blobs_awaiting_count(&self) -> Result<usize> {
+        let count: i64 = self.conn().query_row(
+            "SELECT COUNT(*) FROM blobs WHERE state = 'committed' AND origin = 'sync'",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count.max(0) as usize)
+    }
+
     /// Append one chunk of a blob's content at `offset`, which must be
     /// exactly what is already staged — a sender that has lost its place
     /// is told the truth rather than allowed to write a hole. Returns the
@@ -81,6 +94,12 @@ impl Store {
     /// the length its operation declared. That is the second half of not
     /// trusting a declared length: the declaration bounds the transfer,
     /// and the transfer is bounded again by what actually arrives.
+    ///
+    /// Every refusal takes the same path as a refused operation: a
+    /// visible alert about the blob, and a halt that stops this transfer
+    /// and nothing else. Before, the three refusals here returned a halt
+    /// nobody raised an alert for and the exchange loop turned into a
+    /// session-killing error.
     pub fn write_blob_chunk(
         &self,
         blob_id: &str,
@@ -92,29 +111,30 @@ impl Store {
         let path = incoming_path(self, blob_id);
         let staged = staged_bytes(self, blob_id);
         if offset != staged {
-            return Err(KernelError::SyncHalted {
-                device_id: blob_id.to_string(),
-                reason: format!("chunk offered at {offset}, but {staged} bytes are staged"),
-            });
+            return Err(self.halt_transfer(
+                alerts::SYNC_CORRUPT_OPERATION,
+                blob_id,
+                &format!("chunk offered at {offset}, but {staged} bytes are staged"),
+            ));
         }
         if chunk.len() > limits.chunk_bytes {
-            return Err(KernelError::SyncHalted {
-                device_id: blob_id.to_string(),
-                reason: format!(
+            return Err(self.halt_transfer(
+                alerts::SYNC_LIMIT_EXCEEDED,
+                blob_id,
+                &format!(
                     "chunk of {} bytes is over the {}-byte chunk limit",
                     chunk.len(),
                     limits.chunk_bytes
                 ),
-            });
+            ));
         }
         let would_be = staged.saturating_add(chunk.len() as u64);
         if would_be > declared {
-            return Err(KernelError::SyncHalted {
-                device_id: blob_id.to_string(),
-                reason: format!(
-                    "content would reach {would_be} bytes, past the declared {declared}"
-                ),
-            });
+            return Err(self.halt_transfer(
+                alerts::SYNC_LIMIT_EXCEEDED,
+                blob_id,
+                &format!("content would reach {would_be} bytes, past the declared {declared}"),
+            ));
         }
         let mut file = std::fs::OpenOptions::new()
             .create(true)
@@ -123,9 +143,25 @@ impl Store {
             .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
         file.write_all(chunk)
             .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
-        file.sync_all()
-            .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
+        // Deliberately not fsynced per chunk. `finish_blob` syncs the
+        // whole staged file before promoting it, and the digest it checks
+        // there is the backstop for a tail lost to a crash: a short file
+        // resumes from what survived, a torn one fails its digest and is
+        // fetched again. An fsync every 64 KiB bought nothing but time.
         Ok(would_be)
+    }
+
+    /// Raise and name a refusal about content, so a blob transfer is as
+    /// visible when it stops as an operation stream is.
+    fn halt_transfer(&self, kind: &str, blob_id: &str, detail: &str) -> KernelError {
+        if let Err(e) = alerts::raise(self.conn(), kind, blob_id, detail) {
+            return e;
+        }
+        KernelError::SyncHalted {
+            kind: kind.to_string(),
+            subject: blob_id.to_string(),
+            reason: detail.to_string(),
+        }
     }
 
     /// Complete a transfer: verify the staged bytes against the digest the
@@ -142,6 +178,18 @@ impl Store {
         if staged_bytes(self, blob_id) != declared {
             return Ok(false);
         }
+        // A blob of nought bytes is content, not an absence: an empty
+        // recording is a real capture and its note must reach the other
+        // device. Nothing ever opens the staging file for it, because
+        // there is no chunk to write, so it is created here — and then
+        // the empty-input digest, the promotion and the row update are
+        // the ordinary path. Left to itself this was a wedge: the digest
+        // pass failed to open a file that was never made, and the error
+        // took the whole session down on every attempt, for ever.
+        if declared == 0 && !path.exists() {
+            std::fs::File::create(&path)
+                .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
+        }
         let actual = digest_of(&path)?;
         if actual != sha256 {
             alerts::raise(
@@ -154,6 +202,9 @@ impl Store {
                 .map_err(|e| KernelError::Io { path: path.clone(), source: e })?;
             return Ok(false);
         }
+        // The one fsync of the transfer, here rather than per chunk: the
+        // bytes must be durable before the rename that publishes them.
+        fs::fsync_file(&path)?;
         let target = self.vault().join(&rel_path);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)
@@ -175,7 +226,15 @@ impl Store {
             "UPDATE blobs SET state = 'ready' WHERE blob_id = ?1",
             [blob_id],
         )?;
-        alerts::clear(self.conn(), alerts::SYNC_BLOB_DIGEST_MISMATCH, blob_id)?;
+        // Content that arrived whole withdraws everything that was
+        // standing about this transfer.
+        for kind in [
+            alerts::SYNC_BLOB_DIGEST_MISMATCH,
+            alerts::SYNC_LIMIT_EXCEEDED,
+            alerts::SYNC_CORRUPT_OPERATION,
+        ] {
+            alerts::clear(self.conn(), kind, blob_id)?;
+        }
         Ok(true)
     }
 
@@ -316,6 +375,40 @@ mod tests {
         );
         assert!(store.blobs_awaiting_bytes().expect("awaiting").is_empty());
         assert!(store.verify().expect("verify").is_empty());
+    }
+
+    #[test]
+    fn a_blob_of_nought_bytes_completes_without_a_chunk_ever_being_written() {
+        // A plain empty recording: `capture_bytes` records bytes: 0, and
+        // the operation carrying it declares 0. There is no chunk to send,
+        // so nothing opens the staging file — and the transfer must still
+        // finish rather than failing on a file that was never made.
+        let (dir, store, blob_id) = awaiting(&[]);
+        assert!(store.finish_blob(&blob_id).expect("an empty transfer completes"));
+        assert_eq!(
+            std::fs::read(dir.path().join("Captures/remote.wav")).expect("promoted"),
+            Vec::<u8>::new()
+        );
+        assert!(store.blobs_awaiting_bytes().expect("awaiting").is_empty());
+        assert_eq!(store.blobs_awaiting_count().expect("count"), 0);
+        assert!(store.verify().expect("verify").is_empty());
+    }
+
+    #[test]
+    fn a_refused_chunk_is_visible_as_an_alert_and_withdrawn_when_the_content_lands() {
+        let (_dir, store, blob_id) = awaiting(&[8u8; 64]);
+        assert!(matches!(
+            store.write_blob_chunk(&blob_id, 0, &[8u8; 64], Limits { chunk_bytes: 8, ..Limits::DEFAULT }),
+            Err(KernelError::SyncHalted { .. })
+        ));
+        assert_eq!(
+            store.integrity_alerts_of(alerts::SYNC_LIMIT_EXCEEDED).expect("alerts").len(),
+            1,
+            "a bound that stopped a transfer is not allowed to be silent"
+        );
+        store.write_blob_chunk(&blob_id, 0, &[8u8; 64], Limits::DEFAULT).expect("within bounds");
+        assert!(store.finish_blob(&blob_id).expect("complete"));
+        assert!(store.integrity_alerts().expect("alerts").is_empty());
     }
 
     #[test]

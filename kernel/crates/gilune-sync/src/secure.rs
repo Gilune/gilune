@@ -20,6 +20,7 @@ use crate::transport::{Listener, Session, Transport};
 use crate::{Result, SyncError};
 use gilune_kernel::limits::Limits;
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -61,6 +62,11 @@ pub struct SecureTransport {
     greeting: Greeting,
     roster: Arc<Mutex<Roster>>,
     limits: Limits,
+    /// Whether this device is still willing to talk at all. Cleared when
+    /// sync is switched off, and consulted by a live outbound session at
+    /// every operation boundary — the dialling half of the check the
+    /// listener has always made.
+    outbound: Arc<AtomicBool>,
 }
 
 impl SecureTransport {
@@ -69,8 +75,9 @@ impl SecureTransport {
         greeting: Greeting,
         roster: Arc<Mutex<Roster>>,
         limits: Limits,
+        outbound: Arc<AtomicBool>,
     ) -> SecureTransport {
-        SecureTransport { identity, greeting, roster, limits }
+        SecureTransport { identity, greeting, roster, limits, outbound }
     }
 }
 
@@ -102,9 +109,27 @@ impl Transport for SecureTransport {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .seen(static_pub, &established.peer.device_id, address)?;
-        Ok(Box::new(ChannelSession::new(
+        // The same two questions the listener asks between requests, asked
+        // by the side that dialled. Without this a device that had opened
+        // the connection kept pushing to a peer it had just revoked, and
+        // kept pushing after its own user switched sync off, until the
+        // exchange loop happened to run out of work — the roster was
+        // consulted once, at connect, and never again.
+        let roster = Arc::clone(&self.roster);
+        let outbound = Arc::clone(&self.outbound);
+        let pinned = static_pub.to_string();
+        let permitted = Box::new(move || {
+            outbound.load(Ordering::SeqCst)
+                && roster
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .secret_for(&pinned)
+                    .is_some()
+        });
+        Ok(Box::new(ChannelSession::with_permission(
             Box::new(established.channel),
             self.limits,
+            permitted,
         )))
     }
 

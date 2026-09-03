@@ -163,10 +163,18 @@ impl Store {
     }
 
     /// As `run_pending_jobs`, but leaving `external` processor ids alone.
-    /// An externally-implemented processor (ADR 0018 § 2) claims its own
-    /// work; without this its jobs would be claimed here, find no
-    /// implementation in the vector, and burn an attempt and a lease on
-    /// every pass.
+    ///
+    /// **This loop claims only what it can run.** A claim spends an
+    /// attempt and takes a lease, so claiming a subscription with no
+    /// implementation here is not a harmless no-op: it is another
+    /// claimant's attempt spent for it, and five of them leave a job one
+    /// real failure from quarantine. The claim is therefore filtered to
+    /// the ids in `processors`, which makes the `external` list belt to
+    /// that braces — an externally-implemented processor (ADR 0018 § 2)
+    /// has no `Processor` here to be named by, so it is already excluded.
+    /// The parameter stays because a host may carry both an id's Rust
+    /// implementation and an external claimant, and then it is the only
+    /// thing that says which one owns the work.
     pub fn run_pending_jobs_excluding(
         &self,
         processors: &[&dyn Processor],
@@ -175,13 +183,31 @@ impl Store {
         lease_ms: i64,
     ) -> Result<ProcessingSummary> {
         let mut summary = ProcessingSummary::default();
-        while let Some(job) = self.claim_next_job_excluding(external, now_ms, lease_ms)? {
+        let runnable: Vec<&str> = processors
+            .iter()
+            .map(|p| p.id())
+            .filter(|id| !external.iter().any(|e| e == id))
+            .collect();
+        while let Some(job) = self.claim_next_job_among(&runnable, now_ms, lease_ms)? {
             let Some(processor) = processors.iter().find(|p| p.id() == job.subscription_id)
             else {
-                // No implementation registered here (another device may own
-                // it); release the claim by letting the lease expire.
+                // Unreachable while the claim is filtered to these ids;
+                // kept because releasing a claim by letting its lease
+                // expire is the safe answer if it ever is reached.
                 continue;
             };
+            // The work may already be done: a crash after the outputs
+            // committed but before the job completed leaves the job
+            // leased and its run recorded. Asking here, rather than only
+            // after the processor has run, is what stops a redelivery
+            // re-running a model for an answer already held — and what
+            // stops a provider that has since started failing turning a
+            // finished job into a quarantined one.
+            if self.run_exists(processor.id(), &idempotency_key(processor.id(), &job.event_id))? {
+                self.complete_job(&job.job_id)?;
+                summary.skipped_duplicate += 1;
+                continue;
+            }
             let ctx = ProcessorCtx::new(self, job.subject_id.clone());
             match processor.process(&ctx, &job) {
                 Ok(outputs) => {

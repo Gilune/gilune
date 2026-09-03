@@ -193,6 +193,11 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     // that waits for the switch in Settings.
     val keyWrap = remember { KeystoreKeyWrap() }
     LaunchedEffect(Unit) {
+        // Shared code has nowhere to put a warning of its own — it cannot
+        // name `android.util.Log` — so the shell points the hook at one.
+        // Without it an external provider that threw was silent twice: no
+        // sentence and no log line.
+        GiluneLog.sink = { message, cause -> android.util.Log.w("Gilune", message, cause) }
         state.syncSetup = { gilune -> gilune.configureSync(syncDir(context), deviceName(), keyWrap) }
         state.syncDiscovery = { gilune -> gilune.setDiscovery(NsdDiscovery(context.applicationContext)) }
         state.openVault { gilune -> registerMoonshine(state, gilune) }
@@ -200,10 +205,20 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
 
     // Sync on open (§ 10). `shouldSyncOnForeground` is the whole rule and
     // it is pure: sync switched on, and somebody paired to sync with.
+    //
+    // **Keyed on the rule's answer, not just on the handle.** `resumeSync`
+    // now runs behind the vault opening rather than in front of it, so at
+    // the moment the handle appears the listener has not come back up yet
+    // and `enabled` is still false. Watching the answer means this fires
+    // the instant the switch is actually back on, and once — a second
+    // resume does not change a `true` into another `true`.
+    val syncOnOpen = shouldSyncOnForeground(state.syncStatus.value)
     LaunchedEffect(state.gilune.value) {
         if (state.gilune.value == null) return@LaunchedEffect
         withContext(Dispatchers.IO) { state.refreshSync() }
-        if (shouldSyncOnForeground(state.syncStatus.value)) state.syncDevices()
+    }
+    LaunchedEffect(state.gilune.value, syncOnOpen) {
+        if (state.gilune.value != null && syncOnOpen) state.syncDevices()
     }
 
     // Local transcription (§ 4). The model is fetched and handed to the
@@ -233,9 +248,17 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     //
     // Nothing here is on the path to a typable caret, and no recording
     // waits on any of it: with no model there is simply no caption.
+    //
+    // **The key is `moonshineTrigger`**, which carries two inputs the
+    // hand-rolled one missed. The *other* transcriber's state, because the
+    // download now waits on the model being wanted and switching whisper
+    // off is what makes it wanted. And the connection, watched rather than
+    // sampled, because "Waiting for Wi-Fi" was a sentence that never
+    // stopped being true — joining Wi-Fi changed nothing until somebody
+    // toggled an unrelated switch.
     val moonshine = remember { MoonshineRuntime() }
-    val moonshineKey = state.plugins.firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
-        ?.let { "${it.state}|${it.granted.sorted().joinToString(",")}|${it.settings}" }
+    val metered = rememberConnectionIsMetered(context)
+    val moonshineKey = moonshineTrigger(state.plugins, metered)
     LaunchedEffect(moonshineKey) {
         if (state.gilune.value == null) return@LaunchedEffect
         withContext(Dispatchers.IO) { startMoonshine(context, state, moonshine) }

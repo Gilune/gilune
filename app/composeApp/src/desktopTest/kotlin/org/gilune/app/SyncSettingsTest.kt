@@ -19,143 +19,33 @@ import kotlin.test.assertTrue
 
 class SyncSettingsTest {
 
-    /// Every kind the FFI documents. If the kernel adds one, this list is
-    /// where the omission shows up.
-    private val kinds = listOf(
-        "sync-gap",
-        "sync-corrupt-operation",
-        "sync-unsupported-version",
-        "sync-unknown-op-kind",
-        "sync-limit-exceeded",
-        "sync-blob-digest-mismatch",
-        "sync-revoked-device",
-    )
-
     // ------------------------------------------------------------------
     // Alerts (§ 8)
+    //
+    // The table moved to `SyncAlerts.kt` and is pinned in `SyncAlertsTest`
+    // (jvmSharedTest, so both suites run it). What stays here is the half
+    // that is the desktop's own: this shell asks for the identifiers,
+    // because a person at a keyboard comparing two machines can act on an
+    // operation id where a person holding a phone cannot.
     // ------------------------------------------------------------------
 
     @Test
-    fun everyAlertKindBecomesASentenceRatherThanAnEmptyBanner() {
-        for (kind in kinds) {
-            val said = alertSentence(kind, "device-7", "seq 41")
-            assertTrue(said.length > 40, "$kind produced nothing worth showing: '$said'")
-            assertTrue(said.trim().endsWith("."), "$kind did not end in a sentence: '$said'")
-        }
-    }
-
-    @Test
-    fun everyAlertPromisesThatApplyingResumesWhereItStopped() {
-        // True of all of them, because halting resumes from the frontier.
-        // Without it each of these reads as a loss, which is the one
-        // thing none of them is.
-        for (kind in kinds) {
-            assertTrue(
-                alertSentence(kind, "", "").contains("picks up where it left off"),
-                "$kind never said the condition clearing puts sync back to work",
-            )
-        }
-    }
-
-    @Test
-    fun noAlertEverShowsTheKindStringTheKernelRaisedItUnder() {
-        for (kind in kinds) {
-            val said = alertSentence(kind, "device-7", "seq 41")
-            assertFalse(said.contains(kind), "$kind leaked its own kind string")
-            assertFalse(said.contains("sync-"), "$kind leaked a kernel policy name: '$said'")
-        }
-    }
-
-    @Test
-    fun theSubjectAndDetailAreCarriedIntoTheSentenceSoTheAlertIsIdentifiable() {
-        for (kind in kinds) {
-            val said = alertSentence(kind, "blob-9f2", "declared 4 MiB")
+    fun theDesktopCarriesTheKernelsIdentifiersIntoEverySentence() {
+        for (kind in ALERT_KINDS) {
+            val said = alertSentence(kind, "blob-9f2", "declared 4 MiB", DESKTOP_ALERT_WORDS)
             assertTrue(said.contains("blob-9f2"), "$kind dropped its subject")
             assertTrue(said.contains("declared 4 MiB"), "$kind dropped its detail")
+            assertFalse(said.contains("this phone"), "a desktop is not a phone: '$said'")
         }
     }
 
     @Test
     fun anAlertWithNothingToIdentifyItLeavesNoEmptyBracketsBehind() {
-        for (kind in kinds) {
-            val said = alertSentence(kind, "", "")
+        for (kind in ALERT_KINDS) {
+            val said = alertSentence(kind, "", "", DESKTOP_ALERT_WORDS)
             assertFalse(said.contains("()"), "$kind left an empty aside: '$said'")
             assertFalse(said.contains(" (, "), "$kind left a dangling separator: '$said'")
         }
-    }
-
-    @Test
-    fun aGapSaysNothingPastItWasTakenInAndWhyThatIsRight() {
-        val said = alertSentence("sync-gap", "device-7", "seq 41")
-        assertTrue(said.contains("missing"), "a gap that never says something is missing: '$said'")
-        assertTrue(
-            said.contains("nothing after the gap has been taken in"),
-            "a gap must say what stopped: '$said'",
-        )
-    }
-
-    @Test
-    fun anUnknownOperationKindIsNotDescribedAsDamage() {
-        // § 8's distinction, and the reason it is a separate kind at all:
-        // a newer version's entry is kept byte for byte and forwarded,
-        // and calling that damage would send somebody looking for a fault
-        // that does not exist.
-        val said = alertSentence("sync-unknown-op-kind", "op-3", "kind 9")
-        for (alarm in listOf("damaged", "corrupt", "thrown away", "refused", "could not")) {
-            assertFalse(said.contains(alarm), "an unknown kind read as damage: '$said'")
-        }
-        assertTrue(said.contains("newer version"), "it must say where it came from: '$said'")
-        assertTrue(said.contains("kept exactly as it arrived"), "it must say it is kept: '$said'")
-        assertTrue(said.contains("passed on"), "a full replica forwards it: '$said'")
-    }
-
-    @Test
-    fun aDigestMismatchSaysTheBytesWereThrownAwayRatherThanSavedWrong() {
-        val said = alertSentence("sync-blob-digest-mismatch", "blob-1", "")
-        assertTrue(said.contains("thrown away"), "the bytes' fate is the point: '$said'")
-    }
-
-    @Test
-    fun aRevokedDeviceAlertRefusesToImplyRevocationIsAnUndo() {
-        // § 9 says revocation protects what comes next and does not
-        // retract history, and "the UI must say so too rather than
-        // implying an undo".
-        val said = alertSentence("sync-revoked-device", "device-2", "")
-        assertTrue(said.contains("still in your vault"), "history is not retracted: '$said'")
-        assertTrue(said.contains("does not undo"), "it must say so plainly: '$said'")
-    }
-
-    @Test
-    fun aKindThisBuildHasNeverHeardOfStillGetsWordsRatherThanSilence() {
-        val said = alertSentence("sync-something-from-2027", "device-4", "")
-        assertTrue(said.length > 40, "an unrecognised halt still has to be visible")
-        assertFalse(said.contains("sync-something-from-2027"), "and still not by its kind string")
-        assertTrue(said.contains("picks up where it left off"))
-    }
-
-    @Test
-    fun aBannerOfOnlyUnknownKindsDoesNotOpenBySayingSyncStopped() {
-        assertEquals(
-            "Sync kept something it could not read",
-            alertsHeading(listOf("sync-unknown-op-kind", "sync-unknown-op-kind")),
-        )
-    }
-
-    @Test
-    fun aBannerHoldingARealHaltSaysSoAndCountsItsReasonsWhenThereAreSeveral() {
-        assertEquals(
-            "Sync stopped short of taking everything in",
-            alertsHeading(listOf("sync-gap")),
-        )
-        assertTrue(
-            alertsHeading(listOf("sync-gap", "sync-unknown-op-kind")).contains("2 reasons"),
-            "a mixed banner counts what it holds",
-        )
-    }
-
-    @Test
-    fun noAlertsMeansNoHeadingAtAll() {
-        assertEquals("", alertsHeading(emptyList()))
     }
 
     // ------------------------------------------------------------------

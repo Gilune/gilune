@@ -23,6 +23,20 @@ pub const SYNC_UNKNOWN_OP_KIND: &str = "sync-unknown-op-kind";
 pub const SYNC_LIMIT_EXCEEDED: &str = "sync-limit-exceeded";
 /// Assembled blob bytes did not match the digest the operation declared.
 pub const SYNC_BLOB_DIGEST_MISMATCH: &str = "sync-blob-digest-mismatch";
+/// An operation names something that has not arrived yet — the object a
+/// revision or a tombstone is about, or a head it says it supersedes.
+/// Per-device sequences carry no causal parents (ADR 0005's inherited
+/// gap), so a full replica can legitimately deliver one device's stream
+/// before another's; that stream halts at the naming operation and
+/// resumes, unchanged, once the referent arrives. The subject is the
+/// missing id, never the waiting device: what has to appear is what the
+/// notice names.
+pub const SYNC_AWAITING_REFERENT: &str = "sync-awaiting-referent";
+/// A note deleted on another device had been edited here. The edit is
+/// the person keeping it, so the file stays in the vault as an import
+/// candidate and the deletion is not carried out against it
+/// (constitution rule 1). Not a fault — a decision waiting to be seen.
+pub const VAULT_DELETED_NOTE_EDITED: &str = "vault-deleted-note-edited";
 /// An operation originated on a device this one has revoked. Refused
 /// whoever delivered it (ADR 0019 § 9) — in a full-replica mesh a third
 /// paired device holds a revoked device's history and would otherwise

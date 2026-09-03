@@ -134,12 +134,11 @@ impl NoiseChannel {
         NoiseChannel { stream, noise, limits }
     }
 
-    /// The peer's static identity, as the completed handshake transmitted
-    /// it. The pinned roster entry is checked against this and not
-    /// against anything the peer merely claimed.
-    pub fn remote_static(&self) -> Option<Vec<u8>> {
-        self.noise.get_remote_static().map(|k| k.to_vec())
-    }
+    // The peer's static identity is deliberately **not** readable from
+    // here. It is taken once, in `handshake::finish_noise`, from the
+    // handshake state that transmitted it, and carried on `Established`
+    // — one place a roster entry can be pinned against, rather than two
+    // that could disagree.
 
     fn read_segment(&mut self) -> Result<Option<Vec<u8>>> {
         let mut length = [0u8; 2];

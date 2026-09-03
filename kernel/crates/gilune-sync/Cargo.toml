@@ -12,6 +12,30 @@ serde_json.workspace = true
 thiserror.workspace = true
 hex.workspace = true
 sha2.workspace = true
+# ADR 0019 § 1 and § 3: what a pairing window, a QR and a settings screen
+# publish has to be an address a peer can dial. The listener binds every
+# interface, and `0.0.0.0` is not an address — so the routable ones are
+# enumerated here.
+#
+# **Why a crate rather than std.** The std-only technique is to bind a UDP
+# socket and `connect` it at a private-range address to learn the
+# preferred outbound interface. It works, and it is declined: it is a
+# *bind*, and § 2's whole discipline is that this program binds exactly
+# when the user switches sync on and at no other moment. `listening_on`
+# is read by every settings refresh, so a bind behind it would be a
+# socket opened by a status query — and on Windows a UDP bind is a
+# candidate for the very Security Alert § 2 spends its care shaping.
+# `if-addrs` reads the interface table (`getifaddrs` /
+# `GetAdaptersAddresses`) and opens nothing. It is MIT, it is already in
+# this workspace's lock file as `mdns-sd`'s own dependency, and taking it
+# directly therefore adds no tree at all.
+if-addrs = "0.15"
+# Keepalive on established sessions. A read timeout notices a peer that
+# went quiet; only keepalive notices a peer whose machine vanished
+# without closing its half of the connection, which is what a laptop lid
+# closing looks like to a listener. `socket2` is `MIT OR Apache-2.0` and,
+# like `if-addrs`, already resolved here as `mdns-sd`'s dependency.
+socket2 = "0.6"
 # ADR 0019 § 3 and § 5. Both are recorded as unaudited in the ADR and in
 # architecture/research/2026-09-02-lan-sync.md; SPAKE2-then-Noise is what
 # magic-wormhole ships for this exact problem.

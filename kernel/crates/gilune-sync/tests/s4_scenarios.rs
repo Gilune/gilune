@@ -359,12 +359,29 @@ fn an_operation_of_an_unknown_kind_is_preserved_and_forwarded_but_never_applied(
 #[test]
 fn one_operation_id_claiming_two_places_in_history_halts_by_name() {
     let b = Replica::new();
+    // An operation whose referent is itself, so that what is under test
+    // is the reused identifier and nothing else. (This used to be a
+    // tombstone for an object nobody had ever heard of, which applied
+    // silently — the very thing the awaiting-referent rule now refuses.)
     let first = foreign(
         "device-elsewhere",
         1,
-        operations::TOMBSTONE,
+        operations::OBJECT_CREATED,
         "object-1",
-        serde_json::json!({}),
+        serde_json::json!({
+            "object": {
+                "object_id": "object-1",
+                "type_id": "com.example.thing",
+                "type_schema": 1,
+                "created_ms": 1_700_000_000_001i64,
+            },
+            "revision": {
+                "revision_id": "object-1-rev-1",
+                "payload": "{}",
+                "origin": "capture",
+                "created_ms": 1_700_000_000_001i64,
+            },
+        }),
     );
     b.store.apply_operation("test", &first, Limits::DEFAULT).expect("apply");
 
@@ -377,7 +394,7 @@ fn one_operation_id_claiming_two_places_in_history_halts_by_name() {
         device_id: "device-elsewhere".to_string(),
         op_seq: 2,
         kind: operations::TOMBSTONE.to_string(),
-        target_id: "object-2".to_string(),
+        target_id: "object-1".to_string(),
         created_ms: 1_700_000_000_002,
         payload: serde_json::json!({}),
     });
@@ -481,6 +498,192 @@ fn an_object_deleted_and_then_restored_converges() {
     b.pull_from(&a);
     assert_eq!(a.digest(), b.digest());
     assert_eq!(b.store.status().expect("status").sources, 2);
+    b.store.project().expect("project");
+    assert!(b.store.verify().expect("verify").is_empty());
+}
+
+// ------------------------------------- referents that have not arrived
+//
+// Sequences are per device and carry no causal parents (ADR 0005's
+// inherited gap), and a pull takes one device's stream at a time, so a
+// full replica can hand over its own operations before the history they
+// refer to. Three shapes of that, each with three replicas, each proving
+// the one rule: halt this stream, apply nothing, resume when what was
+// named arrives — and converge with no conflict on a note nobody
+// conflicted over.
+
+/// Pull until nothing is outstanding, and say how many sessions it cost.
+/// More than one is expected: which stream is offered first decides
+/// whether the referent arrives before or after the operation that
+/// names it, and neither order is wrong.
+fn converge(from: &Replica, to: &Replica) -> usize {
+    let mut passes = 0;
+    while to.pull_from(from).incomplete() && passes < 8 {
+        passes += 1;
+    }
+    passes
+}
+
+/// A, then B pulling from A and writing something about what it found.
+/// C is the third replica, which will meet B first.
+fn a_wrote_and_b_answered(words: &str) -> (Replica, Replica, String, String) {
+    let a = Replica::new();
+    let b = Replica::new();
+    let receipt = a.store.capture_bytes("txt", words.as_bytes()).expect("capture");
+    a.store.project().expect("project");
+    b.pull_from(&a);
+    b.store.project().expect("project");
+    let rel = b.projection_of(&receipt.source_id).expect("projected on b");
+    (a, b, receipt.source_id, rel)
+}
+
+#[test]
+fn a_revision_that_arrives_before_its_object_halts_and_then_converges() {
+    let (a, b, object_id, rel) = a_wrote_and_b_answered("what a wrote");
+    let text = std::fs::read_to_string(b.path(&rel)).expect("read");
+    std::fs::write(b.path(&rel), text.replace("what a wrote", "what b made of it")).expect("edit");
+    b.store.reconcile().expect("reconcile");
+
+    let c = Replica::new();
+    let a_device = a.store.device_id().expect("device");
+    let halted = c.pull_through(&b, Fault::WithholdDevice(a_device.clone()));
+    assert_eq!(halted.applied, 0, "a revision of an object nobody here has is not applied");
+    assert_eq!(halted.halted.len(), 1);
+    assert!(halted.halted[0].reason.contains(&object_id), "{:?}", halted.halted);
+    assert_eq!(c.alert_kinds(), vec![alerts::SYNC_AWAITING_REFERENT], "and it is visible");
+    assert_eq!(
+        c.store.integrity_alerts().expect("alerts")[0].subject,
+        object_id,
+        "the notice names what has to appear, not who was waiting"
+    );
+    assert_eq!(
+        c.store.sync_frontier(&b.store.device_id().expect("device")).expect("frontier"),
+        0,
+        "the frontier is where it was, so nothing is skipped when it resumes"
+    );
+    assert_eq!(c.store.status().expect("status").sources, 0);
+
+    // The other stream arrives and the wait ends, with no repair.
+    assert!(converge(&b, &c) <= 3);
+    assert_eq!(b.digest(), c.digest());
+    assert!(c.alert_kinds().is_empty(), "a condition that clears stops being reported");
+    assert_eq!(c.store.object_heads(&object_id).expect("heads").len(), 1);
+    c.store.project().expect("project");
+    let projected = std::fs::read_to_string(c.path(&rel)).expect("read");
+    assert!(projected.contains("what b made of it"));
+    assert!(
+        !projected.contains("gilune-conflicted"),
+        "nobody conflicted over this note: {projected}"
+    );
+    assert!(c.store.verify().expect("verify").is_empty());
+}
+
+#[test]
+fn a_tombstone_that_arrives_before_its_object_halts_and_then_converges() {
+    let (a, b, object_id, rel) = a_wrote_and_b_answered("this will go");
+    std::fs::remove_file(b.path(&rel)).expect("delete on b");
+    b.store.reconcile().expect("reconcile");
+    let proposal = b.store.open_proposals().expect("proposals")[0].0.clone();
+    b.store.resolve_tombstone(&proposal, true).expect("accept");
+
+    let c = Replica::new();
+    let a_device = a.store.device_id().expect("device");
+    let halted = c.pull_through(&b, Fault::WithholdDevice(a_device));
+    assert_eq!(halted.applied, 0, "a deletion of nothing is not silently dropped");
+    assert_eq!(halted.halted.len(), 1);
+    assert_eq!(c.alert_kinds(), vec![alerts::SYNC_AWAITING_REFERENT]);
+    assert_eq!(c.store.integrity_alerts().expect("alerts")[0].subject, object_id);
+    assert_eq!(
+        c.store.sync_frontier(&b.store.device_id().expect("device")).expect("frontier"),
+        0
+    );
+
+    assert!(converge(&b, &c) <= 3);
+    assert_eq!(b.digest(), c.digest(), "the deletion lands once its object is here");
+    assert!(c.alert_kinds().is_empty());
+    assert_eq!(c.store.status().expect("status").sources, 1, "the object is kept, not erased");
+    let summary = c.store.project().expect("project");
+    assert_eq!(summary.written, 0);
+    assert!(!c.path(&rel).exists());
+    assert!(c.store.verify().expect("verify").is_empty());
+}
+
+#[test]
+fn a_revision_naming_a_head_that_has_not_arrived_halts_rather_than_resurrecting_it() {
+    // The quietest of the three, and the one that used to leave damage
+    // behind: the named head simply matched nothing, and then arrived
+    // later as a head nothing had ever superseded — a conflict on a note
+    // that only ever had one writer at a time.
+    let a = Replica::new();
+    let b = Replica::new();
+    let receipt = a.store.capture_bytes("txt", b"first words").expect("capture");
+    a.store.project().expect("project");
+    let rel = a.projection_of(&receipt.source_id).expect("projected");
+    let text = std::fs::read_to_string(a.path(&rel)).expect("read");
+    std::fs::write(a.path(&rel), text.replace("first words", "second words")).expect("edit");
+    a.store.reconcile().expect("reconcile");
+    a.store.project().expect("project");
+
+    b.pull_from(&a);
+    b.store.project().expect("project");
+    let text = std::fs::read_to_string(b.path(&rel)).expect("read");
+    std::fs::write(b.path(&rel), text.replace("second words", "third words")).expect("edit");
+    b.store.reconcile().expect("reconcile");
+
+    // C holds A's first operation and no more: it knows the object and
+    // its first revision, but not the head B's revision supersedes.
+    let mut c = Replica::with_limits(Limits { max_ops_per_session: 1, ..Limits::DEFAULT });
+    c.pull_from(&a);
+    assert_eq!(c.store.status().expect("status").sources, 1);
+    c.relimit(Limits::DEFAULT);
+
+    let a_device = a.store.device_id().expect("device");
+    let halted = c.pull_through(&b, Fault::WithholdDevice(a_device));
+    assert_eq!(halted.applied, 0);
+    assert_eq!(halted.halted.len(), 1);
+    assert_eq!(c.alert_kinds(), vec![alerts::SYNC_AWAITING_REFERENT]);
+    assert_eq!(
+        c.store.object_heads(&receipt.source_id).expect("heads").len(),
+        1,
+        "and nothing was half-applied on the way to refusing"
+    );
+
+    assert!(converge(&b, &c) <= 3);
+    assert_eq!(b.digest(), c.digest());
+    assert!(c.alert_kinds().is_empty());
+    assert_eq!(
+        c.store.object_heads(&receipt.source_id).expect("heads").len(),
+        1,
+        "one writer at a time is one head, whatever order the streams came in"
+    );
+    c.store.project().expect("project");
+    let projected = std::fs::read_to_string(c.path(&rel)).expect("read");
+    assert!(projected.ends_with("third words"), "{projected}");
+    assert!(!projected.contains("gilune-conflicted"), "{projected}");
+}
+
+#[test]
+fn a_capture_of_nought_bytes_syncs_and_converges() {
+    // A recording that caught nothing is still a capture, and its note
+    // must reach the other device. There is no chunk to send for it, so
+    // nothing ever opened a staging file — and completing the transfer
+    // used to fail on that missing file, every session, for ever.
+    let a = Replica::new();
+    let b = Replica::new();
+    let receipt = a.store.capture_bytes("wav", &[]).expect("an empty capture is a capture");
+    a.store.project().expect("project");
+
+    let report = b.pull_from(&a);
+    assert_eq!(report.applied, 1);
+    assert_eq!(report.blobs_completed, 1, "nought bytes is a completed transfer");
+    assert_eq!(report.blobs_pending, 0, "and nothing is left waiting for ever");
+    assert!(!report.incomplete(), "so the caller is not told to come back");
+    assert!(report.halted.is_empty());
+
+    assert_eq!(std::fs::read(b.path(&receipt.rel_path)).expect("arrived"), Vec::<u8>::new());
+    assert_eq!(a.digest(), b.digest());
+    assert!(b.alert_kinds().is_empty());
+    assert!(b.store.verify().expect("verify").is_empty());
     b.store.project().expect("project");
     assert!(b.store.verify().expect("verify").is_empty());
 }

@@ -89,7 +89,15 @@ impl Store {
                 summary.held_back += 1;
                 continue;
             }
-            let canonical = self.render(&head)?;
+            let Some(canonical) = self.render(&head)? else {
+                // The object's own preserved bytes could not be read here
+                // and are not in transit: rendering a body we cannot
+                // vouch for would put a placeholder where the words were,
+                // and reconcile would then ingest it as an edit. Hold the
+                // object back and leave whatever is on disk alone.
+                summary.held_back += 1;
+                continue;
+            };
             let canonical_sha = ids::sha256_hex(canonical.as_bytes());
             let target = self.vault().join(&rel_path);
             let recorded: Option<String> = self
@@ -134,6 +142,15 @@ impl Store {
     /// since then is left exactly where it is: a deletion on one device
     /// must not silently destroy words written on another, and reconcile
     /// preserves it as an import candidate (constitution rule 1).
+    ///
+    /// "The kernel wrote these bytes" is asked twice, and it has to be.
+    /// The recorded hash alone is not the question: `ingest_external_edit`
+    /// records the *edited disk bytes* against the projection so that the
+    /// next projection may canonicalise over them, and that made an edit
+    /// look, one tick later, exactly like the kernel's own output — so a
+    /// tombstone arriving afterwards deleted the words the person had
+    /// just written. The second question is the one that cannot be
+    /// spoofed: are these bytes what this kernel would render right now?
     fn withdraw_tombstoned(&self) -> Result<i64> {
         let doomed: Vec<(String, String, String)> = {
             let mut stmt = self.conn().prepare(
@@ -148,8 +165,16 @@ impl Store {
         for (object_id, rel_path, recorded_sha) in doomed {
             let target = self.vault().join(&rel_path);
             match std::fs::read(&target) {
-                Ok(bytes) if ids::sha256_hex(&bytes) != recorded_sha => continue,
-                Ok(_) => {
+                Ok(bytes) => {
+                    let disk_sha = ids::sha256_hex(&bytes);
+                    let ours = disk_sha == recorded_sha
+                        && self.canonical_sha(&object_id)?.as_deref() == Some(disk_sha.as_str());
+                    if !ours {
+                        // Somebody's words, not ours. The file stays and
+                        // so does the projection row, so reconcile finds
+                        // it and says why it is being kept.
+                        continue;
+                    }
                     std::fs::remove_file(&target)
                         .map_err(|e| KernelError::Io { path: target.clone(), source: e })?;
                     if let Some(parent) = target.parent() {
@@ -157,7 +182,15 @@ impl Store {
                     }
                     removed += 1;
                 }
-                Err(_) => {}
+                // Already gone: there is nothing to withdraw, and the
+                // projection row goes with it.
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                // Unreadable for any other reason — a lock, a permission,
+                // a disconnected drive — says nothing about what the file
+                // contains. Keep the row: forgetting the projection would
+                // make the note an import candidate the next time the
+                // vault could be read, out of a transient failure.
+                Err(_) => continue,
             }
             self.conn()
                 .execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
@@ -231,8 +264,22 @@ impl Store {
                         summary.renames += 1;
                     }
                     if ids::sha256_hex(text.as_bytes()) != recorded_sha {
-                        self.ingest_external_edit(&object_id, &body, text.as_bytes())?;
-                        summary.edits += 1;
+                        if self.is_deleted(&object_id)? {
+                            // The object was deleted on another device and
+                            // this file was edited here. The edit is the
+                            // person keeping it, so the words stay — as a
+                            // file the kernel no longer claims, which is
+                            // to say an import candidate. Ingesting the
+                            // edit instead would write a revision of a
+                            // deleted object and, worse, hand projection
+                            // the very hash that authorises deleting the
+                            // file (constitution rule 1: never destroy
+                            // what the kernel did not write).
+                            summary.imports += self.keep_edit_of_deleted(&object_id, &rel_path)?;
+                        } else {
+                            self.ingest_external_edit(&object_id, &body, text.as_bytes())?;
+                            summary.edits += 1;
+                        }
                     }
                 }
             }
@@ -331,28 +378,8 @@ impl Store {
     // ---------------------------------------------------------- internals
 
     fn live_heads(&self) -> Result<Vec<Head>> {
-        let mut stmt = self.conn().prepare(&format!(
-            "SELECT o.object_id, o.type_id, o.type_schema, o.created_ms,
-                    r.revision_id, r.payload,
-                    (SELECT COUNT(*) FROM heads h2 WHERE h2.object_id = o.object_id) AS head_count
-             FROM objects o
-             JOIN heads h ON h.object_id = o.object_id
-             JOIN revisions r ON r.revision_id = h.revision_id
-             WHERE o.deleted = 0
-             ORDER BY o.object_id, {}",
-            crate::revisions::newest_head_first("r").trim_start_matches("ORDER BY ")
-        ))?;
-        let rows = stmt.query_map([], |row| {
-            Ok(Head {
-                object_id: row.get(0)?,
-                type_id: row.get(1)?,
-                type_schema: row.get(2)?,
-                created_ms: row.get(3)?,
-                revision_id: row.get(4)?,
-                payload: row.get(5)?,
-                conflicted: row.get::<_, i64>(6)? > 1,
-            })
-        })?;
+        let mut stmt = self.conn().prepare(&head_sql("o.deleted = 0"))?;
+        let rows = stmt.query_map([], read_head)?;
         let mut heads: Vec<Head> = Vec::new();
         for row in rows {
             let head = row?;
@@ -362,6 +389,54 @@ impl Store {
             }
         }
         Ok(heads)
+    }
+
+    /// One object's head, deleted or not. The deleted case is the point:
+    /// withdrawing a projection has to know what the kernel would render
+    /// for an object whose file it is about to remove.
+    fn head_of(&self, object_id: &str) -> Result<Option<Head>> {
+        let mut stmt = self.conn().prepare(&head_sql("o.object_id = ?1"))?;
+        let mut rows = stmt.query_map([object_id], read_head)?;
+        rows.next().transpose().map_err(KernelError::from)
+    }
+
+    /// The digest of what this kernel would write for an object right
+    /// now, or `None` when it has no head or cannot be rendered.
+    fn canonical_sha(&self, object_id: &str) -> Result<Option<String>> {
+        let Some(head) = self.head_of(object_id)? else { return Ok(None) };
+        Ok(self.render(&head)?.map(|text| ids::sha256_hex(text.as_bytes())))
+    }
+
+    fn is_deleted(&self, object_id: &str) -> Result<bool> {
+        let deleted: Option<i64> = self
+            .conn()
+            .query_row(
+                "SELECT deleted FROM objects WHERE object_id = ?1",
+                [object_id],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(no_rows_none)?;
+        Ok(deleted == Some(1))
+    }
+
+    /// Keep an edited file whose object was deleted elsewhere: stop
+    /// claiming it as a projection, record it as an import candidate, and
+    /// raise the notice that says what happened. Nothing on disk is
+    /// touched — the whole point is that these are the person's words.
+    fn keep_edit_of_deleted(&self, object_id: &str, rel_path: &str) -> Result<i64> {
+        self.conn()
+            .execute("DELETE FROM projections WHERE object_id = ?1", [object_id])?;
+        crate::alerts::raise(
+            self.conn(),
+            crate::alerts::VAULT_DELETED_NOTE_EDITED,
+            object_id,
+            &format!(
+                "this note was deleted on another device, but it had been edited here; \
+                 the edited file is kept at {rel_path} and is offered as an import"
+            ),
+        )?;
+        self.record_import(rel_path)
     }
 
     fn projection_path(&self, head: &Head) -> Result<String> {
@@ -393,7 +468,13 @@ impl Store {
     }
 
     /// Deterministic canonical form: same committed state, same bytes.
-    fn render(&self, head: &Head) -> Result<String> {
+    ///
+    /// `None` means "not this pass": the object's own preserved bytes are
+    /// the body, and they could not be read, and they are not content in
+    /// transit. There is no honest rendering of that, and a dishonest one
+    /// is worse than none — the placeholder would become the note's body,
+    /// and the next reconcile would ingest it as an edit.
+    fn render(&self, head: &Head) -> Result<Option<String>> {
         let payload: serde_json::Value = serde_json::from_str(&head.payload)?;
         let mut front = String::from("---\n");
         front.push_str(&format!("gilune-id: {}\n", head.object_id));
@@ -414,13 +495,23 @@ impl Store {
         } else if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
             let name = blob_rel.rsplit('/').next().unwrap_or(blob_rel);
             if payload.get("media").and_then(|v| v.as_str()) == Some("txt") {
-                // Bytes that have not arrived yet are the ordinary state
-                // of a note whose operation reached this device before
-                // its content did (ADR 0005). Project the link now and
-                // canonicalise when the content lands: refusing to
-                // project would make one missing transfer hide a vault.
-                std::fs::read_to_string(self.vault().join(blob_rel))
-                    .unwrap_or_else(|_| format!("![[{name}]]\n"))
+                match std::fs::read_to_string(self.vault().join(blob_rel)) {
+                    Ok(text) => text,
+                    // Bytes that have not arrived yet are the ordinary
+                    // state of a note whose operation reached this device
+                    // before its content did (ADR 0005). Project the link
+                    // now and canonicalise when the content lands:
+                    // refusing to project would make one missing transfer
+                    // hide a vault. That reasoning covers exactly this
+                    // case and no other — a local read failure is not a
+                    // transfer in progress, and answering it with the
+                    // same placeholder would put `![[name]]` where the
+                    // person's words are and let reconcile ingest it.
+                    Err(_) if self.awaiting_content(&head.object_id, &payload)? => {
+                        format!("![[{name}]]\n")
+                    }
+                    Err(_) => return Ok(None),
+                }
             } else {
                 format!("![[{name}]]\n")
             }
@@ -428,7 +519,33 @@ impl Store {
             // Unknown payload shape: preserve it legibly (rule 9).
             format!("```json\n{}\n```\n", head.payload)
         };
-        Ok(front + &body)
+        Ok(Some(front + &body))
+    }
+
+    /// Whether this object's bytes are content still crossing from
+    /// another device, rather than content this device is missing.
+    fn awaiting_content(&self, object_id: &str, payload: &serde_json::Value) -> Result<bool> {
+        let row: Option<(String, String)> = match payload.get("blob_id").and_then(|v| v.as_str()) {
+            Some(blob_id) => self
+                .conn()
+                .query_row(
+                    "SELECT state, origin FROM blobs WHERE blob_id = ?1",
+                    [blob_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map(Some)
+                .or_else(no_rows_none)?,
+            None => self
+                .conn()
+                .query_row(
+                    "SELECT state, origin FROM blobs WHERE object_id = ?1",
+                    [object_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map(Some)
+                .or_else(no_rows_none)?,
+        };
+        Ok(matches!(row, Some((state, origin)) if state != "ready" && origin == "sync"))
     }
 
     fn ingest_external_edit(&self, object_id: &str, body: &str, disk: &[u8]) -> Result<()> {
@@ -557,6 +674,36 @@ impl Store {
     }
 }
 
+/// The head selection every projection reads, with one `WHERE` clause
+/// swapped. `where_clause` is always a literal from this module — never
+/// host-supplied text — so replicas cannot disagree about which head
+/// renders, whichever caller asked.
+fn head_sql(where_clause: &str) -> String {
+    format!(
+        "SELECT o.object_id, o.type_id, o.type_schema, o.created_ms,
+                r.revision_id, r.payload,
+                (SELECT COUNT(*) FROM heads h2 WHERE h2.object_id = o.object_id) AS head_count
+         FROM objects o
+         JOIN heads h ON h.object_id = o.object_id
+         JOIN revisions r ON r.revision_id = h.revision_id
+         WHERE {where_clause}
+         ORDER BY o.object_id, {}",
+        crate::revisions::newest_head_first("r").trim_start_matches("ORDER BY ")
+    )
+}
+
+fn read_head(row: &rusqlite::Row<'_>) -> rusqlite::Result<Head> {
+    Ok(Head {
+        object_id: row.get(0)?,
+        type_id: row.get(1)?,
+        type_schema: row.get(2)?,
+        created_ms: row.get(3)?,
+        revision_id: row.get(4)?,
+        payload: row.get(5)?,
+        conflicted: row.get::<_, i64>(6)? > 1,
+    })
+}
+
 enum FrontMatter {
     Absent,
     Malformed,
@@ -643,6 +790,223 @@ mod tests {
 
     fn read_rel(store: &Store, rel: &str) -> String {
         std::fs::read_to_string(store.vault().join(rel)).expect("read projection")
+    }
+
+    /// A tombstone for `object_id`, delivered the way one really arrives:
+    /// as another device's operation, applied through `apply_operation`.
+    fn tombstone_from_elsewhere(store: &Store, object_id: &str) {
+        let bytes = crate::operations::encode(&crate::operations::Envelope {
+            version: crate::operations::ENVELOPE_VERSION,
+            op_id: "elsewhere-1".to_string(),
+            device_id: "device-elsewhere".to_string(),
+            op_seq: 1,
+            kind: crate::operations::TOMBSTONE.to_string(),
+            target_id: object_id.to_string(),
+            created_ms: 1_700_000_000_000,
+            payload: serde_json::json!({}),
+        });
+        store
+            .apply_operation("test", &bytes, crate::limits::Limits::DEFAULT)
+            .expect("the tombstone applies");
+    }
+
+    fn alert_kinds(store: &Store) -> Vec<String> {
+        store
+            .integrity_alerts()
+            .expect("alerts")
+            .into_iter()
+            .map(|a| a.kind)
+            .collect()
+    }
+
+    #[test]
+    fn a_tombstone_from_elsewhere_never_deletes_a_note_edited_here() {
+        // The deletion and the edit were concurrent, and the edit is a
+        // person keeping the note. The file stays, and it says why.
+        let (_dir, store, rel) = captured("worth keeping");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        tombstone_from_elsewhere(&store, &object_id);
+
+        let edited = read_rel(&store, &rel).replace("worth keeping", "still worth keeping");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+
+        let reconciled = store.reconcile().expect("reconcile");
+        assert_eq!(reconciled.edits, 0, "an edit is not ingested against a deleted object");
+        assert_eq!(reconciled.imports, 1, "it is preserved as something to bring back");
+        let summary = store.project().expect("project");
+        assert_eq!(summary.removed, 0, "nothing the kernel did not write is removed");
+
+        assert_eq!(
+            read_rel(&store, &rel),
+            edited,
+            "the words a person wrote survive a deletion made elsewhere"
+        );
+        assert_eq!(alert_kinds(&store), vec![crate::alerts::VAULT_DELETED_NOTE_EDITED]);
+        // Stable: running both again neither deletes the file nor
+        // re-counts it.
+        assert_eq!(store.reconcile().expect("again").imports, 0);
+        assert_eq!(store.project().expect("again").removed, 0);
+        assert!(store.vault().join(&rel).exists());
+    }
+
+    #[test]
+    fn an_edit_ingested_before_the_tombstone_arrived_still_keeps_the_file() {
+        // The other ordering, and the one that used to lose the words:
+        // ingesting the edit records the *edited* bytes against the
+        // projection, so a tombstone landing afterwards found a hash that
+        // matched and deleted the file one tick later.
+        let (_dir, store, rel) = captured("written here first");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+
+        let edited = read_rel(&store, &rel).replace("written here first", "and edited here");
+        std::fs::write(store.vault().join(&rel), &edited).expect("edit");
+        assert_eq!(store.reconcile().expect("reconcile").edits, 1);
+
+        tombstone_from_elsewhere(&store, &object_id);
+        assert_eq!(store.project().expect("project").removed, 0);
+        assert_eq!(read_rel(&store, &rel), edited, "the edit is not deleted under the person");
+    }
+
+    #[test]
+    fn a_tombstone_from_elsewhere_still_withdraws_a_file_the_kernel_wrote() {
+        // The rule is "never delete what the kernel did not write", not
+        // "never delete": an untouched projection goes, as it must.
+        let (_dir, store, rel) = captured("nobody touched this");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        tombstone_from_elsewhere(&store, &object_id);
+
+        assert_eq!(store.project().expect("project").removed, 1);
+        assert!(!store.vault().join(&rel).exists());
+        assert!(alert_kinds(&store).is_empty(), "an ordinary deletion is not a notice");
+    }
+
+    #[test]
+    fn a_projection_whose_own_bytes_cannot_be_read_is_held_back_not_overwritten() {
+        // A text capture's body *is* its preserved bytes. If they cannot
+        // be read and are not in transit, there is no honest rendering —
+        // and the dishonest one, an embed link, would become the note's
+        // body and be ingested as an edit on the next reconcile.
+        let (_dir, store, rel) = captured("the only copy of these words");
+        let blob_rel: String = store
+            .conn()
+            .query_row("SELECT rel_path FROM blobs", [], |row| row.get(0))
+            .expect("the blob");
+        let before = read_rel(&store, &rel);
+        std::fs::remove_file(store.vault().join(&blob_rel)).expect("lose the bytes");
+
+        let summary = store.project().expect("project");
+        assert_eq!(summary.held_back, 1);
+        assert_eq!(summary.written, 0);
+        assert_eq!(read_rel(&store, &rel), before, "the note is left exactly as it was");
+        assert!(!read_rel(&store, &rel).contains("![["), "and never becomes a link");
+    }
+
+    #[test]
+    fn content_still_crossing_from_another_device_projects_as_a_link() {
+        // The case the placeholder exists for, kept honest: bytes that
+        // have not arrived yet are the ordinary state of a note whose
+        // operation got here first, and one missing transfer must not
+        // hide a vault.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        let bytes = crate::operations::encode(&crate::operations::Envelope {
+            version: crate::operations::ENVELOPE_VERSION,
+            op_id: "elsewhere-1".to_string(),
+            device_id: "device-elsewhere".to_string(),
+            op_seq: 1,
+            kind: crate::operations::OBJECT_CREATED.to_string(),
+            target_id: "note-1".to_string(),
+            created_ms: 1_700_000_000_000,
+            payload: serde_json::json!({
+                "object": {
+                    "object_id": "note-1",
+                    "type_id": crate::capture::SOURCE_TYPE,
+                    "type_schema": 1,
+                    "created_ms": 1_700_000_000_000i64,
+                },
+                "revision": {
+                    "revision_id": "note-rev-1",
+                    "payload": serde_json::json!({
+                        "media": "txt",
+                        "blob_id": "blob-1",
+                        "rel_path": "Captures/capture-elsewhere.txt",
+                        "sha256": ids::sha256_hex(b"not here yet"),
+                        "bytes": 12,
+                    })
+                    .to_string(),
+                    "origin": "capture",
+                    "created_ms": 1_700_000_000_000i64,
+                },
+                "blob": {
+                    "blob_id": "blob-1",
+                    "rel_path": "Captures/capture-elsewhere.txt",
+                    "sha256": ids::sha256_hex(b"not here yet"),
+                    "bytes": 12,
+                },
+            }),
+        });
+        store
+            .apply_operation("test", &bytes, crate::limits::Limits::DEFAULT)
+            .expect("apply");
+
+        assert_eq!(store.project().expect("project").written, 1);
+        let rel: String = store
+            .conn()
+            .query_row("SELECT rel_path FROM projections", [], |row| row.get(0))
+            .expect("projection");
+        assert!(read_rel(&store, &rel).contains("![[capture-elsewhere.txt]]"));
+    }
+
+    #[test]
+    fn an_unreadable_projection_keeps_its_row_rather_than_being_forgotten() {
+        // Unreadable is not absent. A lock, a permission, a disconnected
+        // drive says nothing about what the file holds — and dropping the
+        // projection row would turn a transient failure into a note the
+        // kernel no longer claims.
+        let (_dir, store, rel) = captured("behind a lock");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let path = store.vault().join(&rel);
+        std::fs::remove_file(&path).expect("remove");
+        // A directory where the file was: unreadable on every platform,
+        // and not `NotFound` on any of them.
+        std::fs::create_dir(&path).expect("obstruct");
+        tombstone_from_elsewhere(&store, &object_id);
+
+        assert_eq!(store.project().expect("project").removed, 0);
+        let rows: i64 = store
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM projections WHERE object_id = ?1",
+                [&object_id],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(rows, 1, "the projection is still this kernel's to answer for");
+
+        // Genuinely absent is the other answer, and it is a clean one.
+        std::fs::remove_dir(&path).expect("clear");
+        store.project().expect("project");
+        let rows: i64 = store
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM projections WHERE object_id = ?1",
+                [&object_id],
+                |row| row.get(0),
+            )
+            .expect("count");
+        assert_eq!(rows, 0, "a file that is simply gone needs no withdrawing");
     }
 
     #[test]

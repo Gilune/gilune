@@ -73,6 +73,10 @@ class RecordService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // This service can be the only thing running — a widget tap with
+        // no activity anywhere — so it points the shared log hook at the
+        // platform too. Setting it twice is setting it to the same thing.
+        GiluneLog.sink = { message, cause -> Log.w(TAG, message, cause) }
         val channel = NotificationChannel(
             CHANNEL_ID,
             "Recording",

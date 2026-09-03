@@ -228,6 +228,68 @@ fn the_shipped_bind_is_routable_rather_than_the_loopback() {
     );
 }
 
+/// **`0.0.0.0` is not an address anybody can dial**, and it used to be
+/// the one this device published.
+///
+/// The listener binds every interface, `local_addr` reports that bind
+/// verbatim, and nothing downstream substituted anything — so the string
+/// that reached the pairing window, the QR's fourth field and both
+/// shells' settings screens was `0.0.0.0:51837`. A phone scanning that QR
+/// was being told to connect to itself, and the QR and typed-address
+/// paths therefore could not work on real hardware at all.
+///
+/// Tested on the substitution itself rather than by binding: the bind is
+/// what raises the Windows firewall prompt, and the decision this makes
+/// is a pure one.
+#[test]
+fn an_unspecified_bind_is_published_as_an_address_a_peer_can_dial() {
+    use gilune_sync::service::publishable;
+    let routable: std::net::Ipv4Addr = "192.168.1.20".parse().expect("ip");
+
+    assert_eq!(
+        publishable("0.0.0.0:51837", &[routable]),
+        "192.168.1.20:51837",
+        "an every-interface bind must publish an address, not the bind"
+    );
+    assert_eq!(
+        publishable("[::]:51837", &[routable]),
+        "192.168.1.20:51837",
+        "the v6 unspecified address is the same fact in another spelling"
+    );
+
+    // A host that named its own bind meant it. Substituting there would
+    // be overruling a caller who said what they wanted — and it is what
+    // keeps this whole suite on the loopback.
+    assert_eq!(publishable("127.0.0.1:51837", &[routable]), "127.0.0.1:51837");
+    assert_eq!(publishable("10.0.0.4:51837", &[routable]), "10.0.0.4:51837");
+
+    // A machine with nothing routable publishes the loopback, because
+    // that is the true description of where it can be reached. What it
+    // must never publish is any of these.
+    let loopback: std::net::Ipv4Addr = "127.0.0.1".parse().expect("ip");
+    let link_local: std::net::Ipv4Addr = "169.254.3.4".parse().expect("ip");
+    for candidates in [vec![], vec![loopback], vec![loopback, link_local]] {
+        let published = publishable("0.0.0.0:51837", &candidates);
+        assert_eq!(published, "127.0.0.1:51837");
+        assert!(!published.starts_with("0.0.0.0"));
+        assert!(!published.starts_with("169.254"));
+    }
+}
+
+/// And what this machine offers as candidates is never one of the three
+/// kinds of address a peer cannot use. Asserted about whatever this
+/// machine happens to have, so it holds on a laptop with a VPN up and on
+/// a build agent with no network at all.
+#[test]
+fn the_addresses_this_machine_offers_are_all_ones_a_peer_could_dial() {
+    for address in gilune_sync::service::routable_addresses() {
+        assert!(!address.is_loopback(), "{address} is this device talking to itself");
+        assert!(!address.is_link_local(), "{address} is what DHCP never answered for");
+        assert!(!address.is_unspecified(), "{address} is not an address");
+        assert!(!address.is_multicast() && !address.is_broadcast(), "{address}");
+    }
+}
+
 /// The routable bind, actually performed. **Ignored by default and that
 /// is the point**: this is the test that raises the Windows Security
 /// Alert, which is exactly the behaviour § 2 specifies and exactly what
@@ -250,9 +312,17 @@ fn the_routable_bind_and_the_responder_both_come_up_together() {
 
     assert!(!device.service.advertising(), "nothing before the switch");
     let address = device.service.set_enabled(true).expect("enable").expect("address");
+    // The listener took every interface — and what it *publishes* is an
+    // address a peer can dial, because `0.0.0.0` is not one. This is the
+    // live half of `an_unspecified_bind_is_published_as_an_address_a_peer_can_dial`.
     assert!(
-        address.starts_with("0.0.0.0:"),
-        "the listener took every interface: {address}"
+        !address.starts_with("0.0.0.0:") && !address.starts_with("[::]:"),
+        "the pairing window, the QR and both settings screens would carry {address}, \
+         which no device on the network can connect to"
+    );
+    assert!(
+        !device.service.listening_addresses().is_empty(),
+        "and a settings screen has something to show a person who has to type it"
     );
     assert!(
         device.service.advertising(),
@@ -522,6 +592,42 @@ fn browse_until(
         }
     }
     None
+}
+
+/// A responder whose first registration is not confirmed in time.
+///
+/// The shape of the Android adapter's real failure: `NsdManager`
+/// registration is asynchronous and the adapter waits a bounded time for
+/// `onServiceRegistered`, so a slow platform reports a failure for a
+/// registration that in fact completes a moment later. Whatever the
+/// cause, a device that gave up on being findable until somebody toggled
+/// the switch is a device stuck in the one state § 1's fallback chain
+/// exists to make survivable rather than permanent.
+#[derive(Default)]
+struct LateResponder {
+    attempts: std::sync::atomic::AtomicUsize,
+    advertised: std::sync::Mutex<Option<Advertisement>>,
+}
+
+impl PeerDiscovery for LateResponder {
+    fn name(&self) -> String {
+        "late".to_string()
+    }
+    fn advertise(&self, ad: &Advertisement) -> gilune_sync::Result<()> {
+        if self.attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return Err(SyncError::Refused {
+                detail: "the platform did not confirm the registration in time".to_string(),
+            });
+        }
+        *self.advertised.lock().expect("lock") = Some(ad.clone());
+        Ok(())
+    }
+    fn withdraw(&self) {
+        *self.advertised.lock().expect("lock") = None;
+    }
+    fn browse(&self, _timeout: Duration) -> gilune_sync::Result<Vec<Discovered>> {
+        Ok(Vec::new())
+    }
 }
 
 /// A discovery adapter a test drives by hand: it answers with whatever it
@@ -964,6 +1070,81 @@ fn a_peer_running_an_incompatible_version_is_named_as_that_and_not_as_absent() {
     );
 }
 
+/// **One browse per round**, however many peers cannot be reached.
+///
+/// The measurement above is what makes this a defect rather than a
+/// preference: a cold browse cost 2.5 s against an exchange's 1.2 s, and
+/// `reach` browsed once *per unreachable peer*, serially, each after its
+/// own five-second connect timeout. A laptop that woke with three peers
+/// asleep spent the whole budget several times over asking the same
+/// question and getting the same answer — an answer that describes the
+/// network, not the peer that prompted it.
+#[test]
+fn one_round_browses_once_however_many_peers_are_unreachable() {
+    let first = Device::new("Desktop").listening();
+    let second = Device::new("Laptop").listening();
+    let blind = ScriptedDiscovery::answering(Vec::new());
+    let phone = Device::new("Phone").listening().discovering(blind.clone());
+    phone.pair_by_code(&first).expect("pair with the first");
+    phone.pair_by_code(&second).expect("pair with the second");
+
+    // Both moved, and nobody told the phone about either.
+    for peer in [&first, &second] {
+        phone
+            .service
+            .set_peer_address(
+                &peer.service.identity_public_hex(),
+                &format!("127.0.0.1:{}", free_port()),
+            )
+            .expect("stale it");
+    }
+
+    let report = phone.sync();
+    assert_eq!(report.halted.len(), 2, "neither peer was reachable: {report:?}");
+    assert_eq!(
+        blind.browsed(),
+        1,
+        "the same question was asked once per unreachable peer — at 2.5 s each, that is \
+         how a sync with three sleeping peers costs more than the whole budget"
+    );
+}
+
+/// A responder that failed to come up is **tried again on the next sync**,
+/// rather than staying down until somebody toggles the switch.
+#[test]
+fn a_responder_that_did_not_start_is_tried_again_rather_than_left_down() {
+    let responder = Arc::new(LateResponder::default());
+    let device = Device::new("Desktop")
+        .discovering(responder.clone())
+        .listening();
+
+    assert!(
+        device.service.enabled(),
+        "the listener is up: failing to advertise is not failing to switch sync on"
+    );
+    assert!(
+        !device.service.advertising(),
+        "and the responder is honestly reported as down"
+    );
+
+    // A sync round — this device has no peers, so nothing else happens.
+    device.sync();
+
+    assert!(
+        device.service.advertising(),
+        "a device that is listening but has given up on being findable is stuck in the \
+         one state § 1's fallback chain exists to make survivable rather than permanent"
+    );
+    assert_eq!(
+        responder
+            .attempts
+            .load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "tried once at the switch and once more at the next round"
+    );
+    assert!(responder.advertised.lock().expect("lock").is_some());
+}
+
 /// A host that registered no adapter at all gets the third diagnostic:
 /// nothing was found because nothing could look, which is a different
 /// sentence from nothing being there.
@@ -1076,4 +1257,164 @@ fn one_device_serves_several_peers_at_once() {
             "the desktop is missing {name}'s work"
         );
     }
+}
+
+/// **Callers that connect and say nothing must not be able to take the
+/// listener.**
+///
+/// An accepted socket carries no timeouts, and every read on it blocked
+/// for as long as the caller cared to wait — so opening
+/// `MAX_CONCURRENT_SESSIONS` connections and sending not one byte held
+/// every session slot for the life of the process, and no real peer could
+/// ever be served again. It costs an attacker eight TCP connections. The
+/// dialling side has always bounded its own establishment; this is that
+/// bound applied by the side that did not choose to be in the
+/// conversation.
+#[test]
+fn silent_callers_do_not_take_the_listener_from_a_peer_that_means_it() {
+    let desktop = Device::new("Desktop").listening();
+    // The bound is configuration (§ 8), so this is the shipped code path
+    // with a number named — not a fifteen-second wait in a test suite.
+    desktop
+        .service
+        .configure_handshake_timeout(Duration::from_millis(400));
+    let phone = Device::new("Phone").listening();
+
+    // Every slot, taken by sockets that will never say a word. Held in a
+    // vector so they stay open: dropping them would close them, which is
+    // the one thing this caller would not do.
+    let silent: Vec<std::net::TcpStream> = (0..gilune_sync::service::MAX_CONCURRENT_SESSIONS)
+        .map(|_| std::net::TcpStream::connect(desktop.address()).expect("connect"))
+        .collect();
+    assert_eq!(silent.len(), 8);
+    // Long enough for the accept loop to have taken all eight, and eight
+    // times shorter than the handshake bound, so none of them can have
+    // been let go yet.
+    std::thread::sleep(Duration::from_millis(50));
+
+    assert!(
+        phone.pair_by_code(&desktop).is_err(),
+        "the listener really was full, or this scenario proves nothing"
+    );
+
+    // And it does not stay full. Retried because the slot is released on
+    // the far side's own clock, not on this one's.
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let mut paired = false;
+    while Instant::now() < deadline {
+        if phone.pair_by_code(&desktop).is_ok() {
+            paired = true;
+            break;
+        }
+    }
+    assert!(
+        paired,
+        "eight open sockets and no bytes shut this device out of its own listener \
+         permanently"
+    );
+
+    // Not merely accepted — served. A slot that came back has to be a
+    // slot that works.
+    desktop.capture("written once the listener was free again");
+    let report = phone.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert!(report.applied >= 1);
+    drop(silent);
+}
+
+/// A handshake that never finishes **costs the caller an attempt**.
+///
+/// The rate limiter is fed by every other way of failing to establish a
+/// session, and silence was the exception: a caller that said nothing
+/// never reached a failure path, so `check` never had anything to refuse
+/// it with. Being quiet was the one free way to knock on this door.
+#[test]
+fn a_handshake_that_is_never_finished_counts_against_the_caller() {
+    let desktop = Device::new("Desktop").listening();
+    desktop
+        .service
+        .configure_handshake_timeout(Duration::from_millis(200));
+    // The limiter's own shape, with its numbers named so the scenario is
+    // seconds rather than minutes — configuration with a documented
+    // default is what § 8 asks of every bound here. Three failures free,
+    // then a wait.
+    desktop
+        .service
+        .configure_rate_limits(gilune_sync::rate::RateLimiter::new(3, 300, 600, 3_600_000));
+    let phone = Device::new("Phone").listening();
+
+    let silent: Vec<std::net::TcpStream> = (0..5)
+        .map(|_| std::net::TcpStream::connect(desktop.address()).expect("connect"))
+        .collect();
+    // Past the bound, so every one of them has been given up on — and
+    // counted, which is the thing being tested.
+    //
+    // **They are deliberately still open.** Closing them would produce
+    // the same five failures through the "the caller hung up" path,
+    // which always counted — and this scenario would then pass without
+    // the timeout existing at all. A caller that neither speaks nor
+    // leaves is the one this is about.
+    std::thread::sleep(Duration::from_millis(500));
+
+    // Held off. What the caller sees is a closed connection and nothing
+    // else, deliberately: "a caller being backed off learns nothing from
+    // us", so this asserts the outcome rather than a wording.
+    assert!(
+        phone.pair_by_code(&desktop).is_err(),
+        "silence was the one free way to knock on this door: five connections that never \
+         said a word cost their address nothing at all"
+    );
+    assert!(
+        desktop.service.peers().is_empty(),
+        "and nothing was paired while the address was being held off"
+    );
+
+    // And the control, which is what makes the refusal above mean
+    // something: the same device pairs perfectly once the wait is over.
+    std::thread::sleep(Duration::from_millis(800));
+    phone
+        .pair_by_code(&desktop)
+        .expect("a caller is slowed down, never locked out");
+    drop(silent);
+}
+
+/// Switching sync off stops a session **this device dialled**, not only
+/// one it answered.
+///
+/// The listener has always asked the roster between requests. The
+/// dialling side asked once, at connect, and never again — so a device
+/// whose user switched sync off carried on pushing to its peer until the
+/// exchange loop happened to run out of work.
+#[test]
+fn switching_sync_off_stops_a_session_this_device_had_dialled() {
+    let desktop = Device::new("Desktop").listening();
+    let phone = Device::new("Phone").listening();
+    phone.pair_by_code(&desktop).expect("pair");
+    phone.capture("written on the phone");
+    let phone_device = phone.device_id();
+    let mine = phone
+        .store
+        .operations_after(&phone_device, 0, 1)
+        .expect("operations")
+        .into_iter()
+        .next()
+        .expect("an operation of this device's own");
+
+    let mut session = phone.dial(&desktop).expect("dial");
+    session.devices().expect("the first request is served");
+
+    phone.service.set_enabled(false).expect("switch sync off");
+
+    let refused = session.send_envelope(&mine);
+    assert!(
+        matches!(refused, Err(SyncError::Refused { .. })),
+        "a device that was switched off kept pushing: {:?}",
+        refused.map(|_| "an acknowledgement")
+    );
+    assert_eq!(
+        desktop.holds_from(&phone_device),
+        0,
+        "and nothing crossed after the switch"
+    );
+    let _ = session.close();
 }

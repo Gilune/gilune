@@ -63,6 +63,14 @@ private const val TAG_BITS = 128
 /// a later build has to read what this one sealed.
 class KeystoreKeyWrap : KeyWrap {
 
+    private companion object {
+        /// One alias, one lock. Held on the class because the instances
+        /// are not shared: `MainActivity` remembers one adapter and
+        /// `SyncWorker` constructs its own on every background pass, and
+        /// those two can be in this file at the same moment.
+        val ALIAS_LOCK = Any()
+    }
+
     override fun name(): String = KEY_PROTECTION_KEYSTORE
 
     override fun wrap(plaintext: ByteArray): ByteArray = try {
@@ -109,12 +117,21 @@ class KeystoreKeyWrap : KeyWrap {
         throw GiluneException.Invalid("this phone's Keystore could not open the identity key: ${e.message}")
     }
 
-    /// The key, generated on first use. Synchronised because two threads
-    /// generating at once would leave one of them holding a key that
-    /// cannot open what the other sealed — the Keystore's own generate
-    /// replaces an alias silently.
-    @Synchronized
-    private fun wrappingKey(): SecretKey = existingKey() ?: generateKey()
+    /// The key, generated on first use.
+    ///
+    /// **Locked on the class, not on the instance**, and the difference is
+    /// a real one here: there is more than one `KeystoreKeyWrap` alive.
+    /// The activity holds one and `SyncWorker` builds another on the
+    /// background schedule, so `@Synchronized` — which takes the
+    /// *instance's* monitor — let two threads into this at once. Both
+    /// would find no key, both would generate, and the Keystore's own
+    /// generate replaces an alias silently: the loser is left holding a
+    /// key that cannot open what the winner sealed, which is an identity
+    /// thrown away by a race. One alias means one lock, and the lock has
+    /// to be as wide as the alias is.
+    private fun wrappingKey(): SecretKey = synchronized(ALIAS_LOCK) {
+        existingKey() ?: generateKey()
+    }
 
     private fun existingKey(): SecretKey? {
         val store = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }

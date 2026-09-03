@@ -82,6 +82,42 @@ private const val TAG = "GiluneNsd"
 /// and which Settings says out loud.
 private const val REGISTER_WAIT_MS = 4_000L
 
+/// How long a **browse** may spend waiting for discovery to start.
+///
+/// Deliberately not [REGISTER_WAIT_MS]. Registration is a one-off at the
+/// switch and four seconds of patience there costs nothing; a browse is
+/// asked for inside § 1's five-second sync budget, and until this round it
+/// charged the same four seconds against a 2 500 ms deadline. A slow
+/// `onDiscoveryStarted` therefore burned the whole budget before a single
+/// answer was read, and the screen said "no devices found" while the peer
+/// was advertising — the one wrong answer this surface can give, because
+/// it sends somebody to a firewall that is not the problem.
+const val DISCOVERY_START_CAP_MS = 1_000L
+
+/// A grace period for answers **already in hand** when the deadline
+/// passes. A queued `onServiceFound` is a device that answered; reporting
+/// nothing while holding it is the same wrong answer by a different route.
+/// Bounded so a drain cannot become a second browse.
+const val DISCOVERY_DRAIN_MS = 500L
+
+/// How long to wait for discovery to start, given the browse's own budget.
+///
+/// Capped, and never longer than the budget itself: a caller that asked for
+/// 300 ms means 300 ms, and a platform that never calls back must not be
+/// able to hold a browse open past what was asked for plus the cap.
+fun discoveryStartWaitMs(budgetMs: Long, cap: Long = DISCOVERY_START_CAP_MS): Long =
+    budgetMs.coerceAtMost(cap).coerceAtLeast(0)
+
+/// What one resolve is allowed, given how long is left of the browse and
+/// how long is left of the drain that follows it.
+///
+/// Inside the deadline it is simply what remains. Past it — which is where
+/// a queued answer being drained lands — it is what remains of the drain,
+/// so an answer the browse already has is resolved rather than dropped on
+/// the boundary, and the drain still ends.
+fun resolveBudgetMs(untilDeadlineMs: Long, untilDrainEndsMs: Long): Long =
+    if (untilDeadlineMs > 0) untilDeadlineMs else untilDrainEndsMs.coerceAtLeast(0)
+
 /// A TXT value, read defensively. It arrives as `Map<String, ByteArray?>`
 /// with every part of it optional, and anything on the network can put
 /// anything in it, so nothing here trusts what it reads: an unreadable
@@ -241,7 +277,7 @@ class NsdDiscovery(context: Context) : PeerDiscovery {
     /// the budget before a byte moved.
     override fun browse(timeoutMs: ULong): List<DiscoveredDevice> {
         requireBackgroundThread("browsing")
-        val deadline = SystemClock.elapsedRealtime() + timeoutMs.toLong()
+        val budget = timeoutMs.toLong()
         val queue = LinkedBlockingQueue<NsdServiceInfo>()
         val started = CountDownLatch(1)
         val failure = AtomicReference<String?>(null)
@@ -269,22 +305,40 @@ class NsdDiscovery(context: Context) : PeerDiscovery {
 
         val found = LinkedHashMap<String, DiscoveredDevice>()
         try {
-            started.await(REGISTER_WAIT_MS, TimeUnit.MILLISECONDS)
+            // **The budget for answers begins after discovery has
+            // started**, and starting is capped separately. Charging the
+            // registration await against the browse deadline is what made
+            // a slow `onDiscoveryStarted` produce "no devices found" while
+            // a peer was advertising: the pump below exited before it had
+            // read a single queued answer. The worst case is now the
+            // caller's budget plus the cap plus the drain, all bounded and
+            // all stated.
+            started.await(discoveryStartWaitMs(budget), TimeUnit.MILLISECONDS)
             failure.get()?.let {
                 throw GiluneException.Invalid("this phone could not look for devices: $it")
             }
+            val deadline = SystemClock.elapsedRealtime() + budget
+            val drainEnds = deadline + DISCOVERY_DRAIN_MS
             // Resolved one at a time, deliberately. Below API 34 the
             // platform runs exactly one resolve and answers a second with
             // FAILURE_ALREADY_ACTIVE, so a serial pump is the shape that
             // works on both paths rather than two shapes to keep in step.
             while (true) {
                 val left = deadline - SystemClock.elapsedRealtime()
-                if (left <= 0) break
-                val next = queue.poll(left, TimeUnit.MILLISECONDS) ?: break
+                // Past the deadline the queue is **drained** rather than
+                // abandoned: an answer already in hand is a device that
+                // announced itself, and throwing it away to report nothing
+                // is the same wrong answer the deadline fix exists to
+                // stop. `poll()` without a timeout takes what is there and
+                // returns null the moment there is not.
+                val next = (if (left > 0) queue.poll(left, TimeUnit.MILLISECONDS) else queue.poll())
+                    ?: break
+                if (SystemClock.elapsedRealtime() >= drainEnds) break
                 val instance = next.serviceName ?: continue
                 if (found.containsKey(instance)) continue
-                val budget = deadline - SystemClock.elapsedRealtime()
-                resolve(next, budget)?.let { found[instance] = it }
+                val now = SystemClock.elapsedRealtime()
+                resolve(next, resolveBudgetMs(deadline - now, drainEnds - now))
+                    ?.let { found[instance] = it }
             }
         } finally {
             runCatching { nsd.stopServiceDiscovery(listener) }

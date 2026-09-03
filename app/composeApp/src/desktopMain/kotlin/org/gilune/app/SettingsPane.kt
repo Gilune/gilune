@@ -603,7 +603,11 @@ private fun VaultSection(state: GiluneState, vaultDir: String, onVaultChange: (S
                 if (status != null) {
                     appendLine("captures: ${status.sources}")
                     appendLine("projected notes: ${status.projections}")
-                    appendLine("waiting jobs: ${status.jobsPending}")
+                    // A job belonging to a switched-off plugin is parked
+                    // rather than pending work (ADR 0018 § 3), and a bare
+                    // number reads as a backlog somebody has to clear.
+                    val parked = waitingJobsNote(state.plugins, status.jobsPending)
+                    appendLine("waiting jobs: ${status.jobsPending}${parked?.let { " ($it)" } ?: ""}")
                     appendLine("quarantined jobs: ${status.jobsQuarantined}")
                     appendLine("open proposals: ${status.proposalsOpen}")
                     appendLine("quarantined files: ${status.quarantinedFiles}")

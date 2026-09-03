@@ -98,14 +98,16 @@ impl Store {
     /// quarantine at `MAX_ATTEMPTS`. An app-side engine that throws is
     /// quarantined like a bundled one rather than retried forever.
     ///
-    /// One guard the Rust route needs no equivalent of, because it cannot
-    /// reach the situation: a Rust processor fails *before* anything is
-    /// committed, but an external claimant can still be holding a stale
-    /// claim for work another claimant already landed. A late failure
-    /// report must not resurrect a finished job, so if the run exists the
-    /// job is completed instead. This keeps the semantics identical
-    /// rather than diverging — the outcome a Rust failure would have had
-    /// is preserved in the one case only this transport can produce.
+    /// One guard, and the Rust route now has the same one: a claimant can
+    /// be holding a stale claim for work another claimant already landed,
+    /// and a late failure report must not resurrect a finished job, so if
+    /// the run exists the job is completed instead. `run_pending_jobs`
+    /// asks the same question before it runs a processor at all, which is
+    /// how a redelivery after a post-commit crash completes rather than
+    /// being failed and eventually quarantined. Both routes therefore
+    /// answer "this event has already been processed" identically; the
+    /// only difference is where the answer is needed, because an external
+    /// claimant reports its failure after the fact.
     pub fn fail_external_job(
         &self,
         processor_id: &str,
@@ -350,19 +352,25 @@ pub fn run_external_once(
     let Some(claim) = store.claim_external_job(FAKE_EXTERNAL_PROCESSOR, now_ms, lease_ms)? else {
         return Ok(None);
     };
+    use sha2::Digest;
     let mut document: serde_json::Value = serde_json::from_str(&claim.subject_payload)?;
     let mut bytes = 0u64;
-    let mut hasher_input = Vec::new();
+    // Hashed as the chunks arrive. A host application is never obliged to
+    // hold a whole recording to say what it received, and this stands in
+    // for one — collecting the stream back into a `Vec` here would have
+    // undone the streaming it exists to demonstrate.
+    let mut hasher = sha2::Sha256::new();
     if claim.blob.is_some() {
         let mut stream = store.open_claim_blob(&claim)?;
         while let Some(chunk) = stream.next_chunk()? {
             bytes += chunk.len() as u64;
-            hasher_input.extend_from_slice(&chunk);
+            hasher.update(&chunk);
         }
     }
+    let digest = hex::encode(hasher.finalize());
     document["text"] = serde_json::Value::String(format!(
         "[external transcript of {bytes} bytes, sha {}]",
-        &digest_of(&hasher_input)[..12]
+        &digest[..12]
     ));
     let delivered = store.submit_external_outputs(
         FAKE_EXTERNAL_PROCESSOR,
@@ -769,23 +777,26 @@ mod tests {
     }
 
     #[test]
-    fn without_the_exclusion_an_unimplemented_job_burns_its_lease() {
-        // The behaviour the exclusion exists to prevent, pinned so that
-        // deleting it is a test failure rather than a slow mystery. The
-        // local loop claims what it cannot run, and the external host then
-        // waits out a lease it never took.
+    fn a_run_loop_never_claims_a_subscription_it_cannot_run() {
+        // The rule that replaced the exclusion list as the real defence,
+        // pinned so that losing it is a test failure rather than a slow
+        // mystery. A claim spends an attempt and takes a lease; a host
+        // carrying no implementation for this id — the CLI's `work`, a
+        // pass before the provider registered — must therefore claim
+        // nothing at all, however often it runs.
         let (_dir, store, _id) = ready();
-        store.run_pending_jobs(&[], 1_000, 30_000).expect("run");
-        assert_eq!(
-            store.claim_external_job(PROCESSOR, 1_000, 30_000).expect("claim"),
-            None,
-            "the job is leased to a loop that has no implementation for it"
-        );
-        let late = store
-            .claim_external_job(PROCESSOR, 31_000, 30_000)
+        for pass in 0..5 {
+            let summary = store.run_pending_jobs(&[], 1_000 + pass, 30_000).expect("run");
+            assert_eq!(summary, crate::processor::ProcessingSummary::default());
+        }
+        let claim = store
+            .claim_external_job(PROCESSOR, 1_000, 30_000)
             .expect("claim")
-            .expect("claimable only once the burnt lease expires");
-        assert_eq!(late.job.attempts, 2, "and an attempt was spent on nothing");
+            .expect("the job was never leased away, so it is claimable now");
+        assert_eq!(
+            claim.job.attempts, 1,
+            "five passes of a host that cannot run this work spent none of its attempts"
+        );
     }
 
     #[test]

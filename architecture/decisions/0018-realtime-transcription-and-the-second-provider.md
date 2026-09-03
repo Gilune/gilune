@@ -468,6 +468,33 @@ The ADR is Accepted, and the six amendments it listed were made the same day
 the owner's word and gates R1**; R2 ships only with its crash-matrix points
 green; R3 waits on MS2 for the packaged default.
 
+## Post-delivery amendments (2026-09-03 review)
+
+A high-effort review of R1–R3 confirmed two kernel defects in the FFI route's
+neighbourhood and one shell-policy gap; the fixes amend § 2 and § 3.
+
+- **The run loop claims only what it can run.** R2 excluded registered
+  external processor ids from the local loop, but a handle that had *not*
+  registered them — `gilune-cli work`, or a pass before the provider's
+  registration landed — still claimed their jobs, and a claim spends an
+  attempt before any implementation is looked up. Five such passes
+  quarantined the job on the provider's first genuine failure. The loop now
+  claims only subscriptions among its own processor ids; the per-handle
+  exclusion list stays as belt and braces.
+- **The idempotency check runs before `process()` again.** R2's refactor
+  moved the `run_exists` short-circuit inside `deliver_outputs`, reachable
+  only on success, so a crash after the outputs committed followed by a
+  failing retry quarantined a job whose transcript was already in the note.
+  The check is restored ahead of the engine call (and kept afterwards); the
+  external route's claim that the Rust route "cannot reach" that state was
+  false and is corrected.
+- **A second transcription provider registers disabled** when another
+  transcriber is already active (§ 3, § 6: whisper is the incumbent and
+  Moonshine opt-in until MS2). Registering it enabled — the kernel's default
+  for an unseen plugin — made § 3's "both enabled" hole the *default* state
+  on every fresh install and every R1→R3 upgrade, queueing one job per
+  recording that nothing would ever claim.
+
 ## R0's verdict and corrected numbers
 
 R0 ran 2026-09-02 (`spikes/r0-moonshine/README.md`): **PASS WITH

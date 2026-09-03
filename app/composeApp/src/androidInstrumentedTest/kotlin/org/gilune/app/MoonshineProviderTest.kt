@@ -445,12 +445,91 @@ class MoonshineProviderTest {
         }
     }
 
+    /// **Registering is not choosing** (ADR 0018 § 3, § 6).
+    ///
+    /// The defect: the kernel defaults a plugin it has never seen to
+    /// Enabled, so simply registering the declaration switched Moonshine on
+    /// beside whisper — on a fresh install and on an R1 → R3 upgrade alike.
+    /// Two transcribers were on at once, the Plugins screen showed both,
+    /// and every recording queued a moonshine job that nothing in the
+    /// process would ever claim.
+    ///
+    /// Against a real registry, because the thing being asserted is what
+    /// the *kernel* does with an unseen plugin — a fixture would have
+    /// agreed with whatever this test assumed.
+    @Test
+    fun aFreshVaultEndsWithExactlyOneTranscriberOnAndItIsTheIncumbent() {
+        Gilune.open(scratchVault()).use { gilune ->
+            gilune.registerPlugin(moonshineDeclaration())
+            // The state the defect left behind, stated so the fix is
+            // visible rather than assumed.
+            assertEquals(
+                2,
+                gilune.plugins().count { it.pluginId in TRANSCRIPTION_PROVIDERS && it.state == "enabled" },
+                "the kernel defaults an unseen plugin to enabled — that is why the rule exists",
+            )
+
+            val said = applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN)
+
+            val after = gilune.plugins()
+            assertEquals(
+                1,
+                after.count { it.pluginId in TRANSCRIPTION_PROVIDERS && it.state == "enabled" },
+                "exactly one transcription plugin is enabled at a time",
+            )
+            assertEquals(
+                TRANSCRIPTION_PLUGIN,
+                after.activeTranscriber(),
+                "whisper is the incumbent until MS2 has measured both on real hardware",
+            )
+            assertTrue(said != null && said.contains("One transcriber writes your notes"), "$said")
+
+            // Off means nothing is queued (§ 3), and this is the orphan
+            // the defect was quietly accumulating: a recording made while
+            // Moonshine is off produces a job for whisper and none for
+            // Moonshine. Switching Moonshine on afterwards finds nothing
+            // waiting, because enabling resumes parked jobs and never
+            // backfills — so the capture below never had one.
+            capture(gilune)
+            gilune.setPluginEnabled(MOONSHINE_PLUGIN, true)
+            assertTrue(registerMoonshineProcessor(gilune, gilune.plugins()))
+            assertNull(
+                gilune.claimJob(MOONSHINE_PROCESSOR),
+                "a capture made while the provider was off must not have queued it a job",
+            )
+        }
+    }
+
+    /// And the rule is idempotent and never undoes a person's choice: a
+    /// second open finds nothing to do, and a vault where Moonshine was
+    /// chosen keeps it.
+    @Test
+    fun theRuleRunsOnEveryOpenWithoutTakingBackAChoiceSomebodyMade() {
+        Gilune.open(scratchVault()).use { gilune ->
+            gilune.registerPlugin(moonshineDeclaration())
+            applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN)
+            assertNull(applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN), "nothing left to say")
+
+            // Now the person chooses Moonshine, through the switch's own
+            // plan. Re-registering — which happens on every open — must
+            // leave that alone.
+            val switch = providerSwitch(gilune.plugins(), MOONSHINE_PLUGIN, enable = true)
+            for (displaced in switch.disable) gilune.setPluginEnabled(displaced, false)
+            gilune.setPluginEnabled(MOONSHINE_PLUGIN, true)
+
+            gilune.registerPlugin(moonshineDeclaration())
+            assertNull(applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN))
+            assertEquals(MOONSHINE_PLUGIN, gilune.plugins().activeTranscriber())
+        }
+    }
+
     @Test
     fun switchingProviderIsOneWriteThatLeavesOneTranscriberOn() {
         // The shell rule end to end against a real registry: the switch's
         // plan, applied, leaves exactly one provider enabled.
         Gilune.open(scratchVault()).use { gilune ->
             gilune.registerPlugin(moonshineDeclaration())
+            applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN)
             val before = gilune.plugins()
             assertEquals(
                 TRANSCRIPTION_PLUGIN,

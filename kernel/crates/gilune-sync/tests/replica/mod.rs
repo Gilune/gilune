@@ -150,6 +150,15 @@ pub enum Fault {
     Reverse,
     /// Deliver everything twice.
     Duplicate,
+    /// Claim a chunk of content belongs somewhere it does not, so the
+    /// receiver is offered bytes that would leave a hole.
+    MisplaceChunk,
+    /// Do not offer this device's stream at all, so the peer's own
+    /// operations arrive while the history they refer to does not. Not a
+    /// hostile transport: a full replica offers several devices' streams
+    /// and a pull takes them one at a time, so one arriving before
+    /// another is the ordinary case — this only makes it deterministic.
+    WithholdDevice(String),
 }
 
 pub struct FaultySession {
@@ -159,7 +168,14 @@ pub struct FaultySession {
 
 impl Session for FaultySession {
     fn devices(&mut self) -> gilune_sync::Result<Vec<DeviceOffer>> {
-        self.inner.devices()
+        let offers = self.inner.devices()?;
+        Ok(match &self.fault {
+            Fault::WithholdDevice(device) => offers
+                .into_iter()
+                .filter(|offer| &offer.device_id != device)
+                .collect(),
+            _ => offers,
+        })
     }
 
     fn have_after(
@@ -196,6 +212,8 @@ impl Session for FaultySession {
                 .iter()
                 .flat_map(|f| [f.clone(), f.clone()])
                 .collect(),
+            // These two damage content, not operations.
+            Fault::MisplaceChunk | Fault::WithholdDevice(_) => frames,
         })
     }
 
@@ -205,7 +223,19 @@ impl Session for FaultySession {
         offset: u64,
         max_bytes: usize,
     ) -> gilune_sync::Result<Vec<Frame>> {
-        self.inner.have_blob(blob_id, offset, max_bytes)
+        let frames = self.inner.have_blob(blob_id, offset, max_bytes)?;
+        let Fault::MisplaceChunk = &self.fault else { return Ok(frames) };
+        Ok(frames
+            .into_iter()
+            .map(|frame| match frame {
+                Frame::Chunk { blob_id, offset, bytes } => Frame::Chunk {
+                    blob_id,
+                    offset: offset + 1,
+                    bytes,
+                },
+                other => other,
+            })
+            .collect())
     }
 
     fn send_envelope(&mut self, bytes: &[u8]) -> gilune_sync::Result<Option<BlobNeed>> {

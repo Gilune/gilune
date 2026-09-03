@@ -124,10 +124,59 @@ internal object Ms1Ime {
         Runtime.getRuntime().addShutdownHook(Thread { restore(it) })
     }
 
-    private fun capture(): State = State(
-        enabled = shell("ime list -s").lines().map { it.trim() }.filter { it.isNotEmpty() },
-        default = shell("settings get secure default_input_method").trim(),
-    )
+    /// What the device has right now — **after** making sure it has
+    /// anything at all.
+    ///
+    /// **The failure this closes is inherited state.** The rig disables
+    /// every input method for the duration of a row and restores them in a
+    /// `finally` plus a shutdown hook; a hard kill — `adb shell am
+    /// force-stop`, a killed gradle, an emulator yanked mid-row — outruns
+    /// both, and leaves the emulator with no keyboard at all. The next run
+    /// then captured *that* as "as found", restored nothing at the end,
+    /// and every `@WithSystemKeyboard` row measured the behaviour of a
+    /// keyboard that was not bound — silently, because an empty list is
+    /// not an error to `ime disable`.
+    ///
+    /// So an empty list is treated as damage from a previous run rather
+    /// than as the truth, and the platform's own keyboard is put back
+    /// before anything is recorded. If nothing can be put back, the suite
+    /// stops here and says so: MS1's whole subject is what a real IME does
+    /// to a real `InputConnection`, and running it on a device with no IME
+    /// would produce green rows that mean nothing.
+    private fun capture(): State {
+        var enabled = enabledImes()
+        if (enabled.isEmpty()) {
+            val candidates = allImes()
+            val restore = preferredDefaultIme(candidates)
+                ?: error(
+                    "MS1 found no input methods on this device and none to enable " +
+                        "(`ime list -a -s` answered ${candidates.size} rows). A previous " +
+                        "run was probably killed mid-row. Restore a keyboard on the " +
+                        "emulator before judging MS1 — its rows are about what a real " +
+                        "IME does, and there is no IME here.",
+                )
+            shell("ime enable $restore")
+            shell("ime set $restore")
+            enabled = enabledImes()
+            check(enabled.isNotEmpty()) {
+                "MS1 could not restore an input method: `ime enable $restore` left the " +
+                    "device with none. Fix the emulator before trusting these rows."
+            }
+        }
+        return State(
+            enabled = enabled,
+            default = shell("settings get secure default_input_method").trim(),
+        )
+    }
+
+    private fun enabledImes(): List<String> = idsFrom(shell("ime list -s"))
+
+    /// Every input method installed, enabled or not. `-a` is "all"; `-s`
+    /// is the short form that prints ids alone.
+    private fun allImes(): List<String> = idsFrom(shell("ime list -a -s"))
+
+    private fun idsFrom(output: String): List<String> =
+        output.lines().map { it.trim() }.filter { it.isNotEmpty() && it.contains('/') }
 
     fun disableAll(state: State) {
         for (ime in state.enabled) shell("ime disable $ime")
@@ -136,6 +185,23 @@ internal object Ms1Ime {
     fun restore(state: State) {
         for (ime in state.enabled) shell("ime enable $ime")
         if (state.default.isNotEmpty() && state.default != "null") shell("ime set ${state.default}")
+    }
+
+    /// Which input method to put back on a device that has none.
+    ///
+    /// The emulator's own is Google's LatinIME, and it is the one MS1
+    /// measured — the spike's findings are about *that* keyboard's
+    /// unprompted `finishComposingText`, so restoring anything else would
+    /// change the subject. Anything with `latin` in its id wins; failing
+    /// that the first installed one, because a keyboard whose behaviour is
+    /// unmeasured is still better than no keyboard, and the rows that care
+    /// say which one they measured.
+    ///
+    /// Pure, so the choice is asserted without breaking a device to test
+    /// it on.
+    internal fun preferredDefaultIme(available: List<String>): String? {
+        val ids = available.map { it.trim() }.filter { it.isNotEmpty() }
+        return ids.firstOrNull { it.contains("latin", ignoreCase = true) } ?: ids.firstOrNull()
     }
 
     private fun shell(command: String): String {

@@ -150,6 +150,60 @@ fn a_crash_mid_output_commit_yields_exactly_one_revision_on_retry() {
 }
 
 #[test]
+fn a_crash_after_the_outputs_committed_completes_the_job_even_if_the_retry_would_fail() {
+    // The window `output.after_commit` names: the outputs are durable and
+    // the job is still leased. Recovery is the lease expiring and the run
+    // record making the retry a skip — but only if the retry asks *before*
+    // it runs the processor. Asking afterwards meant a provider that had
+    // since started failing (a model that will not load, a device
+    // offline) turned finished work into a failure, five of which
+    // quarantine a job whose answer was already in the vault.
+    struct Boom;
+    impl gilune_kernel::processor::Processor for Boom {
+        fn id(&self) -> &str {
+            "transcribe"
+        }
+        fn process(
+            &self,
+            _ctx: &gilune_kernel::processor::ProcessorCtx<'_>,
+            _job: &gilune_kernel::jobs::Job,
+        ) -> Result<Vec<gilune_kernel::processor::ProposedOutput>, String> {
+            Err("the model is not loaded any more".to_string())
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let source_id = {
+        let store = gilune_kernel::store::Store::open(dir.path()).expect("open");
+        store
+            .subscribe("transcribe", gilune_kernel::capture::SOURCE_READY_EVENT)
+            .expect("subscribe");
+        store.capture_bytes("wav", &[4u8; 96]).expect("wav capture").source_id
+    };
+    let crashed = cli(dir.path(), Some("output.after_commit"), &["work"]);
+    assert!(!crashed.status.success(), "work must die after committing its outputs");
+
+    let store = gilune_kernel::store::Store::open(dir.path()).expect("reopen");
+    assert_eq!(
+        store.revision_count(&source_id).expect("revisions"),
+        2,
+        "the outputs are durable: capture plus transcription"
+    );
+    let past_lease = gilune_kernel::ids::now_ms() + 60_000;
+    let retried = store.run_pending_jobs(&[&Boom], past_lease, 30_000).expect("retry");
+    assert_eq!(retried.skipped_duplicate, 1, "the run record answers before the model does");
+    assert_eq!(retried.failed, 0, "work already done cannot fail");
+    assert_eq!(retried.outputs, 0);
+    assert_eq!(
+        store.job_state_for(&source_id, "transcribe").expect("state").as_deref(),
+        Some("done"),
+        "and the job is finished rather than left to be retried into quarantine"
+    );
+    assert_eq!(store.revision_count(&source_id).expect("revisions"), 2, "and never twice");
+    assert!(store.verify().expect("verify").is_empty());
+}
+
+#[test]
 fn repeated_captures_accumulate_and_stay_verifiable() {
     let dir = tempfile::tempdir().expect("tempdir");
     for i in 0..5 {

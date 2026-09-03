@@ -12,7 +12,11 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import org.junit.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertSame
+import kotlin.test.assertTrue
 
 class QrScanTest {
 
@@ -73,5 +77,57 @@ class QrScanTest {
     @Test
     fun aShortPlaneIsPaddedRatherThanTrusted() {
         assertNull(decodeQrLuminance(qrReader(), ByteArray(16), 240, 240, 240))
+    }
+
+    // ------------------------------------------------------------------
+    // The scan's lifetime
+    //
+    // **The defect these pin.** `ProcessCameraProvider.getInstance` is a
+    // future whose listener runs whenever the provider is ready — which
+    // can be after the composable has left. The shipped code then bound a
+    // camera to a dead composition and handed `setAnalyzer` an executor
+    // `onDispose` had already shut down: a `RejectedExecutionException`
+    // out of CameraX's own thread, on a screen the person had walked away
+    // from. `QrSession` is that race made into a question, so it can be
+    // asked without a camera.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aLiveSessionOffersItsExecutorAndSaysTheCameraIsStillWanted() {
+        val session = QrSession()
+        assertTrue(session.wanted())
+        assertNotNull(session.analyserExecutor())
+        assertFalse(session.isShutDown())
+    }
+
+    @Test
+    fun aDisposedSessionRefusesTheCameraAndWithholdsTheExecutorEntirely() {
+        val session = QrSession()
+        session.dispose()
+        assertFalse(session.wanted(), "a provider arriving now must not bind")
+        // Withheld rather than merely shut down: `setAnalyzer` on a
+        // shut-down executor is what threw, and null makes it
+        // unexpressible instead of avoided by care.
+        assertNull(session.analyserExecutor())
+        assertTrue(session.isShutDown())
+    }
+
+    @Test
+    fun disposingTwiceIsDisposingOnce() {
+        // `onDispose` runs on a change of lifecycle owner as well as on
+        // leaving, and a second shutdown must not be a second event.
+        val session = QrSession()
+        session.dispose()
+        session.dispose()
+        assertFalse(session.wanted())
+        assertTrue(session.isShutDown())
+    }
+
+    @Test
+    fun theExecutorIsTheSameOneForAsLongAsTheSessionLives() {
+        // The analyser is handed this once; a session that minted a new
+        // executor per call would leak a thread per frame-rate decision.
+        val session = QrSession()
+        assertSame(session.analyserExecutor(), session.analyserExecutor())
     }
 }

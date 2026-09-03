@@ -99,7 +99,11 @@ fun qrReader(): MultiFormatReader = MultiFormatReader().apply {
 /// One payload, once. The analyser keeps running until the composable
 /// leaves, so the latch is what stops a code held in front of the lens
 /// from pairing four times a second.
-private class QrAnalyzer(private val onPayload: (String) -> Unit) : ImageAnalysis.Analyzer {
+///
+/// Spelled the way the conventions ask for (British spelling in
+/// identifiers); CameraX's own `ImageAnalysis.Analyzer` keeps its name,
+/// because that one is not ours to spell.
+private class QrAnalyser(private val onPayload: (String) -> Unit) : ImageAnalysis.Analyzer {
     private val reader = qrReader()
     private val spent = AtomicBoolean(false)
 
@@ -122,6 +126,41 @@ private class QrAnalyzer(private val onPayload: (String) -> Unit) : ImageAnalysi
     }
 }
 
+/// The scan's lifetime, as one object the camera provider's listener and
+/// `onDispose` can both see.
+///
+/// **It exists because those two race.** `ProcessCameraProvider.getInstance`
+/// is a future, and its listener runs on the main thread whenever the
+/// provider is ready — which can be after the composable has already left.
+/// The shipped code then bound a camera to a dead composition and, worse,
+/// handed `setAnalyzer` an executor `onDispose` had already shut down: a
+/// `RejectedExecutionException` out of CameraX's own thread, on a screen
+/// the person had walked away from.
+///
+/// So arrival asks whether it is still wanted, and everything the camera
+/// needs is behind that question.
+internal class QrSession {
+    private val disposed = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val executor: ExecutorService = Executors.newSingleThreadExecutor()
+
+    /// Whether the camera should still be bound. Asked **after** the
+    /// future resolves, which is the whole point.
+    fun wanted(): Boolean = !disposed.get()
+
+    /// The analyser's executor, or null once the scan is over — so
+    /// `setAnalyzer` on a shut-down executor is unexpressible rather than
+    /// merely avoided.
+    fun analyserExecutor(): ExecutorService? = if (disposed.get()) null else executor
+
+    /// Idempotent: a second dispose is a no-op, and a listener that
+    /// arrives after either one finds `wanted()` false.
+    fun dispose() {
+        if (disposed.compareAndSet(false, true)) executor.shutdown()
+    }
+
+    fun isShutDown(): Boolean = executor.isShutdown
+}
+
 /// The viewfinder. Binds to the composition's lifecycle, so leaving the
 /// screen — or the phone going to the launcher — releases the camera
 /// without anything here remembering to.
@@ -142,7 +181,16 @@ fun QrScanner(
     // the view tree, so the viewfinder stays inside its own box and
     // scrolls with the page. The cost is a copy per frame, which for a
     // viewfinder a person holds up for a few seconds is nothing.
-    val preview = remember {
+    // The callbacks, read through the latest composition rather than
+    // captured at the first: the analyser outlives a recomposition, and a
+    // payload delivered to a stale lambda is a pairing that goes nowhere.
+    val deliver = androidx.compose.runtime.rememberUpdatedState(onPayload)
+    val report = androidx.compose.runtime.rememberUpdatedState(onFailure)
+    // **Keyed on the lifecycle owner, exactly as the effect below is.**
+    // Unkeyed, these two survived a change of owner that shut their
+    // executor down, so the next binding got a dead one. Whatever the
+    // effect disposes, these are recreated with it.
+    val preview = remember(lifecycleOwner) {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
             // **FIT, not FILL.** FILL scales the frame until the shorter
@@ -155,15 +203,25 @@ fun QrScanner(
             scaleType = PreviewView.ScaleType.FIT_CENTER
         }
     }
-    val executor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
+    val session = remember(lifecycleOwner) { QrSession() }
 
     DisposableEffect(lifecycleOwner) {
         var bound: ProcessCameraProvider? = null
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener(
             {
+                // Asked here, and again after the provider is in hand:
+                // both are moments the scan may already be over.
+                if (!session.wanted()) return@addListener
                 try {
                     val provider = future.get()
+                    val analyserOn = session.analyserExecutor()
+                    if (analyserOn == null || !session.wanted()) {
+                        // Arrived too late. Nothing is bound and nothing
+                        // is reported: leaving a screen is not a failure.
+                        runCatching { provider.unbindAll() }
+                        return@addListener
+                    }
                     bound = provider
                     val viewfinder = Preview.Builder().build()
                     viewfinder.setSurfaceProvider(preview.surfaceProvider)
@@ -173,8 +231,8 @@ fun QrScanner(
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build()
                     analysis.setAnalyzer(
-                        executor,
-                        QrAnalyzer { payload -> preview.post { onPayload(payload) } },
+                        analyserOn,
+                        QrAnalyser { payload -> preview.post { deliver.value(payload) } },
                     )
                     provider.unbindAll()
                     provider.bindToLifecycle(
@@ -184,14 +242,18 @@ fun QrScanner(
                         analysis,
                     )
                 } catch (e: Throwable) {
-                    onFailure(e.message ?: "the camera could not be opened")
+                    // A camera that could not open after the scan ended is
+                    // not news for anybody.
+                    if (session.wanted()) {
+                        report.value(e.message ?: "the camera could not be opened")
+                    }
                 }
             },
             ContextCompat.getMainExecutor(context),
         )
         onDispose {
+            session.dispose()
             runCatching { bound?.unbindAll() }
-            executor.shutdown()
         }
     }
 

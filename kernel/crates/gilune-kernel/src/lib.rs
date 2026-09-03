@@ -54,8 +54,20 @@ pub enum KernelError {
     /// that device is halted: nothing past the fault has been applied,
     /// the frontier is where it was, and a standing integrity alert says
     /// so. Resuming needs no repair here — only the condition to clear.
-    #[error("sync halted for {device_id}: {reason}")]
-    SyncHalted { device_id: String, reason: String },
+    ///
+    /// `kind` is the alert kind that was raised and `subject` is what it
+    /// was raised about — a device id for a broken stream, a blob id for
+    /// content, an object or revision id for a referent that has not
+    /// arrived. Both travel with the error because the refusal and the
+    /// notice a person is shown must never be able to disagree: before
+    /// they did, and every in-transaction halt was relabelled
+    /// `sync-limit-exceeded` on its way out.
+    #[error("sync halted for {subject}: {reason}")]
+    SyncHalted {
+        kind: String,
+        subject: String,
+        reason: String,
+    },
 }
 
 pub type Result<T> = std::result::Result<T, KernelError>;

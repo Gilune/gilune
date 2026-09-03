@@ -80,4 +80,58 @@ class DiscoveryTest {
         discovery.withdraw()
         discovery.withdraw()
     }
+
+    // ------------------------------------------------------------------
+    // The browse's clock (§ 1)
+    //
+    // **The defect these pin.** `browse` waited up to `REGISTER_WAIT_MS`
+    // (4 000) for `onDiscoveryStarted` and charged that against a deadline
+    // the caller had set to 2 500. A slow start therefore spent the entire
+    // budget before the resolve pump had read a single queued answer, and
+    // the screen said "no devices found" while the peer was advertising —
+    // the one wrong answer this surface can give, because it sends
+    // somebody to a firewall that is not the problem.
+    //
+    // The arithmetic is pure and is where the fix actually lives; the
+    // callbacks around it need a second phone.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun theRegistrationAwaitCannotEatTheBrowseBudget() {
+        // Capped, whatever the browse was given. Four seconds of patience
+        // is right at the switch and wrong inside a 2 500 ms browse.
+        assertEquals(DISCOVERY_START_CAP_MS, discoveryStartWaitMs(2_500))
+        assertTrue(
+            discoveryStartWaitMs(2_500) < 2_500,
+            "the wait for a start must be a fraction of the budget, not a multiple",
+        )
+    }
+
+    @Test
+    fun aShortBrowseIsNeverHeldOpenLongerThanItAskedFor() {
+        // A caller that asks for 300 ms means it. The cap is a ceiling and
+        // never a floor.
+        assertEquals(300L, discoveryStartWaitMs(300))
+        assertEquals(0L, discoveryStartWaitMs(0))
+        assertEquals(0L, discoveryStartWaitMs(-1))
+    }
+
+    @Test
+    fun anAnswerAlreadyInHandIsResolvedRatherThanDroppedOnTheDeadline() {
+        // Inside the deadline a resolve gets what is left of it.
+        assertEquals(900L, resolveBudgetMs(untilDeadlineMs = 900, untilDrainEndsMs = 1_400))
+        // Past it — where a queued `onServiceFound` lands — it gets what
+        // is left of the drain, so a device that answered is not thrown
+        // away to report that nothing did.
+        assertEquals(400L, resolveBudgetMs(untilDeadlineMs = -100, untilDrainEndsMs = 400))
+        assertTrue(resolveBudgetMs(-100, 400) > 0, "a drained answer must get a chance")
+    }
+
+    @Test
+    fun theDrainItselfEnds() {
+        // The bound that stops a drain becoming a second browse.
+        assertEquals(0L, resolveBudgetMs(untilDeadlineMs = 0, untilDrainEndsMs = 0))
+        assertEquals(0L, resolveBudgetMs(untilDeadlineMs = -5, untilDrainEndsMs = -5))
+        assertTrue(DISCOVERY_DRAIN_MS < DISCOVERY_START_CAP_MS * 2, "and it is small")
+    }
 }

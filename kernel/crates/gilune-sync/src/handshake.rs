@@ -45,10 +45,26 @@ const ID_JOINER: &[u8] = b"gilune:pair:v1:joiner";
 
 /// How long either side will wait during establishment. A handshake that
 /// stalls must not wedge the listener thread.
-const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
+///
+/// **Public because the listener has to apply it before this module is
+/// reached.** The dialling side sets it on the socket it opened; the
+/// answering side is handed an accepted socket with no timeouts at all,
+/// and the read of the caller's very first line happens outside every
+/// function here. A caller that connects and says nothing would otherwise
+/// hold a session slot for as long as it liked, which is a whole listener
+/// taken with eight open sockets and not one byte sent.
+pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
 /// And once established. Long enough for a chunk of a large blob on a
 /// slow link, short enough that a dead peer is eventually noticed.
 const SESSION_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long a connection may be idle before the kernel probes it.
+/// Deliberately shorter than `SESSION_TIMEOUT`: the read timeout answers
+/// a peer that has gone quiet, and this answers a peer whose machine went
+/// away without closing anything — a closed lid, a dropped radio — which
+/// a read timeout only notices a minute later and a half-open socket
+/// never notices at all.
+const KEEPALIVE_IDLE: Duration = Duration::from_secs(30);
 
 const NOISE_BUFFER: usize = 65535;
 
@@ -450,9 +466,32 @@ fn finish_noise(
 
 // ------------------------------------------------------------ the two flows
 
-fn timed(stream: &TcpStream, timeout: Duration) -> Result<()> {
+/// Bound both directions of a socket. Public for the listener, which
+/// applies `HANDSHAKE_TIMEOUT` to an accepted stream before it reads the
+/// caller's first line — the one read that happens outside this module.
+pub fn timed(stream: &TcpStream, timeout: Duration) -> Result<()> {
     stream.set_read_timeout(Some(timeout))?;
     stream.set_write_timeout(Some(timeout))?;
+    Ok(())
+}
+
+/// Ask the kernel to probe an idle session.
+///
+/// Best-effort by design and never an error: a session works perfectly
+/// without keepalive, and a platform that declines to set it must not
+/// turn a working pairing into a failed one. What it buys is the case a
+/// read timeout is bad at — a peer that disappeared rather than went
+/// quiet, whose half of the connection nobody ever closes.
+fn keepalive(stream: &TcpStream) {
+    let probe = socket2::TcpKeepalive::new().with_time(KEEPALIVE_IDLE);
+    let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&probe);
+}
+
+/// Everything an established session wants on its socket: a bounded wait
+/// and a probe for a peer that vanished.
+fn established(stream: &TcpStream) -> Result<()> {
+    timed(stream, SESSION_TIMEOUT)?;
+    keepalive(stream);
     Ok(())
 }
 
@@ -475,7 +514,7 @@ pub fn dial_pairing(
     let (transport, remote, peer, derived) =
         noise_initiator(&mut channel, identity, &psk, &prologue(intent), me)?;
     let stream = channel.into_stream();
-    timed(&stream, SESSION_TIMEOUT)?;
+    established(&stream)?;
     Ok(Established {
         channel: NoiseChannel::new(stream, transport, limits),
         remote_static: remote,
@@ -505,7 +544,7 @@ pub fn accept_pairing(
         me,
     )?;
     let stream = channel.into_stream();
-    timed(&stream, SESSION_TIMEOUT)?;
+    established(&stream)?;
     Ok(Established {
         channel: NoiseChannel::new(stream, transport, limits),
         remote_static: remote,
@@ -543,7 +582,7 @@ pub fn dial_session(
         });
     }
     let stream = channel.into_stream();
-    timed(&stream, SESSION_TIMEOUT)?;
+    established(&stream)?;
     Ok(Established {
         channel: NoiseChannel::new(stream, transport, limits),
         remote_static: remote,
@@ -583,7 +622,7 @@ pub fn accept_session(
         });
     }
     let stream = channel.into_stream();
-    timed(&stream, SESSION_TIMEOUT)?;
+    established(&stream)?;
     Ok(Established {
         channel: NoiseChannel::new(stream, transport, limits),
         remote_static: remote,

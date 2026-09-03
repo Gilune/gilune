@@ -73,6 +73,52 @@ class SyncWorkerTest {
         }
     }
 
+    // ------------------------------------------------------------------
+    // What a background pass is allowed to do (§ 2, § 10)
+    //
+    // **The defect this pins.** The worker opened a handle, configured
+    // sync, checked only that somebody was paired, and exchanged. Nothing
+    // in it consulted whether sync was switched **on** — and nothing below
+    // it would have: the kernel's outbound permission is process-local and
+    // starts permissive by design, so that a background pass can dial
+    // without ever binding a listener. A phone whose owner had switched
+    // sync off therefore kept syncing every fifteen minutes.
+    //
+    // The field it has to read is `wanted`, not `enabled`. `enabled` is a
+    // bound listener in this process and this process binds nothing, so
+    // gating on it would have stopped the background sync altogether —
+    // the same bug pointing the other way.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aBackgroundPassRunsOnlyWhenTheSwitchIsOnAndSomebodyIsPaired() {
+        val paired = listOf(peer())
+        assertTrue(shouldSyncInBackground(syncStatus(peers = paired)))
+        // Switched off: nothing to do, and not a failure or a retry.
+        assertFalse(shouldSyncInBackground(syncStatus(enabled = false, peers = paired)))
+        // Nobody paired: dialling nothing costs a thread for the privilege.
+        assertFalse(shouldSyncInBackground(syncStatus(peers = emptyList())))
+        assertFalse(shouldSyncInBackground(null))
+        // A revoked peer is not somebody to sync with.
+        assertFalse(shouldSyncInBackground(syncStatus(peers = listOf(peer(state = "revoked")))))
+    }
+
+    @Test
+    fun theBackgroundGateReadsThePersistedSwitchRatherThanABoundListener() {
+        // The state a worker is actually in: the person left sync on, and
+        // this fresh process has bound nothing. Reading `enabled` here
+        // would answer "off" and the background pass would never run —
+        // which is why the two gates are two functions.
+        val worker = syncStatus(enabled = false, wanted = true, peers = listOf(peer()))
+        assertTrue(shouldSyncInBackground(worker), "a worker binds nothing and still syncs")
+        assertFalse(shouldSyncOnForeground(worker), "the foreground gate is the listener's")
+
+        // And the reverse, which is the case that was leaking: a listener
+        // somehow up while the persisted choice is off.
+        val contradiction = syncStatus(enabled = true, wanted = false, peers = listOf(peer()))
+        assertFalse(shouldSyncInBackground(contradiction), "the switch is what decides")
+    }
+
     @Test
     fun cancellingLeavesNothingStanding() {
         val context = InstrumentationRegistry.getInstrumentation().targetContext

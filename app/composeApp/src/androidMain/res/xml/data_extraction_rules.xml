@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    What may leave this phone in a backup or a device transfer, on Android
+    12 and later (ADR 0019 § 4).
+
+    **`filesDir/sync` is excluded, and that is what makes the ADR's
+    re-enrolment rule mechanical.** § 4 keeps the device identity outside
+    the vault precisely so that a restored copy is a new device: the vault
+    is a portable artefact that gets exported and backed up, and an
+    identity travelling with it is "a cloned identity with a shared
+    `op_seq` space". Android's default backup would have carried the
+    identity anyway — through the app's own private storage rather than
+    through the vault — and undone that by the back door.
+
+    Two things would then have gone wrong on a restored phone, and one of
+    them is worse than the other:
+
+      - The identity file is sealed by an AndroidKeyStore key, and Keystore
+        keys are **not** backed up. So the file arrives on the new phone
+        and nothing on it can open the file: enrolment fails with "the
+        Keystore key that sealed this device's identity is no longer on
+        this phone", and sync is unavailable until somebody clears it by
+        hand. That is the state the Sync screen's "Reset sync on this
+        phone" exists to recover from, and this file is why it should stop
+        happening.
+      - Had the key been restorable, the outcome would have been worse
+        still: two phones holding one identity and one sequence space,
+        which is the fork the threat model means when it says sequence
+        reuse is never legitimate.
+
+    With the directory absent, the identity is simply not there, the kernel
+    mints a fresh one, and "a restored phone is a new device" holds because
+    of where the bytes are rather than because of a check somebody
+    remembered to write.
+
+    The vault itself deliberately stays in backup. A restored vault with no
+    identity beside it is exactly § 4's third row: adopt nothing, mint a
+    new identity and a new device id, start a fresh sequence space. The
+    person's notes come back; the device is new; the peers are re-paired.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="file" path="sync" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="file" path="sync" />
+    </device-transfer>
+</data-extraction-rules>

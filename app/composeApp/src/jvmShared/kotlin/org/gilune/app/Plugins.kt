@@ -679,6 +679,91 @@ fun providerSwitchWarning(plugins: List<PluginInfo>, pluginId: String): String? 
         "one transcriber writes your notes."
 }
 
+/// What registering a transcription provider must do to its own switch.
+///
+/// **Registering is not choosing.** The kernel defaults a plugin it has
+/// never seen to Enabled, which is right for a plugin that is the only one
+/// of its kind and wrong for the second transcriber: bundling Moonshine
+/// then switched it on for everybody — on a fresh install and, worse, on
+/// an R1 → R3 upgrade where the row already existed — leaving two
+/// transcribers on at once. The visible half was a Plugins screen showing
+/// both; the invisible half was every recording queueing a second job that
+/// nothing in the process would ever claim, climbing forever.
+///
+/// So a provider registered while another transcriber is already active is
+/// registered and then **switched straight off**. ADR 0018 § 6 keeps
+/// whisper the incumbent until MS2 has measured both engines on real
+/// hardware, so Moonshine is opt-in; § 3's precedence order is what decides
+/// which one "already active" means, and that order is the shell's whole
+/// one-transcriber rule.
+///
+/// It is a switch-off and never a switch-on: turning a transcriber on is a
+/// decision only a person makes, so a person who chose Moonshine and
+/// switched whisper off keeps their choice through every later open.
+data class ProviderRegistration(val switchOff: Boolean, val message: String?)
+
+/// [plugins] is the registry **after** the declaration was registered.
+fun providerRegistration(plugins: List<PluginInfo>, pluginId: String): ProviderRegistration {
+    val none = ProviderRegistration(false, null)
+    if (pluginId !in TRANSCRIPTION_PROVIDERS) return none
+    val plugin = plugins.firstOrNull { it.pluginId == pluginId } ?: return none
+    if (plugin.state != "enabled") return none
+    // The active one is the first enabled provider in precedence order.
+    // Being it is exactly what "nobody else is writing the transcripts"
+    // means, so there is nothing to do.
+    val active = plugins.activeTranscriber()
+    if (active == null || active == pluginId) return none
+    val incumbent = plugins.firstOrNull { it.pluginId == active }?.name ?: active
+    return ProviderRegistration(
+        true,
+        "${plugin.name} is installed and switched off — $incumbent is writing your " +
+            "notes. One transcriber writes your notes; switch this one on in " +
+            "Settings ▸ Plugins to change that.",
+    )
+}
+
+/// Apply that rule on one handle, and answer with what to say — or null
+/// when nothing changed, which is every open after the first.
+///
+/// **Both handles run it** (ADR 0018 § 2's headlessness note): the activity
+/// registers the declaration, and the recording service opens a `Gilune` of
+/// its own on a vault the activity may not have opened since the upgrade.
+/// Plugin state is vault state, so whichever gets there first settles it
+/// and the other finds nothing to do.
+fun applyOneTranscriberRule(gilune: Gilune, pluginId: String): String? {
+    val decision = providerRegistration(
+        runCatching { gilune.plugins() }.getOrNull() ?: return null,
+        pluginId,
+    )
+    if (!decision.switchOff) return null
+    return if (runCatching { gilune.setPluginEnabled(pluginId, false) }.isSuccess) {
+        decision.message
+    } else {
+        null
+    }
+}
+
+/// What "waiting jobs" means when a plugin is switched off.
+///
+/// Disabled means **parked, not destroyed** (ADR 0018 § 3): nothing new is
+/// queued and queued jobs are claimable by nobody. That is the shipped
+/// behaviour and it is the right one — switching a provider back on
+/// resumes the very same job — but it also means the count in Settings ▸
+/// About can hold jobs nobody will ever claim, which reads as a backlog
+/// somebody has to clear. An upgraded vault that had both transcribers on
+/// for a while carries exactly that.
+///
+/// So the count keeps its number and gains a sentence. Null when there is
+/// nothing to explain: no jobs waiting, or nothing switched off to have
+/// parked them.
+fun waitingJobsNote(plugins: List<PluginInfo>, jobsPending: Long): String? {
+    if (jobsPending <= 0L) return null
+    val parked = plugins.filter { it.state != "enabled" && !it.processorId.isNullOrBlank() }
+    if (parked.isEmpty()) return null
+    return "some are parked for ${parked.joinToString(" and ") { it.name }}, which is " +
+        "switched off — they wait rather than run, and nothing is waiting on you"
+}
+
 /// A capture that preserved audio — the only kind a transcriber has
 /// anything to say about. Read off the blob's own path rather than a media
 /// key the summary does not carry.
