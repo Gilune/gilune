@@ -116,7 +116,7 @@ internal fun SyncSection(state: GiluneState) {
     // Above the switch, because a stream that halted last night is the
     // thing a person came here to find out about, and everything below
     // reads as if sync were working until it is said (§ 8).
-    AlertsBanner(state.syncAlerts)
+    AlertsBanner(state.syncAlerts, state::readmitDevice)
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -293,8 +293,12 @@ internal fun SyncSection(state: GiluneState) {
 /// history are both worth saying and neither is a fault, and a red box is
 /// how a person learns to stop reading the surface that has to be read
 /// when it does go red.
+/// One condition carries a decision rather than only a description — a
+/// device claiming to have been one this vault removed — so the banner can
+/// offer it. [onAct] is given the alert's subject, which for that kind is
+/// the device id to re-admit.
 @Composable
-private fun AlertsBanner(alerts: List<IntegrityAlert>) {
+private fun AlertsBanner(alerts: List<IntegrityAlert>, onAct: (String) -> Unit) {
     if (alerts.isEmpty()) return
     val colours = MaterialTheme.colorScheme
     val damage = alerts.any { alertIsDamage(it) }
@@ -320,6 +324,10 @@ private fun AlertsBanner(alerts: List<IntegrityAlert>) {
                 lineHeight = 18.sp,
                 color = ink,
             )
+            val action = alertAction(alert.kind)
+            if (action != null && alert.subject.isNotBlank()) {
+                TextButton(onClick = { onAct(alert.subject) }) { Text(action) }
+            }
         }
     }
 }

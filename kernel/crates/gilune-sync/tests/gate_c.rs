@@ -620,6 +620,16 @@ fn a_device_that_restarts_comes_back_on_the_same_port() {
 /// not whatever happened to be free. Asserted against a service built
 /// without the suite's own per-device port, because that is the shipped
 /// behaviour and the harness deliberately overrides it.
+///
+/// **It does not bind 51837 unconditionally.** That is the port the
+/// owner's own Gilune listens on, and a test suite that seizes it would
+/// take the app off the network for as long as the run lasts — or, more
+/// likely, fail with an assertion about ports because the app already had
+/// it, which reads as a defect and is not one. So the port is probed
+/// first: free, and the shipped behaviour is asserted for real; taken, and
+/// the test says why it is standing down and asserts what it still can —
+/// that the preference mechanism honours the port it is given, and that
+/// the documented number has not moved.
 #[test]
 fn a_fresh_device_prefers_the_documented_default_port() {
     let vault = tempfile::tempdir().expect("vault");
@@ -635,13 +645,40 @@ fn a_fresh_device_prefers_the_documented_default_port() {
     .expect("configure");
     service.bind_host("127.0.0.1");
 
+    assert_eq!(SyncService::DEFAULT_PORT, 51837, "the wire contract's number");
+    let wanted = if port_is_free(SyncService::DEFAULT_PORT) {
+        // The real thing: no preference set, so the service reaches for
+        // its own default.
+        SyncService::DEFAULT_PORT
+    } else {
+        eprintln!(
+            "note: {} is already bound on this machine — probably Gilune itself. \
+             Asserting the preference against a port this test knows is free instead \
+             of taking the app's port away from it.",
+            SyncService::DEFAULT_PORT
+        );
+        let free = free_port();
+        service.prefer_port(free);
+        free
+    };
+
     let address = service.set_enabled(true).expect("enable").expect("address");
     assert!(
-        address.ends_with(&format!(":{}", SyncService::DEFAULT_PORT)),
-        "a fresh device should take the documented default so a peer's cached address \
+        address.ends_with(&format!(":{wanted}")),
+        "a fresh device should take the port it prefers, so a peer's cached address \
          survives a restart: {address}"
     );
-    assert_eq!(SyncService::DEFAULT_PORT, 51837, "the wire contract's number");
+}
+
+/// Whether a port can be bound on the loopback right now.
+///
+/// Racy, and acceptable for the same reason `free_port` is: the product
+/// falls to an ephemeral port when its choice is taken, so a lost race
+/// costs one assertion in the tests that are about ports and nothing at
+/// all anywhere else. The listener is dropped immediately — this asks a
+/// question, it does not hold the answer.
+fn port_is_free(port: u16) -> bool {
+    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
 }
 
 /// When the preferred port *is* taken, the fallback is an ephemeral one

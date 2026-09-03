@@ -17,7 +17,7 @@
 
 use gilune_kernel::limits::Limits;
 use gilune_kernel::operations;
-use gilune_kernel::store::Store;
+use gilune_kernel::store::{Store, SCHEMA_VERSION};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
@@ -64,7 +64,11 @@ fn assert_fixture_shape(store: &Store) {
 fn a_v4_vault_upgrades_in_place_without_losing_what_it_held() {
     let dir = fixture_copy();
     let store = Store::open(dir.path()).expect("open a vault a v4 binary wrote");
-    assert_eq!(store.schema_version().expect("version"), 5);
+    // Whatever this build's schema is, not the version this test was
+    // written against: the fixture is evidence about the *v4 shape*
+    // surviving, and pinning the target version would make every later
+    // migration edit this line rather than run the chain.
+    assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
     assert_fixture_shape(&store);
 
     // The projection is unchanged by the upgrade: same committed state,
@@ -158,7 +162,7 @@ fn an_upgrade_interrupted_at_any_boundary_converges_on_the_next_open() {
         assert!(!crashed.status.success(), "{point}: the process must have died");
 
         let store = Store::open(dir.path()).expect("reopen after the crash");
-        assert_eq!(store.schema_version().expect("version"), 5, "{point}");
+        assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION, "{point}");
         assert_fixture_shape(&store);
         let device = store.device_id().expect("device");
         assert_eq!(

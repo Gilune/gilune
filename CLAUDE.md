@@ -1093,6 +1093,92 @@ gates promises) are ratified. **Next: application-level engineering — see
      (Gboard); 36 rows now run keyboard-UNBOUND; whether
      TextFieldState suffers the same teardown is unasserted (wants
      its own @WithSystemKeyboard row).
+   - **Third review + surgical round (2026-09-03, Fable 5.1; finders
+     and verifiers on Sonnet after an Opus 529 outage; ONE Opus fixer,
+     sequential, adversarial tests; coordinator line-by-line review, NO
+     follow-up sweep — owner decision to stop the review→fix loop).**
+     Honest accounting the owner asked for: sweep 1 found 25 (all
+     fixed); sweep 2 found 33 = 15 NEW regressions from round one + 18
+     re-listed cleanup seeds; sweep 3 found 33 = 10 NEW regressions
+     from round two + 4 pre-existing + 19 re-listed (now PARKED below).
+     Round-two regressions came from clever fallbacks tested on honest
+     paths only. Fixed with simplest-safe rules: `previous_device_ids`
+     RECORDED never believed (pairing un-refuses ONLY the peer's current
+     device_id; each claim → alert `sync-previous-identity-claimed`
+     not-damage + explicit FFI `readmit_device(id)` durable via meta
+     `readmitted_devices`, overruled by a later revoke; roster pair()
+     retires only the paired-as name); legacy keyless tombstone
+     withdraws ONLY if sole head == projected revision AND disk ==
+     recorded AND not a local edit (strictly narrower; transcript_merge
+     now uses shared `operations::tombstone_payload` so its tombstones
+     name heads); Referent::Uninterpreted ONLY when the held unreadable
+     op is from the operation's origin device (origin key, else the
+     deliverer) — unrelated devices are not evidence → Awaited;
+     `SubjectMoved` completes the job as `skipped_moved` (new
+     ProcessingSummary/FFI field) and the pass CONTINUES; one-row
+     `ProcessorCtx::subject_head_and_payload()` on both routes; schema
+     v6 = `CREATE INDEX IF NOT EXISTS operations_target ON
+     operations(target_id)` (fixture chain re-pinned to
+     SCHEMA_VERSION); WIT `proposed-output.expected-head` +
+     `host-objects.subject-head`; `registerMoonshineOnHandle` shared by
+     activity + RecordService (service raises providerOffNotice via
+     MobilePrefs(context) when IT switched off); gate_c default-port
+     test probes 51837 first; joiner rate-limiter keyed by the QR's
+     fingerprint. Refuted this sweep: `promote`'s already-exists branch
+     (target path is digest-bound, same bytes). Suites: cargo 345/0,
+     desktop 529/0 (--rerun-tasks), clippy clean; dll 5.69 MB restaged,
+     ABIs 6.45/6.67 MB, bindings byte-identical (readmitDevice,
+     skippedMoved). **Android instrumented NOT RUN this round: the
+     emulator and the gilune-s1 AVD were ABSENT from the machine and
+     the SDK appears mid-migration (C:\Android\android-sdk is now live;
+     new untracked scripts/move-android-to-d.ps1 +
+     verify-android-on-d.ps1 and a build-android.ps1 edit appeared
+     during the run — the OWNER's work, left uncommitted; the ANDROID_HOME
+     machine notes above are STALE until the owner confirms the new
+     layout).** Kotlin compiles for both source sets; two new
+     instrumented tests unexecuted.
+   - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
+     re-counted by future review sweeps; fix opportunistically when a
+     change already touches the file).** Verified real in three
+     consecutive sweeps and deliberately deferred each time behind
+     correctness: (1) `configure_sync` is a per-handle-opener ritual
+     (MainActivity/Main.kt via GiluneState.syncSetup; SyncWorker calls
+     it directly) — deeper form `Gilune.openConfigured`; RecordService
+     correctly opens WITHOUT it. (2) `IntegrityAlert.kind` is a free
+     String; the kind set lives in alerts.rs AND SyncAlerts.kt, pinned
+     by AlertKindCouplingTest reading alerts.rs as text (regex matches
+     `pub const` only) — deeper form a uniffi enum. (3) One-active-
+     transcriber stays shell policy (ADR 0018 Q4, ratified);
+     `applyOneTranscriberRule` still mutates plugin state from Kotlin
+     for upgraded vaults. (4) Jobs whose plugin is enabled but whose
+     engine THIS build lacks are unclaimable and uncounted
+     (`jobs_parked` counts disabled subscriptions only). (5) Pre-key
+     naming ops (no origin key, no held op) still await forever —
+     no production vault predates the key. (6) Moonshine.kt
+     `moonshinePlan` three `when` arms differing only in `notice`;
+     `phase==Ready && modelDir!=null` coupled. (7) Plugins.kt
+     `providerSwitchWarning` re-derives what `providerSwitch` built;
+     `enable` as a behaviour selector; two sites re-derive "another
+     transcriber is active". (8) operations.rs `adopt_legacy_envelopes`
+     per-row SELECT for columns the batch SELECT could carry;
+     `conn_count` duplicates `row_exists`; two inline COUNT(*) checks.
+     (9) service.rs `.lock().unwrap_or_else(|e| e.into_inner())` ×21,
+     only `roster()` has an accessor. (10) tests: `copy_tree` in
+     paired/mod.rs AND migration_v5.rs beside `files_under`. (11)
+     SyncAddresses.kt `deviceAddresses` vs SyncSettings.kt
+     `pairingAddresses` same shape. (12) `project()` per live object:
+     fs::read + 2×sha256 + 4 SELECTs per call from 12 sites, no
+     mtime/size pre-check. (13) `wordlessRecordings` re-runs
+     recentSources(2000) on EVERY vaultTick while the transcriber
+     settings screen is open. (14) `facts()`: two uncached identity-
+     file reads + parses per status call. (15) `dial_first` serial 2 s
+     per candidate (≤4). (16) `write_blob_chunk_bounded` per-chunk
+     stat + open/close (kept deliberately for multi-instance safety).
+     (17) `head_verdict` matches a revision id by substring over raw
+     payload text (UUID entropy makes false positives negligible).
+     (18) `is_damage` matches on &str — no exhaustiveness check; an
+     omitted KNOWN kind reads non-damage (unknown-kind = not damage is
+     ratified). (19) `GiluneStatus.blobsAwaiting` is read by no shell.
    - **Team-coordination lesson (2026-08-31)**: agents verify against
      the whole tree — a coordinator edit that breaks compilation
      (Main.kt File-vs-String) cost one agent ~40 minutes of retry

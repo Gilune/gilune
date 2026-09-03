@@ -350,6 +350,32 @@ pub(crate) fn name_origins(
     Ok(())
 }
 
+/// The payload a tombstone carries: the heads the deleter could see, and
+/// whose each of them — and the object — was.
+///
+/// **One builder, because there were two and one of them was empty.**
+/// `resolve_tombstone` names the heads it saw, which is what lets a
+/// receiving projection tell "the deleter saw everything that is here"
+/// from "somebody wrote something they never had in front of them". The
+/// transcript merge wrote `{}` — a bare tombstone, indistinguishable on
+/// every other replica from one written before the key existed, so its
+/// deletions fell to the weaker pre-key fallback for ever. The merge is a
+/// deletion made *here*, with the whole object in front of it, so it can
+/// answer the question exactly; it simply never did.
+///
+/// Runs on the caller's connection, so it composes inside a transaction
+/// the caller owns — which both callers need, since the heads it reads
+/// must be the heads the same transaction is about to tombstone.
+pub(crate) fn tombstone_payload(
+    conn: &rusqlite::Connection,
+    object_id: &str,
+) -> Result<serde_json::Value> {
+    let superseded = crate::revisions::heads(conn, object_id)?;
+    let mut carried = serde_json::json!({ "supersedes": superseded });
+    name_origins(conn, object_id, &superseded, &mut carried)?;
+    Ok(carried)
+}
+
 fn next_seq(conn: &rusqlite::Connection, device_id: &str) -> Result<i64> {
     let highest: i64 = conn.query_row(
         "SELECT COALESCE(MAX(op_seq), 0) FROM operations WHERE device_id = ?1",
@@ -660,31 +686,49 @@ impl Store {
     /// could never arrive halted that device's stream for ever, and in a
     /// full-replica mesh that is one revoked device silencing a healthy
     /// one. These are the two ways it can be known that waiting is futile.
+    /// **Whose unreadable operation it is decides the answer.** "This
+    /// build cannot read the object" has to mean *the device the operation
+    /// is about* wrote something here that this build cannot read. Asking
+    /// only whether **anybody** had is what went wrong: one unknown-kind
+    /// operation from an unrelated device that happened to name the same
+    /// object made every revision of it forward-only, so a revision that
+    /// would have applied perfectly once its `object-created` landed was
+    /// instead recorded as uninterpretable and never applied at all — the
+    /// frontier moved past it and nothing brought it back.
+    ///
+    /// **Which device that is, and why `delivered_by` is a fallback rather
+    /// than a guess.** The origin key names it outright and is believed
+    /// when present. It is absent in exactly two shapes, and both are the
+    /// case this fallback exists for rather than an edge of it: adopted
+    /// pre-v5 operations carry no origin keys at all, and a plugin-created
+    /// object has no `object-created` for `name_origins` to read an origin
+    /// out of, so a modern revision of one carries no key either. Halting
+    /// there would halt that device's stream for ever, since the object can
+    /// never appear. So the question falls back to the stream actually in
+    /// front of us — is *this* device's own history here under a kind this
+    /// build cannot read — which is the one device that can be reasoned
+    /// about without believing anything. A third device's operation is
+    /// never evidence, with the key or without it.
     fn object_verdict(
         &self,
         conn: &rusqlite::Connection,
         object_id: &str,
         named_origin: Option<&str>,
+        delivered_by: &str,
     ) -> Result<Referent> {
         if let Some(device) = self.refused_origin(named_origin)? {
             return Ok(Referent::Refused(device));
         }
-        // Nothing was named — a naming operation written before the key
-        // existed — or what was named is welcome here. Fall back to what
-        // this replica already holds about the object. If the object is
-        // absent while an operation about it is present, that operation
-        // is one this build does not interpret: an `object-created` it
+        let origin = named_origin.filter(|d| !d.is_empty()).unwrap_or(delivered_by);
+        // The object is absent while an operation about it, from the very
+        // device the operation is about, is present: that one is a kind
+        // this build does not interpret, because an `object-created` it
         // could read would have created the row.
         let held = self.uninterpreted_ops_for(conn, object_id)?;
-        for (device, _) in &held {
-            if self.is_refused(device)? {
-                return Ok(Referent::Refused(device.clone()));
-            }
-        }
-        if held.is_empty() {
-            Ok(Referent::Awaited)
-        } else {
+        if held.iter().any(|(device, _)| device == origin) {
             Ok(Referent::Uninterpreted)
+        } else {
+            Ok(Referent::Awaited)
         }
     }
 
@@ -695,25 +739,30 @@ impl Store {
     /// uninterpreted" would answer `Uninterpreted` for every head still
     /// in flight — which is exactly the late-arrival case that must wait.
     /// So the fallback asks the narrower question: is the revision named
-    /// inside an operation this build did not interpret?
+    /// inside an operation this build did not interpret **from the device
+    /// that wrote that revision**?
+    ///
+    /// Same rule as `object_verdict`, and `delivered_by` means the same
+    /// thing here: an unrelated device's unknown-kind operation that
+    /// happens to quote the revision id is not evidence about the head at
+    /// all, whether or not the naming operation carries an origin key.
     fn head_verdict(
         &self,
         conn: &rusqlite::Connection,
         object_id: &str,
         revision_id: &str,
         named_origin: Option<&str>,
+        delivered_by: &str,
     ) -> Result<Referent> {
         if let Some(device) = self.refused_origin(named_origin)? {
             return Ok(Referent::Refused(device));
         }
+        let origin = named_origin.filter(|d| !d.is_empty()).unwrap_or(delivered_by);
         for (device, payload) in self.uninterpreted_ops_for(conn, object_id)? {
             // Identifiers are UUIDs, so naming one is a substring match
             // over a payload whose shape this build cannot parse — which
             // is the whole point of it being uninterpreted.
-            if payload.contains(revision_id) {
-                if self.is_refused(&device)? {
-                    return Ok(Referent::Refused(device));
-                }
+            if device == origin && payload.contains(revision_id) {
                 return Ok(Referent::Uninterpreted);
             }
         }
@@ -917,6 +966,7 @@ impl Store {
                         conn,
                         &object_id,
                         payload.get(OBJECT_ORIGIN_DEVICE).and_then(|v| v.as_str()),
+                        &envelope.device_id,
                     )? {
                         Referent::Awaited => return Err(Self::awaiting(&object_id, envelope)),
                         Referent::Refused(device) => {
@@ -972,7 +1022,13 @@ impl Store {
                                 let origin = named
                                     .and_then(|m| m.get(head))
                                     .and_then(|v| v.as_str());
-                                match self.head_verdict(conn, &object_id, head, origin)? {
+                                match self.head_verdict(
+                                    conn,
+                                    &object_id,
+                                    head,
+                                    origin,
+                                    &envelope.device_id,
+                                )? {
                                     Referent::Awaited => {
                                         return Err(Self::awaiting(head, envelope))
                                     }
@@ -1024,6 +1080,7 @@ impl Store {
                         conn,
                         &envelope.target_id,
                         payload.get(OBJECT_ORIGIN_DEVICE).and_then(|v| v.as_str()),
+                        &envelope.device_id,
                     )? {
                         Referent::Awaited => {
                             return Err(Self::awaiting(&envelope.target_id, envelope))
@@ -1217,6 +1274,22 @@ impl Store {
 /// Device ids only. No key material ever reaches the vault.
 pub(crate) const REFUSED_DEVICES: &str = "refused_devices";
 
+/// Meta key holding the device ids a person has explicitly re-admitted
+/// after a peer claimed them as an earlier identity of its own.
+///
+/// **It exists because reconciliation would otherwise undo the decision.**
+/// A revoked roster row keeps naming the device it revoked, and every
+/// launch folds those names back into `REFUSED_DEVICES` — which is
+/// correct, and is what makes a revocation survive a restart. Without a
+/// record that says "this one was let back in on purpose", re-admitting a
+/// claimed earlier identity would last exactly until the next open, and
+/// the alert would come back with it.
+///
+/// So a re-admission is durable vault state in its own right, and the only
+/// thing that takes it away is a later revocation — which is a person
+/// changing their mind, and must win.
+pub(crate) const READMITTED_DEVICES: &str = "readmitted_devices";
+
 impl Store {
     /// Devices whose operations this one refuses to apply.
     pub fn refused_devices(&self) -> Result<Vec<String>> {
@@ -1233,6 +1306,10 @@ impl Store {
         if device_id.is_empty() {
             return Ok(false);
         }
+        // A revocation is the newer decision, so it overrules an earlier
+        // re-admission: without this, a device let back in once could
+        // never be revoked again — reconciliation would keep skipping it.
+        self.forget_readmission(device_id)?;
         let mut devices = self.refused_devices()?;
         if devices.iter().any(|d| d == device_id) {
             return Ok(false);
@@ -1263,6 +1340,59 @@ impl Store {
         Ok(true)
     }
 
+    /// Record that a peer has claimed a device id it says it used before it
+    /// re-enrolled — **without believing it**.
+    ///
+    /// The claim arrives inside the authenticated channel, which proves who
+    /// is speaking and proves nothing at all about what they are saying. A
+    /// device this vault refuses stays refused; what changes is that the
+    /// claim becomes visible, so a person can decide (`readmit_device`).
+    ///
+    /// Nothing is raised about a device this vault does not refuse: there
+    /// would be no decision to take, and a notice with no action behind it
+    /// is a notice nobody can clear. Answers whether anything was raised.
+    pub fn note_previous_identity_claim(&self, device_id: &str, detail: &str) -> Result<bool> {
+        if device_id.is_empty() || !self.is_refused(device_id)? {
+            return Ok(false);
+        }
+        alerts::raise(
+            self.conn(),
+            alerts::SYNC_PREVIOUS_IDENTITY_CLAIMED,
+            device_id,
+            detail,
+        )?;
+        Ok(true)
+    }
+
+    /// Welcome an **earlier** identity back, because a person said so.
+    ///
+    /// The deliberate counterpart of `note_previous_identity_claim`: the
+    /// claim is data, this is the decision. It lifts the refusal, records
+    /// the re-admission durably so the next reconciliation does not undo
+    /// it, and withdraws the notice that offered the choice.
+    ///
+    /// Answers whether the device was actually refused before this — so a
+    /// caller can tell "let back in" from "there was nothing to let in".
+    pub fn readmit_device(&self, device_id: &str) -> Result<bool> {
+        if device_id.is_empty() {
+            return Ok(false);
+        }
+        let lifted = self.unrefuse_device(device_id)?;
+        let mut readmitted = self.readmitted_devices()?;
+        if !readmitted.iter().any(|d| d == device_id) {
+            readmitted.push(device_id.to_string());
+            self.write_meta_list(READMITTED_DEVICES, &readmitted)?;
+        }
+        alerts::clear(self.conn(), alerts::SYNC_PREVIOUS_IDENTITY_CLAIMED, device_id)?;
+        Ok(lifted)
+    }
+
+    /// Devices a person has explicitly re-admitted. Read by reconciliation
+    /// and by nothing else.
+    pub fn readmitted_devices(&self) -> Result<Vec<String>> {
+        self.meta_list(READMITTED_DEVICES)
+    }
+
     /// Fold a device-local roster's revocations into this vault's set.
     ///
     /// Union, never replacement. A roster knows about the pairings *this*
@@ -1270,11 +1400,21 @@ impl Store {
     /// ever refused, including ones decided under an identity that no
     /// longer exists. Reconciling one into the other keeps both facts;
     /// overwriting kept only the newer and quieter one.
+    ///
+    /// One exception, and it is a decision rather than a heuristic: a
+    /// device somebody re-admitted by hand is not folded back in. Otherwise
+    /// the roster's revoked row — which is still there, and should be —
+    /// would re-refuse it at every launch and the re-admission would be a
+    /// button that does nothing past the next open.
     pub fn reconcile_refused_devices(&self, revoked: &[String]) -> Result<()> {
+        let readmitted = self.readmitted_devices()?;
         let mut devices = self.refused_devices()?;
         let mut added = false;
         for device in revoked {
-            if device.is_empty() || devices.iter().any(|d| d == device) {
+            if device.is_empty()
+                || devices.iter().any(|d| d == device)
+                || readmitted.iter().any(|d| d == device)
+            {
                 continue;
             }
             devices.push(device.clone());
@@ -1283,6 +1423,52 @@ impl Store {
         if added {
             self.write_refused(&devices)?;
         }
+        Ok(())
+    }
+
+    fn forget_readmission(&self, device_id: &str) -> Result<()> {
+        let readmitted = self.readmitted_devices()?;
+        if !readmitted.iter().any(|d| d == device_id) {
+            return Ok(());
+        }
+        let kept: Vec<String> = readmitted.into_iter().filter(|d| d != device_id).collect();
+        self.write_meta_list(READMITTED_DEVICES, &kept)
+    }
+
+    fn meta_list(&self, key: &str) -> Result<Vec<String>> {
+        let raw: Option<String> = self
+            .conn()
+            .query_row("SELECT value FROM meta WHERE key = ?1", [key], |row| row.get(0))
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(e),
+            })?;
+        let Some(raw) = raw else { return Ok(Vec::new()) };
+        let parsed: serde_json::Value =
+            serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+        Ok(parsed
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    fn write_meta_list(&self, key: &str, values: &[String]) -> Result<()> {
+        let document = serde_json::Value::Array(
+            values
+                .iter()
+                .map(|d| serde_json::Value::String(d.clone()))
+                .collect(),
+        );
+        self.conn().execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            rusqlite::params![key, document.to_string()],
+        )?;
         Ok(())
     }
 
@@ -1919,6 +2105,77 @@ mod tests {
         assert!(
             !kinds.contains(&alerts::SYNC_AWAITING_REFERENT.to_string()),
             "nothing is being waited for: {kinds:?}"
+        );
+    }
+
+    #[test]
+    fn an_unrelated_devices_unreadable_operation_never_makes_a_revision_forward_only() {
+        // The adversarial case, and the one that silently lost a note.
+        // obj-1 belongs to device X. Device Y — nothing to do with either
+        // — writes something this build cannot read that happens to name
+        // obj-1: a plugin's kind, or a stranger being deliberate. Device B
+        // then revises obj-1, and X's `object-created` has not arrived yet,
+        // because streams are ordered per device and carry no causal
+        // parents. That is the ordinary wrong-order case, and it must wait.
+        //
+        // Asking "is anything unreadable held about obj-1" answered yes,
+        // about Y — so B's revision was recorded as uninterpretable,
+        // forwarded, and the frontier moved past it. When X's
+        // `object-created` arrived a moment later there was nothing left to
+        // apply the revision from: the words were on the wire, were
+        // accepted, and were never written.
+        let (_dir, store) = store();
+        deliver(
+            &store,
+            "device-y",
+            1,
+            "com.example.thing-made",
+            "obj-1",
+            serde_json::json!({ "shape": "square" }),
+        )
+        .expect("an unknown kind applies and forwards");
+
+        let revision = || {
+            a_revision(
+                "obj-1",
+                "rev-2",
+                "the words that must not be lost",
+                serde_json::json!({ OBJECT_ORIGIN_DEVICE: "device-x", "supersedes": ["rev-1"] }),
+            )
+        };
+        let halted = deliver(&store, "device-b", 1, OBJECT_REVISED, "obj-1", revision());
+        assert!(
+            matches!(
+                halted,
+                Err(KernelError::SyncHalted { ref kind, .. })
+                    if kind == alerts::SYNC_AWAITING_REFERENT
+            ),
+            "an unrelated device's unreadable operation was taken as evidence about X's \
+             object, so B's revision was forwarded instead of waiting: {halted:?}"
+        );
+        assert_eq!(
+            store.sync_frontier("device-b").expect("frontier"),
+            0,
+            "and the frontier must not move past what was not applied"
+        );
+
+        // Then X's own history arrives and the revision converges, which is
+        // the whole point of waiting rather than forwarding.
+        deliver(&store, "device-x", 1, OBJECT_CREATED, "obj-1", a_note("obj-1", "rev-1", "first"))
+            .expect("X's object arrives");
+        deliver(&store, "device-b", 1, OBJECT_REVISED, "obj-1", revision())
+            .expect("and now it applies");
+        let head: String = store
+            .conn()
+            .query_row("SELECT revision_id FROM heads WHERE object_id = 'obj-1'", [], |row| {
+                row.get(0)
+            })
+            .expect("a head");
+        assert_eq!(head, "rev-2", "the revision landed rather than being lost");
+        let kinds: Vec<String> = alerts_of(&store).into_iter().map(|(k, _)| k).collect();
+        assert!(
+            !kinds.contains(&alerts::SYNC_AWAITING_REFERENT.to_string()),
+            "and the wait cleared itself: {kinds:?}"
         );
     }
 

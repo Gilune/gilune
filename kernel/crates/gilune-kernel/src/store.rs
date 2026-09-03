@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -513,6 +513,21 @@ const MIGRATIONS: &[&str] = &[
             COALESCE((SELECT value FROM meta WHERE key = 'device_id'), '')
       WHERE origin_device = '';
      DELETE FROM meta WHERE key = 'op_seq';",
+    // v5 -> v6: an index on what operations are *about*.
+    //
+    // Every read that asks "what does this vault hold concerning this
+    // object" was a full scan of the operations table: the referent
+    // verdicts on the apply path (`uninterpreted_ops_for`), the origin
+    // lookup a naming operation writes (`origins_of`), and the tombstone
+    // question projection asks about every deleted note. A table that only
+    // grows, scanned once per applied operation, is a vault that gets
+    // slower for ever — and the first replica to feel it is the one taking
+    // in somebody's whole history.
+    //
+    // `IF NOT EXISTS` because this is the one migration that could meet
+    // its own object: an index is not user data, so a vault that acquired
+    // one by any other route must not fail to open over it.
+    "CREATE INDEX IF NOT EXISTS operations_target ON operations(target_id);",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
@@ -573,6 +588,26 @@ mod tests {
         let store = Store::open(dir.path()).expect("reopen");
         assert_eq!(store.schema_version().expect("version"), SCHEMA_VERSION);
         assert_eq!(store.device_id().expect("device id"), device);
+    }
+
+    #[test]
+    fn the_operations_target_index_exists_once_a_vault_is_open() {
+        // Not a performance assertion — an existence one. Every read that
+        // asks what a vault holds about an object filters `operations` by
+        // `target_id`, and without an index each of those is a full scan of
+        // a table that only ever grows.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        let found: i64 = store
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'index' AND name = 'operations_target'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("ask sqlite what it has");
+        assert_eq!(found, 1, "the index the apply path reads through is missing");
     }
 
     #[test]

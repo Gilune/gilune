@@ -61,9 +61,15 @@ impl Store {
             return Ok(None);
         };
         let ctx = ProcessorCtx::new(self, job.subject_id.clone());
+        // One read for both, deliberately. A revision landing between a
+        // payload read and a head read would hand this claimant the old
+        // document under the new head — and its `expected_head` would then
+        // *pass*, writing stale work over the newer answer the check exists
+        // to protect. `subject_head_and_payload` reads one head row.
+        let (subject_head, subject_payload) = ctx.subject_head_and_payload()?;
         let claim = ExternalClaim {
-            subject_payload: ctx.subject_payload()?,
-            subject_head: ctx.subject_head()?,
+            subject_payload,
+            subject_head,
             blob: ctx.subject_blob_facts()?,
             job,
         };
@@ -460,6 +466,40 @@ mod tests {
                 }],
             )
             .expect("submit")
+    }
+
+    #[test]
+    fn a_claims_head_names_the_very_revision_whose_document_it_carries() {
+        // The external route hands both across a boundary at once, so a
+        // pair that straddled a write would be *stored* in the claimant's
+        // process and handed back minutes later as `expected_head`. The
+        // check would then pass against a head that was current when it was
+        // read but never held the document the engine worked from.
+        //
+        // Both come from one head row, so the pair is one revision's — and
+        // that is checkable from outside: the head the claim names must be
+        // the revision whose payload the claim carries.
+        let (_dir, store, source_id) = ready();
+        let claim = store
+            .claim_external_job(PROCESSOR, 1_000, 30_000)
+            .expect("claim")
+            .expect("a job is waiting");
+        let head = claim.subject_head.expect("a subject with a head names it");
+        let payload_of_that_head: String = store
+            .conn()
+            .query_row("SELECT payload FROM revisions WHERE revision_id = ?1", [&head], |row| {
+                row.get(0)
+            })
+            .expect("the named revision");
+        assert_eq!(
+            claim.subject_payload, payload_of_that_head,
+            "the claim carried a document that its own head does not hold"
+        );
+        assert_eq!(
+            crate::revisions::heads(store.conn(), &source_id).expect("heads")[0],
+            head,
+            "and it is the head this vault would render"
+        );
     }
 
     #[test]

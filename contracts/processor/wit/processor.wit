@@ -17,6 +17,17 @@ package org:memory@0.1.0;
 interface host-objects {
     // The subject's current head payload (canonical JSON document).
     subject-payload: func() -> result<string, string>;
+    // Which revision `subject-payload` answered with — the head this
+    // processor actually read. Handing it back as an output's
+    // `expected-head` is how a slow processor declines to overwrite an
+    // answer that landed while it was working. `none` only for a subject
+    // with no head at all.
+    //
+    // The host reads this and the payload from one head row, so the pair
+    // is always one revision's: two separate reads with a write between
+    // them would give the old document under the new head, and the
+    // compare-and-set would then pass over the very answer it protects.
+    subject-head: func() -> result<option<string>, string>;
     // The subject's original blob bytes, digest-verified by the host.
     subject-blob: func() -> result<list<u8>, string>;
 }
@@ -47,6 +58,21 @@ interface handler {
         type-schema: s64,
         payload: string,
         target: output-target,
+        // The subject head this output was written over, for a
+        // `revise-subject` that would rather be refused than overwrite.
+        // The host compares it inside the transaction that writes, so a
+        // revision that landed while this processor ran refuses the
+        // output rather than losing to it.
+        //
+        // `none` — the default, and the shape everything before this
+        // carried — keeps the old behaviour: the output lands whatever
+        // the subject has become. Ignored for `new-object`, which
+        // replaces nothing.
+        //
+        // Additive and optional, so this is a compatible minor
+        // (07-compatibility): a guest built against 0.1.0 without it is
+        // unchanged, and a host reading `none` behaves exactly as it did.
+        expected-head: option<string>,
     }
 
     process: func(j: job) -> result<list<proposed-output>, string>;

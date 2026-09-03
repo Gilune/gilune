@@ -93,6 +93,14 @@ const val SYNC_AWAITING_REFERENT = "sync-awaiting-referent"
 /// earns its place here more than anywhere else in the table.
 const val VAULT_DELETED_NOTE_EDITED = "vault-deleted-note-edited"
 
+/// A device you paired said it used to be some *other* device — one this
+/// vault refuses. **Not damage, and nothing has stopped**: the claim is
+/// shown rather than acted on, because a greeting proves who is speaking
+/// and never proves what they say. Its `subject` is the device id being
+/// claimed, which is what [readmitDevice] takes, so this is the one kind in
+/// the table that carries an action.
+const val SYNC_PREVIOUS_IDENTITY_CLAIMED = "sync-previous-identity-claimed"
+
 /// Every kind this build has words of its own for.
 val ALERT_KINDS: List<String> = listOf(
     SYNC_GAP,
@@ -106,7 +114,18 @@ val ALERT_KINDS: List<String> = listOf(
     VAULT_DELETED_NOTE_EDITED,
     SYNC_REFERENT_REFUSED,
     VAULT_CONTENT_UNREADABLE,
+    SYNC_PREVIOUS_IDENTITY_CLAIMED,
 )
+
+/// Whether a standing condition is one a person can act on from the sync
+/// screen, and what the button says.
+///
+/// Exactly one kind is, and it is deliberately narrow: this is not a
+/// general "fix it" hook. A claimed earlier identity is the one condition
+/// where the vault genuinely cannot decide and a person can, so the
+/// decision is offered where the notice is instead of somewhere else.
+fun alertAction(kind: String): String? =
+    if (kind == SYNC_PREVIOUS_IDENTITY_CLAIMED) "Re-admit its earlier history" else null
 
 /// Whether a standing condition means something is **damaged**.
 ///
@@ -250,6 +269,24 @@ fun alertSentence(
                 "or renamed it with another app, put it back and it will reappear. " +
                 "Nothing was lost, and $RESUMES with everything else."
 
+        // A claim, not a fault and not a halt. The sentence has to make
+        // two things plain: nothing was changed on the strength of it, and
+        // the decision in front of the person is one only they can take —
+        // they are the ones who know whether that really was their old
+        // machine. Saying "it is refused" without the "you can let it in"
+        // would read as damage; saying "let it in" without "nothing has
+        // happened yet" would read as a prompt to hurry.
+        SYNC_PREVIOUS_IDENTITY_CLAIMED ->
+            "A device you paired says it used to be another device — one you removed " +
+                "earlier$about. Nothing has been changed on the strength of that: a " +
+                "device can say anything about its own past, so ${words.thisDevice} " +
+                "keeps refusing the older device's work until you say otherwise. If " +
+                "it really is the same machine come back — a restored backup, a " +
+                "replacement handset — re-admit its earlier history and everything it " +
+                "wrote before appears. If it is not, leave this as it is. Nothing " +
+                "stopped either way, and $RESUMES with every device you have not " +
+                "removed."
+
         // A kind this build has never heard of. **Neutral by construction**:
         // whether it is damage is the row's `damage` flag, not this
         // sentence's to guess, so the words say what is certainly true —
@@ -345,6 +382,8 @@ fun alertsHeading(alerts: List<uniffi.gilune_ffi.IntegrityAlert>): String {
             "Sync set aside a change about a device you removed"
         kinds.all { it == VAULT_CONTENT_UNREADABLE } ->
             "A note's text file could not be read"
+        kinds.all { it == SYNC_PREVIOUS_IDENTITY_CLAIMED } ->
+            "A device says it used to be one you removed"
         // A single condition this build has no heading of its own for —
         // a newer kernel's kind that it says is not damage. Reachable with
         // one alert, so it may not say "1 things".

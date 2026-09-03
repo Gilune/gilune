@@ -212,7 +212,8 @@ pub struct IntegrityAlert {
     /// `sync-unknown-op-kind`, `sync-limit-exceeded`,
     /// `sync-blob-digest-mismatch`, `sync-revoked-device`,
     /// `sync-awaiting-referent`, `sync-referent-refused`,
-    /// `vault-deleted-note-edited` or `vault-content-unreadable`.
+    /// `sync-previous-identity-claimed`, `vault-deleted-note-edited` or
+    /// `vault-content-unreadable`.
     pub kind: String,
     /// What the alert is about — a device id, an operation id, a blob id.
     pub subject: String,
@@ -659,6 +660,11 @@ impl TryFrom<PluginDeclaration> for gilune_kernel::plugins::PluginDescriptor {
 pub struct ProcessingSummary {
     pub completed: i64,
     pub skipped_duplicate: i64,
+    /// The subject was revised while the processor was running, so its
+    /// output was refused rather than written over the newer answer. Not
+    /// a failure and not a duplicate: work deliberately dropped because
+    /// something better landed first.
+    pub skipped_moved: i64,
     pub failed: i64,
     pub outputs: i64,
 }
@@ -923,6 +929,7 @@ impl Gilune {
         Ok(ProcessingSummary {
             completed: s.completed,
             skipped_duplicate: s.skipped_duplicate,
+            skipped_moved: s.skipped_moved,
             failed: s.failed,
             outputs: s.outputs,
         })
@@ -1424,6 +1431,26 @@ impl Gilune {
     pub fn revoke_peer(&self, static_pub: String) -> FfiResult<bool> {
         let store = self.store();
         self.with_sync(|service| service.revoke_peer(&store, &static_pub))
+    }
+
+    /// Welcome back a device id a peer claimed as an **earlier identity of
+    /// its own** — the deliberate answer to a `sync-previous-identity-
+    /// claimed` alert, whose `subject` is the id to pass here.
+    ///
+    /// Pairing welcomes the device that paired and nothing else: the
+    /// ancestry in a greeting is a sentence the peer wrote, and honouring
+    /// it automatically would let any device a person agrees to pair with
+    /// lift the revocation on any other. So this is a second action, taken
+    /// by somebody who knows whether that really was their old machine.
+    ///
+    /// Durable, and it survives the next launch: a revoked roster row goes
+    /// on naming that id for ever, and reconciliation is taught to leave a
+    /// re-admitted one alone. Revoking the device again overrules it.
+    ///
+    /// Answers whether the device was refused before this — false means
+    /// there was nothing to let back in.
+    pub fn readmit_device(&self, device_id: String) -> FfiResult<bool> {
+        Ok(self.store().readmit_device(&device_id)?)
     }
 
     /// Sync with every paired peer this device has an address for. M5b

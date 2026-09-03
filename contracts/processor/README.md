@@ -8,7 +8,14 @@ share it (ADR 0003, ADR 0006, ADR 0018 § 2):
   builds' only profile, per ADR 0006). The trait mirrors
   [`wit/processor.wit`](wit/processor.wit) member for member:
   `output-target` is `processor::OutputTarget`, kebab-case for
-  camel-case, and `proposed-output.target` is its `target` field.
+  camel-case, `proposed-output.target` is its `target` field, and
+  `proposed-output.expected-head` is its `expected_head`
+  (`Option<String>` for `option<string>`). The host import matches too:
+  `host-objects.subject-head` is `ProcessorCtx::subject_head`, and
+  `ProcessorCtx::subject_head_and_payload` is an implementation of the
+  two together rather than a third member — the WIT pair is read from
+  one head row, which is what the sandboxed profile will have to honour
+  as well.
 - **Sandboxed** — a WebAssembly component of the `processor` world,
   capability-checked by the host (validated in Spike S3; product host
   lands when ADR 0003 flips to Accepted).
@@ -44,6 +51,12 @@ Contract obligations, all profiles:
   and the change is announced as `org.memory.revision-added` — the same
   operation and event shapes an external edit uses, so sync semantics do
   not change;
+- a `revise-subject` that names `expected-head` is refused, inside the
+  writing transaction, when the subject's head is no longer that one —
+  so a processor that took seconds cannot overwrite an answer that
+  landed while it ran. The host completes such a job rather than
+  failing it: declining to overwrite is the check working, not an
+  error, and it never stops the rest of the queue;
 - deny-by-default: the host grants only the imports the manifest
   declares, and a standard-library component's implicit WASI imports get
   an empty context (05-plugin-system § Capability model);

@@ -110,7 +110,55 @@ class SyncAlertsTest {
         assertEquals("vault-deleted-note-edited", VAULT_DELETED_NOTE_EDITED)
         assertEquals("sync-referent-refused", SYNC_REFERENT_REFUSED)
         assertEquals("vault-content-unreadable", VAULT_CONTENT_UNREADABLE)
+        assertEquals("sync-previous-identity-claimed", SYNC_PREVIOUS_IDENTITY_CLAIMED)
         assertEquals(ALERT_KINDS.size, ALERT_KINDS.toSet().size, "no kind is listed twice")
+    }
+
+    @Test
+    fun aClaimedEarlierIdentityIsOfferedAsADecisionRatherThanReportedAsAFault() {
+        // The one condition in the table that carries an action, and the
+        // one where the wording has to do two jobs at once: say that
+        // nothing has been changed on the strength of what a device
+        // claimed, and hand the person the decision only they can take.
+        for (words in listOf(DESKTOP_ALERT_WORDS, PHONE_ALERT_WORDS)) {
+            val said = alertSentence(SYNC_PREVIOUS_IDENTITY_CLAIMED, "device-4", "", words)
+            assertTrue(
+                said.contains("Nothing has been changed"),
+                "a claim that reads as something already done: '$said'",
+            )
+            assertTrue(
+                said.contains("re-admit its earlier history"),
+                "the notice must name the way out: '$said'",
+            )
+            assertTrue(
+                said.contains("If it is not, leave this as it is"),
+                "and must not push somebody towards yes: '$said'",
+            )
+            assertFalse(
+                said.contains("stopped short") || said.contains("damaged"),
+                "nothing stopped, so it may not read as damage: '$said'",
+            )
+        }
+        assertEquals(
+            "Re-admit its earlier history",
+            alertAction(SYNC_PREVIOUS_IDENTITY_CLAIMED),
+        )
+        assertEquals(
+            "A device says it used to be one you removed",
+            alertsHeading(listOf(alert(SYNC_PREVIOUS_IDENTITY_CLAIMED))),
+        )
+    }
+
+    @Test
+    fun noOtherConditionOffersAnAction() {
+        // The action is deliberately narrow: it lifts a refusal, which is
+        // not something to attach to conditions that merely describe a
+        // wait. A kind added without a decision about this would otherwise
+        // inherit a button by accident.
+        for (kind in ALERT_KINDS.filter { it != SYNC_PREVIOUS_IDENTITY_CLAIMED }) {
+            assertEquals(null, alertAction(kind), "$kind grew a button nobody decided on")
+        }
+        assertEquals(null, alertAction("sync-something-from-2027"))
     }
 
     @Test

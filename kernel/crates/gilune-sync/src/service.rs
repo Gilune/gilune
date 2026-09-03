@@ -939,9 +939,28 @@ impl SyncService {
         expect_fingerprint: Option<String>,
     ) -> Result<PeerSummary> {
         let now = ids::now_ms();
-        // One attempt is one attempt however many addresses it tried:
-        // the candidates are one device, so they share the limiter's key.
-        let key = addresses.first().cloned().unwrap_or_default();
+        // **One key for the whole attempt: the check, every failure, and
+        // the success.** One attempt is one attempt however many addresses
+        // it tried — the candidates are one device — and the key has to
+        // name that device rather than one of the roads to it.
+        //
+        // It used to check the first address and record the outcome
+        // against whichever address answered, and a QR carries several: on
+        // any machine whose first candidate is a virtual adapter nobody
+        // answers on, every failure went under one name and every check
+        // asked about another, so the limiter never held anybody up at all
+        // — an offline guesser with the QR's fingerprint had unlimited
+        // tries at the code. So the key is the peer the pairing *names*
+        // when it names one: a QR carries the fingerprint of the device it
+        // came from, and that is the identity the whole attempt is about.
+        //
+        // Without a fingerprint the pairing is a typed `host:port`, which
+        // is a list of exactly one, so the address checked before the dial
+        // is the address that will be reached. Same key either way.
+        let key = match &expect_fingerprint {
+            Some(fingerprint) => fingerprint.clone(),
+            None => addresses.first().cloned().unwrap_or_default(),
+        };
         self.shared
             .rate
             .lock()
@@ -973,14 +992,14 @@ impl SyncService {
         // A QR names the device it came from. If the handshake produced a
         // different identity, the code was photographed off somebody
         // else's screen or redirected — refuse, and store nothing.
-        if let Some(expected) = expect_fingerprint {
+        if let Some(expected) = &expect_fingerprint {
             let actual = identity::fingerprint_compact(&established.remote_static);
-            if actual != expected {
+            if &actual != expected {
                 self.shared
                     .rate
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
-                    .failed(address, now);
+                    .failed(&key, now);
                 return Err(SyncError::Refused {
                     detail: "that device is not the one the pairing code names".to_string(),
                 });
@@ -993,14 +1012,14 @@ impl SyncService {
                 .rate
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .failed(address, now);
+                .failed(&key, now);
             return Err(e);
         }
         self.shared
             .rate
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .succeeded(address);
+            .succeeded(&key);
         let peer = self.roster().pair(
             &established.remote_static_hex(),
             &established.peer.device_id,
@@ -1289,20 +1308,41 @@ fn offer_from(window: &PairingWindow) -> PairingOffer {
     }
 }
 
-/// A device that has just been paired is welcome — **under every name it
-/// has ever used**.
+/// A device that has just been paired is welcome — **under the name it
+/// paired as, and no other**.
 ///
 /// An explicit re-pairing is the only thing that takes a device out of the
 /// kernel's durable refusal set, and it withdraws the standing alert with
 /// it: nobody should have to dismiss a notice about a device they have
-/// just paired. Welcoming only the *current* device id was the half-fix: a
-/// peer that re-enrolled arrives under a new id, so the refusal recorded
-/// against its old one survived the welcome, its earlier history stayed
-/// refused however it arrived, and the alert that said so could not be
-/// cleared by any action the user had available.
+/// just paired. That reasoning holds exactly as far as the device in front
+/// of the user, which is the one whose `device_id` the handshake produced.
+///
+/// **What it deliberately no longer does: believe the ancestry.** The
+/// greeting's `previous_device_ids` is a list the peer types, inside a
+/// channel that authenticates *who is speaking* and says nothing about
+/// whether what they say is true. Welcoming every name it offered made
+/// pairing a lift on any revocation in this vault: pair with a device the
+/// user is happy to pair with, have it claim the revoked laptop's id, and
+/// the laptop's operations start applying again — a revocation undone by
+/// somebody else's assertion.
+///
+/// So a claim is recorded rather than acted on
+/// (`sync-previous-identity-claimed`, informational), and re-admitting an
+/// earlier identity is its own decision with its own action
+/// (`Store::readmit_device`). The honest re-enrolment case ADR 0019 § 4
+/// describes still works — it just costs one deliberate tap by the person
+/// who knows whether that really was their old machine.
 fn welcome(store: &Store, peer: &crate::roster::Peer) -> Result<()> {
-    for device_id in peer.device_ids() {
-        store.unrefuse_device(&device_id)?;
+    store.unrefuse_device(&peer.device_id)?;
+    for claimed in &peer.previous_device_ids {
+        let detail = format!(
+            "{} (fingerprint {}) says it used to be this device. Nothing here has \
+             been changed on the strength of that: if it really is the same machine, \
+             re-admit its earlier history — otherwise leave it refused.",
+            peer.name,
+            peer.fingerprint(),
+        );
+        store.note_previous_identity_claim(claimed, &detail)?;
     }
     Ok(())
 }

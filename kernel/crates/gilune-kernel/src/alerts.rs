@@ -50,6 +50,21 @@ pub const SYNC_REVOKED_DEVICE: &str = "sync-revoked-device";
 /// stream did **not** stop. Informational, never damage — it is the exit
 /// from `sync-awaiting-referent`, not another way in.
 pub const SYNC_REFERENT_REFUSED: &str = "sync-referent-refused";
+/// A peer said, inside the authenticated channel, that it used to be some
+/// other device — and that device is one this vault refuses.
+///
+/// **A claim is not a credential.** Pairing welcomes the device that
+/// actually paired: re-pairing *this* peer is a decision the user just
+/// took. What it used to be called is a sentence the peer typed into the
+/// greeting, and honouring it automatically would let any device this
+/// vault agrees to pair with lift a revocation on any *other* device, just
+/// by naming it. So the claim is recorded and shown, and re-admitting the
+/// earlier identity is a second, explicit action (`Store::readmit_device`).
+///
+/// Not damage: nothing is broken and nothing was lost. The subject is the
+/// claimed device id — what a person would be re-admitting — and the
+/// detail names the peer that claimed it.
+pub const SYNC_PREVIOUS_IDENTITY_CLAIMED: &str = "sync-previous-identity-claimed";
 /// A note's own preserved bytes could not be read here, and they are not
 /// content in transit, so the projection was held back rather than
 /// written with a placeholder where the words are (`vault.rs`'s render).
@@ -232,6 +247,7 @@ mod tests {
             SYNC_UNKNOWN_OP_KIND,
             SYNC_AWAITING_REFERENT,
             SYNC_REFERENT_REFUSED,
+            SYNC_PREVIOUS_IDENTITY_CLAIMED,
             VAULT_DELETED_NOTE_EDITED,
             VAULT_CONTENT_UNREADABLE,
         ];

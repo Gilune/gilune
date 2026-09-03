@@ -506,7 +506,18 @@ neighbourhood and one shell-policy gap; the fixes amend § 2 and § 3.
   moved is refused for whichever route submits it. The "never overwrite
   words already in the note" rule was provider-local Kotlin before this,
   which left the FFI route open to any submitter; it is now a kernel
-  compare-and-set, and Moonshine passes the head it read.
+  compare-and-set, and Moonshine passes the head it read. *Third review:*
+  the compare-and-set had two gaps of its own — a refusal escaped the run
+  loop as an error, aborting the rest of the pass and telling the user a
+  sync had failed when a note had merely been edited mid-transcription;
+  and the head and the document were read in two statements, so a revision
+  landing between them let a stale transcript through. A refused output now
+  completes its job as `skipped_moved` and the pass continues; the head and
+  document come from one row in one query on both routes; the WIT record
+  carries `expected-head` so the sandboxed transport is not left out. The
+  Android widget's service handle now performs the full Moonshine
+  registration (not only the one-transcriber rule) and raises the
+  switched-off notice itself when it is the handle that did the switching.
 
 ## R0's verdict and corrected numbers
 

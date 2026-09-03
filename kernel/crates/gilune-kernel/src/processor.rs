@@ -53,10 +53,55 @@ impl<'a> ProcessorCtx<'a> {
     /// processor actually read. Passing it back as an output's
     /// `expected_head` is how a slow processor declines to overwrite an
     /// answer that landed while it was working.
+    ///
+    /// **Prefer `subject_head_and_payload`.** Calling this and
+    /// `subject_payload` separately is two reads with a gap between them,
+    /// and the gap is exactly the race the compare-and-set exists to
+    /// close: see that method for what the gap does.
     pub fn subject_head(&self) -> Result<Option<String>> {
         Ok(crate::revisions::heads(self.store.conn(), &self.subject_id)?
             .into_iter()
             .next())
+    }
+
+    /// The head **and** the document it holds, from one row.
+    ///
+    /// **Two reads with a gap between them defeat the check they feed.**
+    /// A processor reads the document, reads the head, and hands the head
+    /// back as `expected_head` so a revision that landed meanwhile refuses
+    /// its output. If a revision lands *between* those two reads, the pair
+    /// describes no revision that ever existed: the old document under the
+    /// new head. The compare-and-set then passes — the head is current,
+    /// because it was read second — and the newer answer is silently
+    /// overwritten by work done against the older one. Reading them the
+    /// other way round is no better; it just moves which half is stale.
+    ///
+    /// One query over one head row cannot be interleaved, so the pair is
+    /// always one revision's, and a revision arriving after it is exactly
+    /// what the compare-and-set is there to refuse.
+    pub fn subject_head_and_payload(&self) -> Result<(Option<String>, String)> {
+        let row: Option<(String, String)> = self
+            .store
+            .conn()
+            .query_row(
+                &format!(
+                    "SELECT r.revision_id, r.payload FROM heads h
+                     JOIN revisions r ON r.revision_id = h.revision_id
+                     WHERE h.object_id = ?1 {} LIMIT 1",
+                    crate::revisions::newest_head_first("r")
+                ),
+                [&self.subject_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(KernelError::from(e)),
+            })?;
+        let (head, payload) = row.ok_or_else(|| KernelError::Corrupt {
+            detail: format!("{} has no current revision", self.subject_id),
+        })?;
+        Ok((Some(head), payload))
     }
 
     /// Where the subject's blob is, or `None` when it has none — a
@@ -147,6 +192,13 @@ pub trait Processor: Send + Sync {
 pub struct ProcessingSummary {
     pub completed: i64,
     pub skipped_duplicate: i64,
+    /// The subject was revised while the processor was running, and the
+    /// output named the head it had read — so it was refused rather than
+    /// written over the newer answer, and the job completed with nothing
+    /// to show. Its own counter because it is not a duplicate: a duplicate
+    /// means the work is already recorded, this means the work was dropped
+    /// on purpose because something better arrived.
+    pub skipped_moved: i64,
     pub failed: i64,
     pub outputs: i64,
 }
@@ -228,12 +280,42 @@ impl Store {
             let ctx = ProcessorCtx::new(self, job.subject_id.clone());
             match processor.process(&ctx, &job) {
                 Ok(outputs) => {
-                    let delivered = self.deliver_outputs(processor.id(), &job, &outputs)?;
-                    summary.outputs += delivered.outputs;
-                    if delivered.skipped_duplicate {
-                        summary.skipped_duplicate += 1;
-                    } else {
-                        summary.completed += 1;
+                    match self.deliver_outputs(processor.id(), &job, &outputs) {
+                        Ok(delivered) => {
+                            summary.outputs += delivered.outputs;
+                            if delivered.skipped_duplicate {
+                                summary.skipped_duplicate += 1;
+                            } else {
+                                summary.completed += 1;
+                            }
+                        }
+                        // **The subject moved while this ran, and that is
+                        // an ordinary outcome.** The compare-and-set exists
+                        // so a slow processor declines to overwrite an
+                        // answer that landed while its engine was working —
+                        // a person typing, a second engine finishing — and
+                        // declining is the feature working, not a fault.
+                        //
+                        // It escaped this loop, which made it one: the `?`
+                        // carried it out of `run_pending_jobs` as an error,
+                        // so the *rest of the queue* never ran and every
+                        // caller — the app's work pass, the recording
+                        // service, the CLI — reported a failure for a job
+                        // that had simply been overtaken. And the job kept
+                        // its lease, so it came back and did it again.
+                        //
+                        // So it completes here: this job is done, there is
+                        // nothing left for it to write, and the loop
+                        // carries on to the next one. Counted as
+                        // `skipped_moved` rather than folded into
+                        // `skipped_duplicate` — a duplicate means the work
+                        // was already recorded, and this is the opposite,
+                        // work deliberately dropped because it was stale.
+                        Err(KernelError::SubjectMoved { .. }) => {
+                            self.complete_job(&job.job_id)?;
+                            summary.skipped_moved += 1;
+                        }
+                        Err(e) => return Err(e),
                     }
                 }
                 Err(message) => {
@@ -587,6 +669,156 @@ mod tests {
         assert_eq!(second.skipped_duplicate, 1);
         assert_eq!(second.outputs, 0);
         assert_eq!(revisions_on(&store, &subject_id(&store)), 2, "one revision, not two");
+    }
+
+    #[test]
+    fn the_head_and_the_document_a_processor_reads_are_always_one_revisions() {
+        // The adversarial ordering, and it is silent when it goes wrong.
+        // A processor reads the document, then reads the head, and hands
+        // the head back as `expected_head` so a revision that landed while
+        // its engine ran refuses its output. A revision landing *between*
+        // those two reads gives it a pair that describes no revision that
+        // ever existed — the old document under the new head — and the
+        // compare-and-set then passes, because the head really is current.
+        // The newer answer is overwritten by work done against the older
+        // one, and nothing anywhere says so.
+        let (_dir, store) = wav_captured();
+        let source_id = subject_id(&store);
+        let ctx = ProcessorCtx::new(&store, source_id.clone());
+
+        // Read the payload first, as the old two-call shape did.
+        let payload_first = ctx.subject_payload().expect("payload");
+        // Something lands: a person typing, or a second engine finishing.
+        let conn = store.conn();
+        conn.execute_batch("BEGIN IMMEDIATE;").expect("begin");
+        crate::revisions::add_revision(
+            conn,
+            &source_id,
+            "landed-while-it-ran",
+            &serde_json::json!({ "text": "what somebody else wrote" }).to_string(),
+            "external-edit",
+            2_000,
+            crate::revisions::Announce::Silent,
+        )
+        .expect("a revision lands between the two reads");
+        conn.execute_batch("COMMIT;").expect("commit");
+        // And only now the head.
+        let head_second = ctx.subject_head().expect("head");
+
+        assert_eq!(
+            head_second.as_deref(),
+            Some("landed-while-it-ran"),
+            "the second read sees the newer revision, which is the whole problem"
+        );
+
+        // The shipped accessor reads one head row, so the pair it answers
+        // with belongs to one revision and cannot straddle a write.
+        let (head, payload) = ctx.subject_head_and_payload().expect("both at once");
+        assert_eq!(head.as_deref(), Some("landed-while-it-ran"));
+        assert_ne!(
+            payload, payload_first,
+            "the document must be the one that head actually holds"
+        );
+        assert!(payload.contains("what somebody else wrote"));
+
+        // And the pair the interleaved reads produced is refused at commit
+        // rather than silently applied: the head it names is stale by the
+        // time the transaction runs.
+        let job = Job {
+            job_id: "job-1".to_string(),
+            subscription_id: "transcribe".to_string(),
+            event_id: "event-1".to_string(),
+            event_type: crate::capture::SOURCE_READY_EVENT.to_string(),
+            subject_id: source_id.clone(),
+            payload: String::new(),
+            attempts: 0,
+        };
+        crate::revisions::heads(store.conn(), &source_id).expect("heads");
+        let stale = store.deliver_outputs(
+            "transcribe",
+            &job,
+            &[ProposedOutput {
+                type_id: crate::capture::SOURCE_TYPE.to_string(),
+                type_schema: 1,
+                payload: payload_first,
+                target: OutputTarget::ReviseSubject,
+                // The head as it was when the *document* was read — which
+                // is what an honest single-transaction read would have
+                // given back, and what the interleaved pair lost.
+                expected_head: Some("a-head-that-has-been-superseded".to_string()),
+            }],
+        );
+        assert!(
+            matches!(stale, Err(KernelError::SubjectMoved { .. })),
+            "the compare-and-set must refuse a stale head: {stale:?}"
+        );
+    }
+
+    #[test]
+    fn a_subject_that_moved_skips_that_job_and_the_queue_carries_on() {
+        // The compare-and-set is the feature working: a slow processor
+        // declines to overwrite an answer that landed while its engine was
+        // running. It came back out of this loop as an `Err`, which turned
+        // "one note was overtaken" into "the whole work pass failed" — the
+        // rest of the queue never ran, every caller reported a failure, and
+        // the job kept its lease and did it again next time.
+        //
+        // A processor that always names a head nobody has: every delivery
+        // is a subject that moved.
+        struct Stale;
+        impl Processor for Stale {
+            fn id(&self) -> &str {
+                "transcribe"
+            }
+            fn process(
+                &self,
+                _ctx: &ProcessorCtx<'_>,
+                _job: &Job,
+            ) -> std::result::Result<Vec<ProposedOutput>, String> {
+                Ok(vec![ProposedOutput {
+                    type_id: crate::capture::SOURCE_TYPE.to_string(),
+                    type_schema: 1,
+                    payload: serde_json::json!({ "text": "written over a head that moved" })
+                        .to_string(),
+                    target: OutputTarget::ReviseSubject,
+                    expected_head: Some("a-revision-nobody-has".to_string()),
+                }])
+            }
+        }
+
+        let (_dir, store) = wav_captured();
+        // A second capture, so there is a queue rather than one job: what
+        // matters is that the first job's refusal does not take the second
+        // one down with it.
+        store.capture_bytes("wav", &[9u8, 8, 7, 6, 5]).expect("a second capture");
+        assert_eq!(
+            store.conn().query_row("SELECT COUNT(*) FROM jobs", [], |r| r.get::<_, i64>(0)),
+            Ok(2),
+            "two captures, two jobs"
+        );
+
+        let summary = store
+            .run_pending_jobs(&[&Stale], 1_000, 30_000)
+            .expect("a subject that moved is an outcome, never an error out of the loop");
+        assert_eq!(summary.skipped_moved, 2, "both jobs were overtaken, both are done");
+        assert_eq!(summary.completed, 0);
+        assert_eq!(summary.failed, 0, "declining to overwrite is not a failure");
+        assert_eq!(summary.outputs, 0, "and nothing was written");
+        assert_eq!(
+            store.conn().query_row(
+                "SELECT COUNT(*) FROM jobs WHERE state = 'done'",
+                [],
+                |r| r.get::<_, i64>(0)
+            ),
+            Ok(2),
+            "a job nothing is left to write for is done, not leased until it retries"
+        );
+
+        // And a healthy processor afterwards has nothing left to run: the
+        // jobs really did complete rather than being parked.
+        let after = store.run_pending_jobs(&[&FakeTranscriber], 60_000, 30_000).expect("run");
+        assert_eq!(after.completed, 0);
+        assert_eq!(after.outputs, 0);
     }
 
     #[test]

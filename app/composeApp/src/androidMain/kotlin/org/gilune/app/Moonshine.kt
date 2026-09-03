@@ -231,10 +231,10 @@ fun rememberConnectionIsMetered(context: Context): Boolean {
     return metered
 }
 
-/// Register the realtime provider. **Android only, and this is the only
-/// call site** — `openVault` registers the shared declarations for both
-/// shells, and Moonshine is not one of them: the AAR is Android-only and
-/// ADR 0018 § 4 keeps whisper as the desktop engine.
+/// Register the realtime provider. **Android only** — `openVault`
+/// registers the shared declarations for both shells, and Moonshine is not
+/// one of them: the AAR is Android-only and ADR 0018 § 4 keeps whisper as
+/// the desktop engine.
 ///
 /// Registering is idempotent and never resurrects a plugin the user
 /// removed.
@@ -272,9 +272,31 @@ fun rememberConnectionIsMetered(context: Context): Boolean {
 /// switched on, and this open took it away. A fresh install is not that —
 /// nothing was taken away there, because the provider arrives switched off
 /// and says so on the screen that offers it.
-data class MoonshineRegistration(val switchedOffOnUpgrade: Boolean = false)
+/// [message] is the sentence the switch-off produced, or null when nothing
+/// moved — the activity puts it on the message line, and a handle with no
+/// screen has nowhere to put it.
+data class MoonshineRegistration(
+    val switchedOffOnUpgrade: Boolean = false,
+    val message: String? = null,
+)
 
-fun registerMoonshine(state: GiluneState, gilune: Gilune): MoonshineRegistration {
+/// **The registration itself, on whichever handle got here first.**
+///
+/// Both handles run this: the activity when it opens the vault, and the
+/// recording service when a widget tap opens one of its own. It used to be
+/// the activity's alone, and the service ran only the one-transcriber rule
+/// — so a phone whose owner records from the home-screen widget and has
+/// not opened the app since the update had no `org.memory.moonshine` row
+/// at all. Nothing registered the implementation, so the service could not
+/// claim its jobs; nothing declared the plugin, so Settings could not
+/// offer it; and the switch-off notice, which is the one thing a person
+/// has to be told, could never be raised from the handle that did the
+/// switching off.
+///
+/// Plugin state is vault state, so whichever handle arrives first settles
+/// it and the other finds nothing to do. The caller owns what to *say*:
+/// this returns the outcome and touches no UI.
+fun registerMoonshineOnHandle(gilune: Gilune): MoonshineRegistration {
     var outcome = MoonshineRegistration()
     runCatching {
         val declaration = moonshineDeclaration()
@@ -292,17 +314,28 @@ fun registerMoonshine(state: GiluneState, gilune: Gilune): MoonshineRegistration
                 runCatching { gilune.grantCapability(MOONSHINE_PLUGIN, capability) }
             }
             said = applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN)
-            if (said != null && wasRunning) outcome = MoonshineRegistration(switchedOffOnUpgrade = true)
         }
         registerMoonshineProcessor(gilune, gilune.plugins())
-        state.refresh()
-        // Said only when the switch actually moved — which is once, on the
-        // install or the upgrade that introduced the second provider — and
-        // never over an enrolment notice, which is the one thing about
-        // opening this vault a person has to be told.
-        if (said != null && state.message.value.startsWith("vault: ")) {
-            state.message.value = said
-        }
+        outcome = MoonshineRegistration(
+            switchedOffOnUpgrade = said != null && wasRunning,
+            message = said,
+        )
+    }
+    return outcome
+}
+
+/// The activity's half: register, refresh what the screen is drawn from,
+/// and put the sentence on the message line if there is one.
+fun registerMoonshine(state: GiluneState, gilune: Gilune): MoonshineRegistration {
+    val outcome = registerMoonshineOnHandle(gilune)
+    runCatching { state.refresh() }
+    // Said only when the switch actually moved — which is once, on the
+    // install or the upgrade that introduced the second provider — and
+    // never over an enrolment notice, which is the one thing about
+    // opening this vault a person has to be told.
+    val said = outcome.message
+    if (said != null && state.message.value.startsWith("vault: ")) {
+        state.message.value = said
     }
     return outcome
 }
@@ -410,13 +443,27 @@ private fun ready(runtime: MoonshineRuntime, model: MoonshineModel, dir: File) {
 /// because registration is what stops `runProcessing` on this handle from
 /// claiming a job it has no implementation for and burning its lease.
 fun moonshineProviderForService(context: Context, gilune: Gilune): (() -> MoonshineDecoder)? {
-    // The one-transcriber rule runs on **this** handle too, because this
-    // handle may be the first thing to open the vault since the upgrade
-    // that introduced the second provider: a phone whose owner records
-    // through the widget and never opens the app would otherwise queue a
-    // moonshine job per recording that nothing claims. Plugin state is
-    // vault state, so whichever handle gets here first settles it.
-    runCatching { applyOneTranscriberRule(gilune, MOONSHINE_PLUGIN) }
+    // **The whole registration, not just the rule.** This handle may be
+    // the first thing ever to open this vault — a phone whose owner
+    // records from the widget and has not opened the app since the update
+    // — and running only the one-transcriber rule left it with no
+    // `org.memory.moonshine` row at all: nothing to switch on in Settings,
+    // no implementation registered for `claimJob`, and jobs queued for a
+    // provider nothing in any process could claim. Plugin state is vault
+    // state, so whichever handle gets here first settles it and the other
+    // finds nothing to do.
+    val registration = registerMoonshineOnHandle(gilune)
+    if (registration.switchedOffOnUpgrade) {
+        // Raised from whichever handle actually did the switching off.
+        // The activity's route is a message line it can draw; this handle
+        // has no screen, and the notice is the only thing that will still
+        // be there when somebody next opens the app. Blocking is right
+        // here — this runs on the service's own worker, never the main
+        // thread, and the write is a single DataStore edit.
+        runCatching {
+            kotlinx.coroutines.runBlocking { MobilePrefs(context).raiseProviderOffNotice() }
+        }
+    }
     val plugins = runCatching { gilune.plugins() }.getOrNull() ?: return null
     if (!registerMoonshineProcessor(gilune, plugins)) return null
     if (plugins.activeTranscriber() != MOONSHINE_PLUGIN) return null

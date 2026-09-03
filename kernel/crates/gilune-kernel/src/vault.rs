@@ -455,9 +455,7 @@ impl Store {
                 // else wrote something the deleter never had in front of
                 // them" — so it fell back to re-rendering the object and
                 // comparing hashes, which an ingested edit could match.
-                let superseded = crate::revisions::heads(conn, &object_id)?;
-                let mut carried = serde_json::json!({ "supersedes": superseded });
-                crate::operations::name_origins(conn, &object_id, &superseded, &mut carried)?;
+                let carried = crate::operations::tombstone_payload(conn, &object_id)?;
                 conn.execute(
                     "UPDATE objects SET deleted = 1 WHERE object_id = ?1",
                     [&object_id],
@@ -517,11 +515,36 @@ impl Store {
     ///
     /// A tombstone written before the key existed names nothing at all,
     /// and cannot be told from one that legitimately named no heads. For
-    /// those the older, weaker proxy stands: the projection's own revision
-    /// is not an external edit. It is not exact — it cannot see an edit
-    /// made on another device — but it is the question the key now
-    /// answers properly, and a vault holding pre-key tombstones has by
-    /// definition never synced under a kernel that wrote them.
+    /// those the question is asked of the projection instead, in the
+    /// narrowest form that is actually true: **the file on disk reflects
+    /// exactly the head being deleted, and nothing has landed since.** The
+    /// object has one head, and it is the revision the projection was
+    /// written from. The caller has already established that the bytes on
+    /// disk are the ones the kernel wrote, so together those say the whole
+    /// of what is here was seen.
+    ///
+    /// **What this adds, and why.** The fallback used to ask only where
+    /// the projected revision came from — withdraw unless its `origin` was
+    /// `external-edit` — which is a question about *who wrote it* standing
+    /// in for a question about *what has arrived*. A revision synced in
+    /// from another device carries that device's origin, not
+    /// `external-edit`, so a note revised remotely after this device
+    /// projected it, and then tombstoned by a keyless deleter, had its
+    /// file deleted while holding words the deleter had never seen.
+    ///
+    /// The head comparison is exact about that and infers nothing about
+    /// provenance: a head that is not the projected one means something
+    /// landed after the file was written, whoever wrote it. The origin
+    /// check stays beside it rather than being replaced by it, because it
+    /// answers a case the comparison cannot — an edit ingested *here*
+    /// becomes the head and the projection's revision both, so on its own
+    /// the comparison would delete words somebody had just typed.
+    ///
+    /// Both must hold, so this is strictly narrower than either question
+    /// alone: it withdraws in fewer cases and never in more. That is the
+    /// direction rule 1 asks for — the cost of keeping a file is an import
+    /// candidate and a notice, the cost of deleting one is somebody's
+    /// words.
     fn deleter_saw_everything(
         &self,
         object_id: &str,
@@ -547,7 +570,23 @@ impl Store {
                 named.extend(heads.iter().filter_map(|v| v.as_str()).map(str::to_string));
             }
         }
+        let heads = crate::revisions::heads(self.conn(), object_id)?;
         if !any_key {
+            // Nothing has landed since the file was written: one head, and
+            // it is the one the projection was rendered from.
+            if heads.len() != 1 || heads[0] != projected_revision {
+                return Ok(false);
+            }
+            // And the head is not this device's own ingested edit. Kept
+            // rather than replaced: on its own the head comparison says
+            // yes here, because ingesting an edit *is* a revision and it
+            // *does* become the projection's, so a tombstone arriving
+            // afterwards would delete words somebody had just typed
+            // (`an_edit_ingested_before_the_tombstone_arrived_still_keeps_the_file`).
+            // The two together are strictly narrower than either alone —
+            // this can only ever keep more files, never fewer — which is
+            // the direction rule 1 asks for: keeping costs an import
+            // candidate and a notice, deleting costs somebody's words.
             let origin: Option<String> = self
                 .conn()
                 .query_row(
@@ -559,9 +598,7 @@ impl Store {
                 .or_else(no_rows_none)?;
             return Ok(origin.as_deref() != Some("external-edit"));
         }
-        Ok(crate::revisions::heads(self.conn(), object_id)?
-            .iter()
-            .all(|head| named.contains(head)))
+        Ok(heads.iter().all(|head| named.contains(head)))
     }
 
     fn is_deleted(&self, object_id: &str) -> Result<bool> {
@@ -1099,6 +1136,102 @@ mod tests {
             edited,
             "the words a person wrote survive a deletion made elsewhere"
         );
+    }
+
+    #[test]
+    fn a_keyless_tombstone_keeps_a_file_a_remote_revision_has_overtaken() {
+        // The adversarial case for the pre-key fallback, and the one the
+        // old proxy got wrong. Nobody here touched the file, so "did the
+        // kernel write these bytes" answers yes; the projected revision
+        // came in from another device, so its `origin` is that device's
+        // and not `external-edit` — and the old rule read that as "safe to
+        // delete". But a *second* remote revision has landed since the
+        // file was written, and a tombstone that names no heads cannot
+        // have seen it. Deleting the file there throws away words that
+        // arrived after the deleter last looked.
+        let (_dir, store, rel) = captured("first words");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let seen = head_of(&store, &object_id);
+
+        // R1 from elsewhere, and this device projects it: the file on disk
+        // is now the kernel's own rendering of a revision it received.
+        from_elsewhere(
+            &store,
+            1,
+            crate::operations::OBJECT_REVISED,
+            &object_id,
+            serde_json::json!({
+                "object_id": object_id,
+                "revision": {
+                    "revision_id": "rev-one",
+                    "payload": serde_json::json!({ "text": "second words" }).to_string(),
+                    "origin": "capture",
+                    "created_ms": 1_700_000_000_500i64,
+                },
+                "supersedes": [seen],
+            }),
+        );
+        store.project().expect("project R1");
+        assert!(read_rel(&store, &rel).contains("second words"));
+
+        // R2 lands after the projection was written. Nothing rewrites the
+        // file yet — the tombstone arrives in the same pull.
+        from_elsewhere(
+            &store,
+            2,
+            crate::operations::OBJECT_REVISED,
+            &object_id,
+            serde_json::json!({
+                "object_id": object_id,
+                "revision": {
+                    "revision_id": "rev-two",
+                    "payload": serde_json::json!({ "text": "third words" }).to_string(),
+                    "origin": "capture",
+                    "created_ms": 1_700_000_001_000i64,
+                },
+                "supersedes": ["rev-one"],
+            }),
+        );
+        // A deleter running an older build: it names nothing at all, so
+        // there is no way to know what it had in front of it.
+        from_elsewhere(
+            &store,
+            3,
+            crate::operations::TOMBSTONE,
+            &object_id,
+            serde_json::json!({}),
+        );
+
+        assert_eq!(
+            store.project().expect("project").removed,
+            0,
+            "a keyless tombstone deleted a file that a later revision had already \
+             overtaken — the deleter cannot have seen what arrived after it"
+        );
+        assert!(store.vault().join(&rel).exists());
+    }
+
+    #[test]
+    fn a_keyless_tombstone_still_withdraws_a_file_nothing_has_overtaken() {
+        // The other half, and the reason the rule is a comparison rather
+        // than a refusal: an ordinary delete from an older build, against a
+        // note nothing has touched since it was projected, must still take
+        // the file away. Otherwise every pre-key tombstone leaves an
+        // orphan for ever, which is the defect the named heads were added
+        // to close in the first place.
+        let (_dir, store, rel) = captured("nothing has happened to this");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        tombstone_from_elsewhere(&store, &object_id);
+
+        assert_eq!(store.project().expect("project").removed, 1);
+        assert!(!store.vault().join(&rel).exists());
+        assert!(alert_kinds(&store).is_empty(), "and it is not reported as a decision");
     }
 
     #[test]

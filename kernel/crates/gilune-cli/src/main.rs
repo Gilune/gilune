@@ -111,6 +111,7 @@ fn run() -> Result<(), String> {
                 serde_json::json!({
                     "completed": s.completed,
                     "skipped_duplicate": s.skipped_duplicate,
+                    "skipped_moved": s.skipped_moved,
                     "failed": s.failed,
                     "outputs": s.outputs,
                 })

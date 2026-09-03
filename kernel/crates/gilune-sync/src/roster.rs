@@ -224,16 +224,25 @@ impl Roster {
     /// replica still relays, was refused for ever by a device that had
     /// just deliberately welcomed it back.
     ///
-    /// So a peer that is paired now, under any name it has ever used,
+    /// So a peer that is paired now, **under the name it paired as**,
     /// silences every revoked row that names it. `pair` also retires those
     /// rows outright; this is the half that holds even for a roster
     /// written before that ran.
+    ///
+    /// Only its current id, deliberately. A peer's `previous_device_ids`
+    /// are names it asserted about itself, and letting an assertion silence
+    /// a revocation here would be the same bypass `welcome` closes, one
+    /// layer down: pairing anybody would quietly un-refuse whoever they
+    /// claimed to have been. An earlier identity is welcomed back by
+    /// `Store::readmit_device` and by nothing else — and that decision is
+    /// durable in the vault, so reconciliation does not undo it.
     pub fn revoked_device_ids(&self) -> Vec<String> {
         let welcomed: Vec<String> = self
             .peers
             .iter()
             .filter(|p| p.state == PeerState::Paired)
-            .flat_map(|p| p.device_ids())
+            .map(|p| p.device_id.clone())
+            .filter(|id| !id.is_empty())
             .collect();
         let mut refused: Vec<String> = Vec::new();
         for peer in self.peers.iter().filter(|p| p.state == PeerState::Revoked) {
@@ -253,9 +262,17 @@ impl Roster {
     /// **Replaced by device, not merely by key.** A peer that re-enrols
     /// arrives with a new static key *and* a new device id, so replacing
     /// only the row with the same key left the revoked row behind — and a
-    /// revoked row is a standing refusal. Any revoked row this peer
-    /// answers to, under its current name or any earlier one, is retired
-    /// by the pairing that welcomed it.
+    /// revoked row is a standing refusal. A revoked row naming the device
+    /// id this peer **paired as** is retired by the pairing that welcomed
+    /// it: re-pairing this device is the user's own decision about this
+    /// device.
+    ///
+    /// A revoked row naming an id the peer merely *claims* as an earlier
+    /// self is left exactly where it is. That claim is a sentence in a
+    /// greeting, not a credential, and retiring a revocation on the
+    /// strength of it would let any device the user pairs with lift the
+    /// refusal on any other. `welcome` records the claim instead, and
+    /// `Store::readmit_device` is the deliberate way back in.
     pub fn pair(
         &mut self,
         static_pub: &str,
@@ -279,10 +296,10 @@ impl Roster {
         };
         let stored = peer.clone();
         self.mutate(move |peers| {
-            let names = stored.device_ids();
+            let paired_as = stored.device_id.clone();
             peers.retain(|p| {
                 p.static_pub != stored.static_pub
-                    && !(p.state == PeerState::Revoked && names.iter().any(|id| p.claims(id)))
+                    && !(p.state == PeerState::Revoked && p.claims(&paired_as))
             });
             peers.push(stored);
         })?;
@@ -666,23 +683,49 @@ mod tests {
             )
             .expect("re-pair");
 
-        assert!(
-            roster.revoked_device_ids().is_empty(),
-            "the device was welcomed back under both its names, so neither is refused"
+        assert_eq!(
+            roster.revoked_device_ids(),
+            vec!["device-old".to_string()],
+            "a name the peer asserted about itself must not silence a revocation: \
+             pairing anybody would then lift the refusal on whoever they named"
         );
-        assert_eq!(roster.peers().len(), 1, "and the revoked row is gone, not merely quiet");
+        assert_eq!(
+            roster.peers().len(),
+            2,
+            "the row that revoked the old name stays; only the newly paired name is retired"
+        );
         assert_eq!(
             roster.find(&after).expect("the peer").device_ids(),
-            vec!["device-new".to_string(), "device-old".to_string()]
+            vec!["device-new".to_string(), "device-old".to_string()],
+            "the claim is still recorded — it is what the notice is about"
         );
 
-        // It survives a reopen as one row with its ancestry intact.
+        // It survives a reopen with both facts intact: the ancestry the
+        // peer claimed, and the revocation that has not been lifted.
         let reopened = Roster::open(dir.path().join("roster.json"), None).expect("reopen");
-        assert!(reopened.revoked_device_ids().is_empty());
+        assert_eq!(reopened.revoked_device_ids(), vec!["device-old".to_string()]);
         assert_eq!(
             reopened.find(&after).expect("the peer").previous_device_ids,
             vec!["device-old".to_string()]
         );
+    }
+
+    /// The half that must keep working: a device re-paired under the very
+    /// name it was revoked under. That is the user re-pairing *this*
+    /// device, which is a decision about the device in front of them.
+    #[test]
+    fn re_pairing_a_device_under_the_name_it_was_revoked_under_retires_that_row() {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut roster = roster(&dir, None);
+        let key = "7a".repeat(32);
+
+        roster.pair(&key, "device-a", &[], "Phone", "a:1", [1u8; 32]).expect("pair");
+        assert!(roster.revoke(&key).expect("revoke"));
+        assert_eq!(roster.revoked_device_ids(), vec!["device-a".to_string()]);
+
+        roster.pair(&key, "device-a", &[], "Phone", "a:1", [2u8; 32]).expect("re-pair");
+        assert!(roster.revoked_device_ids().is_empty());
+        assert_eq!(roster.peers().len(), 1, "the revoked row is gone, not merely quiet");
     }
 
     /// And the same fact from the other side: a device that is *still*
@@ -716,10 +759,13 @@ mod tests {
             )
             .expect("re-pair");
 
+        let mut refused = roster.revoked_device_ids();
+        refused.sort();
         assert_eq!(
-            roster.revoked_device_ids(),
-            vec!["device-gone".to_string()],
-            "welcoming one device back must not amnesty another"
+            refused,
+            vec!["device-gone".to_string(), "device-old".to_string()],
+            "welcoming one device back must not amnesty another — nor the name the \
+             welcomed one merely claimed to have had"
         );
     }
 

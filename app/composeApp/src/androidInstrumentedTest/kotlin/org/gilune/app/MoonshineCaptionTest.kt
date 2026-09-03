@@ -387,6 +387,78 @@ class MoonshineCaptionTest {
         }
     }
 
+    /// **A vault whose first opener is the recording service.** A phone
+    /// whose owner records from the home-screen widget and has not opened
+    /// the app since the update: the service opens a `Gilune` of its own,
+    /// and until this round it ran only the one-transcriber rule — so
+    /// nothing declared the provider at all. No row, so Settings could not
+    /// offer it, `claimJob` had no implementation registered, and any job
+    /// queued for it was one nothing in any process could claim.
+    @Test
+    fun theRecordingServicesHandleRegistersTheProviderOnAVaultThatHasNeverSeenIt() {
+        val vault = scratchVault()
+        Gilune.open(vault).use { gilune ->
+            assertTrue(
+                gilune.plugins().none { it.pluginId == MOONSHINE_PLUGIN },
+                "the fixture is wrong: the provider is already installed",
+            )
+
+            // Exactly what the service does, and it is allowed to answer
+            // "no provider for this handle" — what matters is the row.
+            moonshineProviderForService(context, gilune)
+
+            val plugin = gilune.plugins().firstOrNull { it.pluginId == MOONSHINE_PLUGIN }
+            assertTrue(plugin != null, "a widget-only phone never got the provider at all")
+            // Registered and switched off, on the same one-transcriber rule
+            // the activity's route follows: registering is not choosing.
+            assertEquals("disabled", plugin!!.state, "registering is not choosing")
+            assertEquals(MOONSHINE_PROCESSOR, plugin.processorId)
+            assertEquals(listOf("blobs.read", "objects.write"), plugin.granted.sorted())
+            assertEquals(
+                listOf(NETWORK_CAPABILITY),
+                plugin.ungranted,
+                "a service that never asks anybody must not be granted the network",
+            )
+        }
+    }
+
+    /// And when it is the service that performs the switch-off, it is the
+    /// service that raises the notice. It has no message line and no
+    /// screen, so without this the one thing a person has to be told —
+    /// their caption has stopped — was told to nobody.
+    @Test
+    fun theRecordingServiceRaisesTheSwitchedOffNoticeItself() {
+        val vault = scratchVault()
+        val prefs = MobilePrefs(context)
+        kotlinx.coroutines.runBlocking { prefs.dismissProviderOffNotice() }
+        Gilune.open(vault).use { gilune ->
+            // An upgraded vault, as R1 → R3 left it: the row is there and on.
+            gilune.registerPlugin(moonshineDeclaration())
+            gilune.setPluginEnabled(MOONSHINE_PLUGIN, true)
+
+            moonshineProviderForService(context, gilune)
+
+            assertEquals(
+                "disabled",
+                gilune.plugins().single { it.pluginId == MOONSHINE_PLUGIN }.state,
+            )
+            assertTrue(
+                kotlinx.coroutines.runBlocking { prefs.providerOffNotice.first() },
+                "the handle that switched it off did not say so, and no other handle can",
+            )
+
+            // Once. A second recording finds nothing to switch off, so a
+            // notice the person has since dismissed does not come back.
+            kotlinx.coroutines.runBlocking { prefs.dismissProviderOffNotice() }
+            moonshineProviderForService(context, gilune)
+            assertFalse(
+                kotlinx.coroutines.runBlocking { prefs.providerOffNotice.first() },
+                "the notice would come back after every widget recording",
+            )
+        }
+        kotlinx.coroutines.runBlocking { prefs.dismissProviderOffNotice() }
+    }
+
     /// The notice itself: persisted, dismissible, and off by default.
     @Test
     fun theNoticeStandsUntilItIsDismissedAndDefaultsToNothing() {

@@ -128,13 +128,22 @@ fn merge_into_source(store: &Store, transcript_id: &str) -> Result<()> {
         // A source that already carries text keeps what it has — a merge
         // never overwrites — and the transcript retires either way, its
         // own words preserved in kernel history rather than in the vault.
+        // The heads this deletion could see, named — read before the rows
+        // are marked deleted, and inside this transaction, so the operation
+        // describes exactly the history it is retiring.
+        //
+        // It used to carry `{}`, which on every other replica is
+        // indistinguishable from a tombstone written before the key
+        // existed: the merge knew precisely what it was deleting and said
+        // nothing, so its deletions fell to the weaker fallback for ever.
+        let carried = crate::operations::tombstone_payload(conn, transcript_id)?;
         conn.execute("UPDATE objects SET deleted = 1 WHERE object_id = ?1", [transcript_id])?;
         conn.execute("DELETE FROM projections WHERE object_id = ?1", [transcript_id])?;
         crate::operations::record(
             conn,
             crate::operations::TOMBSTONE,
             transcript_id,
-            serde_json::json!({}),
+            carried,
             created_ms,
         )?;
         Ok(())
@@ -233,6 +242,51 @@ mod tests {
 
     fn count(store: &Store, sql: &str) -> i64 {
         store.conn().query_row(sql, [], |row| row.get(0)).expect("count")
+    }
+
+    #[test]
+    fn the_merges_tombstone_names_the_heads_it_retired() {
+        // A bare `{}` tombstone is, on every other replica, exactly what a
+        // tombstone written before the key existed looks like — so the
+        // receiving projection has to fall back to the weaker pre-key
+        // question rather than the exact one. The merge is a deletion made
+        // here with the whole object in front of it: it can answer
+        // precisely, and now it does.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (_source_id, transcript_id, _rel) = old_model_vault(dir.path());
+        let head_before: String = {
+            let store = Store::open(dir.path()).expect("read the head before the merge runs");
+            // Opening ran the merge, so read the head the merge retired
+            // out of the operation it wrote rather than out of `heads`.
+            let payload: String = store
+                .conn()
+                .query_row(
+                    "SELECT payload FROM operations WHERE kind = ?1 AND target_id = ?2",
+                    rusqlite::params![crate::operations::TOMBSTONE, transcript_id],
+                    |row| row.get(0),
+                )
+                .expect("the merge's tombstone");
+            let document: serde_json::Value = serde_json::from_str(&payload).expect("json");
+            let named = document
+                .get("supersedes")
+                .and_then(|v| v.as_array())
+                .expect("the tombstone names the heads it saw")
+                .clone();
+            assert_eq!(named.len(), 1, "one head was retired: {named:?}");
+            // No origin key, and that is right rather than missing: this
+            // fixture's transcript object was written with raw SQL, as the
+            // old model left it, so there is no `object-created` operation
+            // to read an origin out of. `name_origins` writes what is
+            // known and nothing else — the canonical bytes say only what
+            // is true — which is the same reason the key is absent from
+            // pre-M5a operations in a real vault.
+            assert!(
+                document.get(crate::operations::OBJECT_ORIGIN_DEVICE).is_none(),
+                "an origin was asserted for an object no operation ever created: {document}"
+            );
+            named[0].as_str().expect("a revision id").to_string()
+        };
+        assert!(!head_before.is_empty());
     }
 
     #[test]

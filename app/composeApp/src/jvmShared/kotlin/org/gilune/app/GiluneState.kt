@@ -316,6 +316,21 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         }
     }
 
+    /// Welcome back an earlier identity a peer **claimed** — the action
+    /// behind a `sync-previous-identity-claimed` notice, whose `subject` is
+    /// the device id to pass here.
+    ///
+    /// Pairing deliberately does not do this on its own: the ancestry in a
+    /// greeting is a sentence the peer wrote about itself, so believing it
+    /// would let any device somebody is willing to pair with lift the
+    /// refusal on any device they had removed. The person is the one who
+    /// knows whether that really was their old machine, so it is a tap.
+    fun readmitDevice(deviceId: String) {
+        syncAction("that device's earlier history is welcome again") {
+            it.readmitDevice(deviceId)
+        }
+    }
+
     /// Run a sync action and report it, refreshing the facts afterwards.
     /// `pluginAction`'s shape, and for the same reason: the IO dispatch,
     /// the refresh and the error wording come free and read the same.

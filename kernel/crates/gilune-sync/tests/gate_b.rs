@@ -218,6 +218,104 @@ fn repeated_wrong_codes_are_rate_limited_with_backoff() {
     assert!(listener.service.peers().is_empty());
 }
 
+/// **One key for the check, the failures and the success.**
+///
+/// A QR names several addresses, because the machine that painted it
+/// cannot know which of its interfaces the phone shares. The joiner's
+/// limiter checked the *first* of them before dialling and then recorded
+/// what happened against the one that *answered* — two different keys on
+/// any machine whose first candidate is a virtual adapter nobody is
+/// listening on, which is every machine with Hyper-V, WSL or a VPN.
+///
+/// The half that shows it: a successful pairing never cleared the record
+/// the check reads, so failures before a pairing were still counted
+/// against the device long after it had paired. Attempts kept accruing
+/// under a key nothing ever cleared until it aged out an hour later —
+/// which is a person who mistyped a code twice, paired, and then found
+/// their next pairing held up by the mistakes before it.
+///
+/// The key is now the peer the pairing names — the QR's fingerprint —
+/// which is the one thing that identifies the device rather than a road to
+/// it.
+#[test]
+fn a_pairing_that_succeeds_clears_what_the_failures_before_it_recorded() {
+    let listener = Device::new("Desktop").listening();
+    let joiner = Device::new("Phone").listening();
+    // The shipped defaults: this scenario is about the bound itself.
+    joiner.service.configure_rate_limits(RateLimiter::default());
+
+    // Three wrong attempts, over a QR shaped like a real machine's: a
+    // dead candidate first, the live one behind it. Inside the burst, so
+    // nobody is held up yet.
+    let offer = listener.service.start_pairing_with(60_000, 100).expect("window");
+    for _ in 0..3 {
+        let wrong = qr_payload(&listener, Tamper::WrongSecret);
+        joiner
+            .service
+            .pair_from_qr(&joiner.store, &wrong)
+            .expect_err("a wrong secret is refused");
+    }
+    assert!(listener.service.peers().is_empty());
+    let _ = offer;
+
+    // Then the real thing, over the same two-address shape.
+    let honest = qr_payload(&listener, Tamper::None);
+    joiner.service.pair_from_qr(&joiner.store, &honest).expect("the real code pairs");
+    assert_eq!(joiner.service.peers().len(), 1);
+
+    // And afterwards the slate is clean: two more wrong attempts, and
+    // neither is held up by the three from before the pairing.
+    listener.service.start_pairing_with(60_000, 100).expect("a fresh window");
+    let mut refusals = Vec::new();
+    for _ in 0..2 {
+        let wrong = qr_payload(&listener, Tamper::WrongSecret);
+        refusals.push(
+            joiner
+                .service
+                .pair_from_qr(&joiner.store, &wrong)
+                .expect_err("still wrong")
+                .to_string(),
+        );
+    }
+    assert!(
+        !refusals.iter().any(|r| r.contains("too many attempts")),
+        "a successful pairing did not clear the record the check reads, so the \
+         mistakes before it were still being counted: {refusals:?}"
+    );
+}
+
+/// What to do to the listener's own QR payload before handing it over.
+enum Tamper {
+    /// Nothing but the dead address in front, which every case gets.
+    None,
+    /// A secret of the right shape that is not the right one.
+    WrongSecret,
+}
+
+/// The listener's QR payload with a **dead candidate address in front of
+/// the live one** — the shape a machine with a virtual adapter publishes,
+/// and the one where "which address answered" and "which device this is"
+/// come apart.
+///
+/// `255.255.255.255` is the broadcast address: a stream connect to it is
+/// refused by the operating system the instant it is attempted, so the
+/// dead candidate costs nothing rather than the two-second candidate
+/// timeout six times over.
+fn qr_payload(listener: &Device, tamper: Tamper) -> String {
+    let real = listener.service.pairing_qr_payload().expect("a payload");
+    let mut fields: Vec<String> = real.split('|').map(str::to_string).collect();
+    assert_eq!(fields.len(), 5, "the payload's shape changed: {real}");
+    if let Tamper::WrongSecret = tamper {
+        // Same length, same alphabet, different bytes — so it fails the
+        // handshake rather than the payload's own shape checks.
+        fields[2] = "ab".repeat(fields[2].len() / 2);
+        assert_ne!(fields[2], real.split('|').nth(2).expect("secret"));
+    }
+    let (hosts, port) = fields[4].rsplit_once(':').expect("host:port");
+    fields[4] = format!("255.255.255.255,{hosts}:{port}");
+    fields.join("|")
+}
+
 // ------------------------------------------------------------------ point 7
 
 #[test]
@@ -581,17 +679,26 @@ fn re_pairing_a_device_survives_the_next_launch() {
 }
 
 /// **The same, for a device that re-enrolled in between** — the case the
-/// two ends could not agree about at all.
+/// two ends could not agree about at all, and the case whose fix had to be
+/// walked back one step.
 ///
 /// § 9 refuses by originating device id. § 4 gives a machine a *new*
 /// device id when its vault arrives somewhere holding no identity for it.
 /// So a revoked phone that comes back as a restored backup is the same
 /// device under a new name, carrying history written under the old one —
-/// and re-pairing used to welcome only the new name. The old stream
-/// stayed refused however it arrived, and the alert that said so could
-/// not be cleared by anything the user could do.
+/// and re-pairing welcomed only the new name. The old stream stayed
+/// refused however it arrived, and the alert that said so could not be
+/// cleared by anything the user could do.
+///
+/// The first fix welcomed every name the greeting claimed, and that was
+/// too much: a claim is a sentence a peer writes about itself, so it made
+/// pairing *anybody* a way to lift a revocation on *anyone*
+/// (`a_peer_claiming_a_revoked_devices_name_does_not_get_it_readmitted`).
+/// What ships is the claim recorded as an informational alert and one
+/// explicit action behind it — so the honest case still ends where it
+/// should, by way of a decision the person who knows takes.
 #[test]
-fn re_pairing_a_peer_that_re_enrolled_welcomes_the_history_it_wrote_before() {
+fn re_pairing_a_peer_that_re_enrolled_offers_its_earlier_history_back() {
     let vault = tempfile::tempdir().expect("vault");
     let local = tempfile::tempdir().expect("local");
     let phone = Device::new("Phone").listening();
@@ -641,18 +748,46 @@ fn re_pairing_a_peer_that_re_enrolled_welcomes_the_history_it_wrote_before() {
         assert_eq!(rephone.service.enrolment().as_str(), "re-enrolled");
         assert_ne!(rephone.device_id(), phone_device, "a new name for one device");
 
-        // The user pairs it again. That is the welcome — and it has to
-        // welcome the device, not merely the name it happens to use now.
+        // The user pairs it again. That welcomes the device in front of
+        // them — and offers, rather than assumes, the identity it claims
+        // to have had before.
         rephone.pair_by_code(&desktop).expect("re-pair the re-enrolled phone");
+        assert_eq!(
+            desktop.store.refused_devices().expect("refusals"),
+            vec![phone_device.clone()],
+            "a name the peer merely claimed must not be welcomed by the pairing itself"
+        );
+        let claimed = desktop.alerts_of(alerts::SYNC_PREVIOUS_IDENTITY_CLAIMED);
+        assert_eq!(claimed.len(), 1, "the claim must be visible: {claimed:?}");
+        assert_eq!(claimed[0].subject, phone_device, "the notice names what to re-admit");
+        assert!(!claimed[0].damage, "a claim is not damage");
+        assert!(
+            claimed[0].detail.contains("Phone again"),
+            "the notice must say who claimed it: {}",
+            claimed[0].detail
+        );
+
+        // And now the decision the person who knows takes: yes, that was
+        // my phone. This is the only thing that lets the old stream in.
+        assert!(
+            desktop
+                .store
+                .readmit_device(&phone_device)
+                .expect("re-admit the earlier identity"),
+            "the device was refused, so re-admitting it should have lifted something"
+        );
         assert!(
             desktop.store.refused_devices().expect("refusals").is_empty(),
-            "welcoming a device back must welcome the history it wrote before it \
-             re-enrolled: {:?}",
+            "{:?}",
             desktop.store.refused_devices()
         );
         assert!(
+            desktop.alerts_of(alerts::SYNC_PREVIOUS_IDENTITY_CLAIMED).is_empty(),
+            "acting on the notice withdraws it"
+        );
+        assert!(
             desktop.alerts_of(alerts::SYNC_REVOKED_DEVICE).is_empty(),
-            "and nobody should have to dismiss a notice about a device just paired"
+            "and nobody should have to dismiss a notice about a device just welcomed"
         );
         desktop.address()
     };
@@ -665,7 +800,12 @@ fn re_pairing_a_peer_that_re_enrolled_welcomes_the_history_it_wrote_before() {
     assert_eq!(after.address(), was_at, "the restarted device moved port");
     assert!(
         after.store.refused_devices().expect("refusals").is_empty(),
-        "the next launch refused both names of a device that had been paired again"
+        "the next launch folded the stale revocation back in, so re-admitting an \
+         earlier identity lasted exactly until the process restarted"
+    );
+    assert!(
+        after.alerts_of(alerts::SYNC_PREVIOUS_IDENTITY_CLAIMED).is_empty(),
+        "and the notice came back with it"
     );
 
     // Proof rather than inference: the tablet, which knows nothing about
@@ -682,6 +822,129 @@ fn re_pairing_a_peer_that_re_enrolled_welcomes_the_history_it_wrote_before() {
         "the work the phone wrote before it re-enrolled never arrived"
     );
     assert!(after.alerts_of(alerts::SYNC_REVOKED_DEVICE).is_empty());
+}
+
+/// **A peer that lies about who it used to be gets nothing for it.**
+///
+/// The adversarial half of the re-enrolment story, and the reason
+/// `welcome` no longer believes `previous_device_ids`. The ancestry is a
+/// list the peer writes into its own greeting. The channel authenticates
+/// *who is speaking* — that is what Noise gives — and says nothing
+/// whatever about whether what they say is true. So while pairing welcomed
+/// every name a joiner claimed, any device the user was willing to pair
+/// with could lift the refusal on any device they had deliberately
+/// revoked, simply by naming it.
+///
+/// Here the phone has never been the laptop and says it was. The laptop
+/// stays refused, the claim is shown rather than acted on, and the
+/// laptop's operations go on being refused however they are relayed.
+#[test]
+fn a_peer_claiming_a_revoked_devices_name_does_not_get_it_readmitted() {
+    let desktop = Device::new("Desktop").listening();
+    let laptop = Device::new("Laptop").listening();
+    let laptop_device = laptop.device_id();
+
+    // The phone's directories belong to the test: its identity file is
+    // edited between two opens, which is how "a peer that lies in its
+    // greeting" is expressed without inventing a second protocol.
+    let phone_vault = tempfile::tempdir().expect("vault");
+    let phone_local = tempfile::tempdir().expect("local");
+
+    {
+        let phone = Device::open("Phone", phone_vault.path(), phone_local.path()).listening();
+        // The phone becomes a full replica of the laptop, honestly.
+        laptop.pair_by_code(&phone).expect("the laptop and the phone pair");
+        laptop.capture("written on the laptop");
+        laptop.sync();
+        assert!(phone.holds_from(&laptop_device) > 0, "the phone is a full replica");
+
+        // The desktop takes the laptop's history and then revokes it.
+        laptop.pair_by_code(&desktop).expect("the laptop and the desktop pair");
+        desktop.sync();
+        desktop
+            .service
+            .revoke_peer(&desktop.store, &laptop.identity_pub())
+            .expect("the desktop revokes the laptop");
+
+        // The laptop writes on, and only the phone has that work.
+        laptop.capture("written after the desktop revoked it");
+        phone.sync();
+    }
+
+    // The phone now claims the laptop's name as an earlier identity of its
+    // own. Its keys and its device id are untouched: the only difference
+    // between this and the honest re-enrolment case is that the sentence
+    // is false, which is precisely what the desktop cannot check.
+    claim_previous_identity(phone_local.path(), &laptop_device);
+    let phone = Device::open("Phone", phone_vault.path(), phone_local.path()).listening();
+
+    let held_before = desktop.holds_from(&laptop_device);
+    phone.pair_by_code(&desktop).expect("the phone and the desktop pair");
+
+    assert_eq!(
+        desktop.store.refused_devices().expect("refusals"),
+        vec![laptop_device.clone()],
+        "pairing one device lifted the revocation on another, because that device \
+         said so"
+    );
+    let claimed = desktop.alerts_of(alerts::SYNC_PREVIOUS_IDENTITY_CLAIMED);
+    assert_eq!(claimed.len(), 1, "the claim is recorded and shown: {claimed:?}");
+    assert_eq!(claimed[0].subject, laptop_device);
+    assert!(!claimed[0].damage, "a claim somebody made is not damage");
+
+    // And the refusal is still real where it counts: the phone relays the
+    // laptop's later work and the desktop will not have it.
+    let report = phone.sync();
+    assert!(
+        report.halted.iter().any(|h| h.device_id == laptop_device),
+        "the laptop's relayed stream should still be refused: {:?}",
+        report.halted
+    );
+    assert_eq!(
+        desktop.holds_from(&laptop_device),
+        held_before,
+        "a revoked device's operations arrived because a third device vouched for it"
+    );
+    assert_eq!(desktop.alerts_of(alerts::SYNC_REVOKED_DEVICE).len(), 1);
+
+    // Nothing here is a dead end: the same explicit action is available,
+    // and it is what a person would take if the claim were in fact true.
+    assert!(desktop
+        .store
+        .readmit_device(&laptop_device)
+        .expect("re-admit"));
+    assert!(desktop.store.refused_devices().expect("refusals").is_empty());
+    let report = phone.sync();
+    assert!(
+        !report.halted.iter().any(|h| h.device_id == laptop_device),
+        "{:?}",
+        report.halted
+    );
+    assert!(desktop.holds_from(&laptop_device) > held_before);
+}
+
+/// Rewrite a device's identity file so its greeting claims `claimed` as a
+/// device id it used before it re-enrolled.
+///
+/// The file is plain JSON beside the roster (it is sealed only when a host
+/// supplies a `KeyWrap`, and this suite supplies none), so the edit is the
+/// smallest possible statement of "a peer says something untrue about
+/// itself": one array, and nothing else about the device changes.
+fn claim_previous_identity(local: &std::path::Path, claimed: &str) {
+    let path = std::fs::read_dir(local)
+        .expect("the device-local directory")
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|name| name.ends_with(".identity.json"))
+        })
+        .expect("an identity file");
+    let mut document: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("identity json");
+    document["previous_device_ids"] = serde_json::json!([claimed]);
+    std::fs::write(&path, document.to_string()).expect("write");
 }
 
 /// And the fix must not be "stop refusing anybody": a device that is

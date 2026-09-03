@@ -52,6 +52,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -471,6 +472,17 @@ private fun SyncAlerts(state: GiluneState) {
                     color = if (damage) colours.onErrorContainer else colours.onSurfaceVariant,
                     modifier = Modifier.testTag("sync-alert"),
                 )
+                // One condition asks for a decision rather than only
+                // describing one: a device claiming to have been one this
+                // phone removed. The offer belongs beside the sentence
+                // that explains it, and nowhere else.
+                val action = alertAction(alert.kind)
+                if (action != null && alert.subject.isNotBlank()) {
+                    TextButton(
+                        onClick = { state.readmitDevice(alert.subject) },
+                        modifier = Modifier.testTag("sync-alert-action"),
+                    ) { Text(action) }
+                }
             }
         }
     }

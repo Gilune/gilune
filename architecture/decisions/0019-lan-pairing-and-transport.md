@@ -776,6 +776,44 @@ Each stage is shippable alone and in order.
     flow can forget the timeout swap. Test rig: the paired-device port
     band moved out of the OS ephemeral range, which had let a client
     socket squat a port a device was about to restart on.
+- **2026-09-03 (third review; one surgical round, simplest-safe rules
+  replacing the second round's inferences).**
+  - **A claimed earlier identity is recorded, never believed.** The
+    second round let a greeting's `previous_device_ids` un-refuse every
+    name it listed — so any device the user paired with could lift the
+    revocation on any other device by claiming to have been it. Now a
+    pairing un-refuses only the peer's own current `device_id` (the
+    user re-pairing *this* device is a decision about this device);
+    each claimed earlier id raises `sync-previous-identity-claimed`
+    (not damage) and is re-admitted only by an explicit action,
+    `readmit_device`, which is durable vault state that a later
+    revocation overrules. The roster likewise retires a revoked row
+    only for the name the peer paired as. The honest re-enrolment case
+    still works; it costs one deliberate tap by the person who knows
+    whether that really was their old machine.
+  - **A tombstone without named heads withdraws a file only when
+    nothing could have moved**: the object has exactly one head, it is
+    the revision the projection was rendered from, the bytes on disk are
+    the kernel's, and that head is not a local edit. The second round's
+    heuristic read the origin of a revision the projection had frozen on
+    once the object was deleted, and could delete a file holding another
+    device's already-synced edit. Keyless tombstones come from live code
+    (the transcript merge, pre-v5 adoption), so the merge now builds its
+    tombstone with the shared payload builder and names its heads.
+  - **A referent is "carried by something this build cannot read" only
+    when the unreadable operation comes from the device the naming
+    operation is about** (its origin key, else the device that delivered
+    it). An unrelated device's unknown-kind operation against the same
+    id is not evidence; the referent is awaited. The second round's
+    rule forwarded — and lost — a legitimate revision on that evidence.
+  - **A processor output refused because its subject moved is an
+    outcome, not an error**: the job completes with nothing to write,
+    the pass continues, and the count is `skipped_moved`. A processor
+    reads the head and the document from one row in one query, so the
+    pair it hands back can never straddle a write.
+  - Schema v6 indexes `operations(target_id)`; the processor WIT gains
+    the optional `expected-head`; the joiner's rate limiter keys the
+    whole attempt by the fingerprint the pairing names.
 
 ## Ratification record
 

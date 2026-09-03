@@ -212,14 +212,21 @@ impl Processor for WhisperTranscriber {
     }
 
     fn process(&self, ctx: &ProcessorCtx<'_>, _job: &Job) -> Result<Vec<ProposedOutput>, String> {
+        // The head and the document, from one row and one read. Taken
+        // before the model runs: a long recording can take seconds, and
+        // whatever landed on the note in the meantime — a person typing, a
+        // second engine finishing — is an answer this one must not
+        // silently replace.
+        //
+        // **One read rather than two.** They used to be separate calls,
+        // and a revision landing between them left this holding the old
+        // document under the new head — at which point the compare-and-set
+        // below would pass and overwrite the very answer it exists to
+        // protect.
+        let (read_head, payload) =
+            ctx.subject_head_and_payload().map_err(|e| e.to_string())?;
         let mut document: serde_json::Value =
-            serde_json::from_str(&ctx.subject_payload().map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        // Read together with the document, before the model runs: a long
-        // recording can take seconds, and whatever landed on the note in
-        // the meantime — a person typing, a second engine finishing — is
-        // an answer this one must not silently replace.
-        let read_head = ctx.subject_head().map_err(|e| e.to_string())?;
+            serde_json::from_str(&payload).map_err(|e| e.to_string())?;
         if document.get("media").and_then(|v| v.as_str()) != Some("wav") {
             return Ok(Vec::new());
         }
