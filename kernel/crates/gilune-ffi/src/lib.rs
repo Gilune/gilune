@@ -120,8 +120,79 @@ pub struct SyncStatus {
     /// this machine meant something the user should know about.
     pub enrolment_notice: Option<String>,
     pub listening_on: Option<String>,
+    /// Whether the user has switched sync **on**, which survives a
+    /// restart — as opposed to `enabled`, which is whether it is
+    /// listening at this instant. They differ exactly when a machine was
+    /// meant to be reachable and could not bind (a busy port, a firewall
+    /// that said no), and a switch that silently flicked itself off would
+    /// be the wrong way to show that.
+    pub wanted: bool,
+    /// Whether this device is advertising itself on the network right
+    /// now. **Separate from `enabled` deliberately**: binding TCP can
+    /// succeed while opening UDP 5353 fails, and a device that is
+    /// reachable-but-not-findable is a state § 1's fallback chain exists
+    /// for. One flag for both would tell a user their device is findable
+    /// when it is only reachable.
+    pub advertising: bool,
+    /// Which route discovery takes on this host — `mdns-sd`, whatever a
+    /// platform adapter calls itself, or `none`. A diagnostic has to be
+    /// able to say whether nothing was found or nothing could look.
+    pub discovery: String,
     pub pairing: Option<PairingOffer>,
     pub peers: Vec<PeerInfo>,
+}
+
+/// What one advertisement carried, exactly as it came off the wire.
+/// What a `PeerDiscovery` adapter reports; **not** what a settings screen
+/// draws — that is `FoundDevice`, and the difference is that roster state
+/// is decided here in Rust rather than taken from an adapter's word.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct DiscoveredDevice {
+    pub fingerprint: String,
+    /// The TXT record's protocol version, verbatim. An adapter reports
+    /// what it read and never judges it: a device on the same LAN running
+    /// a version this build cannot talk to is a fact, not an error.
+    pub protocol: String,
+    /// `host:port`, ready to dial.
+    pub address: String,
+}
+
+/// A device seen on the network (ADR 0019 § 1).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct FoundDevice {
+    /// What the advertisement carried, and all it carried besides a
+    /// protocol version and an address. The human name is exchanged
+    /// inside the encrypted handshake and is not knowable from here.
+    pub fingerprint: String,
+    pub address: String,
+    /// Whether this build can talk to it at all.
+    pub compatible: bool,
+    /// The static key when this is already a paired device, empty for a
+    /// stranger — which is also what makes a stranger offerable to pair.
+    pub static_pub: String,
+    /// `paired`, `revoked` or `unknown`.
+    pub state: String,
+}
+
+/// One standing integrity condition (ADR 0019 § 8).
+///
+/// **This is the surface that makes halting visible.** The kernel raises
+/// these when it refuses something — a sequence gap, an envelope it
+/// cannot decode, a bound a peer exceeded, bytes that failed their digest
+/// — and silent halting is the failure mode that would make sync look
+/// like it works. They are device-local diagnostics, never operations:
+/// what this device refused is not a fact other devices share.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct IntegrityAlert {
+    pub alert_id: String,
+    /// `sync-gap`, `sync-corrupt-operation`, `sync-unsupported-version`,
+    /// `sync-unknown-op-kind`, `sync-limit-exceeded`,
+    /// `sync-blob-digest-mismatch` or `sync-revoked-device`.
+    pub kind: String,
+    /// What the alert is about — a device id, an operation id, a blob id.
+    pub subject: String,
+    pub detail: String,
+    pub raised_ms: i64,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -215,9 +286,104 @@ impl From<gilune_sync::service::SyncFacts> for SyncStatus {
             enrolment: f.enrolment,
             enrolment_notice: f.enrolment_notice,
             listening_on: f.listening_on,
+            wanted: f.wanted,
+            advertising: f.advertising,
+            discovery: f.discovery,
             pairing: f.pairing.map(Into::into),
             peers: f.peers.into_iter().map(Into::into).collect(),
         }
+    }
+}
+
+impl From<gilune_sync::service::FoundDevice> for FoundDevice {
+    fn from(d: gilune_sync::service::FoundDevice) -> Self {
+        FoundDevice {
+            fingerprint: d.fingerprint,
+            address: d.address,
+            compatible: d.compatible,
+            static_pub: d.static_pub,
+            state: d.state,
+        }
+    }
+}
+
+impl From<gilune_kernel::alerts::Alert> for IntegrityAlert {
+    fn from(a: gilune_kernel::alerts::Alert) -> Self {
+        IntegrityAlert {
+            alert_id: a.alert_id,
+            kind: a.kind,
+            subject: a.subject,
+            detail: a.detail,
+            raised_ms: a.raised_ms,
+        }
+    }
+}
+
+/// How a host finds other devices and lets itself be found (ADR 0019
+/// § 1). Implemented in Rust on the desktop by `mdns-sd`; implemented in
+/// **Kotlin over `NsdManager`** on Android, because the platform owns the
+/// multicast socket there and using it costs no `MulticastLock` and no
+/// extra permission. ADR 0001's rule applied literally: Rust does not
+/// call a platform API, an adapter implements the trait.
+///
+/// A host that registers nothing is a supported configuration, not a
+/// broken one — a cached address and a typed one both work without
+/// discovery.
+#[uniffi::export(with_foreign)]
+pub trait PeerDiscovery: Send + Sync {
+    /// A name for what this is, for a diagnostic that has to say which
+    /// route was tried. Never `none` — that name belongs to the absence
+    /// of an adapter.
+    fn name(&self) -> String;
+    /// Start advertising `_gilune._tcp` carrying this fingerprint and
+    /// port, **and nothing else**: no device name, no user, no vault.
+    fn advertise(&self, fingerprint: String, port: u16) -> Result<(), GiluneError>;
+    /// Stop advertising.
+    fn withdraw(&self);
+    /// Browse for up to `timeout_ms` and answer with what was seen.
+    /// Blocking by contract — callers are a button and a background pass.
+    fn browse(&self, timeout_ms: u64) -> Result<Vec<DiscoveredDevice>, GiluneError>;
+}
+
+/// Bridges the foreign trait onto the sync crate's own.
+///
+/// The two differ in one field and it is worth the adapter: the foreign
+/// side answers with `FoundDevice`, which is what a settings screen
+/// draws, while the sync crate's `Discovered` is only what came off the
+/// wire. Roster state is decided **here**, in Rust, from the roster —
+/// never taken from what an adapter reported, because an adapter is
+/// reporting a network and the roster is this device's own record.
+struct DiscoveryAdapter(Arc<dyn PeerDiscovery>);
+
+impl gilune_sync::PeerDiscovery for DiscoveryAdapter {
+    fn name(&self) -> String {
+        self.0.name()
+    }
+    fn advertise(&self, ad: &gilune_sync::Advertisement) -> gilune_sync::Result<()> {
+        self.0
+            .advertise(ad.fingerprint.clone(), ad.port)
+            .map_err(|e| gilune_sync::SyncError::Refused { detail: e.to_string() })
+    }
+    fn withdraw(&self) {
+        self.0.withdraw();
+    }
+    fn browse(&self, timeout: std::time::Duration) -> gilune_sync::Result<Vec<gilune_sync::Discovered>> {
+        let seen = self
+            .0
+            .browse(timeout.as_millis() as u64)
+            .map_err(|e| gilune_sync::SyncError::Refused { detail: e.to_string() })?;
+        Ok(seen
+            .into_iter()
+            .map(|d| gilune_sync::Discovered {
+                fingerprint: d.fingerprint,
+                // Verbatim. An adapter that could not read the TXT
+                // version leaves this empty, and empty is not compatible
+                // — better a device shown as unreachable than a
+                // handshake that fails for reasons nobody can see.
+                protocol: d.protocol,
+                address: d.address,
+            })
+            .collect())
     }
 }
 
@@ -247,6 +413,16 @@ pub struct GiluneStatus {
     pub sources: i64,
     pub blobs_ready: i64,
     pub blobs_committed: i64,
+    /// Blobs whose operation has applied but whose bytes are still in
+    /// transit. **A pending state, not damage**: a note can arrive before
+    /// its recording does, and the honest thing is to say the content is
+    /// still coming rather than to show a broken link. The kernel has
+    /// counted these since M5a; nothing could display them until now.
+    pub blobs_awaiting: i64,
+    /// How many integrity conditions are standing. `integrity_alerts`
+    /// says what they are; this is the number a status line can carry
+    /// without asking for the list.
+    pub alerts: i64,
     pub events: i64,
     pub jobs_pending: i64,
     pub jobs_quarantined: i64,
@@ -864,6 +1040,8 @@ impl Gilune {
             sources: s.sources,
             blobs_ready: s.blobs_ready,
             blobs_committed: s.blobs_committed,
+            blobs_awaiting: s.blobs_awaiting,
+            alerts: s.alerts,
             events: s.events,
             jobs_pending: s.jobs_pending,
             jobs_quarantined: s.jobs_quarantined,
@@ -1049,6 +1227,95 @@ impl Gilune {
         let store = self.store();
         self.with_sync(|service| service.pair_from_qr(&store, &payload))
             .map(Into::into)
+    }
+
+    /// Bind again if the user left sync switched on, and answer whether
+    /// it is now listening. Called once on open, after `configure_sync`
+    /// and after discovery is registered.
+    ///
+    /// **This does not weaken § 2's lazy bind.** That rule is that
+    /// nothing binds before the user first opts in — a user who never
+    /// turns sync on never meets the firewall prompt, and capture is
+    /// never behind it. Once they have opted in, coming back up reachable
+    /// is the feature working: the prompt already happened at the first
+    /// enable, and a device that forgot it was reachable on every launch
+    /// could never be synced with unprompted.
+    ///
+    /// Failing to bind is **not** an error here. A busy port or a
+    /// firewall that said no leaves the recorded choice untouched and the
+    /// device simply not listening, which `SyncStatus` describes as
+    /// `wanted` without `enabled`.
+    pub fn resume_sync(&self) -> FfiResult<Option<String>> {
+        self.with_sync(|service| Ok(service.resume().unwrap_or(None)))
+    }
+
+    /// Register how this host finds other devices (ADR 0019 § 1).
+    ///
+    /// Desktop passes nothing and gets `mdns-sd` — see
+    /// `use_bundled_discovery`. Android passes a Kotlin adapter over
+    /// `NsdManager`, because the platform owns the multicast socket
+    /// there. A host that calls neither still syncs at cached and typed
+    /// addresses, which is a supported state and not a broken one.
+    ///
+    /// **Registering does not bind anything.** The responder starts at
+    /// `set_sync_enabled(true)` like the listener does, and for the same
+    /// reason: UDP 5353 is a second inbound bind, not an escape from the
+    /// first.
+    pub fn set_discovery(&self, discovery: Arc<dyn PeerDiscovery>) -> FfiResult<()> {
+        self.with_sync(|service| {
+            service.set_discovery(Arc::new(DiscoveryAdapter(discovery)));
+            Ok(())
+        })
+    }
+
+    /// Use the Rust `mdns-sd` implementation. What the desktop calls, and
+    /// what any future headless host calls: it needs no JVM and no
+    /// executor.
+    pub fn use_bundled_discovery(&self) -> FfiResult<()> {
+        self.with_sync(|service| {
+            service.set_discovery(Arc::new(gilune_sync::MdnsDiscovery::new()));
+            Ok(())
+        })
+    }
+
+    /// Look for devices on this network. Blocks for up to `timeout_ms`.
+    ///
+    /// Everything seen is reported, paired or not: a stranger is what a
+    /// person is looking at when they are about to pair one, and a paired
+    /// device appearing here is how "it is switched on and I still cannot
+    /// reach it" becomes a visible fact rather than a mystery.
+    pub fn discover_devices(&self, timeout_ms: u64) -> FfiResult<Vec<FoundDevice>> {
+        let timeout = std::time::Duration::from_millis(timeout_ms.clamp(200, 30_000));
+        Ok(self
+            .with_sync(|service| service.discover(timeout))?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Tell this device where a paired one can be reached — § 1's manual
+    /// step, for the network where discovery is filtered and the cached
+    /// address has gone stale.
+    ///
+    /// Deliberately a roster write rather than a one-shot dial: an
+    /// address a person supplied is the address to try first next time,
+    /// which is the whole of the cached-address rule.
+    pub fn set_peer_address(&self, static_pub: String, address: String) -> FfiResult<bool> {
+        self.with_sync(|service| service.set_peer_address(&static_pub, &address))
+    }
+
+    /// Every standing integrity condition (ADR 0019 § 8), oldest first.
+    ///
+    /// The read side of the alert surface: the kernel has raised these
+    /// since M5a and nothing could show them, which made a halted stream
+    /// look exactly like an idle one.
+    pub fn integrity_alerts(&self) -> FfiResult<Vec<IntegrityAlert>> {
+        Ok(self
+            .store()
+            .integrity_alerts()?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     pub fn peers(&self) -> FfiResult<Vec<PeerInfo>> {

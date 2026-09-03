@@ -62,6 +62,26 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// action below refreshes it.
     val syncStatus = mutableStateOf<uniffi.gilune_ffi.SyncStatus?>(null)
 
+    /// Standing integrity conditions (ADR 0019 § 8).
+    ///
+    /// **The surface that makes halting visible.** The kernel has raised
+    /// these since M5a and nothing could show them, which made a halted
+    /// stream look exactly like an idle one — the failure mode § 8 calls
+    /// "the one that would make sync look like it works". Refreshed
+    /// alongside the facts, so anything that changes them shows them.
+    val syncAlerts = mutableStateListOf<uniffi.gilune_ffi.IntegrityAlert>()
+
+    /// Devices seen on the network by the last `discoverDevices`. Empty
+    /// until somebody looks: browsing is a button and a background pass,
+    /// never something a screen does on its own — a browse costs seconds
+    /// and multicast traffic, and § 1 is explicit that discovery stays
+    /// off the connect path whenever a cached address will do.
+    val discovered = mutableStateListOf<uniffi.gilune_ffi.FoundDevice>()
+
+    /// True while a browse is in flight, so a screen can say "looking…"
+    /// rather than showing an empty list that means nothing yet.
+    val discovering = mutableStateOf(false)
+
     /// How this shell enrols the device (ADR 0019 § 4). The identity key
     /// lives **outside the vault** in a directory only the shell knows —
     /// `%LOCALAPPDATA%\Gilune` on Windows, `filesDir` on Android — and the
@@ -79,16 +99,98 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         val setup = syncSetup ?: return null
         return try {
             val status = setup(g)
-            syncStatus.value = status
+            // Registering how this device finds others binds nothing —
+            // the responder starts with the listener, at the switch, and
+            // for the same reason: UDP 5353 is a second inbound bind, not
+            // an escape from the first (§ 2). A discovery adapter that
+            // will not register is not a reason to fail enrolment: cached
+            // and typed addresses both work without one.
+            runCatching { syncDiscovery?.invoke(g) }
+            // Come back reachable if the user left sync switched on.
+            //
+            // **Not a weakening of § 2's lazy bind.** That rule is that
+            // nothing binds before the user first opts in, so a user who
+            // never turns sync on never meets the firewall prompt and
+            // capture is never behind it. Once they have opted in, coming
+            // back up reachable is the feature working — the prompt
+            // happened at the first enable, and a device that forgot it
+            // was reachable on every launch could never be synced with
+            // unprompted. On a device that never opted in this is a
+            // no-op, so the property is kept by the kernel rather than by
+            // each shell remembering to ask.
+            //
+            // After discovery is registered, so the responder comes up
+            // with the listener rather than a beat later. Failing to bind
+            // is not a reason to fail enrolment: a busy port leaves the
+            // choice recorded and the device simply not listening, which
+            // `SyncStatus` reports as `wanted` without `enabled`.
+            runCatching { g.resumeSync() }
+            syncStatus.value = runCatching { g.syncStatus() }.getOrNull() ?: status
             status.enrolmentNotice
         } catch (e: Throwable) {
             "sync unavailable: ${e.message}"
         }
     }
 
+    /// How this shell finds other devices (ADR 0019 § 1). Desktop calls
+    /// `useBundledDiscovery` and gets the Rust `mdns-sd` implementation;
+    /// Android registers a Kotlin adapter over `NsdManager`, because the
+    /// platform owns the multicast socket there. Set before `openVault`,
+    /// on `syncSetup`'s idiom.
+    ///
+    /// A shell that sets nothing still syncs at cached and typed
+    /// addresses — a supported configuration, not a broken one.
+    var syncDiscovery: ((Gilune) -> Unit)? = null
+
     fun refreshSync() {
         val g = gilune.value ?: return
         syncStatus.value = runCatching { g.syncStatus() }.getOrNull() ?: syncStatus.value
+        val standing = runCatching { g.integrityAlerts() }.getOrNull()
+        if (standing != null) {
+            syncAlerts.clear()
+            syncAlerts.addAll(standing)
+        }
+    }
+
+    /// Look for devices on this network. Blocking on the kernel's side,
+    /// so it runs off the main thread like every other sync action.
+    ///
+    /// Deliberately explicit: nothing browses on its own. A cold browse
+    /// measured 2.5 s against an exchange's 1.2 s on the development
+    /// machine, which is exactly why § 1 keeps discovery off the connect
+    /// path — a screen that browsed on every recomposition would spend
+    /// the whole sync budget looking for devices it already knows.
+    fun discoverDevices(timeoutMs: ULong = 2500u) {
+        val g = gilune.value ?: return
+        if (discovering.value) return
+        discovering.value = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val found = g.discoverDevices(timeoutMs)
+                discovered.clear()
+                discovered.addAll(found)
+                message.value = when {
+                    found.isEmpty() ->
+                        "no devices found on this network — many guest and office " +
+                            "networks stop devices seeing each other"
+                    found.size == 1 -> "found 1 device"
+                    else -> "found ${found.size} devices"
+                }
+            } catch (e: Throwable) {
+                message.value = "looking for devices failed: ${e.message}"
+            } finally {
+                discovering.value = false
+            }
+        }
+    }
+
+    /// Tell this device where a paired one can be reached — the manual
+    /// step of § 1's chain, for a network where discovery is filtered and
+    /// the address pairing recorded has gone stale.
+    fun setPeerAddress(staticPub: String, address: String, called: String) {
+        syncAction("$called can now be reached at $address") {
+            it.setPeerAddress(staticPub, address)
+        }
     }
 
     /// Run a sync action and report it, refreshing the facts afterwards.

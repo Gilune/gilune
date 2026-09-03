@@ -13,10 +13,18 @@
 //! each other in a device-local roster; every connection after that is the
 //! same pattern with the stored pair secret as its `psk`, so an unpaired
 //! or revoked peer cannot complete a handshake at all — **default-deny is
-//! a property of the handshake, not a check performed after one**. Still
-//! no discovery: an address comes from a QR or from a person typing it,
-//! and M5c makes it findable.
+//! a property of the handshake, not a check performed after one**.
+//!
+//! M5c makes it live. `discovery` advertises `_gilune._tcp` and browses
+//! for it behind a `PeerDiscovery` trait with one implementation here and
+//! one in Kotlin; the listener binds a routable interface at a stable
+//! port and serves peers concurrently; and reaching a peer is a chain
+//! rather than a single attempt — the cached address first, discovery
+//! only when that fails, then whatever a person typed, and finally a
+//! diagnostic that names what is probably wrong with the network instead
+//! of spinning.
 
+pub mod discovery;
 pub mod exchange;
 pub mod handshake;
 pub mod identity;
@@ -31,6 +39,7 @@ pub mod service;
 pub mod transport;
 pub mod wire;
 
+pub use discovery::{Advertisement, Discovered, MdnsDiscovery, NoDiscovery, PeerDiscovery};
 pub use exchange::{ExchangeReport, Halted};
 pub use identity::{Enrolment, Identity, IdentityStore, KeyWrap};
 pub use roster::{Peer, PeerState, Roster};

@@ -65,6 +65,17 @@ impl Peer {
             .unwrap_or_default()
     }
 
+    /// The same identity in the form an advertisement carries (§ 1). A
+    /// DNS-SD instance name has no room for the readable spelling's
+    /// dashes and case, so matching a browse result to a roster entry has
+    /// to happen in this form — and doing it through one function is what
+    /// stops the two spellings being compared to each other by accident.
+    pub fn fingerprint_compact(&self) -> String {
+        hex::decode(&self.static_pub)
+            .map(|bytes| crate::identity::fingerprint_compact(&bytes))
+            .unwrap_or_default()
+    }
+
     pub fn secret(&self) -> Option<[u8; 32]> {
         if self.state != PeerState::Paired || self.secret.len() != 32 {
             return None;
@@ -209,6 +220,24 @@ impl Roster {
         };
         peer.state = PeerState::Revoked;
         peer.secret.clear();
+        self.save()?;
+        Ok(true)
+    }
+
+    /// Record where a peer can be reached, without claiming to have
+    /// reached it. This is § 1's manual entry and its discovery step
+    /// arriving at the same place: an address a person typed and an
+    /// address a browse resolved are both "try this one first next time",
+    /// which is what the cached-address rule means. Deliberately does
+    /// **not** touch `last_seen_ms` — nothing has been seen.
+    pub fn set_address(&mut self, static_pub: &str, address: &str) -> Result<bool> {
+        let Some(peer) = self.peers.iter_mut().find(|p| p.static_pub == static_pub) else {
+            return Ok(false);
+        };
+        if peer.address == address {
+            return Ok(true);
+        }
+        peer.address = address.to_string();
         self.save()?;
         Ok(true)
     }

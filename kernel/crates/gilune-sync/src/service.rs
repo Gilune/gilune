@@ -11,6 +11,7 @@
 //! the roster changes, so a revoked device's operations are refused
 //! whoever relays them.
 
+use crate::discovery::PeerDiscovery;
 use crate::exchange;
 use crate::handshake::{self, Greeting, Intent};
 use crate::identity::{self, Enrolment, Identity, IdentityStore, KeyWrap};
@@ -28,23 +29,97 @@ use gilune_kernel::limits::Limits;
 use gilune_kernel::store::Store;
 use std::net::TcpListener;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The listener's preferred port, in the dynamic range (ADR 0019 § 1).
 /// If it is taken an ephemeral one is used, and the actual port is what
 /// the QR and the settings screen show — never the preferred one.
+///
+/// **A fixed default is what makes a restarted device reachable.** M5b
+/// took whatever port was free, so a device that came back from a restart
+/// was no longer at the address every peer had cached for it; a peer then
+/// had nothing to dial and no way to find out. Preferring one port turns
+/// the common case — one Gilune per machine — into "the address a peer
+/// cached is still right", and discovery answers the uncommon one.
 pub const DEFAULT_PORT: u16 = 51837;
 
-/// What M5b binds to.
+/// What the listener binds.
 ///
-/// **Deliberately the loopback interface at this stage.** M5b's scope is
-/// "two processes on one machine, no discovery"; binding a routable
-/// interface is what raises the Windows Security Alert, and ADR 0019 § 11
-/// puts the firewall UX in M5c together with the discovery that needs it.
-/// M5c changes this constant and adds the explanation that has to appear
-/// immediately before the prompt.
-pub const DEFAULT_BIND_HOST: &str = "127.0.0.1";
+/// **Every interface, which is what makes this milestone live.** M5b
+/// deliberately bound the loopback: its scope was two processes on one
+/// machine and binding a routable interface is what raises the Windows
+/// Security Alert. M5c is the stage that wants the radio, so the bind is
+/// routable and the shells own the explanation that has to appear
+/// immediately before the prompt (§ 2) — and the prompt happens at
+/// `set_enabled(true)` and nowhere else, which is the property that keeps
+/// capture from ever being behind it.
+pub const DEFAULT_BIND_HOST: &str = "0.0.0.0";
+
+/// How many peers may be served at once.
+///
+/// M5b served one at a time, which was honest for a boundary proof and
+/// wrong for a mesh: a phone mid-session made a laptop's Sync-now hang
+/// until it finished. Thread-per-session is right at this scale — a
+/// personal LAN holds a handful of the same user's own devices — and the
+/// cap is what stops a hostile peer turning "accept another one" into
+/// unbounded threads. Over the cap a caller is closed on, not queued:
+/// resumption from a frontier is free, so being turned away costs a peer
+/// nothing but a retry.
+pub const MAX_CONCURRENT_SESSIONS: usize = 8;
+
+/// Why a peer could not be reached, in the words the user gets. § 1's
+/// last step is "a diagnostic that names AP client isolation as the
+/// likely cause" — words, not a spinner — and this is where those words
+/// are decided, once, rather than in each shell.
+pub fn unreachable_diagnostic(called: &str, cached: &str, looked: bool, seen: usize) -> String {
+    unreachable_because(called, cached, looked, seen, false)
+}
+
+/// The same, when the browse is able to say whether the wanted device was
+/// among what it saw.
+///
+/// A device that answered a browse but speaks a protocol this build
+/// cannot is **not** a device that is switched off, and telling someone
+/// their laptop is asleep when it is sitting in front of them running a
+/// newer Gilune is the kind of wrong answer that costs an evening.
+pub fn unreachable_because(
+    called: &str,
+    cached: &str,
+    looked: bool,
+    seen: usize,
+    version_mismatch: bool,
+) -> String {
+    if version_mismatch {
+        return format!(
+            "{called} is on this network, but it is running a version of Gilune that this \
+             one cannot exchange notes with. Updating both devices to the same version is \
+             what fixes it; nothing is wrong with either vault in the meantime."
+        );
+    }
+    if !looked {
+        return format!(
+            "{called} did not answer at {cached}, and this device has no way to look for \
+             it. Open that device's sync settings, read the address it shows, and enter \
+             it here."
+        );
+    }
+    if seen == 0 {
+        return format!(
+            "{called} did not answer at {cached}, and no device could be found on this \
+             network. Many guest, hotel and office networks stop devices talking to each \
+             other directly — if this is one of those, no amount of waiting will help and \
+             the two devices need a network of their own. Otherwise check that sync is \
+             switched on over there, and that Windows was allowed through the firewall on \
+             private networks."
+        );
+    }
+    format!(
+        "{called} did not answer at {cached}. {seen} other device(s) are visible on this \
+         network, so this network is not the problem — that one is probably switched off, \
+         asleep, or has sync turned off."
+    )
+}
 
 /// A peer as a settings screen sees it. No secrets: the pair secret never
 /// leaves the roster.
@@ -70,6 +145,22 @@ pub struct PairingOffer {
     pub attempts_left: u32,
 }
 
+/// A device seen on the network, as a settings screen sees it.
+#[derive(Debug, Clone)]
+pub struct FoundDevice {
+    pub fingerprint: String,
+    pub address: String,
+    /// Whether this build can talk to it at all — a device on the same
+    /// LAN running a different protocol version is visible and not
+    /// reachable, and saying so beats a pairing that fails.
+    pub compatible: bool,
+    /// The static key, when this is a device already in the roster. Empty
+    /// for a stranger, which is also what makes it offerable to pair.
+    pub static_pub: String,
+    /// `paired`, `revoked` or `unknown`.
+    pub state: String,
+}
+
 /// The facts a sync settings screen shows.
 #[derive(Debug, Clone)]
 pub struct SyncFacts {
@@ -85,6 +176,21 @@ pub struct SyncFacts {
     pub enrolment: String,
     pub enrolment_notice: Option<String>,
     pub listening_on: Option<String>,
+    /// Whether the user has switched sync on, as opposed to whether it is
+    /// listening right now. The two differ exactly when a machine was
+    /// meant to be reachable and could not bind — a busy port, a firewall
+    /// that said no — which is a state worth being able to describe
+    /// rather than showing as a switch that silently flicked itself off.
+    pub wanted: bool,
+    /// Whether this device is currently advertising itself. Separate from
+    /// `enabled` on purpose: a machine can bind its listener and still
+    /// fail to open UDP 5353, and § 1's fallback chain is exactly what
+    /// happens then — so a screen that showed one flag for both would be
+    /// telling a user their device is findable when it is only reachable.
+    pub advertising: bool,
+    /// Which route discovery took, or `none`. A diagnostic has to be able
+    /// to say whether nothing was found or nothing could look.
+    pub discovery: String,
     pub pairing: Option<PairingOffer>,
     pub peers: Vec<PeerSummary>,
 }
@@ -105,6 +211,23 @@ pub struct SyncShared {
     roster: Arc<Mutex<Roster>>,
     window: Mutex<Option<PairingWindow>>,
     rate: Mutex<RateLimiter>,
+    /// How many peers are being served right now. Bounded by
+    /// `MAX_CONCURRENT_SESSIONS`, and decremented by a guard rather than
+    /// by the end of the handler, because a handler can end by panicking.
+    live: Arc<AtomicUsize>,
+    /// Whether this device is still willing to answer.
+    ///
+    /// Cleared when sync is switched off, and consulted by every live
+    /// session between requests — **the same mechanism revocation uses**,
+    /// for the same reason: apply is one transaction per operation, so
+    /// the boundary between two requests is also a boundary between two
+    /// whole operations, and stopping there cannot half-apply anything.
+    ///
+    /// The alternative was to join the session threads when the listener
+    /// stops, and it was wrong: a session waits up to a minute for a peer
+    /// that has gone quiet, so switching sync off would freeze the
+    /// settings screen for as long as that took.
+    serving: Arc<AtomicBool>,
 }
 
 impl SyncShared {
@@ -126,8 +249,15 @@ struct Listening {
 impl Listening {
     fn stop(&mut self) {
         self.stopping.store(true, Ordering::SeqCst);
-        // Wake the blocked accept so the thread can see the flag.
-        let _ = std::net::TcpStream::connect(&self.address);
+        // Wake the blocked accept so the thread can see the flag. The
+        // bind is every interface now, and `0.0.0.0` is not somewhere a
+        // connect can be aimed on every platform — the loopback reaches
+        // the same listener and always exists.
+        let knock = match self.address.rsplit_once(':') {
+            Some((_, port)) => format!("127.0.0.1:{port}"),
+            None => self.address.clone(),
+        };
+        let _ = std::net::TcpStream::connect(&knock);
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
         }
@@ -146,10 +276,28 @@ pub struct SyncService {
     identities: IdentityStore,
     device_id: String,
     enrolment: Enrolment,
-    bind_host: String,
+    bind_host: Mutex<String>,
+    preferred_port: Mutex<u16>,
+    /// How this device finds others and lets itself be found. Registered
+    /// by the host — `MdnsDiscovery` on desktop, a Kotlin `NsdManager`
+    /// adapter on Android — and `NoDiscovery` until one is, which is a
+    /// supported state rather than a broken one: § 1's cached address and
+    /// manual entry both work without it.
+    discovery: Mutex<Arc<dyn PeerDiscovery>>,
+    /// Whether the responder is currently up. Not derived from `enabled`:
+    /// binding TCP can succeed while opening UDP 5353 fails, and a screen
+    /// must be able to say "reachable but not findable" because that is
+    /// the state the fallback chain exists for.
+    advertising: AtomicBool,
 }
 
 impl SyncService {
+    /// The preferred port, reachable from a caller that only holds the
+    /// service. Same number as the module constant — one fact, two
+    /// spellings, because a settings screen asks the service and a test
+    /// asks the type.
+    pub const DEFAULT_PORT: u16 = DEFAULT_PORT;
+
     /// Enrol this machine against this vault and stand the service up.
     /// Nothing binds a socket here: the listener waits for
     /// `set_enabled(true)`, so a user who never turns sync on never sees a
@@ -184,20 +332,111 @@ impl SyncService {
                 roster: Arc::new(Mutex::new(roster)),
                 window: Mutex::new(None),
                 rate: Mutex::new(RateLimiter::default()),
+                live: Arc::new(AtomicUsize::new(0)),
+                serving: Arc::new(AtomicBool::new(false)),
             }),
             listening: Mutex::new(None),
             identities,
             device_id,
             enrolment,
-            bind_host: DEFAULT_BIND_HOST.to_string(),
+            bind_host: Mutex::new(DEFAULT_BIND_HOST.to_string()),
+            preferred_port: Mutex::new(DEFAULT_PORT),
+            discovery: Mutex::new(Arc::new(crate::discovery::NoDiscovery)),
+            advertising: AtomicBool::new(false),
         })
     }
 
-    /// Bind somewhere other than the loopback. Not reachable from the
-    /// FFI in M5b — it exists so a test can be explicit about what it
-    /// binds, and so M5c has one line to change.
-    pub fn bind_host(&mut self, host: &str) {
-        self.bind_host = host.to_string();
+    /// Whether the user has ever switched sync on, on this machine, for
+    /// this vault. Survives a restart; see `IdentityStore::settings_path`.
+    pub fn wanted(&self) -> bool {
+        self.identities.sync_wanted(&self.device_id)
+    }
+
+    /// Bind if the user left sync switched on, and answer whether it is
+    /// now listening.
+    ///
+    /// **This does not weaken § 2.** The lazy-bind rule is that nothing
+    /// binds before the user first opts in — so a user who never turns
+    /// sync on never meets the firewall prompt, and capture is never
+    /// behind it. Once they have opted in, binding at launch *is* the
+    /// feature working: the prompt already happened at the first enable,
+    /// and a device that forgot it was reachable every time it started
+    /// would be a device nothing could ever sync with unprompted.
+    ///
+    /// Separate from `configure` on purpose. Enrolment must not fail
+    /// because a port is busy or a firewall said no, so the bind is a
+    /// second, fallible step a host takes deliberately — and a host that
+    /// never calls it simply starts switched off.
+    pub fn resume(&self) -> Result<Option<String>> {
+        if !self.wanted() {
+            return Ok(None);
+        }
+        self.set_enabled(true)
+    }
+
+    /// Bind somewhere other than every interface. A test uses it to stay
+    /// off the network; a host that knows its situation may narrow the
+    /// bind deliberately.
+    pub fn bind_host(&self, host: &str) {
+        *self.bind_host.lock().unwrap_or_else(|e| e.into_inner()) = host.to_string();
+    }
+
+    /// Prefer a port other than the documented default.
+    ///
+    /// The default is what makes a restarted device findable again at a
+    /// cached address, so this exists for the case that breaks it: two
+    /// Gilunes on one machine, where the second one would otherwise take
+    /// an ephemeral port and move on every restart. Naming a port each is
+    /// what lets a two-process scenario be about sync rather than about
+    /// port allocation.
+    pub fn prefer_port(&self, port: u16) {
+        *self.preferred_port.lock().unwrap_or_else(|e| e.into_inner()) = port;
+    }
+
+    /// Register how this device finds others (§ 1). Takes effect at the
+    /// next `set_enabled(true)`; registering while sync is already on
+    /// starts the new adapter advertising immediately, because a host
+    /// that swapped its adapter meant to.
+    pub fn set_discovery(&self, discovery: Arc<dyn PeerDiscovery>) {
+        let previous =
+            std::mem::replace(&mut *self.discovery.lock().unwrap_or_else(|e| e.into_inner()), discovery);
+        previous.withdraw();
+        self.advertising.store(false, Ordering::SeqCst);
+        if self.enabled() {
+            self.begin_advertising();
+        }
+    }
+
+    fn discovery(&self) -> Arc<dyn PeerDiscovery> {
+        Arc::clone(&self.discovery.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    /// Whether the responder is up right now.
+    pub fn advertising(&self) -> bool {
+        self.advertising.load(Ordering::SeqCst)
+    }
+
+    /// Which route discovery takes on this host, or `none`.
+    pub fn discovery_route(&self) -> String {
+        self.discovery().name()
+    }
+
+    /// Put this device on the network, if it can be. A responder that
+    /// will not start is **not** a failure to switch sync on: the
+    /// listener is bound and every peer holding a cached address can
+    /// still reach it, which is precisely the situation § 1's fallback
+    /// chain was written for. So the outcome is recorded and not raised.
+    fn begin_advertising(&self) {
+        let Some(address) = self.listening_on() else { return };
+        let Some(port) = address.rsplit_once(':').and_then(|(_, p)| p.parse().ok()) else {
+            return;
+        };
+        let ad = crate::discovery::Advertisement {
+            fingerprint: identity::fingerprint_compact(self.shared.identity.public()),
+            port,
+        };
+        let started = self.discovery().advertise(&ad).is_ok();
+        self.advertising.store(started, Ordering::SeqCst);
     }
 
     pub fn enrolment(&self) -> &Enrolment {
@@ -246,6 +485,11 @@ impl SyncService {
     /// (ADR 0019 § 2), and switching off closes it and abandons any
     /// pairing window with it.
     pub fn set_enabled(&self, on: bool) -> Result<Option<String>> {
+        // Recorded first, and recorded whatever happens next: the user's
+        // choice is a fact even if this machine then fails to bind. A
+        // flag written only on success would silently forget the choice
+        // exactly on the machines where remembering it matters.
+        let _ = self.identities.set_sync_wanted(&self.device_id, on);
         let mut listening = self.listening.lock().unwrap_or_else(|e| e.into_inner());
         if !on {
             *self.shared.window.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -254,6 +498,17 @@ impl SyncService {
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clear();
+            // The responder goes first. Withdrawing after the listener
+            // closed would leave a window in which this device is
+            // advertised at a port that answers nothing, which is the one
+            // failure a discovering peer cannot tell from a bad network.
+            self.discovery().withdraw();
+            self.advertising.store(false, Ordering::SeqCst);
+            // Live sessions stop at their next operation boundary rather
+            // than being waited for: a peer that has gone quiet holds a
+            // session open for a minute, and switching sync off must not
+            // take a minute.
+            self.shared.serving.store(false, Ordering::SeqCst);
             if let Some(mut live) = listening.take() {
                 live.stop();
             }
@@ -262,8 +517,12 @@ impl SyncService {
         if let Some(live) = listening.as_ref() {
             return Ok(Some(live.address.clone()));
         }
-        let socket = TcpListener::bind((self.bind_host.as_str(), DEFAULT_PORT))
-            .or_else(|_| TcpListener::bind((self.bind_host.as_str(), 0)))?;
+        let host = self.bind_host.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let preferred = *self.preferred_port.lock().unwrap_or_else(|e| e.into_inner());
+        // The preferred port first, an ephemeral one if it is taken, and
+        // whichever was actually taken is what gets published (§ 1).
+        let socket = TcpListener::bind((host.as_str(), preferred))
+            .or_else(|_| TcpListener::bind((host.as_str(), 0)))?;
         let address = socket.local_addr()?.to_string();
         *self
             .shared
@@ -273,13 +532,69 @@ impl SyncService {
         let stopping = Arc::new(AtomicBool::new(false));
         let flag = Arc::clone(&stopping);
         let shared = Arc::clone(&self.shared);
+        shared.serving.store(true, Ordering::SeqCst);
         let thread = std::thread::spawn(move || accept_loop(shared, socket, flag));
         *listening = Some(Listening {
             address: address.clone(),
             stopping,
             thread: Some(thread),
         });
+        // Held no longer: advertising reads `listening_on`, which takes
+        // this same lock.
+        drop(listening);
+        self.begin_advertising();
         Ok(Some(address))
+    }
+
+    // ------------------------------------------------------------ discovery
+
+    /// Look for devices on this network (§ 1). Blocking, for `browse`'s
+    /// own duration: the callers are a button and a background pass, and
+    /// neither wants an answer that is still arriving.
+    ///
+    /// Every device seen is reported, paired or not — a stranger is what
+    /// a person is looking at when they are about to pair one, and a
+    /// paired device appearing here is how "it is on and I still cannot
+    /// reach it" becomes visible rather than mysterious.
+    pub fn discover(&self, timeout: std::time::Duration) -> Result<Vec<FoundDevice>> {
+        let mine = identity::fingerprint_compact(self.shared.identity.public());
+        let found = self.discovery().browse(timeout)?;
+        let roster = self.roster();
+        Ok(found
+            .into_iter()
+            // Never offer this device to itself. It is advertising on the
+            // same network and it answers its own browse.
+            .filter(|d| d.fingerprint != mine)
+            .map(|d| {
+                let known = roster
+                    .peers()
+                    .iter()
+                    .find(|p| p.fingerprint_compact() == d.fingerprint)
+                    .map(|p| (p.static_pub.clone(), p.state.as_str().to_string()));
+                let (static_pub, state) = known.unwrap_or_default();
+                FoundDevice {
+                    compatible: d.compatible(),
+                    fingerprint: d.fingerprint,
+                    address: d.address,
+                    static_pub,
+                    state: if state.is_empty() { "unknown".to_string() } else { state },
+                }
+            })
+            .collect())
+    }
+
+    /// Record an address a person typed for a paired device (§ 1, step
+    /// two of the fallback chain). Deliberately a roster write rather
+    /// than a one-shot dial: an address that worked once is the address
+    /// to try first next time, which is the whole cached-address rule.
+    pub fn set_peer_address(&self, static_pub: &str, address: &str) -> Result<bool> {
+        let address = address.trim();
+        if address.is_empty() || !address.contains(':') {
+            return Err(SyncError::Refused {
+                detail: "an address is a host and a port, like 192.168.1.20:51837".to_string(),
+            });
+        }
+        self.roster().set_address(static_pub, address)
     }
 
     // ------------------------------------------------------------- pairing
@@ -503,16 +818,93 @@ impl SyncService {
 
     // ----------------------------------------------------------------- sync
 
-    /// Sync with every paired peer whose address this device knows.
-    /// M5b has no discovery, so a peer with no cached address is skipped
-    /// rather than hunted for.
+    /// Reach one paired peer, down § 1's chain.
+    ///
+    /// **The order is the decision.** A cached address is tried first and
+    /// discovery only runs when it fails — which is what makes the
+    /// phone's background job cheap, and what answers a network that
+    /// filters multicast but routes unicast. Whatever answers is written
+    /// back to the roster, so the expensive step pays for itself once and
+    /// the next session is a unicast dial again.
+    ///
+    /// When the chain runs out the error is § 1's third step: words that
+    /// name what is probably wrong, never a spinner. A caller has already
+    /// been given the manual-entry route by then — `set_peer_address` is
+    /// how a person supplies the address this could not find.
+    fn reach(
+        &self,
+        transport: &SecureTransport,
+        static_pub: &str,
+        cached: &str,
+        called: &str,
+    ) -> Result<Box<dyn crate::Session>> {
+        if !cached.is_empty() {
+            match transport.connect(&format!("{static_pub}@{cached}")) {
+                Ok(session) => return Ok(session),
+                // A refusal from a peer that *answered* is a different
+                // fact from an address that answered nothing: being told
+                // no is not something discovery can fix, so the chain
+                // stops here rather than browsing the network over it.
+                Err(e @ SyncError::Protocol { .. }) => return Err(e),
+                Err(_) => {}
+            }
+        }
+        let discovery = self.discovery();
+        let looked = discovery.name() != "none";
+        let mine = identity::fingerprint_compact(self.shared.identity.public());
+        let seen: Vec<_> = if looked {
+            discovery
+                .browse(crate::discovery::DEFAULT_BROWSE)
+                .unwrap_or_default()
+                .into_iter()
+                // This device is advertising on the same network and
+                // answers its own browse. Counting it would make the
+                // diagnostic below say "1 other device is visible" on a
+                // network where this machine is entirely alone — which is
+                // the network the diagnostic most needs to describe
+                // correctly.
+                .filter(|d| d.fingerprint != mine)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let wanted = self
+            .roster()
+            .find(static_pub)
+            .map(|p| p.fingerprint_compact())
+            .unwrap_or_default();
+        let ours = seen
+            .iter()
+            .find(|d| !wanted.is_empty() && d.fingerprint == wanted);
+        let found = ours.filter(|d| d.compatible());
+        if let Some(found) = found {
+            let session = transport.connect(&format!("{static_pub}@{}", found.address))?;
+            // Discovery is expensive and this is what stops it being
+            // paid twice: the address that worked becomes the cached one.
+            let _ = self.roster().set_address(static_pub, &found.address);
+            return Ok(session);
+        }
+        Err(SyncError::Refused {
+            detail: unreachable_because(
+                called,
+                if cached.is_empty() { "any address this device knows" } else { cached },
+                looked,
+                seen.len(),
+                // Seen, and not something this build can talk to. A
+                // different fact from "not seen", and a different fix.
+                ours.is_some(),
+            ),
+        })
+    }
+
+    /// Sync with every paired peer, reaching each down the chain in § 1.
     pub fn sync_now(&self, store: &Store) -> Result<ExchangeReport> {
         let transport = self.transport();
         let targets: Vec<(String, String, String)> = self
             .roster()
             .peers()
             .iter()
-            .filter(|p| p.state == PeerState::Paired && !p.address.is_empty())
+            .filter(|p| p.state == PeerState::Paired)
             .map(|p| {
                 let called = if p.name.is_empty() { p.fingerprint() } else { p.name.clone() };
                 (p.static_pub.clone(), p.address.clone(), called)
@@ -520,7 +912,7 @@ impl SyncService {
             .collect();
         let mut total = ExchangeReport::default();
         for (static_pub, address, called) in targets {
-            let mut session = match transport.connect(&format!("{static_pub}@{address}")) {
+            let mut session = match self.reach(&transport, &static_pub, &address, &called) {
                 Ok(session) => session,
                 Err(e) => {
                     // A connection that never opened is not one device's
@@ -570,6 +962,9 @@ impl SyncService {
             enrolment: self.enrolment.as_str().to_string(),
             enrolment_notice: self.enrolment.notice(),
             listening_on: self.listening_on(),
+            wanted: self.wanted(),
+            advertising: self.advertising(),
+            discovery: self.discovery_route(),
             pairing: self.pairing(),
             peers: self.peers(),
         }
@@ -601,17 +996,25 @@ fn summary(peer: &crate::roster::Peer) -> PeerSummary {
 
 // ------------------------------------------------------------- the listener
 
-/// One peer at a time, as the loopback server is: M5b proves the
-/// boundary, and a concurrent listener is a bound M5c argues for on its
-/// own evidence rather than inherits here.
+/// Accept peers and serve each on its own thread, up to
+/// `MAX_CONCURRENT_SESSIONS`.
+///
+/// M5b served one at a time and said so: a boundary proof does not need
+/// concurrency. A mesh does — with one worker, a phone in the middle of a
+/// long first synchronisation makes every other device's Sync-now wait
+/// behind it, and on a desktop that is an always-available listener the
+/// wait is unbounded. Thread-per-session is right at this scale (a
+/// handful of one person's own devices) and the cap is what keeps
+/// "another peer connected" from meaning "another thread, forever".
+///
+/// Each session opens **its own kernel handle**, exactly as a second
+/// process would — multi-instance on one vault is supported use (owner
+/// decision 2026-08-31), and it is also what makes thread-per-session
+/// possible at all, since a `Store` is not shared across threads.
 fn accept_loop(shared: Arc<SyncShared>, socket: TcpListener, stopping: Arc<AtomicBool>) {
-    // Its own kernel handle, exactly as a second process would open —
-    // multi-instance on one vault is supported use (owner decision
-    // 2026-08-31), and it keeps a blocking accept off the FFI's lock.
-    let Ok(store) = Store::open(&shared.vault) else { return };
     for stream in socket.incoming() {
         if stopping.load(Ordering::SeqCst) {
-            return;
+            break;
         }
         let Ok(stream) = stream else { continue };
         let _ = stream.set_nodelay(true);
@@ -631,7 +1034,43 @@ fn accept_loop(shared: Arc<SyncShared>, socket: TcpListener, stopping: Arc<Atomi
             // caller being backed off learns nothing from us.
             continue;
         }
-        let _ = answer(&shared, &store, stream, &caller);
+        if shared.live.load(Ordering::SeqCst) >= MAX_CONCURRENT_SESSIONS {
+            // Full. Dropping the stream is the refusal, and it costs the
+            // caller one retry: resuming from a frontier is free, which
+            // is exactly why turning a peer away is safe.
+            continue;
+        }
+        shared.live.fetch_add(1, Ordering::SeqCst);
+        let session_shared = Arc::clone(&shared);
+        // Detached, deliberately. The handle is not kept because nothing
+        // wants to wait for it: switching sync off is answered by the
+        // `serving` flag at the next operation boundary, and the counter
+        // above is what bounds how many can be in flight.
+        match std::thread::Builder::new()
+            .name("gilune-sync-session".to_string())
+            .spawn(move || {
+                // The guard, not the end of the function: a handler that
+                // panics must still give its slot back, or a crash in one
+                // session would shrink the listener for good.
+                let _slot = SessionSlot(Arc::clone(&session_shared.live));
+                let Ok(store) = Store::open(&session_shared.vault) else { return };
+                let _ = answer(&session_shared, &store, stream, &caller);
+            }) {
+            Ok(_detached) => {}
+            Err(_) => {
+                shared.live.fetch_sub(1, Ordering::SeqCst);
+            }
+        }
+    }
+}
+
+/// Holds one of `MAX_CONCURRENT_SESSIONS`, and gives it back however the
+/// session ends.
+struct SessionSlot(Arc<AtomicUsize>);
+
+impl Drop for SessionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -778,21 +1217,43 @@ fn answer(
                 .unwrap_or_else(|e| e.into_inner())
                 .succeeded(caller);
             {
+                // What a session teaches the *listening* side about where
+                // its peer can be reached. The dialling side learns this
+                // for free — it dialled — but a device that only ever
+                // receives would otherwise keep whatever address pairing
+                // recorded, and that is exactly the address that goes
+                // stale when the peer restarts on a different port.
+                //
+                // Same rule as pairing: the **host** comes from the socket
+                // the peer actually arrived on, and only the **port** is
+                // believed from what it said inside the encrypted
+                // handshake — so a peer cannot make this device record an
+                // address it chose.
+                let learned = match established.peer.advertised_port() {
+                    Some(port) if port != 0 => format!("{caller}:{port}"),
+                    _ => String::new(),
+                };
                 let mut roster = shared.roster.lock().unwrap_or_else(|e| e.into_inner());
-                roster.seen(&static_pub, &established.peer.device_id, "")?;
+                roster.seen(&static_pub, &established.peer.device_id, &learned)?;
             }
             let roster = Arc::clone(&shared.roster);
+            let serving = Arc::clone(&shared.serving);
             let pinned = static_pub.clone();
-            // Consulted between requests. Revoking takes the pair secret
-            // away, so this goes false the instant the roster changes and
-            // the session ends on the next boundary with nothing
-            // half-applied.
+            // Consulted between requests, and answering two questions
+            // with one mechanism. Revoking takes the pair secret away, so
+            // this goes false the instant the roster changes; switching
+            // sync off clears `serving`, so a live session ends then too.
+            // Either way the session ends on the next boundary with
+            // nothing half-applied, because apply is one transaction per
+            // operation and the boundary between two requests is also a
+            // boundary between two whole operations.
             let permitted = move || {
-                roster
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .secret_for(&pinned)
-                    .is_some()
+                serving.load(Ordering::SeqCst)
+                    && roster
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .secret_for(&pinned)
+                        .is_some()
             };
             let mut channel = established.channel;
             protocol::serve(store, &mut channel, &shared.limits, &permitted)?;

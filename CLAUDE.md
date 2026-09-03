@@ -222,6 +222,58 @@ gates promises) are ratified. **Next: application-level engineering — see
      watched (installed -g); listener serves one peer; restarted
      device takes a new port (no discovery till M5c); Ctrl+N notes
      don't sync (pre-existing M2 import gap — surface in M5c?).
+     **M5c DONE (2026-09-03, one Opus agent + one Android sub-agent;
+     the sub-agent's close-out report reached MAIN when its parent
+     reply bounced — read both)**: discovery = _gilune._tcp behind
+     PeerDiscovery (desktop mdns-sd 0.21, daemon lazy; Android
+     NsdManager adapter Discovery.kt — both API paths, SERIAL
+     resolve pump (<34 answers concurrent resolves with
+     ALREADY_ACTIVE), own executor, main-thread refusal, TXT = v/fp
+     ONLY, no MulticastLock + a comment saying never add one;
+     advertise() waits for onServiceRegistered so advertising is
+     measured). TWO SCHEDULED MEASUREMENTS ANSWERED: mdns-sd
+     COEXISTS with the Windows 11 responder on UDP 5353; 100 ops =
+     1.21 s, cold browse 2.51 s, together 3.72 s of the 5 s budget
+     (loopback-labelled) — browse costs 2× the exchange, so
+     cached-address-first is a REQUIREMENT, pinned by a
+     browse-counting test. Port stability: fixed default 51837 →
+     ephemeral if taken, published everywhere; peer's true port from
+     the encrypted greeting. Fallback chain proven: cached →
+     discovery → typed → words (three diagnostics incl. AP
+     isolation). Live-run defects fixed+pinned: mDNS resolved peers
+     to 127.0.0.1; incompatible-version peer read as "switched off";
+     disable froze settings 60 s joining sessions (now ends them at
+     an op boundary like revocation). Lazy routable bind at
+     set_sync_enabled(true) — firewall prompt OBSERVED (gate 13).
+     Concurrent listener thread-per-session cap 8. Alert surface:
+     GiluneStatus gains blobs_awaiting+alerts, integrity_alerts()
+     FFI, banners both shells, all seven kinds in user words
+     (sync-unknown-op-kind worded as NOT damage). Scheduling:
+     foreground on open/resume behind shouldSyncOnForeground;
+     PeriodicWorkRequest 15 min UNMETERED+batteryNotLow no-charging
+     unique KEEP; never an FGS. **androidx.work:work-runtime:2.10.0
+     added — the R0 InitializationProvider defect does NOT reproduce
+     for a DIRECT app dependency** (provider merges into the APP
+     manifest; test APK carries none; real enqueue + full suite
+     prove it — the AAR-side exclusions stay). Sub-agent finding,
+     coordinator decision: sync-enabled was process-local — now
+     PERSISTED device-local beside identity/roster (never the vault:
+     a copied vault must not open a port), resume_sync in the shared
+     seam. docs/guide/sync.html + screenshot + nav across all
+     guides. Gate C: 11/12/15 proven two-process real-socket real-
+     Noise (real-device half AWAITS THE OWNER'S PHONE), 13 observed,
+     14 real-WorkManager-asserted, 16 measured loopback-labelled.
+     Suites: cargo 247/0, desktop 469/0, instrumented 647/0/1;
+     clippy clean; ABIs 6.20/6.34 MB. Gaps: NsdDiscovery never saw a
+     second device; sub-34 resolve path never executed; revoke-last-
+     peer leaves the KEEP schedule (worker no-ops); worker retry
+     unexercised; IPv6-only peers undiscovered by design.
+     **M5 delivery complete pending hardware: ADR 0019 stays
+     Proposed until gate C's real-device six run on the owner's
+     phone; 0005 (LAN half) and 0008 (needs the headless-agent demo)
+     likewise. THREE WINDOWS FIREWALL DIALOGS from the routable-bind
+     tests were left OPEN on the owner's desktop — allow/deny is the
+     owner's click, never an agent's.**
      Gaps: GiluneStatus lacks blobs_awaiting/alerts (deliberate, no
      FFI change — `gilune-cli alerts` meanwhile, M5c wires shells);
      per-peer establishment rate limits → M5b (no peer identity yet);

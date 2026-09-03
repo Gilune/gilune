@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sync — Gilune guide</title>
+<meta name="description" content="How Gilune keeps your devices in step: pairing with a code or a QR, what syncs, when it happens, and what to do when a network gets in the way.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a class="here" href="sync.html">Sync</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <h1>Sync</h1>
+  <p class="lede">Your devices hand their notes to each other directly, over your own
+  network. There is no account, no server, and nothing of yours passes through anybody
+  else's machine.</p>
+
+  <h2>What syncing means here</h2>
+
+  <p>Two devices that you have introduced to each other exchange what you have written
+  — notes, recordings, edits — straight across the network you are both on. Nobody else
+  is involved. Nothing is uploaded, and there is no service to sign up for, go down, or
+  change its terms.</p>
+
+  <p>Every device keeps a <strong>full copy</strong>. Your phone is not a window onto
+  your desktop; it holds the whole vault, and so does the desktop. Either one on its own
+  is the entire notebook.</p>
+
+  <h2>Turning it on</h2>
+
+  <p>Open <strong>Settings</strong> from the top bar, choose <strong>Sync</strong>, and
+  turn on <strong>Let other devices reach this one</strong>. That is the whole of it.</p>
+
+  <figure>
+    <img src="../assets/sync-settings.png" alt="The Sync page of Gilune's settings: a switch labelled let other devices reach this one, this device's name and fingerprint, and sections for starting a pairing and for entering a code from another device.">
+  </figure>
+
+  <p>That switch is the only thing in Gilune that opens a port on your machine, and
+  nothing else does it. With sync off, everything else works exactly as it always did —
+  writing, voice capture, transcription, tasks, search — and nothing on the network can
+  reach the app at all. Sync is something you opt into, not something you switch off.</p>
+
+  <p>The switch is remembered. Once you have turned it on, Gilune comes back ready to
+  reach your other devices every time it starts, without asking again — you turn it on
+  once, not once per session. Turning it off is remembered just as firmly.</p>
+
+  <h3>The Windows firewall prompt</h3>
+
+  <p>The first time you turn sync on, Windows asks whether to allow Gilune through the
+  firewall. It appears at that moment and only at that moment, because that is when
+  Gilune first starts listening — you will never meet it while simply writing a note.</p>
+
+  <p>Tick <strong>Private networks</strong> and leave <strong>Public networks</strong>
+  unticked. Private means the network at home or in the office that you already trust;
+  public means the café and the airport, where you do not want the app answering
+  strangers.</p>
+
+  <p><strong>If you are not an administrator on this machine</strong>, Windows will not
+  offer you the choice — it will simply tell you that Gilune was blocked, and sync will
+  never find anything. Someone with an administrator account can add the rule once, in a
+  terminal opened as administrator:</p>
+
+<pre><code>netsh advfirewall firewall add rule name="Gilune" dir=in action=allow program="%LOCALAPPDATA%\Gilune\Gilune.exe" enable=yes profile=private</code></pre>
+
+  <p>That is a one-off. Afterwards sync works for you without any further prompt.</p>
+
+  <h2>Pairing two devices</h2>
+
+  <p>Devices only talk to each other after you have introduced them, and you do that
+  once per pair. There are two ways to do it, and they are the same introduction
+  underneath — one of them just saves you typing.</p>
+
+  <h3>With the six-digit code</h3>
+
+  <ol>
+    <li>On one device, in <strong>Settings ▸ Sync</strong>, press <strong>Start
+    pairing</strong>. It shows a six-digit code and an address.</li>
+    <li>On the other device, on the same screen, find <strong>Enter a code from another
+    device</strong> and type in both the address and the code.</li>
+    <li>Press <strong>Pair</strong>.</li>
+  </ol>
+
+  <p>This works between any two devices, in either direction, always. It is the way that
+  never depends on anything else being in place.</p>
+
+  <p>A code is good for <strong>one pairing only</strong>, it <strong>expires after a
+  few minutes</strong>, and <strong>a few wrong tries cancels it</strong>. If any of
+  those happen, nothing is broken and nothing is at risk — press <strong>New code</strong>
+  and start again. A code that could be guessed at forever would not be worth six
+  digits.</p>
+
+  <h3>With the QR code</h3>
+
+  <p>While a code is open, the desktop shows the same introduction as a QR square beside
+  the digits. On the phone, open its Sync screen and scan it. That is the whole
+  difference: the same pairing, without typing an address and six digits into a phone.</p>
+
+  <p>The QR goes one way — the desktop shows it, the phone reads it. Two desktops pair
+  with the code.</p>
+
+  <h3>Making sure you paired with the right device</h3>
+
+  <p>Under <strong>This device</strong>, each device shows a short <strong>fingerprint</strong>
+  of its own: a handful of letters and digits, the same every time. After pairing, each
+  device lists the other one with the fingerprint it saw during the introduction.</p>
+
+  <p>To check, put the two screens side by side: the fingerprint your desktop lists for
+  the phone should be character-for-character the fingerprint the phone shows for itself,
+  and the other way round. If they match, you paired with the device you meant to.</p>
+
+  <h2>Finding devices automatically</h2>
+
+  <p>Once sync is on, a device announces itself on the network it is connected to. Press
+  <strong>Look for devices</strong> on the Sync page and everything that answers appears
+  in a list — the ones you have already paired with, and any you have not.</p>
+
+  <p>Syncing uses this on its own, too. Gilune tries the address it already has for a
+  device first, because that is by far the quicker of the two; only when that address no
+  longer works does it go looking. So a device that has moved to a different address
+  usually just works again, without you doing anything.</p>
+
+  <p>What gets announced is <strong>deliberately anonymous</strong>: a short fingerprint,
+  and nothing else. Not the device's name, not the name of your vault, nothing about you
+  and nothing about what you have written. Anyone else on the same network can tell that
+  a Gilune device is there — that is true of anything that announces itself — but not
+  whose it is or what it is called.</p>
+
+  <p>The name you actually see beside a device turns up only after the two of you have
+  paired. Names are exchanged privately, between devices that already know each other.</p>
+
+  <h2>What syncs</h2>
+
+  <p>Everything, both ways. Every note, every recording, every edit you make on either
+  side. Deletions travel too — delete a note on the phone and it goes from the desktop
+  as well.</p>
+
+  <p>A note sometimes arrives a little before its recording does: the words are small
+  and the audio is not, so the audio follows on behind. That is normal, and nothing is
+  missing — the note fills in when the recording lands.</p>
+
+  <h2>When it happens</h2>
+
+  <p>The <strong>desktop</strong> listens the whole time the app is open, so anything
+  another device sends arrives while you are working. If you want to push what you have
+  just written without waiting, press <strong>Sync with devices now</strong> at the
+  bottom of the Sync page.</p>
+
+  <p>The <strong>phone</strong> syncs when you open it, and again every time you come
+  back to it. On top of that it checks in the background roughly every fifteen minutes,
+  on Wi-Fi, when the battery is not low.</p>
+
+  <div class="note">
+    <p><strong>Fifteen minutes is a floor, not a promise.</strong> Android decides when
+    background work actually runs and batches it up to save power, so a phone you are
+    using is somewhere near that quarter of an hour, while a phone left in a pocket
+    overnight can go considerably longer. Anything you want on the other device straight
+    away, open the app — that is the path that happens in seconds.</p>
+  </div>
+
+  <h2>Revoking a device</h2>
+
+  <p>Beside each paired device is a <strong>Revoke</strong> button, and either device can
+  do it to the other. It takes effect immediately: the device can no longer connect, and
+  an exchange happening at that moment stops there and then.</p>
+
+  <div class="note">
+    <p><strong>Revoking is not an undo.</strong> Everything that device already sent you
+    stays in your vault, exactly where it is. Revoking decides what happens next, not
+    what already happened. Pairing that device again later is a new introduction, not a
+    resumption of the old one.</p>
+  </div>
+
+  <h2>A copied vault becomes a new device</h2>
+
+  <p>Copy your vault folder to another machine, or restore it from a backup, and Gilune
+  treats that machine as a <strong>new device with a history of its own</strong>. This is
+  deliberate: two machines writing as though they were the same device would tread on
+  each other's history, and the notes would be the thing that suffered.</p>
+
+  <p>It is also why one vault can end up showing two devices in the list. Gilune says so
+  plainly on the Sync page when it happens, the original device is unaffected, and you
+  can revoke whichever one you did not mean to have.</p>
+
+  <h2>When something is not working</h2>
+
+  <ul>
+    <li><strong>Nothing is found at all.</strong> Many guest, hotel and office networks
+    deliberately stop the devices on them from seeing one another. On a network like
+    that, no amount of waiting will help and there is nothing wrong with Gilune. Put both
+    devices on a network of your own, or turn on the phone's hotspot and use that.</li>
+
+    <li><strong>A device is found but will not connect.</strong> Check that sync is
+    actually switched on over there, and that Gilune was allowed through the firewall on
+    private networks on that machine.</li>
+
+    <li><strong>It used to work and now it does not.</strong> The other device's address
+    has probably changed — routers hand out new ones from time to time. Read the current
+    address off that device's Sync settings and type it into the address field on this
+    one.</li>
+
+    <li><strong>A message says something is being held back.</strong> Gilune stops rather
+    than accept something it cannot make sense of or verify, and it tells you what it was
+    and why. Nothing is lost by this: once the problem clears, it picks up exactly where
+    it left off.</li>
+  </ul>
+
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    MIT licence · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

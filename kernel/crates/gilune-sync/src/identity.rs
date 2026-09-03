@@ -154,6 +154,42 @@ impl IdentityStore {
         self.root.join(format!("{}.roster.json", slug(device_id)))
     }
 
+    /// Where this device records whether the user has turned sync on.
+    ///
+    /// **Device-local, beside the identity and the roster, and for the
+    /// same reason** (ADR 0019 § 4): whether *this machine* answers the
+    /// network is a fact about this machine, not about the vault. Putting
+    /// it in the vault would mean copying a vault to a second machine
+    /// switched sync on there, which is the opposite of the re-enrolment
+    /// rule. Putting it in a shell preference would mean the desktop and
+    /// the phone each keeping their own answer to one question, and ADR
+    /// 0008 asks for one configuration model serving both.
+    pub fn settings_path(&self, device_id: &str) -> PathBuf {
+        self.root.join(format!("{}.sync.json", slug(device_id)))
+    }
+
+    /// Whether sync was left switched on. Absent, unreadable or malformed
+    /// all mean **off** — the safe direction: a device that cannot read
+    /// its own intent must not open a port on the strength of a guess.
+    pub fn sync_wanted(&self, device_id: &str) -> bool {
+        std::fs::read(self.settings_path(device_id))
+            .ok()
+            .and_then(|raw| serde_json::from_slice::<serde_json::Value>(&raw).ok())
+            .and_then(|v| v.get("enabled").and_then(|e| e.as_bool()))
+            .unwrap_or(false)
+    }
+
+    /// Record what the user chose. Not wrapped by `KeyWrap`: it is a
+    /// boolean about this machine's networking, not key material, and
+    /// wrapping it would mean a device that lost its wrapper could no
+    /// longer tell whether it was meant to be reachable.
+    pub fn set_sync_wanted(&self, device_id: &str, enabled: bool) -> Result<()> {
+        write_private(
+            &self.settings_path(device_id),
+            serde_json::json!({ "enabled": enabled }).to_string().as_bytes(),
+        )
+    }
+
     /// Read the identity held for `device_id`, or `None` if this machine
     /// holds none — which is the whole of "the vault came from
     /// elsewhere".

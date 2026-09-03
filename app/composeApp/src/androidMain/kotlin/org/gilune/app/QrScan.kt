@@ -33,6 +33,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.platform.testTag
@@ -144,7 +145,14 @@ fun QrScanner(
     val preview = remember {
         PreviewView(context).apply {
             implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            scaleType = PreviewView.ScaleType.FILL_CENTER
+            // **FIT, not FILL.** FILL scales the frame until the shorter
+            // side covers the box, which puts the rest of the picture
+            // outside it — measured on the emulator, where the camera
+            // painted over the six-digit fields below. FIT never draws
+            // beyond the box, and for a viewfinder it is also the better
+            // of the two: a person aiming at a QR wants to see the whole
+            // frame rather than a cropped middle.
+            scaleType = PreviewView.ScaleType.FIT_CENTER
         }
     }
     val executor: ExecutorService = remember { Executors.newSingleThreadExecutor() }
@@ -187,7 +195,17 @@ fun QrScanner(
         }
     }
 
-    Box(modifier.fillMaxWidth().height(VIEWFINDER).testTag("qr-scanner")) {
+    // `clipToBounds` is a belt to FIT_CENTER's braces: a view that scales
+    // its own child can draw outside the slot Compose gave it, and on a
+    // scrolling settings page the thing it would draw over is the pairing
+    // fields underneath.
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(VIEWFINDER)
+            .clipToBounds()
+            .testTag("qr-scanner"),
+    ) {
         AndroidView(factory = { preview }, modifier = Modifier.fillMaxWidth().height(VIEWFINDER))
     }
 }

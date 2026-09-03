@@ -15,9 +15,19 @@
 //    That sentence is on the screen beside the button, because a UI that
 //    implies an undo is the one way this can mislead.
 //
-// M5b has no discovery: a peer is reached at the address pairing recorded.
-// The screen says that plainly rather than showing a device list that
-// would only be empty for reasons nobody explained.
+// M5c adds the three things a live network needs (§ 1, § 8, § 10), and
+// each of them exists because its absence would be a silence:
+//
+//  - **Standing integrity alerts are drawn at the top.** The kernel has
+//    halted a peer's stream since M5a and nothing could show it, which
+//    made a halted stream look exactly like an idle one — § 8's own
+//    "failure mode that would make sync look like it works".
+//  - **Looking for devices is a button.** A browse costs seconds and
+//    multicast traffic, and § 1 keeps discovery off the connect path, so
+//    nothing here browses on its own.
+//  - **The cadence is stated honestly** (§ 10). Fifteen minutes is the
+//    floor WorkManager clamps to, not a promise the phone keeps in a
+//    pocket, and the screen says so instead of implying a clock.
 
 package org.gilune.app
 
@@ -39,6 +49,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -116,6 +127,128 @@ fun keyProtectionSentence(protection: String): String = when (protection) {
 /// the button below can be honest about when it is ready.
 fun normalisedPairingCode(typed: String): String = typed.filter { it.isDigit() }.take(6)
 
+/// One standing integrity condition, in words (ADR 0019 § 8).
+///
+/// Every sentence answers the same three questions — what stopped, why,
+/// and what happens next — because a halt that is visible but
+/// unexplained is barely better than a silent one. **The raw kind never
+/// reaches the screen**, and neither do `subject` and `detail` except in
+/// the fallback below: a subject is a device id, an operation id or a
+/// blob id, and a detail is the kernel's own words for another kernel.
+/// Neither is something a person can act on.
+///
+/// Halting is never damage — § 8's policy is to apply nothing past the
+/// fault and resume from the frontier when the condition clears — so
+/// every sentence says so, and `sync-unknown-op-kind` says something
+/// stronger still: nothing stopped at all.
+fun alertSentence(kind: String, subject: String, detail: String): String = when (kind) {
+    "sync-gap" ->
+        "One of your devices sent its changes out of order, so Gilune stopped taking " +
+            "anything further from it. Everything that arrived before the missing change " +
+            "is already here, and it carries on from exactly that point once the missing " +
+            "one arrives — usually the next time the two devices are on the same network."
+
+    "sync-corrupt-operation" ->
+        "A change from one of your devices could not be read, so nothing after it has " +
+            "been taken from that device. Nothing was half-applied and nothing already in " +
+            "your vault was touched. Gilune picks up where it stopped as soon as that " +
+            "device sends a copy it can read."
+
+    "sync-unsupported-version" ->
+        "One of your devices is sending changes in a form this copy of Gilune cannot " +
+            "read, so it has stopped taking them rather than guessing. Everything received " +
+            "before that is already here. Updating Gilune on this phone clears it, and " +
+            "sync resumes from where it stopped."
+
+    "sync-unknown-op-kind" ->
+        "One of your devices sent something a newer version of Gilune understands and " +
+            "this one does not. Nothing stopped and nothing is lost: it is kept exactly as " +
+            "it arrived and passed on to your other devices untouched, and this phone will " +
+            "understand it once it is updated."
+
+    "sync-limit-exceeded" ->
+        "One of your devices sent more in a single exchange than Gilune accepts at once, " +
+            "so it stopped the exchange tidily rather than cutting it off. Everything up " +
+            "to that point is here, and the next sync continues from exactly there."
+
+    "sync-blob-digest-mismatch" ->
+        "A recording or attachment arrived with bytes that did not match what the sending " +
+            "device said they would be, so it was refused rather than saved — a partial or " +
+            "altered file never lands in your vault. Gilune fetches it again from where it " +
+            "stopped the next time that device is reachable."
+
+    "sync-revoked-device" ->
+        "Changes that started on a device you revoked reached this phone, and they were " +
+            "refused — whichever device carried them here. That is revocation doing its " +
+            "job. Everything from your other devices carries on as normal, and this clears " +
+            "once those changes stop being passed around."
+
+    // A condition raised by a newer kernel than this screen knows about.
+    // Its own words are the only ones there are, and saying nothing would
+    // be the silence this whole surface exists to end.
+    else -> {
+        val said = detail.ifBlank { subject }.ifBlank { "no further detail" }
+        "Something about syncing stopped, and this version of Gilune has no plain words " +
+            "for it: $said. Nothing past it was applied, and sync resumes from where it " +
+            "stopped when the condition clears."
+    }
+}
+
+/// What the "This device" block says about being findable (ADR 0019 § 1).
+///
+/// `advertising` is deliberately separate from `enabled` in the kernel,
+/// and this is why: binding TCP can succeed while opening UDP 5353 fails,
+/// and a device that is reachable but not findable is the exact state the
+/// fallback chain exists for. One sentence for both would tell a person
+/// their phone is findable when it is only reachable.
+fun discoverySentence(enabled: Boolean, advertising: Boolean, discovery: String): String = when {
+    discovery.isBlank() || discovery == "none" ->
+        "This phone has no way to announce itself or to look for others, so it reaches " +
+            "your devices at the addresses pairing recorded. That works; it just means " +
+            "nothing is found on its own."
+
+    !enabled ->
+        "While sync is off this phone announces nothing. Turn it on and your other " +
+            "devices can find it here without being told an address."
+
+    advertising ->
+        "This phone is announcing itself on this network, so your other devices can find " +
+            "it without being told an address."
+
+    else ->
+        "Sync is on, so your paired devices can reach this phone — but it is not " +
+            "announcing itself, so nothing will find it on its own. Some networks block " +
+            "those announcements. Pair with the six-digit code and an address, or type an " +
+            "address for a device below."
+}
+
+/// What a device seen on the network is, to this phone. `state` is
+/// `paired`, `revoked` or `unknown`, and incompatibility outranks all
+/// three: a device running another version is present and unreachable,
+/// which is worth saying before anything about pairing.
+fun foundDeviceState(state: String, compatible: Boolean): String = when {
+    !compatible -> "running a version this phone cannot talk to"
+    state == "paired" -> "already paired with this phone"
+    state == "revoked" -> "revoked — it cannot reach your notes"
+    else -> "not paired yet"
+}
+
+/// Whether opening or returning to the app should exchange anything
+/// (ADR 0019 § 10). Two conditions, and the second one matters: a resume
+/// with nobody paired would dial nothing and cost a thread for the
+/// privilege, so the prompt path stays quiet until there is a device to
+/// be prompt with.
+fun shouldSyncOnForeground(status: SyncStatus?): Boolean =
+    status != null && status.enabled && status.peers.any { it.state == "paired" }
+
+/// The sentence for a look that found nothing (§ 1's third step: words,
+/// not a spinner). Client isolation is named because it is the usual
+/// cause and because "wait a bit longer" is advice that never works.
+const val NOTHING_FOUND =
+    "Nothing answered on this network. Many guest, hotel and office networks stop " +
+        "devices from seeing each other at all, and waiting will not change that — pair " +
+        "with an address instead, which the other device shows beside its code."
+
 /// What this screen should say about the last thing that happened, or
 /// null for nothing worth a line.
 ///
@@ -142,6 +275,10 @@ fun SyncSection(state: GiluneState) {
     }
 
     Text("Sync with your other devices", style = MaterialTheme.typography.titleSmall)
+
+    // Above everything, because a halted stream that nobody mentions is
+    // indistinguishable from an idle one (§ 8).
+    SyncAlerts(state)
 
     // The outcome of the last thing pressed, said on the screen that has
     // the buttons. Without this the whole section is silent: a pairing
@@ -178,6 +315,16 @@ fun SyncSection(state: GiluneState) {
             checked = status.enabled,
             onCheckedChange = { on ->
                 state.syncAction(if (on) "sync is on" else "sync is off") { it.setSyncEnabled(on) }
+                // The background schedule follows the switch and nothing
+                // else (§ 10). The choice itself is remembered by the
+                // kernel, beside the identity and the roster — `enabled`
+                // is a bound socket and a bound socket does not survive
+                // the app being killed, so `wanted` is the durable half
+                // and `resumeSync` on open is what binds again. Without
+                // that, this gate never fired on a fresh launch and the
+                // phone only ever synced if somebody re-toggled a switch
+                // that already looked off.
+                if (on) scheduleBackgroundSync(context) else cancelBackgroundSync(context)
             },
             modifier = Modifier.testTag("sync-switch"),
         )
@@ -192,6 +339,21 @@ fun SyncSection(state: GiluneState) {
         style = MaterialTheme.typography.bodySmall,
         color = colours.onSurfaceVariant,
     )
+    // Meant to be on, and not listening. The switch is remembered across
+    // launches now, so this is the state where the app came back up and
+    // could not take its port. Showing the switch quietly off would hide
+    // a fault and invite a person to flip something already where they
+    // left it.
+    if (status.wanted && !status.enabled) {
+        Text(
+            "Sync is switched on, but this phone could not start listening — usually " +
+                "something else already has the port. Turn the switch off and on again " +
+                "to retry.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.error,
+            modifier = Modifier.testTag("sync-bind-failed"),
+        )
+    }
     status.listeningOn?.let { address ->
         Text(
             "Listening on $address",
@@ -206,6 +368,9 @@ fun SyncSection(state: GiluneState) {
     ThisDevice(status)
 
     HorizontalDivider(color = colours.outlineVariant)
+    DevicesOnThisNetwork(state, status)
+
+    HorizontalDivider(color = colours.outlineVariant)
     AddADevice(state, context)
 
     HorizontalDivider(color = colours.outlineVariant)
@@ -217,9 +382,147 @@ fun SyncSection(state: GiluneState) {
         modifier = Modifier.heightIn(min = TouchTarget).testTag("sync-now"),
     ) { Text("Sync with devices now") }
     Text(
-        "Exchanges everything new with each paired device this phone has an address " +
-            "for. A device that is not reachable is skipped and reported, not hunted " +
-            "for: finding devices on their own arrives in the next stage.",
+        "Exchanges everything new with each paired device. Gilune tries the address it " +
+            "last used first, and looks for the device on this network only when that " +
+            "fails — which is what keeps syncing quick and cheap. A device it still " +
+            "cannot reach is reported, never hunted for in silence.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+    // § 10, in the ADR's own terms. WorkManager clamps a periodic job to
+    // fifteen minutes, and Doze then batches deferred work into
+    // maintenance windows that lengthen the longer a phone stays idle, so
+    // a promise of "every fifteen minutes" would be one the phone does
+    // not keep. Saying it here is cheaper than a support answer later.
+    Text(
+        "Gilune also syncs on its own: every time you open the app or come back to it, " +
+            "and in the background about every fifteen minutes while this phone is on a " +
+            "network that does not charge by the megabyte and the battery is not low.\n\n" +
+            "Fifteen minutes is a floor, not a promise. While you are using the phone it " +
+            "is close to that; sitting in a pocket overnight it stretches toward an hour " +
+            "or worse, because Android batches background work the longer a device stays " +
+            "idle. Anything you want straight away, open the app.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+        modifier = Modifier.testTag("sync-cadence"),
+    )
+}
+
+/// The alerts banner (§ 8). Absent entirely when nothing stands, because
+/// a permanently drawn "all well" box is how people stop reading a
+/// surface that has to be read when it does appear.
+@Composable
+private fun SyncAlerts(state: GiluneState) {
+    if (state.syncAlerts.isEmpty()) return
+    val colours = MaterialTheme.colorScheme
+    Surface(
+        color = colours.errorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().testTag("sync-alerts"),
+    ) {
+        Column(
+            Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            for (alert in state.syncAlerts) {
+                Text(
+                    alertSentence(alert.kind, alert.subject, alert.detail),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = colours.onErrorContainer,
+                    modifier = Modifier.testTag("sync-alert"),
+                )
+            }
+        }
+    }
+}
+
+/// The first step of § 1's fallback chain made visible: what is out there
+/// right now, asked for rather than watched.
+@Composable
+private fun DevicesOnThisNetwork(state: GiluneState, status: SyncStatus) {
+    val colours = MaterialTheme.colorScheme
+    // Whether anybody has looked yet. An empty list before a look means
+    // nothing at all, and saying "nothing found" then would be a lie the
+    // screen told itself.
+    var looked by remember { mutableStateOf(false) }
+    val looking = state.discovering.value
+
+    Text("Devices on this network", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Looking is deliberate and costs a couple of seconds. Gilune does not do it on " +
+            "its own — when it already knows a device's address it goes straight there.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
+    OutlinedButton(
+        onClick = {
+            looked = true
+            state.discoverDevices()
+        },
+        // Off means nothing is bound and nothing is announced, so a look
+        // would only ever find devices that could not answer back.
+        enabled = status.enabled && !looking,
+        modifier = Modifier.heightIn(min = TouchTarget).testTag("sync-look"),
+    ) { Text(if (looking) "Looking…" else "Look for devices") }
+
+    if (!status.enabled) {
+        Text(
+            "Turn sync on to look for devices.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.onSurfaceVariant,
+            modifier = Modifier.testTag("sync-look-off"),
+        )
+        return
+    }
+    if (looking) {
+        Text(
+            "Looking…",
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.onSurfaceVariant,
+            modifier = Modifier.testTag("sync-looking"),
+        )
+        return
+    }
+    if (state.discovered.isEmpty()) {
+        if (looked) {
+            Text(
+                NOTHING_FOUND,
+                style = MaterialTheme.typography.bodySmall,
+                color = colours.onSurfaceVariant,
+                modifier = Modifier.testTag("sync-none-found"),
+            )
+        }
+        return
+    }
+    for (device in state.discovered) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 4.dp)
+                .testTag("found-row"),
+        ) {
+            Text(
+                device.fingerprint,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                device.address,
+                fontFamily = FontFamily.Monospace,
+                style = MaterialTheme.typography.bodySmall,
+                color = colours.onSurfaceVariant,
+            )
+            Text(
+                foundDeviceState(device.state, device.compatible),
+                style = MaterialTheme.typography.bodySmall,
+                color = if (device.compatible) colours.onSurfaceVariant else colours.error,
+            )
+        }
+    }
+    Text(
+        "A device shows its own fingerprint in its Sync settings. Comparing the two is " +
+            "how you know you are pairing with what you meant to — copy the address above " +
+            "into the field below and use the six-digit code that device is showing.",
         style = MaterialTheme.typography.bodySmall,
         color = colours.onSurfaceVariant,
     )
@@ -248,6 +551,14 @@ private fun ThisDevice(status: SyncStatus) {
         style = MaterialTheme.typography.bodySmall,
         color = if (status.keyProtection == "none") colours.error else colours.onSurfaceVariant,
         modifier = Modifier.testTag("sync-protection"),
+    )
+    // Reachable and findable are two facts, and the honest case is the
+    // one where they disagree (§ 1).
+    Text(
+        discoverySentence(status.enabled, status.advertising, status.discovery),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (status.enabled && !status.advertising) colours.error else colours.onSurfaceVariant,
+        modifier = Modifier.testTag("sync-discovery"),
     )
 }
 
@@ -383,6 +694,9 @@ private fun PairedDevices(state: GiluneState, status: SyncStatus) {
 private fun PeerRow(state: GiluneState, peer: PeerInfo) {
     val colours = MaterialTheme.colorScheme
     val revoked = peer.state == "revoked"
+    var editing by remember(peer.staticPub) { mutableStateOf(false) }
+    var typed by remember(peer.staticPub) { mutableStateOf(peer.address) }
+
     Row(
         Modifier
             .fillMaxWidth()
@@ -421,4 +735,50 @@ private fun PeerRow(state: GiluneState, peer: PeerInfo) {
             ) { Text("Revoke") }
         }
     }
+    // § 1's middle step, and the one a person reaches for when a network
+    // routes unicast but filters the announcements: tell this phone where
+    // the device is. It is stored rather than dialled once — an address
+    // that worked is the address to try first next time.
+    if (revoked) return
+    if (!editing) {
+        OutlinedButton(
+            onClick = {
+                typed = peer.address
+                editing = true
+            },
+            modifier = Modifier.heightIn(min = TouchTarget).testTag("peer-address-edit"),
+        ) { Text(if (peer.address.isBlank()) "Set an address" else "Change the address") }
+        return
+    }
+    OutlinedTextField(
+        value = typed,
+        onValueChange = { typed = it.trim() },
+        singleLine = true,
+        label = { Text("Address") },
+        placeholder = { Text("192.168.1.20:51837") },
+        modifier = Modifier.fillMaxWidth().testTag("peer-address-field"),
+    )
+    Row(
+        Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(
+            onClick = {
+                state.setPeerAddress(peer.staticPub, typed, peer.name.ifBlank { "that device" })
+                editing = false
+            },
+            enabled = typed.contains(':'),
+            modifier = Modifier.heightIn(min = TouchTarget).testTag("peer-address-save"),
+        ) { Text("Save") }
+        OutlinedButton(
+            onClick = { editing = false },
+            modifier = Modifier.heightIn(min = TouchTarget).testTag("peer-address-cancel"),
+        ) { Text("Cancel") }
+    }
+    Text(
+        "The other device shows its address in its own Sync settings, as " +
+            "host:port. Gilune tries it before looking for anything.",
+        style = MaterialTheme.typography.bodySmall,
+        color = colours.onSurfaceVariant,
+    )
 }

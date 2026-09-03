@@ -32,6 +32,15 @@ spake2 = "0.4"
 # a shell could log.
 qrcode = { version = "0.14", default-features = false }
 getrandom = "0.3"
+# ADR 0019 § 1: `_gilune._tcp`, on the desktop and on any future headless
+# host. `mdns-sd` is the only Rust responder+querier with **no async
+# runtime dependency**, which is what lets it run from this crate's
+# synchronous world and from ADR 0008's UI-less agent. Its `async` and
+# `logging` defaults buy nothing here and cost bytes against the 15 MB
+# per-ABI budget, so neither is taken. Android does not use this at all —
+# `NsdManager` implements the same trait through a Kotlin adapter, so the
+# platform owns the multicast socket and the app needs no MulticastLock.
+mdns-sd = { version = "0.21", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true

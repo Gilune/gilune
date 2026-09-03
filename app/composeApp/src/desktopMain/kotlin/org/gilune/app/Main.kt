@@ -416,6 +416,13 @@ private fun DesktopApp(
             identity.mkdirs()
             gilune.configureSync(identity.absolutePath, deviceName(), platformKeyWrap())
         }
+        // How this device finds others (§ 1): the desktop takes the Rust
+        // `mdns-sd` implementation, which is also what ADR 0008's future
+        // host with no JVM to borrow from inherits. Registering it binds
+        // nothing — the responder starts with the listener, at the
+        // switch, because UDP 5353 is a second inbound bind rather than
+        // an escape from the first (§ 2).
+        state.syncDiscovery = { gilune -> gilune.useBundledDiscovery() }
         state.openVault { gilune ->
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a

@@ -58,6 +58,21 @@ impl Device {
             .expect("every host declares the projection");
         let service = SyncService::configure(&store, local, name, None, Limits::DEFAULT)
             .expect("configure sync");
+        // **The suite binds the loopback, and that is deliberate.** M5c
+        // made the product's own bind routable (§ 2), which is the moment
+        // Windows raises its Security Alert — and a test suite that
+        // raised a firewall dialog on every run would be a suite nobody
+        // could run unattended. The socket is a real one either way, so
+        // every property these tests assert holds identically; the tests
+        // that are *about* the routable bind say so and set their own.
+        service.bind_host("127.0.0.1");
+        // One port per device, so a restart lands back where it was and
+        // two devices in one test binary do not fight over the documented
+        // default. The product prefers `DEFAULT_PORT` for exactly the
+        // opposite reason — one Gilune per machine — and
+        // `gate_c::a_device_that_restarts_comes_back_on_the_same_port`
+        // is where that behaviour is asserted rather than assumed.
+        service.prefer_port(port_for(local));
         // Tests must never be at the mercy of a backoff they did not
         // ask for; the ones that are *about* backoff set their own.
         service.configure_rate_limits(RateLimiter::new(1_000_000, 0, 0, 1));
@@ -83,6 +98,27 @@ impl Device {
 
     pub fn listening(self) -> Device {
         self.service.set_enabled(true).expect("bind");
+        self
+    }
+
+    /// Ask for a particular port, for the scenarios that are about ports.
+    pub fn preferring(self, port: u16) -> Device {
+        self.service.prefer_port(port);
+        self
+    }
+
+    /// Bind a routable interface, for the scenarios that are about the
+    /// live network rather than about the boundary. **Raises the Windows
+    /// firewall prompt**, which is why it is opt-in per test and not the
+    /// harness default.
+    pub fn on_the_network(self) -> Device {
+        self.service.bind_host(gilune_sync::service::DEFAULT_BIND_HOST);
+        self
+    }
+
+    /// Register a discovery adapter, as a host does.
+    pub fn discovering(self, discovery: std::sync::Arc<dyn gilune_sync::PeerDiscovery>) -> Device {
+        self.service.set_discovery(discovery);
         self
     }
 
@@ -191,6 +227,26 @@ impl Device {
     pub fn alerts_of(&self, kind: &str) -> Vec<gilune_kernel::alerts::Alert> {
         self.store.integrity_alerts_of(kind).expect("alerts")
     }
+}
+
+/// A port for the device whose device-local directory is `local`.
+///
+/// **Derived from the path, not allocated**, and that is the point: a
+/// device reopened at the same directories is the same device coming back
+/// from a restart, and it has to land on the same port or every peer's
+/// cached address for it is stale. Allocating from a counter would give
+/// the restarted device a new port and quietly hide the very gap M5c
+/// closed. Falling back to an ephemeral port when the derived one is
+/// taken is the product's own behaviour, so a collision between two
+/// unrelated tests costs nothing but the assertion in the tests that are
+/// about ports, which pick their own.
+fn port_for(local: &Path) -> u16 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    local.hash(&mut hasher);
+    // The dynamic range, above the product's documented default so a
+    // suite run never squats on it.
+    52_000 + (hasher.finish() % 8_000) as u16
 }
 
 /// Copy a whole vault directory, the way a person copies a folder to a

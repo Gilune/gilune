@@ -183,10 +183,27 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     // **outside the vault**, so exporting or restoring a vault never
     // clones an identity — and the key itself is sealed by the Keystore.
     // Nothing here binds a socket: that waits for the switch in Settings.
+    //
+    // How this phone finds other devices (ADR 0019 § 1) is set beside it
+    // and for the same reason — `openVault` registers it as part of
+    // opening. It is the platform's `NsdManager` rather than the Rust
+    // `mdns-sd` the desktop uses, because on Android the platform owns the
+    // multicast socket and borrowing it costs no `MulticastLock` and no
+    // extra permission. Registering binds nothing and announces nothing:
+    // that waits for the switch in Settings.
     val keyWrap = remember { KeystoreKeyWrap() }
     LaunchedEffect(Unit) {
         state.syncSetup = { gilune -> gilune.configureSync(syncDir(context), deviceName(), keyWrap) }
+        state.syncDiscovery = { gilune -> gilune.setDiscovery(NsdDiscovery(context.applicationContext)) }
         state.openVault { gilune -> registerMoonshine(state, gilune) }
+    }
+
+    // Sync on open (§ 10). `shouldSyncOnForeground` is the whole rule and
+    // it is pure: sync switched on, and somebody paired to sync with.
+    LaunchedEffect(state.gilune.value) {
+        if (state.gilune.value == null) return@LaunchedEffect
+        withContext(Dispatchers.IO) { state.refreshSync() }
+        if (shouldSyncOnForeground(state.syncStatus.value)) state.syncDevices()
     }
 
     // Local transcription (§ 4). The model is fetched and handed to the
@@ -307,7 +324,16 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                         draft = ""
                         state.captureText(text)
                     }
+                    // A return, not the first start — which is what tells
+                    // this apart from opening the app, whose own sync runs
+                    // beside the vault opening above rather than here.
+                    val returning = backgroundedAt != null
                     backgroundedAt = null
+                    // Sync on every resume (ADR 0019 § 10): the prompt
+                    // path, and the only one a person should feel.
+                    if (returning && shouldSyncOnForeground(state.syncStatus.value)) {
+                        state.syncDevices()
+                    }
                     // The widget's recording service commits and now
                     // transcribes through a Gilune handle of its own
                     // (§ 4), so what it produced is invisible to this

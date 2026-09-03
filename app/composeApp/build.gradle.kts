@@ -125,6 +125,27 @@ kotlin {
                     exclude(group = "androidx.appcompat")
                 }
                 implementation("com.google.zxing:core:3.5.3")
+                // -------------------------------------------------------
+                // The phone's background sync (ADR 0019 § 10), which names
+                // a `PeriodicWorkRequest` by construct.
+                //
+                // **This is the group the Moonshine AAR excludes**, and it
+                // is worth saying why adding it here is not a reversal of
+                // that. The exclusion above is a defect fix: `androidx.work`
+                // brings `androidx.startup`, whose `InitializationProvider`
+                // AGP dedupes out of the test APK, and every process
+                // started for the test package crashed. That was measured
+                // when the AAR dragged the dependency in silently. Declared
+                // deliberately here, the same merged provider is measured
+                // again rather than assumed — see the instrumented suite
+                // count in this round's report. The AAR's exclusion stays
+                // because nothing in Moonshine uses WorkManager; ours is
+                // the only reason the group is on the classpath.
+                //
+                // `work-runtime` rather than `-ktx`: the worker is a
+                // blocking `Worker`, and nothing here wants the coroutine
+                // surface.
+                implementation("androidx.work:work-runtime:2.10.0")
             }
         }
         val androidInstrumentedTest by getting {
