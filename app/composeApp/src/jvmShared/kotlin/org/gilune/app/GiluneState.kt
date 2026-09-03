@@ -55,6 +55,86 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         return summary.copy(outputs = summary.outputs + external)
     }
 
+    // ------------------------------------------------------------ sync
+
+    /// This device's sync facts, or null until a shell has said where its
+    /// device-local state lives. Read by the sync settings screen; every
+    /// action below refreshes it.
+    val syncStatus = mutableStateOf<uniffi.gilune_ffi.SyncStatus?>(null)
+
+    /// How this shell enrols the device (ADR 0019 § 4). The identity key
+    /// lives **outside the vault** in a directory only the shell knows —
+    /// `%LOCALAPPDATA%\Gilune` on Windows, `filesDir` on Android — and the
+    /// platform's `KeyWrap` adapter is likewise the shell's to supply, so
+    /// the seam is a hook rather than a shared constant. Set before
+    /// `openVault`; the same shape as `externalProcessing` above.
+    var syncSetup: ((Gilune) -> uniffi.gilune_ffi.SyncStatus)? = null
+
+    /// Enrol on open, and say so if opening this vault here meant
+    /// something. `enrolmentNotice` is non-null exactly when the vault
+    /// turned out to have come from another device: the ADR asks the UI
+    /// to say so plainly "rather than letting a user wonder why their
+    /// laptop appears twice".
+    private fun enrol(g: Gilune): String? {
+        val setup = syncSetup ?: return null
+        return try {
+            val status = setup(g)
+            syncStatus.value = status
+            status.enrolmentNotice
+        } catch (e: Throwable) {
+            "sync unavailable: ${e.message}"
+        }
+    }
+
+    fun refreshSync() {
+        val g = gilune.value ?: return
+        syncStatus.value = runCatching { g.syncStatus() }.getOrNull() ?: syncStatus.value
+    }
+
+    /// Run a sync action and report it, refreshing the facts afterwards.
+    /// `pluginAction`'s shape, and for the same reason: the IO dispatch,
+    /// the refresh and the error wording come free and read the same.
+    fun syncAction(describe: String, act: (Gilune) -> Unit) {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                act(g)
+                refreshSync()
+                message.value = describe
+            } catch (e: Throwable) {
+                message.value = "$describe failed: ${e.message}"
+            }
+        }
+    }
+
+    /// Exchange operations with every paired device this one has an
+    /// address for.
+    ///
+    /// Deliberately **not** called `sync`: `sync()` above has meant
+    /// "reconcile the vault's files" since M2, and the two are different
+    /// enough that sharing a name would be a bug waiting to be written.
+    fun syncDevices() {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val report = g.syncNow()
+                g.project()
+                refresh()
+                refreshSync()
+                message.value = when {
+                    report.halted.isNotEmpty() ->
+                        "device sync stopped: ${report.halted.first()}"
+                    report.applied == 0L && report.sent == 0L -> "devices are already up to date"
+                    else ->
+                        "device sync: ${report.applied} received, ${report.sent} sent" +
+                            if (report.incomplete) " (more to come)" else ""
+                }
+            } catch (e: Throwable) {
+                message.value = "device sync failed: ${e.message}"
+            }
+        }
+    }
+
     fun openVault(onOpened: (Gilune) -> Unit = {}) {
         scope.launch(Dispatchers.IO) {
             try {
@@ -77,10 +157,18 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 // tombstone all apply with no new machinery, and a plugin
                 // the user removed is never resurrected.
                 g.registerPlugin(tasksDeclaration())
+                // Enrolment happens on open (ADR 0019 § 4) and before
+                // anything else reads the vault, because it is what
+                // decides whether this machine is the device the vault
+                // believes it belongs to. Nothing binds a socket here.
+                val notice = enrol(g)
                 g.project()
                 gilune.value = g
                 refresh()
-                message.value = "vault: ${g.vaultPath()}"
+                // A re-enrolment notice outranks the routine line: it is
+                // the one thing about opening this vault that the user
+                // has to be told.
+                message.value = notice ?: "vault: ${g.vaultPath()}"
                 onOpened(g)
             } catch (e: Throwable) {
                 message.value = "failed to open vault: ${e.message}"

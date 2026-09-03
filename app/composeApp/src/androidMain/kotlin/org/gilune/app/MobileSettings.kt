@@ -66,6 +66,11 @@ sealed interface SettingsRoute {
     data object Vault : SettingsRoute
     data object Capture : SettingsRoute
     data object Plugins : SettingsRoute
+
+    /// Pairing and peers (ADR 0019). Its own place rather than a corner of
+    /// Vault: the vault is where notes are, and this is who else may have
+    /// them.
+    data object Sync : SettingsRoute
     data object Appearance : SettingsRoute
     data object About : SettingsRoute
     data class Plugin(val pluginId: String) : SettingsRoute
@@ -96,6 +101,7 @@ fun SettingsScreen(
             SettingsRoute.Vault -> VaultSection(state, onExport)
             SettingsRoute.Capture -> CaptureSection(idleTimeout, onIdleTimeoutChange)
             SettingsRoute.Plugins -> PluginsManager(state) { onNavigate(SettingsRoute.Plugin(it)) }
+            SettingsRoute.Sync -> SyncSection(state)
             SettingsRoute.Appearance -> AppearanceSection(theme, onThemeChange)
             SettingsRoute.About -> AboutSection(state)
             is SettingsRoute.Plugin -> {
@@ -117,6 +123,7 @@ private fun SettingsIndex(state: GiluneState, onNavigate: (SettingsRoute) -> Uni
     NavRow("Plugins", "${state.plugins.count { it.state == "enabled" }} of ${state.plugins.size} on") {
         onNavigate(SettingsRoute.Plugins)
     }
+    NavRow("Sync", syncSummary(state.syncStatus.value)) { onNavigate(SettingsRoute.Sync) }
     NavRow("Appearance") { onNavigate(SettingsRoute.Appearance) }
     NavRow("About") { onNavigate(SettingsRoute.About) }
 }
@@ -194,7 +201,8 @@ private fun VaultSection(state: GiluneState, onExport: () -> Unit) {
 const val VAULT_TRUTH: String =
     "Your vault is private to this app. No other app — including Obsidian and " +
         "any file manager — can see it, and uninstalling Gilune deletes it. " +
-        "Until devices can sync, Export a copy is how the files leave this phone."
+        "Export a copy is how the files leave this phone; Settings ▸ Sync is how " +
+        "they reach the devices you have paired, and nothing else."
 
 @Composable
 private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {

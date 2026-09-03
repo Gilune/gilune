@@ -176,6 +176,52 @@ gates promises) are ratified. **Next: application-level engineering — see
      150/0, desktop 436/0, instrumented 610/0/1(a03); dll restaged,
      both ABIs rebuilt, bindings byte-identical (SyncHalted maps to
      existing Invalid — shells learn of halts from alerts, M5c).
+     **M5b DONE (2026-09-03, one Opus agent + two shell sub-agents,
+     agent-coordinated)**: identity = X25519 minted on first use,
+     device-local {device_id}.identity.json in a shell-nominated root
+     (%LOCALAPPDATA%\Gilune\sync / filesDir/sync; Debug withholds the
+     private half) — KEYED BY VAULT device_id, an accepted refinement
+     recorded in 0019's Amendments (one identity per machine+vault;
+     same-machine copy not detected = rule-8-excluded, stated);
+     re-minting seeds the old device's frontier or the first session
+     with the original halts. KeyWrap = uniffi foreign trait (no
+     adapter ⇒ unwrapped WITH the reason in the file + keyProtection
+     "none" surfaced): desktop DPAPI user-scope via direct Crypt32
+     JNA (UI_FORBIDDEN, LocalFree, round-trip self-test before
+     offering; 6 real-adapter tests), Android Keystore AES-256-GCM
+     seal (no on-device round-trip test — gap). §4 re-enrolment table
+     exact + visible notice. Pairing: SPAKE2 (role identity strings
+     listener/joiner so reflection fails) → Noise XXpsk0
+     (25519/ChaChaPoly/BLAKE2s; snow trimmed to named ciphers); pair
+     secret from the handshake hash (never transmitted); credential
+     kind bound into the prologue (QR→code downgrade fails); QR
+     payload GILUNE-PAIR|1|secret|fingerprint|host:port (15 malformed
+     shapes rejected). Default-deny = psk0 property: listener
+     trial-decrypts msg1 against held pair secrets, unpaired callers
+     get SILENCE (wire-tap tests: no payload, no static key on the
+     wire). M5a framing refactored behind Channel — one serve/one
+     exchange loop for loopback AND encrypted. Revocation deletes the
+     pair secret; mid-session closes at op boundary; third-replica
+     refusal is a kernel apply property via a roster-projected
+     refusal list. Rate limits: per-peer doubling backoff; windows
+     single-use/3-min/5-attempts-then-abandoned-with-secrets-cleared.
+     FFI: the nine 0019 §6 methods + configure_sync (shell owns the
+     identity path; syncSetup wired BEFORE openVault in both shells);
+     bindings byte-identical AGAIN; dll restaged; ABIs 5.24/5.36 MB.
+     Five bugs found by gates/GUI, fixed in code: joiner-paired-
+     before-listener-committed (confirmation frame), revocation check
+     before the blocking read, source-port-recorded-as-address
+     (listening port travels in the encrypted greeting), GUI cleared
+     the code before the IO thread read it, peer list never
+     refreshed. Gate B 19/19 ×3 runs + LIVE two-OS-process pairing
+     (note captured on A projected as Markdown on B) + GUI pair/
+     revoke/re-pair + emulator Sync screen with live camera preview.
+     Suites: cargo 217/0, desktop 442/0 (+6 DPAPI — the shell had
+     shipped untested), instrumented 610/0/1 fresh-boot. Gaps:
+     Sync-screen instrumented tests absent; CAMERA dialog never
+     watched (installed -g); listener serves one peer; restarted
+     device takes a new port (no discovery till M5c); Ctrl+N notes
+     don't sync (pre-existing M2 import gap — surface in M5c?).
      Gaps: GiluneStatus lacks blobs_awaiting/alerts (deliberate, no
      FFI change — `gilune-cli alerts` meanwhile, M5c wires shells);
      per-peer establishment rate limits → M5b (no peer identity yet);

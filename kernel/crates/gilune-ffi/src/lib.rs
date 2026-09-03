@@ -50,7 +50,176 @@ impl From<gilune_kernel::KernelError> for GiluneError {
     }
 }
 
+impl From<gilune_sync::SyncError> for GiluneError {
+    fn from(e: gilune_sync::SyncError) -> Self {
+        use gilune_sync::SyncError as S;
+        match e {
+            S::Kernel(k) => GiluneError::from(k),
+            // A peer that misbehaved, a code that did not match, a device
+            // that is not paired: all refused input, which is what
+            // `Invalid` already means at this boundary. The boundary
+            // gains variants, never reshaped ones (ADR 0019 § 6).
+            S::Protocol { .. } | S::OversizeFrame { .. } | S::Refused { .. } => {
+                GiluneError::Invalid { detail: e.to_string() }
+            }
+            // This device could not do its part — a socket that would not
+            // open, an identity file that would not read.
+            S::Io(_) | S::Identity { .. } => GiluneError::Storage { detail: e.to_string() },
+        }
+    }
+}
+
 type FfiResult<T> = Result<T, GiluneError>;
+
+/// The platform's key-protection adapter (ADR 0019 § 4), implemented in
+/// Kotlin on both shells: DPAPI user scope on Windows, an AndroidKeyStore
+/// AES-GCM key on Android. Rust never calls a platform API (ADR 0001);
+/// it asks for one of these and records honestly when it is given none.
+#[uniffi::export(with_foreign)]
+pub trait KeyWrap: Send + Sync {
+    /// What to record as having protected the key, so a settings screen
+    /// can name it rather than promise it.
+    fn name(&self) -> String;
+    fn wrap(&self, plaintext: Vec<u8>) -> FfiResult<Vec<u8>>;
+    fn unwrap(&self, ciphertext: Vec<u8>) -> FfiResult<Vec<u8>>;
+}
+
+/// Bridges the foreign trait onto the sync crate's own, which knows
+/// nothing about uniffi.
+struct WrapAdapter(Arc<dyn KeyWrap>);
+
+impl gilune_sync::KeyWrap for WrapAdapter {
+    fn name(&self) -> String {
+        self.0.name()
+    }
+    fn wrap(&self, plaintext: &[u8]) -> Result<Vec<u8>, String> {
+        self.0.wrap(plaintext.to_vec()).map_err(|e| e.to_string())
+    }
+    fn unwrap(&self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
+        self.0.unwrap(ciphertext.to_vec()).map_err(|e| e.to_string())
+    }
+}
+
+/// This device's own sync facts, and everything a settings screen shows.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SyncStatus {
+    /// Whether the listener is bound. Turning this on is what raises a
+    /// firewall prompt, and nothing else does.
+    pub enabled: bool,
+    pub device_id: String,
+    pub device_name: String,
+    /// Short and human-comparable — what "is that really my laptop" means
+    /// when there is no certificate authority anywhere.
+    pub fingerprint: String,
+    pub identity_pub: String,
+    /// The adapter that actually protected the identity key, or `none`.
+    pub key_protection: String,
+    /// `continued`, `adopted` or `re-enrolled`.
+    pub enrolment: String,
+    /// A sentence for the shell's message line when opening this vault on
+    /// this machine meant something the user should know about.
+    pub enrolment_notice: Option<String>,
+    pub listening_on: Option<String>,
+    pub pairing: Option<PairingOffer>,
+    pub peers: Vec<PeerInfo>,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PeerInfo {
+    /// The pinned static key: this peer's identity, and its handle for
+    /// `revoke_peer`.
+    pub static_pub: String,
+    pub fingerprint: String,
+    pub device_id: String,
+    pub name: String,
+    pub address: String,
+    /// `paired` or `revoked`.
+    pub state: String,
+    pub paired_ms: i64,
+    pub last_seen_ms: i64,
+}
+
+/// A pairing window, while it stands.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct PairingOffer {
+    pub code: String,
+    pub address: String,
+    pub fingerprint: String,
+    pub expires_ms: i64,
+    pub attempts_left: u32,
+}
+
+/// A QR as bits, never as a string (ADR 0019 § 7): the shell paints
+/// squares on a canvas and the pairing secret never crosses as something
+/// a shell could log.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct QrMatrix {
+    pub width: u32,
+    /// Row-major, `width * width` long. `true` is a dark module.
+    pub modules: Vec<bool>,
+}
+
+/// What one round of syncing moved.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SyncReport {
+    pub applied: i64,
+    pub duplicates: i64,
+    pub sent: i64,
+    pub blobs_completed: i64,
+    pub blobs_pending: i64,
+    pub bytes: i64,
+    /// Streams that stopped, and why. A halt is visible by contract: a
+    /// silent one is the failure mode that makes sync look like it works.
+    pub halted: Vec<String>,
+    /// Something still needs another session. Not a failure — the
+    /// frontier makes resuming free.
+    pub incomplete: bool,
+}
+
+impl From<gilune_sync::service::PeerSummary> for PeerInfo {
+    fn from(p: gilune_sync::service::PeerSummary) -> Self {
+        PeerInfo {
+            static_pub: p.static_pub,
+            fingerprint: p.fingerprint,
+            device_id: p.device_id,
+            name: p.name,
+            address: p.address,
+            state: p.state,
+            paired_ms: p.paired_ms,
+            last_seen_ms: p.last_seen_ms,
+        }
+    }
+}
+
+impl From<gilune_sync::service::PairingOffer> for PairingOffer {
+    fn from(o: gilune_sync::service::PairingOffer) -> Self {
+        PairingOffer {
+            code: o.code,
+            address: o.address,
+            fingerprint: o.fingerprint,
+            expires_ms: o.expires_ms,
+            attempts_left: o.attempts_left,
+        }
+    }
+}
+
+impl From<gilune_sync::service::SyncFacts> for SyncStatus {
+    fn from(f: gilune_sync::service::SyncFacts) -> Self {
+        SyncStatus {
+            enabled: f.enabled,
+            device_id: f.device_id,
+            device_name: f.device_name,
+            fingerprint: f.fingerprint,
+            identity_pub: f.identity_pub,
+            key_protection: f.key_protection,
+            enrolment: f.enrolment,
+            enrolment_notice: f.enrolment_notice,
+            listening_on: f.listening_on,
+            pairing: f.pairing.map(Into::into),
+            peers: f.peers.into_iter().map(Into::into).collect(),
+        }
+    }
+}
 
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct CaptureReceipt {
@@ -354,6 +523,11 @@ pub struct Gilune {
     /// process can run something is a fact about that process, never
     /// about the vault, so it is never written down.
     external: Mutex<Vec<String>>,
+    /// The sync service, once a shell has said where this device keeps
+    /// its own state. Absent until then: identity lives outside the
+    /// vault, and only the shell knows where that is on its platform
+    /// (ADR 0019 § 4).
+    sync: Mutex<Option<gilune_sync::SyncService>>,
 }
 
 impl Gilune {
@@ -380,6 +554,19 @@ impl Gilune {
             .unwrap_or_else(|e| e.into_inner())
             .retain(|id| *id != processor_id);
         Ok(())
+    }
+
+    /// Run something against the sync service, or say plainly that this
+    /// host never told the kernel where its device-local state lives.
+    fn with_sync<T>(
+        &self,
+        act: impl FnOnce(&gilune_sync::SyncService) -> gilune_sync::Result<T>,
+    ) -> FfiResult<T> {
+        let guard = self.sync.lock().unwrap_or_else(|e| e.into_inner());
+        let service = guard.as_ref().ok_or(GiluneError::Invalid {
+            detail: "this host has not configured sync".to_string(),
+        })?;
+        Ok(act(service)?)
     }
 
     fn is_external(&self, processor_id: &str) -> bool {
@@ -427,6 +614,7 @@ impl Gilune {
             store: Mutex::new(store),
             processors: Mutex::new(Vec::new()),
             external: Mutex::new(Vec::new()),
+            sync: Mutex::new(None),
         }))
     }
 
@@ -775,6 +963,134 @@ impl Gilune {
     /// Deliberate, and safe to repeat. Returns how many were queued.
     pub fn backfill_jobs(&self) -> FfiResult<i64> {
         Ok(self.store().backfill_jobs()?)
+    }
+
+    // ------------------------------------------------------------ sync
+
+    /// Enrol this machine against this vault (ADR 0019 § 4) and stand the
+    /// sync service up. Called once, straight after `open`.
+    ///
+    /// `identity_dir` is device-local state **outside the vault** and the
+    /// shell nominates it — `%LOCALAPPDATA%\Gilune` on Windows,
+    /// `filesDir` on Android — so the kernel stays path-agnostic.
+    /// `key_wrap` is the platform's protection for the key at rest; pass
+    /// `None` and the key is stored unwrapped with the reason recorded
+    /// in the file rather than assumed away.
+    ///
+    /// **Nothing binds a socket here.** The returned status carries
+    /// `enrolment_notice`, which is non-null exactly when this vault
+    /// turned out to have come from another device — the case the UI must
+    /// say out loud rather than leaving a user to wonder why their laptop
+    /// appears twice.
+    pub fn configure_sync(
+        &self,
+        identity_dir: String,
+        device_name: String,
+        key_wrap: Option<Arc<dyn KeyWrap>>,
+    ) -> FfiResult<SyncStatus> {
+        let wrap = key_wrap.map(|w| {
+            Arc::new(WrapAdapter(w)) as Arc<dyn gilune_sync::KeyWrap>
+        });
+        let service = gilune_sync::SyncService::configure(
+            &self.store(),
+            identity_dir,
+            &device_name,
+            wrap,
+            gilune_kernel::limits::Limits::DEFAULT,
+        )?;
+        let facts = service.facts();
+        *self.sync.lock().unwrap_or_else(|e| e.into_inner()) = Some(service);
+        Ok(facts.into())
+    }
+
+    pub fn sync_status(&self) -> FfiResult<SyncStatus> {
+        Ok(self.with_sync(|service| Ok(service.facts()))?.into())
+    }
+
+    /// Turn sync on or off. **This is the moment the listener binds**
+    /// (ADR 0019 § 2): a user who never turns sync on never meets the
+    /// firewall prompt, and capture is never behind it. Switching off
+    /// closes the socket and abandons any pairing window with it.
+    pub fn set_sync_enabled(&self, enabled: bool) -> FfiResult<SyncStatus> {
+        self.with_sync(|service| {
+            service.set_enabled(enabled)?;
+            Ok(service.facts())
+        })
+        .map(Into::into)
+    }
+
+    /// Open a pairing window: a fresh six-digit code and a fresh QR
+    /// secret, single-use, expiring, and abandoned after a few wrong
+    /// guesses. Asking again replaces the window, which is how a person
+    /// gets a new code after theirs was used up.
+    pub fn start_pairing(&self) -> FfiResult<PairingOffer> {
+        self.with_sync(|service| service.start_pairing()).map(Into::into)
+    }
+
+    /// The QR for the open window, as a module matrix.
+    pub fn pairing_qr(&self) -> FfiResult<QrMatrix> {
+        let matrix = self.with_sync(|service| service.pairing_qr())?;
+        Ok(QrMatrix { width: matrix.width, modules: matrix.modules })
+    }
+
+    /// Join a device that is showing a code. `address` is `host:port`,
+    /// from that device's settings screen.
+    pub fn pair_with_code(&self, address: String, code: String) -> FfiResult<PeerInfo> {
+        let store = self.store();
+        self.with_sync(|service| service.pair_with_code(&store, &address, &code))
+            .map(Into::into)
+    }
+
+    /// Join a device from a scanned QR. The address comes from the
+    /// payload, and the fingerprint in it is checked against the identity
+    /// the handshake actually transmits — so a code photographed off
+    /// somebody else's screen cannot redirect this device silently.
+    pub fn pair_from_qr(&self, payload: String) -> FfiResult<PeerInfo> {
+        let store = self.store();
+        self.with_sync(|service| service.pair_from_qr(&store, &payload))
+            .map(Into::into)
+    }
+
+    pub fn peers(&self) -> FfiResult<Vec<PeerInfo>> {
+        Ok(self
+            .with_sync(|service| Ok(service.peers()))?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Revoke a peer, by the static key `PeerInfo` carries. Local and
+    /// immediate: the pair secret goes, a live session ends at the next
+    /// operation boundary, and that device's operations are refused on
+    /// apply whoever relays them afterwards.
+    ///
+    /// It does not retract history. Revocation protects what comes next,
+    /// and the UI must say so rather than implying an undo.
+    pub fn revoke_peer(&self, static_pub: String) -> FfiResult<bool> {
+        let store = self.store();
+        self.with_sync(|service| service.revoke_peer(&store, &static_pub))
+    }
+
+    /// Sync with every paired peer this device has an address for. M5b
+    /// has no discovery, so a peer whose address is unknown is skipped
+    /// rather than hunted for.
+    pub fn sync_now(&self) -> FfiResult<SyncReport> {
+        let store = self.store();
+        let report = self.with_sync(|service| service.sync_now(&store))?;
+        Ok(SyncReport {
+            applied: report.applied as i64,
+            duplicates: report.duplicates as i64,
+            sent: report.sent as i64,
+            blobs_completed: report.blobs_completed as i64,
+            blobs_pending: report.blobs_pending as i64,
+            bytes: report.bytes as i64,
+            incomplete: report.incomplete(),
+            halted: report
+                .halted
+                .iter()
+                .map(|h| format!("{}: {}", h.device_id, h.reason))
+                .collect(),
+        })
     }
 }
 

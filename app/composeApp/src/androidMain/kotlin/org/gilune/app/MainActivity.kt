@@ -172,7 +172,22 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
     // tasks for both shells, and Moonshine is neither shared nor desktop.
     // Registering grants nothing — its one capability is `network.request`,
     // which always waits for an explicit yes.
-    LaunchedEffect(Unit) { state.openVault { gilune -> registerMoonshine(state, gilune) } }
+    // How this phone enrols itself (ADR 0019 § 4), set **before** the
+    // vault is opened because `openVault` runs it as part of opening: the
+    // identity decides whether this device is the one the vault believes
+    // it belongs to, and that question is answered before anything else
+    // reads it. A vault restored onto another phone re-enrols here and
+    // says so on the message line.
+    //
+    // The identity and the roster live in `filesDir/sync` — device-local,
+    // **outside the vault**, so exporting or restoring a vault never
+    // clones an identity — and the key itself is sealed by the Keystore.
+    // Nothing here binds a socket: that waits for the switch in Settings.
+    val keyWrap = remember { KeystoreKeyWrap() }
+    LaunchedEffect(Unit) {
+        state.syncSetup = { gilune -> gilune.configureSync(syncDir(context), deviceName(), keyWrap) }
+        state.openVault { gilune -> registerMoonshine(state, gilune) }
+    }
 
     // Local transcription (§ 4). The model is fetched and handed to the
     // kernel off the capture path entirely — nothing here is on the way

@@ -11,13 +11,26 @@
          it needs the user's yes, which the app asks for beside the mic. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- The one thing the app ever fetches: the transcription model
-         (ADR 0017 § 4). Holding the Android permission is not consent —
-         the download waits on the plugin's own `network.request` grant,
-         which always needs an explicit yes, and nothing is fetched
-         because the app opened. Capture, projection, editing and search
-         never touch the network at all. -->
+    <!-- Two things, and the second one arrived with ADR 0019.
+         (1) The transcription model (ADR 0017 § 4) — the only thing this
+         app fetches from the internet. Holding the Android permission is
+         not consent: the download waits on the plugin's own
+         `network.request` grant, which always needs an explicit yes, and
+         nothing is fetched because the app opened.
+         (2) Sync with your own devices over the local network (ADR 0019
+         § 1, § 2). A socket is bound only when sync is switched on in
+         Settings, connections go only to devices that have been paired,
+         and an unpaired device cannot complete the handshake at all.
+         Capture, projection, editing and search still touch no socket. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Reading a pairing QR, and nothing else (ADR 0019 § 7). Asked for
+         at the moment Scan is tapped, never at install, and declining it
+         costs nothing: the six-digit code is on the same screen, so the
+         camera is a convenience and never a condition of syncing. No
+         frame is stored and none leaves the process — it is decoded in
+         memory and dropped. -->
+    <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Whether this connection is metered, which is the whole of the
          caption model's "only download on Wi-Fi" default (ADR 0018 § 4).

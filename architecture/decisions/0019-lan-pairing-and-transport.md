@@ -572,6 +572,24 @@ Each stage is shippable alone and in order.
   and the periodic worker; the user docs sync guide. Gate C, on real
   hardware and a real network.
 
+## Amendments
+
+- **2026-09-03 (M5b, coordinator-accepted refinement).** § 4 says one
+  identity per device; the implementation keys the identity file inside
+  the device-local store **by the vault's `device_id`** — one identity
+  per (machine, vault). Reasons: one machine can hold two unrelated
+  vaults, and a literal one-per-device reading would re-mint on opening
+  the second, silently dropping the first's pairings; and keying by
+  `device_id` means *moving* a vault on the same machine is not
+  mistaken for copying it. The recorded cost: a vault **copied** to a
+  second directory on the same machine keeps its `device_id`, finds
+  the same identity file, and is not detected as a fork — a
+  configuration constitution rule 8 already excludes, now stated
+  rather than discovered. Re-minting on a foreign machine additionally
+  seeds the old device's frontier at what the vault holds, without
+  which the first session with the original would halt on operations
+  both sides already have.
+
 ## Ratification record
 
 Ratified by the owner on 2026-09-02, as proposed, with no

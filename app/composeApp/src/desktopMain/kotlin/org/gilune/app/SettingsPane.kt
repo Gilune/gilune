@@ -1,5 +1,7 @@
-// Settings as a surface rather than a dialog, because it has to grow:
-// devices and sync land here next. Plugins follow the Obsidian shape the
+// Settings as a surface rather than a dialog, because it has to grow —
+// Sync arrived here with ADR 0019 and took the Devices placeholder's
+// slot, and its screen lives in `SyncSettings.kt`. Plugins follow the
+// Obsidian shape the
 // owner asked for (2026-08-31): a manager section with switches, and one
 // nav entry per installed plugin opening that plugin's own screen —
 // permissions, events, contributions, and the remove button live there
@@ -59,7 +61,7 @@ import javax.swing.JFileChooser
 private enum class Section(val label: String) {
     Vault("Vault"),
     Plugins("Plugins"),
-    Devices("Devices"),
+    Sync("Sync"),
     Appearance("Appearance"),
     About("About"),
 }
@@ -149,7 +151,7 @@ fun SettingsPane(
                             is Pane.Fixed -> when (open.section) {
                                 Section.Vault -> VaultSection(state, vaultDir, onVaultChange)
                                 Section.Plugins -> PluginsManager(state) { pane = Pane.Plugin(it) }
-                                Section.Devices -> DevicesSection()
+                                Section.Sync -> SyncSection(state)
                                 Section.Appearance -> AppearanceSection(theme, onThemeChange)
                                 Section.About -> AboutSection(state, vaultDir)
                             }
@@ -615,18 +617,8 @@ private fun VaultSection(state: GiluneState, vaultDir: String, onVaultChange: (S
     }
 }
 
-@Composable
-private fun DevicesSection() {
-    Text("Devices", style = MaterialTheme.typography.titleSmall)
-    Text(
-        "Nothing here yet. Device pairing and LAN sync are the next milestone: " +
-            "this is where paired devices, the short-code pairing flow, and " +
-            "revocation will live.",
-        fontSize = 12.sp,
-        lineHeight = 18.sp,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
-}
+// Sync lives in `SyncSettings.kt`. It replaced the Devices placeholder
+// that stood here and promised it (ADR 0019 § M5b).
 
 @Composable
 private fun AppearanceSection(theme: ThemeChoice, onThemeChange: (ThemeChoice) -> Unit) {

@@ -23,6 +23,12 @@ pub const SYNC_UNKNOWN_OP_KIND: &str = "sync-unknown-op-kind";
 pub const SYNC_LIMIT_EXCEEDED: &str = "sync-limit-exceeded";
 /// Assembled blob bytes did not match the digest the operation declared.
 pub const SYNC_BLOB_DIGEST_MISMATCH: &str = "sync-blob-digest-mismatch";
+/// An operation originated on a device this one has revoked. Refused
+/// whoever delivered it (ADR 0019 § 9) — in a full-replica mesh a third
+/// paired device holds a revoked device's history and would otherwise
+/// relay it, so "excluded" has to be a property of apply, not of who
+/// happens to be on the far end of the socket.
+pub const SYNC_REVOKED_DEVICE: &str = "sync-revoked-device";
 
 /// One raised condition. `subject` is whatever the alert is *about* — a
 /// device id for a halted stream, an operation id for an unreadable

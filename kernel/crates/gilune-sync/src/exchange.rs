@@ -92,7 +92,7 @@ pub fn push(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
         .map(|offer| (offer.device_id, offer.highest_seq))
         .collect();
 
-    for (device_id, ours) in store.operation_devices()? {
+    'devices: for (device_id, ours) in store.operation_devices()? {
         let mut cursor = *theirs.get(&device_id).unwrap_or(&0);
         while cursor < ours {
             if report.budget_spent() >= limits.max_ops_per_session
@@ -116,12 +116,17 @@ pub fn push(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<
                     // The peer refused this operation. That is its halt,
                     // recorded here and not retried: it will ask again
                     // from its own frontier once the condition clears.
+                    //
+                    // One stream at a time and never the session — the
+                    // same contract `pull` keeps. A peer that refuses a
+                    // third device's history (because it has revoked
+                    // that device, § 9) must still receive ours.
                     Err(SyncError::Protocol { detail }) => {
                         report.halted.push(Halted {
                             device_id: device_id.clone(),
                             reason: detail,
                         });
-                        return Ok(report);
+                        continue 'devices;
                     }
                     Err(e) => return Err(e),
                 }
@@ -169,9 +174,15 @@ fn offer_blob(
 pub fn pull(store: &Store, session: &mut dyn Session, limits: Limits) -> Result<ExchangeReport> {
     let mut report = ExchangeReport::default();
     let local = store.device_id()?;
+    // A revoked device's stream is not asked for at all. `apply` refuses
+    // it anyway — that is the backstop, and the property the third-replica
+    // test asserts — but asking every session for history that will be
+    // refused every session would cost a round trip and a fresh alert each
+    // time, for a decision already taken.
+    let refused = store.refused_devices()?;
 
     for offer in session.devices()? {
-        if offer.device_id == local {
+        if offer.device_id == local || refused.contains(&offer.device_id) {
             continue;
         }
         loop {

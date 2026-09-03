@@ -427,6 +427,24 @@ impl Store {
                 blob_wanted: None,
             });
         }
+        // Revocation protects what comes next, never what is already
+        // held (ADR 0019 § 9) — which is why this sits *after* the
+        // duplicate check and not before it. History already applied is
+        // not retracted; a revoked device's next operation is refused
+        // whoever hands it over, so a third replica in a full mesh
+        // cannot relay one back in.
+        if self.is_refused(&envelope.device_id)? {
+            let detail = format!(
+                "{} is revoked on this device; its operations are refused \
+                 whoever delivers them",
+                envelope.device_id
+            );
+            return Err(self.halt(
+                alerts::SYNC_REVOKED_DEVICE,
+                &envelope.device_id,
+                &detail,
+            ));
+        }
         if envelope.op_seq != frontier + 1 {
             let detail = format!(
                 "expected seq {}, this envelope is {}",
@@ -765,6 +783,129 @@ impl Store {
             bytes: declared,
             received: crate::blobs::staged_bytes(self, &blob_id),
         }))
+    }
+}
+
+// ------------------------------------------- refusal by originating device
+
+/// Meta key holding the device ids whose operations this device refuses.
+/// A **projection of the device-local roster**, never the authority: the
+/// roster lives outside the vault with the identity key (ADR 0019 § 4)
+/// and rewrites this list whenever it changes. It is kept here so that
+/// refusal is a property of `apply` itself rather than of a caller
+/// remembering to pass a policy — every delivery path, present and
+/// future, runs into it.
+///
+/// Device ids only. No key material ever reaches the vault.
+const REFUSED_DEVICES: &str = "refused_devices";
+
+impl Store {
+    /// Devices whose operations this one refuses to apply.
+    pub fn refused_devices(&self) -> Result<Vec<String>> {
+        let raw: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT value FROM meta WHERE key = ?1",
+                [REFUSED_DEVICES],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(KernelError::from(e)),
+            })?;
+        let Some(raw) = raw else { return Ok(Vec::new()) };
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+        Ok(parsed
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default())
+    }
+
+    /// Replace the refusal list wholesale — the roster is the authority,
+    /// so this is a write of the whole truth rather than an increment.
+    /// A device that stops being refused has its standing alert
+    /// withdrawn here: re-pairing is what clears the condition, and
+    /// nobody should have to dismiss a notice about a device they have
+    /// just welcomed back.
+    pub fn set_refused_devices(&self, devices: &[String]) -> Result<()> {
+        let previous = self.refused_devices()?;
+        let document = serde_json::Value::Array(
+            devices
+                .iter()
+                .map(|d| serde_json::Value::String(d.clone()))
+                .collect(),
+        );
+        self.conn().execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES (?1, ?2)",
+            rusqlite::params![REFUSED_DEVICES, document.to_string()],
+        )?;
+        for device in previous {
+            if !devices.contains(&device) {
+                alerts::clear(self.conn(), alerts::SYNC_REVOKED_DEVICE, &device)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn is_refused(&self, device_id: &str) -> Result<bool> {
+        Ok(self.refused_devices()?.iter().any(|d| d == device_id))
+    }
+
+    /// Take on a new device identity for this vault, because the vault
+    /// arrived from somewhere else (ADR 0019 § 4, row three of the
+    /// re-enrolment table). Returns the identity being left behind.
+    ///
+    /// The fresh sequence space is free — `next_seq` counts this
+    /// device's own rows and there are none — but the operations the
+    /// *previous* identity wrote are still here, and this device now
+    /// holds them as any full replica holds a third device's history.
+    /// So its frontier is seeded at what is actually held: without that,
+    /// the first session with the original device would offer seq 1,
+    /// find the op id already present, and halt on an identifier clash
+    /// that is really just a vault that was copied.
+    pub fn reenrol_as_new_device(&self, new_device_id: &str) -> Result<String> {
+        let conn = self.conn();
+        conn.execute_batch("BEGIN IMMEDIATE;")?;
+        let done: Result<String> = (|| {
+            let previous: String = conn.query_row(
+                "SELECT value FROM meta WHERE key = 'device_id'",
+                [],
+                |row| row.get(0),
+            )?;
+            let held: i64 = conn.query_row(
+                "SELECT COALESCE(MAX(op_seq), 0) FROM operations WHERE device_id = ?1",
+                [&previous],
+                |row| row.get(0),
+            )?;
+            if held > 0 {
+                conn.execute(
+                    "INSERT INTO sync_frontiers (device_id, applied_seq) VALUES (?1, ?2)
+                     ON CONFLICT(device_id) DO UPDATE SET applied_seq = MAX(applied_seq, ?2)",
+                    rusqlite::params![previous, held],
+                )?;
+            }
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('device_id', ?1)",
+                [new_device_id],
+            )?;
+            Ok(previous)
+        })();
+        match done {
+            Ok(previous) => {
+                conn.execute_batch("COMMIT;")?;
+                Ok(previous)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
     }
 }
 

@@ -89,6 +89,42 @@ kotlin {
                     exclude(group = "com.squareup.okhttp3")
                     exclude(group = "androidx.work")
                 }
+                // -------------------------------------------------------
+                // Reading a pairing QR (ADR 0019 § 7). CameraX supplies
+                // the preview and the analysis frames; `zxing:core`
+                // decodes the luminance plane directly, which is why
+                // there is no wrapper library here — the decode is
+                // fifteen lines in `QrScan.kt` and a wrapper would be a
+                // dependency to own for it.
+                //
+                // ML Kit's code scanner would need no camera permission
+                // at all and was declined in the ADR's alternatives: it
+                // is closed source and hard-requires Play services, in an
+                // app that removed OkHttp from a vendor AAR to keep a
+                // network fetch inside its consent gate.
+                //
+                // **`camera-view` drags `androidx.appcompat` back in, and
+                // it is excluded for the reason above** (measured with
+                // `:composeApp:dependencies`, 2026-09-03): appcompat is
+                // one of the two groups whose `InitializationProvider`
+                // AGP dedupes out of the test APK, and letting CameraX
+                // reopen that defect would cost the instrumented suite
+                // rather than an argument. It is safe to cut: the
+                // `camera-view-1.4.2.aar` was unpacked and its 64
+                // classes, its resources and its `R.txt` contain **no
+                // reference to appcompat at all** — the dependency is
+                // vestigial. `androidx.work` is not in the CameraX tree
+                // at any depth. What CameraX does add is
+                // `androidx.camera:*`, `concurrent-futures`,
+                // `androidx.tracing` and `listenablefuture`, none of them
+                // a manifest provider.
+                implementation("androidx.camera:camera-core:1.4.2")
+                implementation("androidx.camera:camera-camera2:1.4.2")
+                implementation("androidx.camera:camera-lifecycle:1.4.2")
+                implementation("androidx.camera:camera-view:1.4.2") {
+                    exclude(group = "androidx.appcompat")
+                }
+                implementation("com.google.zxing:core:3.5.3")
             }
         }
         val androidInstrumentedTest by getting {

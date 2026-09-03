@@ -10,6 +10,28 @@ rust-version.workspace = true
 gilune-kernel = { path = "../gilune-kernel" }
 serde_json.workspace = true
 thiserror.workspace = true
+hex.workspace = true
+sha2.workspace = true
+# ADR 0019 § 3 and § 5. Both are recorded as unaudited in the ADR and in
+# architecture/research/2026-09-02-lan-sync.md; SPAKE2-then-Noise is what
+# magic-wormhole ships for this exact problem.
+# Only the suite named in NOISE_PARAMS is compiled in: the default
+# feature set also pulls AES-GCM, which nothing here selects and which
+# costs bytes against the 15 MB per-ABI budget.
+snow = { version = "0.10", default-features = false, features = [
+    "std",
+    "default-resolver",
+    "use-curve25519",
+    "use-chacha20poly1305",
+    "use-blake2",
+    "use-getrandom",
+] }
+spake2 = "0.4"
+# § 7: encode in Rust, paint in Compose. No image stack — the module
+# matrix crosses the FFI as bits, so the pairing secret is never a string
+# a shell could log.
+qrcode = { version = "0.14", default-features = false }
+getrandom = "0.3"
 
 [dev-dependencies]
 tempfile.workspace = true

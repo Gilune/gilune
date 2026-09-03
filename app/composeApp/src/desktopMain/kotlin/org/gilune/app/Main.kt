@@ -88,15 +88,39 @@ import uniffi.gilune_ffi.Gilune
 import java.io.File
 import kotlin.math.roundToInt
 
+/// Where this machine keeps what belongs to it rather than to a vault.
+/// Named once, because there are two of these now and they must never
+/// drift apart: `%LOCALAPPDATA%\Gilune` on Windows, the home directory
+/// anywhere else.
+private fun localGiluneDir(name: String): File =
+    File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"), "Gilune/$name")
+
 /// Where a downloaded model lands. One file per catalogue entry, so
 /// changing the setting downloads the new model beside the old one rather
 /// than over it: the previous file is left alone, and switching back is
 /// not another download.
 private fun modelFile(model: WhisperModel): File =
-    File(
-        System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"),
-        "Gilune/models/${model.fileName}",
-    )
+    File(localGiluneDir("models"), model.fileName)
+
+/// This device's identity keypair and the roster of devices it has
+/// paired with. **Outside the vault, and that is the whole point**
+/// (ADR 0019 § 4): a vault is a portable artefact people copy, restore
+/// and put in shared folders, and an identity inside one is a cloned
+/// identity sharing a sequence space.
+private fun identityDir(): File = localGiluneDir("sync")
+
+/// What another device will call this one in its list. The machine's own
+/// name is what a person already recognises; the fallback is a phrase
+/// rather than a blank, because a device nobody can name is a device
+/// nobody can revoke with confidence.
+private fun deviceName(): String =
+    (
+        System.getenv("COMPUTERNAME")
+            ?: runCatching { java.net.InetAddress.getLocalHost().hostName }.getOrNull()
+        )
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() }
+        ?: "This desktop"
 
 /// How long the layout waits for the tabs to settle before it is
 /// written: a burst of opens and closes costs one preference write.
@@ -380,6 +404,18 @@ private fun DesktopApp(
     }
 
     LaunchedEffect(Unit) {
+        // Enrolment is the shell's to arrange and the kernel's to decide
+        // (ADR 0019 § 4): this says where the identity lives and what
+        // protects it, and `openVault` runs it before anything else reads
+        // the vault, because it is what settles whether this machine is
+        // the device the vault believes it belongs to. Set before the
+        // open, never after. Nothing here binds a socket — that waits for
+        // the switch in Settings ▸ Sync.
+        state.syncSetup = { gilune ->
+            val identity = identityDir()
+            identity.mkdirs()
+            gilune.configureSync(identity.absolutePath, deviceName(), platformKeyWrap())
+        }
         state.openVault { gilune ->
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
