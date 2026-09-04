@@ -438,3 +438,188 @@ replica pulling streams out of order.
     per text note. Gate 6 is measured on reconciliation, which is what
     § 2.5 names. The same treatment for rendering wants the object's own
     stat facts and is a separate change.
+
+- **2026-09-04, K3 delivered.** The system index: `.gilune/local/index.db`
+  beside `kernel.db`, its own schema version 1, stamped with the feed's
+  epoch, maintained from the feed in the pass that recorded the change.
+  Gate items 3 and 4 are evidence; 5 is evidence in the small (an
+  observer counts indexer calls) and belongs to P1 for the agenda; 8's
+  measurement is recorded below.
+
+  **The database.** `index_meta(key, value)` holds
+  `index_schema_version` and `feed_epoch` — both **text**, because the
+  column has no declared type and a number written there comes back a
+  number, which made every handle silently discard the last one's work
+  until a test caught it. `namespaces(namespace PK, version, cursor_seq,
+  last_error, last_error_ms)` is the per-namespace cursor.
+  `predicate_kinds(namespace, predicate, kind)` is the value typing.
+  `facts(rel_path, line, namespace, predicate, value, num, typed)` with
+  indexes on `(predicate, value)`, `(predicate, num)`, `(rel_path)` and
+  `(namespace, rel_path)` — the last so a namespace's rows for one path
+  can be replaced without a scan. `lines(id, rel_path, line, field,
+  text)` holds the indexed text with an FTS5 external-content table over
+  it (`content='lines'`, insert and delete triggers) so replacing one
+  note's rows is an indexed delete rather than a scan of the whole
+  full-text index.
+
+  - **`typed`, beyond the columns § 2.3 named.** The decision asked for
+    values "stored as text with a sortable numeric or date shadow"; a
+    shadow alone cannot say that a value *failed* its declared kind, and
+    `due: tomorow` would then sort after every real date. So a row
+    records whether its value took its kind, and an ordered comparison
+    requires it. `Number` fills `num` and orders on it; `Date` is
+    normalised to `YYYY-MM-DD` where lexicographic order is
+    chronological; `Text` orders as text. **Unparseable typed values are
+    kept exactly as they arrived** — somebody looking for what they
+    actually wrote finds it by equality — and take no part in an ordered
+    comparison. A bound that parses as a number asks a numeric question
+    and only `num` answers it; any other bound compares text and
+    excludes numeric predicates, so `weight >= 10` never reads "10" as
+    less than "9". Dates are day-granular: a time component is dropped,
+    and a value that needs one declares itself `Text`.
+
+  - **Lines are 1-based within the note's body**, front matter split off
+    — the same number `MatchedLine.number` and `TaskHit.line` already
+    carry, which is what a shell navigates by. (`MdBlock.line` is
+    0-based and body-relative; the shells already differ there and the
+    index follows the search surfaces, not the parser.) The text handed
+    to an indexer is that body, so a plugin counts what the kernel
+    counted. Front-matter facts are **not** in this stage: an indexer
+    never sees the `---` block, so `[key:value]` needs either a
+    kernel-owned front-matter namespace or P2 keeping its own reader —
+    named here so it is a decision rather than a discovery.
+
+  - **The tokenizer is `trigram`**, and it was chosen to preserve what
+    the shipped language already means. `Search.kt` matches a bare term
+    with `contains(..., ignoreCase = true)` — a case-insensitive
+    substring, inside a word, with a quoted phrase matching spaces and
+    all — and `unicode61` would have made those word matches with prefix
+    queries, silently changing every existing query's meaning. Trigram
+    is exact about it. **Cost:** ~5.8 MB of `index.db` for 1,000 notes
+    of 20 lines (20,000 indexed lines), which is roughly three times the
+    text. **Behavioural delta P2 must honour:** a trigram index holds no
+    token shorter than three characters, so a one- or two-character term
+    is answered by a `LIKE` scan of the indexed lines instead — the
+    meaning is identical, the cost is not; and `LIKE`'s case folding is
+    ASCII-only, so a two-character non-ASCII term is case-sensitive
+    where a three-character one is not.
+
+  - **`Constraint::Text` carries a target, and the note's name and path
+    are indexed as note-level rows.** A bare term in the shipped
+    language matches the body **or** the note's name, and a conjunction
+    cannot express an `or` — so the `or` lives inside the one
+    constraint: `Any` reads body lines and the name, `Body`, `Name` and
+    `Path` read one apiece. A name row is note-level, so a term matching
+    a note's name holds on every line of it, which is exactly what
+    `searchVault` does today with `type:task`. `path:` is answerable
+    without a post-filter for the same reason.
+
+  - **Note-scope join.** At `Line` scope the answer is the lines
+    satisfying every constraint **at the same anchor** — a note-level
+    fact satisfies every line of its note, two line-level facts on two
+    different lines do not join. At `Note` scope it is those lines'
+    notes, plus notes whose note-level facts satisfy everything on their
+    own. A query made only of note-level constraints therefore answers
+    nothing at `Line` scope: it names no line, and answering it with
+    every line of the note would return the vault. Ordering is
+    `(rel_path, line)`, always.
+
+  - **`Ne` is "no fact with that predicate and that value at this
+    anchor"**, not "some fact with another value": a line carrying
+    `colour=red colour=blue` is excluded by `Ne red`, because a line
+    that says it is red is not a line that is not red whatever else it
+    says. `Ne` and `NotExists` are **filters, not generators** — they
+    narrow what other constraints found and name no anchors — so a query
+    with nothing positive in it answers nothing rather than the vault,
+    and at `Note` scope a negative is judged at the anchor, so a
+    note-level anchor is not excluded by a line-level fact.
+
+  - **Two operators beyond the brief's list, each with the caller that
+    needs it.** `NotExists`, because `done:none` is "no `done:` token on
+    this line" and nothing else in the list expresses it; `Contains`,
+    because `[key:value]`, `file:`, `path:` and `content:` are all
+    *contains* in the shipped language and `Prefix` is not.
+
+  - **A line beyond the note's length is stored as the plugin gave it.**
+    The kernel never interprets a fact, and a line number is the
+    plugin's claim about the note it was handed; counting the note's
+    lines to police that claim would be the kernel reading the plugin's
+    mind, and dropping the fact would lose data silently. A consumer
+    bounds-checks the file it opens, which it must do anyway.
+
+  - **A move re-keys; a namespace with nothing at the old path
+    derives.** A move changes where a note is, not what it says, so the
+    facts are re-keyed and no indexer is asked again. That alone would
+    break `incremental == rebuilt`: a rebuild replaying `Created(a)`
+    then `Moved(a→b)` finds no file at `a`, so there is nothing to
+    re-key. Deriving at the new path when the old path held nothing
+    closes it, and the kernel's own text index derives either way
+    because its name and path rows *are* the path. Re-keying nothing
+    inside the transaction means another process moved it first, which
+    is the rows already being where this one was about to put them.
+
+  - **An indexer that throws stops its own namespace at that note.** The
+    pass completes, everything before the note is written, the cursor is
+    set to one short of the refusal, the message is recorded against the
+    namespace and readable from `index_status`, and every other
+    namespace finishes the feed. **Where a refusal is surfaced:** in the
+    returned `IndexPass`, and durably in `namespaces.last_error`, which
+    clears when the namespace catches up. Deliberately **not** an
+    integrity alert: the alert kinds are a coupled surface both shells
+    read, and a plugin failing to read a note is not damage to the
+    vault. `project`, `reconcile` and `reconcile_path` swallow index
+    failures entirely — the index is derived, and a disposable database
+    must never be able to stop the vault being written.
+
+  - **The whole database is discarded rather than migrated.** A foreign
+    epoch, a schema version this build does not know, or a file SQLite
+    cannot read a row out of: all three are answered by dropping
+    everything and rebuilding from cursor 0. There is no migration path
+    and there is deliberately not going to be one.
+
+  - **A namespace belongs to the plugin whose id it is or is under**:
+    `org.memory.tasks` owns `org.memory.tasks` and
+    `org.memory.tasks.lines`, and not `org.memory.tasksextra`. Matched
+    by a half-open range on the primary key rather than `LIKE`, which
+    would have taken the third. `remove_plugin` drops them; the notes
+    are untouched.
+
+  - **Registration is per handle, per process** (the external-processor
+    rule). A process with no indexer for a namespace never touches that
+    namespace's facts — the CLI projecting a vault leaves the app's
+    index alone — while the kernel's own `text` namespace is maintained
+    by whichever process passes. Predicate kinds are rewritten on every
+    registration; **the version is what asks for a re-derivation**, so a
+    plugin that changes a predicate's kind without changing its version
+    leaves the facts typed as they were.
+
+  - **`NoteIndexer` returns a result**, where the brief's sketch
+    returned a bare list. A uniffi foreign trait with an infallible
+    signature turns a Kotlin exception into a panic crossing the
+    boundary; `KeyWrap`'s shape does not, and a throwing indexer is a
+    case the gate asks for by name.
+
+  - **`TextTarget`, not `TextField`.** The generated Kotlin type would
+    collide with the Compose composable in exactly the files P2 will
+    write.
+
+  - **Measurement (debug build, this machine, quiet).** 1,000 notes ×
+    20 lines: built in 6.45 s, 20,000 indexed lines, 5.80 MB of
+    `index.db`. One edit to one note: 140 ms for the reconcile and the
+    index together, **one** indexer call, that note's 20 line rows
+    replaced by 2, two file reads (reconciliation's and the index's).
+    One query: 147 µs. A release build and § 8.8's before-and-after on
+    the owner's desktop belong to stage S, which is where a shell is
+    actually asking.
+
+  - **Known gaps, stated.** An **import candidate is announced once**
+    (`INSERT OR IGNORE` in `record_import`), so an edit to a file the
+    kernel does not claim never reaches the feed and never reaches the
+    index until the file is imported or the index is rebuilt; that is a
+    K1 property, not an index one, and the property test avoids editing
+    imports because of it. The index reads a changed note a second time,
+    after reconciliation has already read it — threading the text
+    through would couple the index into the projection's internals. A
+    quarantined file's rows are deleted, so its text is unfindable while
+    it waits for a person. There is no compaction, so nothing yet needs
+    the reader cursors § 3 mentioned.

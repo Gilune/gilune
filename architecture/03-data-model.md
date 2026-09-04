@@ -191,6 +191,17 @@ file's size and modification time, which is how reconciliation tells an
 externally changed file from an untouched one without reading it (ADR
 0007's amendment).
 
+The **system index** is a separate database beside the kernel's, derived
+from that feed and outside the fixture chain (ADR 0020 § 2.3). It holds
+facts — `(anchor, predicate, value)`, where an anchor is a note or a line
+in one — contributed by every registered indexer into its own namespace,
+and a full-text index of note text. Predicates are namespaced by plugin
+id and **opaque to the kernel**, exactly as event types are; the kernel
+stores them, orders them by a kind their namespace declared, and answers
+conjunctions across all of them. It carries the feed's epoch and its own
+schema version, and any mismatch discards it: deleting the whole file
+costs a rebuild and nothing else.
+
 This is not an entity-attribute-value model. Stable envelope fields are explicit
 and indexable; plugin payloads are typed documents with optional registered
 indexes or projections.
@@ -204,6 +215,14 @@ not expose arbitrary SQL.
 Unknown payloads remain retrievable by ID and exportable. Full-text and semantic
 search are replaceable services that build rebuildable indexes from committed
 data.
+
+Over the system index the kernel additionally answers a **conjunction of
+constraints with anchors** (ADR 0020 § 2.4): each constraint is a fact
+comparison or a full-text match, a fact about a note satisfies every line
+of that note, and the answer is either the lines satisfying everything at
+one anchor or the notes those lines belong to. There is no disjunction.
+The kernel never interprets a predicate, so a query joining two plugins'
+facts requires neither of them to know the other exists.
 
 ## Deletion and retention
 

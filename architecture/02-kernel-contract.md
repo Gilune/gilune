@@ -17,6 +17,9 @@ versioned interfaces; they do not share kernel internals.
 - a densely sequenced feed of what changed in the vault projection, and
   the stat facts that let reconciliation avoid reading what has not
   (ADR 0020);
+- a derived, device-local **system index** beside the vault holding every
+  plugin's facts about anchors and a full-text index of note text,
+  maintained from that feed and rebuildable from it (ADR 0020 § 2.3);
 - plugin-scoped state that is distinct from user-owned data.
 
 ### Identity and history
@@ -115,6 +118,9 @@ modules:
 - `memory:secrets` — request and use scoped secret handles;
 - `memory:changes` — resume a cursor over what changed in the vault
   projection, and reconcile one path;
+- `memory:index` — register an indexer for a namespace, advance or
+  rebuild the index, and answer a conjunction of constraints with
+  anchors;
 - `memory:sync` — enumerate, transmit, validate, and apply operations;
 - `memory:export` — enumerate stable envelopes and stream standard-format blobs;
 - `memory:diagnostics` — health and failure information with redaction.

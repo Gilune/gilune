@@ -16,3 +16,9 @@ Two standing rules:
 
 Populated from vertical-slice milestone M4 (plugin contract) and M5
 (sync test vectors) onward.
+
+- [`processor/`](processor/README.md) — interpreting an object and
+  proposing outputs the kernel commits (ADR 0003, 0013, 0018).
+- [`indexer/`](indexer/README.md) — describing a note as facts about
+  anchors, which the kernel stores and joins (ADR 0020). Its WIT half is
+  deferred; the README is the contract meanwhile.

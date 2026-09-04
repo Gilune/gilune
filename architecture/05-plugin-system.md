@@ -48,6 +48,19 @@ domain-optimised projections from committed objects. The first-party Markdown
 vault projection (ADR 0007) is the flagship member of this class and the basis
 of the export contract.
 
+Most of them need no index of their own. A plugin that describes the
+vault registers a **`NoteIndexer`** instead (ADR 0020 § 2.3,
+`contracts/indexer/`): a pure function from a note's text to facts about
+anchors, which the kernel stores in one system index under that plugin's
+namespace and maintains from its own change feed. Being pure over text,
+it needs no vault access at all — which is what will let a sandboxed
+downloaded plugin extend the index. Two indexers that have never heard of
+each other join on the anchor, and removing a plugin drops its namespace
+and leaves the notes (the removal rule below). A private index remains
+allowed for data that is not a fact — an embedding index — under the same
+feed-and-cursor pattern; facts are the rule and a private index is the
+exception.
+
 ## Manifest
 
 Every plugin has a signed, immutable manifest. The following is illustrative;
