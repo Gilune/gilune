@@ -118,3 +118,35 @@ deleting the Markdown layer and rebuilding it to an equivalent vault; external
 edit, rename, delete, and malformed-front-matter cases reconciling without loss
 of kernel history, including termination injected during reconciliation; and a
 vault copied while closed restoring completely on another machine.
+
+## Amendments
+
+- **2026-09-04 (ADR 0020 § 2.5, K2): reconciliation stops reading what it
+  can stat.** Reconciliation read and SHA-256'd **every** projected file on
+  every pass to find external changes. It now records each file's size and
+  modification time beside `content_sha256`, and a file whose size and
+  mtime both match its record is not read; a mismatch is read and hashed
+  exactly as before. This is git's index rule, adopted with git's
+  racy-file safeguard: a file whose mtime is not older than the moment its
+  record was written is hashed regardless, because the write and the
+  record may have landed inside the filesystem's timestamp resolution, and
+  the record is re-armed with a later moment when the hash says nothing
+  changed, so the entry settles rather than being re-hashed for ever.
+
+  **Openness is unchanged**, which is the point that had to survive: rule
+  13 makes third-party editing supported use, and reconciliation still
+  *looks* at every file on every pass. Looking is not reading. A file any
+  other tool touches has a different size or a different timestamp and is
+  read.
+
+  Stated residual, inherited rather than introduced: a rewrite that
+  preserves a file's length and lands with a timestamp the filesystem
+  reports as older is invisible to a stat. The full hash of every
+  projected file is therefore an explicit action — the CLI's `verify` —
+  rather than a cost every launch pays, and `verify` re-arms any record it
+  finds stale so the next reconciliation reads that file properly.
+  Reporting without re-arming would be a diagnosis with no treatment.
+
+  A targeted entry point, `reconcile_path(rel)`, reconciles one file to
+  the same decisions the full pass would reach about it, so a writer's own
+  save is taken in without a pass over the vault.

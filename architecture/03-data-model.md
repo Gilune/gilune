@@ -178,7 +178,18 @@ The proposed local implementation contains logical stores for:
 - events, subscriptions, jobs, and attempts;
 - schema registrations;
 - plugin installations, grants, and private state;
-- tombstones, device acknowledgements, and garbage-collection eligibility.
+- tombstones, device acknowledgements, and garbage-collection eligibility;
+- the vault change feed and its dense counter and epoch (ADR 0020).
+
+The change feed describes the **projection** — which files appeared,
+changed, moved, left, or were set aside — and is a second view of what
+already happened, never a second record of it. Object-level change stays
+the events store's; objects that never project are absent from the feed.
+Its sequence is dense by construction, so a reader resumes from a cursor
+and a gap can only mean a row it missed. The projection also records each
+file's size and modification time, which is how reconciliation tells an
+externally changed file from an untouched one without reading it (ADR
+0007's amendment).
 
 This is not an entity-attribute-value model. Stable envelope fields are explicit
 and indexable; plugin payloads are typed documents with optional registered

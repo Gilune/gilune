@@ -14,6 +14,9 @@ versioned interfaces; they do not share kernel internals.
 - blob identity, reference tracking, staging, finalisation, and garbage
   collection eligibility;
 - durable event, subscription-job, and processing-result records;
+- a densely sequenced feed of what changed in the vault projection, and
+  the stat facts that let reconciliation avoid reading what has not
+  (ADR 0020);
 - plugin-scoped state that is distinct from user-owned data.
 
 ### Identity and history
@@ -110,6 +113,8 @@ modules:
 - `memory:schemas` — register schemas and negotiate supported versions;
 - `memory:capabilities` — inspect and invoke granted host facilities;
 - `memory:secrets` — request and use scoped secret handles;
+- `memory:changes` — resume a cursor over what changed in the vault
+  projection, and reconcile one path;
 - `memory:sync` — enumerate, transmit, validate, and apply operations;
 - `memory:export` — enumerate stable envelopes and stream standard-format blobs;
 - `memory:diagnostics` — health and failure information with redaction.

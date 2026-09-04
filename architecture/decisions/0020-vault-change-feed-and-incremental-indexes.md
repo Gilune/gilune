@@ -350,3 +350,91 @@ replica pulling streams out of order.
 - **2026-09-04, ratified by the owner ("ratified.") and the build
   authorised.** Staged as § 9, one implementer per stage, sequential:
   K1+K2, then K3, then P1+P2+S, each landing with its gate items.
+
+- **2026-09-04, K1 and K2 delivered.** Schema v7 adds `vault_changes`
+  (`seq` an explicit `INTEGER PRIMARY KEY`, `kind`, `rel_path`,
+  `previous_rel_path`, `object_id`, `revision_id`, `cause`, `created_ms`)
+  with an index on `rel_path`; `meta.vault_change_seq` (the counter) and
+  `meta.vault_change_epoch` (`lower(hex(randomblob(16)))`, stamped by the
+  migration); and `projections.size`, `projections.mtime_ns`,
+  `projections.recorded_ns`. Gate items 1, 2, 6, 7 and 9 are evidence;
+  3–5 and 8 belong to the stages that follow. What the round chose where
+  this decision left room, and where it deviated:
+
+  - **No compaction.** § 2.1 permits consecutive `Modified` rows for one
+    path to be compacted; nothing does. The table is never trimmed, so
+    every sequence from 1 to the counter is held, and reader cursors in
+    `meta` (§ 3) were not needed and were not added. A compactor would
+    need them and would have to leave every live reader's position
+    intact; when one is wanted, `already_removed` shows the shape of the
+    per-path query it would build on. Until then `CursorUnknown` for a
+    held sequence can only mean a foreign epoch or a reader ahead of the
+    vault.
+
+  - **`cause`, path by path.** Exact: reconciliation's external edit
+    (`ExternalEdit`), and **`Sync`**, which is decided by asking the
+    operations table whose the projected head's revision was — a head
+    carried here by another device's operation is a synced change and can
+    be nothing else, whatever `origin` string the writer stamped on it.
+    Read off `revisions.origin`, and therefore only as good as the
+    writer's own stamp: `Capture`, `Processor`. Assigned by the site
+    rather than derived: `Reconcile` for a rename by id, an import, a
+    quarantine, and for a deletion decided here. `LocalEdit` is the
+    fallback for an origin this build does not recognise. The question is
+    asked only where a change is announced, so a settled vault never pays
+    for it.
+
+  - **`Created` means the vault did not have this file** — either no
+    projection record, or a record whose file was missing. The narrower
+    "no record" reading would report a rejected tombstone proposal
+    putting a file back as `Modified`, which describes a change to
+    something that was not there.
+
+  - **`Removed` is said once per disappearance.** Reconciliation opening
+    a tombstone proposal and a synced tombstone withdrawing the same
+    projection are two passes noticing one event; the guard is that the
+    feed's last word about that path is not already `removed`. Anything
+    that puts a file back writes a row of its own, so a second genuine
+    removal is never suppressed. A locally deleted file is announced when
+    reconciliation notices it, not when a person answers the proposal:
+    the file is not in the vault from the moment it goes.
+
+  - **mtime and the racy moment are nanoseconds** since the Unix epoch on
+    both platforms (`SystemTime::duration_since`), so the racy comparison
+    is exact and unit-free of platform. `recorded_ns` — the moment the
+    record was written — is the third column § 3 did not name; git
+    compares against its index file's mtime, and a per-row moment is the
+    same rule without a file to stand for it. A racy row that hashes
+    clean is re-armed with a later moment, which is git's smudge in
+    reverse and is what makes the entry settle instead of being hashed on
+    every pass for ever.
+
+  - **`verify` re-arms as well as reports.** § 2.5 makes the full hash an
+    explicit action; a `verify` that only reported would leave the stat
+    rule going on missing the same file. It reports only what the stat
+    rule *would* have missed — a file whose record already disagrees is
+    an ordinary external edit reconciliation has yet to take in, and
+    calling that damage would make every unsaved edit look like one.
+
+  - **`reconcile_path` refuses what it cannot be about.** A path outside
+    the vault, or one that is not a `.md` file, is `VaultUnusable` rather
+    than silently doing nothing: only Markdown files project, and a
+    caller's bug should not be invisible.
+
+  - **Stated, because it is true rather than tidy.** Two processes
+    projecting the same object in the same instant both find no record,
+    both write the file, and both announce it — the feed reports what
+    happened, and the file really was written twice. The sequence stays
+    dense and unique (proven across operating-system processes), and
+    re-deriving from a path a consumer is told about is idempotent, so
+    nothing is lost by it. Avoiding it would mean serialising projection's
+    file writes across processes, which would cost multi-instance the
+    property that makes it work.
+
+  - **Not in scope, and worth the next stage knowing.** `project()`
+    renders every live object on every pass, and rendering a text
+    capture reads that capture's preserved bytes; K2's stat rule covers
+    the *projected* files, so an idle `project()` still reads one blob
+    per text note. Gate 6 is measured on reconciliation, which is what
+    § 2.5 names. The same treatment for rendering wants the object's own
+    stat facts and is a separate change.
