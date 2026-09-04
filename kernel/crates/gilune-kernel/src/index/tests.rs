@@ -592,6 +592,10 @@ fn one_edit_costs_one_indexer_call_and_one_notes_worth_of_text_rows() {
     let second = note(&store, "colour=blue two");
     let third = note(&store, "colour=green three");
     assert_eq!(calls.load(Ordering::SeqCst), 3);
+    // One settling pass, for the reason K2's own tests take one: a file
+    // written and recorded inside the same clock tick is racy by git's
+    // rule and is hashed until its record is re-armed.
+    store.reconcile().expect("settle");
 
     let before = store.index_status().expect("status").lines;
     crate::probe::reset_file_reads();
@@ -600,6 +604,13 @@ fn one_edit_costs_one_indexer_call_and_one_notes_worth_of_text_rows() {
         calls.load(Ordering::SeqCst),
         4,
         "one edit, one indexer call, whatever the size of the vault"
+    );
+    assert_eq!(
+        crate::probe::file_reads(),
+        2,
+        "the edited note read twice — once by reconciliation, once by the \
+         index — and nothing else read at all: the index never reads a file \
+         the feed did not name"
     );
     assert_eq!(
         store.index_status().expect("status").lines,
@@ -675,6 +686,48 @@ fn a_note_that_only_moved_carries_its_facts_across_without_being_read_again() {
             }]
         ),
         vec![moved.to_string()]
+    );
+}
+
+#[test]
+fn a_note_edited_after_it_moved_in_the_same_batch_is_read_again() {
+    // The second-order case a re-key drags in. Rows carried across by a
+    // re-key are as old as the pass that wrote them, so treating the new
+    // path as up to date would make an edit later in the same batch
+    // invisible — for ever, because the change has already gone past.
+    //
+    // Both changes reach one batch because a second process makes them:
+    // its passes advance the kernel's text index and leave this
+    // namespace's cursor exactly where the first process left it.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let app = Store::open(dir.path()).expect("open");
+    let (colour, calls) = Marks::new("test.colour", "colour=");
+    app.register_indexer("test.colours", 1, &[], colour)
+        .expect("register");
+    let rel = note(&app, "colour=red before any of this");
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let tool = Store::open(dir.path()).expect("a second process");
+    let moved = "Moved/elsewhere.md";
+    std::fs::create_dir_all(tool.vault().join("Moved")).expect("folder");
+    std::fs::rename(tool.vault().join(&rel), tool.vault().join(moved)).expect("move");
+    tool.reconcile().expect("reconcile the move");
+    rewrite(&tool, moved, "colour=black and then somebody edited it");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the other process carries no implementation of this namespace"
+    );
+
+    app.advance_index().expect("one batch holding both changes");
+    assert_eq!(
+        lines(&app, &[eq("test.colour", "black")]),
+        vec![(moved.to_string(), 1)],
+        "the edit after the move was read"
+    );
+    assert!(
+        lines(&app, &[eq("test.colour", "red")]).is_empty(),
+        "and what the note used to say is not still on the record"
     );
 }
 
