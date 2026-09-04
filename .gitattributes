@@ -10,3 +10,8 @@ kernel/crates/gilune-cli/tests/fixtures/** -text
 # Gradle wrapper scripts must keep their native line endings to run.
 gradlew text eol=lf
 gradlew.bat text eol=crlf
+
+# The continuous build's scripts and workflows are read by bash on a Linux
+# runner: a carriage return reaches it as part of the command.
+*.sh text eol=lf
+.github/** text eol=lf

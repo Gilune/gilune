@@ -1,0 +1,491 @@
+name: Build
+
+# Every push to main builds all three packages and runs the tests; a v* tag
+# additionally publishes a Release with the installers attached. CI branches
+# build as well, so the pipeline can be proven before it reaches main —
+# workflow_dispatch is only offered for workflows already on the default
+# branch, which makes it useless for a first validation.
+on:
+  push:
+    branches: [main, 'ci/**']
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to stamp: MAJOR.MINOR.PATCH, MAJOR at least 1. Empty keeps the development defaults.'
+        required: false
+        default: ''
+      dry_run_release:
+        description: 'Run the release job as far as collecting and checking the artefacts, without creating a Release.'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # whisper.cpp declares a cmake_minimum_required that cmake 4 refuses
+  # without this. Harmless on cmake 3.
+  CMAKE_POLICY_VERSION_MINIMUM: '3.5'
+  # Pinned rather than "whichever the image ships": the NDK is a compiler.
+  GILUNE_NDK_VERSION: '27.2.12479018'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # What version the three packages carry, decided once so they agree.
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.decide.outputs.version }}
+      gradle_args: ${{ steps.decide.outputs.gradle_args }}
+      is_release: ${{ steps.decide.outputs.is_release }}
+    steps:
+      - name: Decide the version
+        id: decide
+        shell: bash
+        env:
+          REF: ${{ github.ref }}
+          REQUESTED: ${{ inputs.version }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          # jpackage on Windows will only accept MAJOR.MINOR.BUILD with
+          # MAJOR greater than 0, so a v0.x tag cannot drive the MSI and is
+          # refused here rather than producing a mis-versioned installer.
+          semver='^[1-9][0-9]*\.[0-9]+\.[0-9]+$'
+          version=''
+          is_release=false
+          case "$REF" in
+            refs/tags/*)
+              is_release=true
+              tag=${REF#refs/tags/}
+              version=${tag#v}
+              if ! printf '%s' "$version" | grep -Eq "$semver"; then
+                echo "::error title=Unusable release tag::${tag} cannot drive an installer version. A release tag must read v<MAJOR>.<MINOR>.<PATCH> with MAJOR at least 1 and no suffix — v1.0.0, not v0.9.0 and not v1.0.0-rc1 — because jpackage on Windows requires MAJOR.MINOR.BUILD with MAJOR greater than 0."
+                exit 1
+              fi
+              ;;
+            *)
+              if [ -n "$REQUESTED" ]; then
+                if ! printf '%s' "$REQUESTED" | grep -Eq "$semver"; then
+                  echo "::error title=Unusable version::${REQUESTED} is not MAJOR.MINOR.PATCH with MAJOR at least 1, which is what jpackage on Windows will accept."
+                  exit 1
+                fi
+                version=$REQUESTED
+              fi
+              ;;
+          esac
+          gradle_args=''
+          if [ -n "$version" ]; then
+            gradle_args="-Pgilune.version=${version} -Pgilune.versionCode=${RUN_NUMBER}"
+          fi
+          {
+            echo "version=${version}"
+            echo "gradle_args=${gradle_args}"
+            echo "is_release=${is_release}"
+          } >> "$GITHUB_OUTPUT"
+          echo "Version: ${version:-<development build, gradle defaults kept>}"
+          echo "Release: ${is_release}"
+
+  # ---------------------------------------------------------------------
+  windows:
+    name: Windows desktop (MSI)
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: app
+
+      - name: Rust toolchain
+        shell: bash
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+
+      - name: Locate LLVM and CMake
+        shell: pwsh
+        run: |
+          # whisper-rs-sys runs bindgen on the host, which needs libclang;
+          # the image ships LLVM, and the fallback is here so a change in
+          # the image is a slow build rather than a failed one.
+          $candidates = @("$env:ProgramFiles\LLVM\bin", "${env:ProgramFiles(x86)}\LLVM\bin")
+          $llvm = $candidates | Where-Object { Test-Path (Join-Path $_ 'libclang.dll') } | Select-Object -First 1
+          if (-not $llvm) {
+            choco install llvm --no-progress -y
+            $llvm = "$env:ProgramFiles\LLVM\bin"
+          }
+          Add-Content -Path $env:GITHUB_ENV -Value "LIBCLANG_PATH=$llvm"
+          Write-Host "libclang: $llvm"
+          cmake --version
+
+      - name: Build the kernel with local transcription
+        shell: bash
+        working-directory: kernel
+        run: cargo build --release -p gilune-ffi --features whisper
+
+      - name: Kernel test suite
+        shell: bash
+        working-directory: kernel
+        run: cargo test --workspace
+
+      - name: Generate the desktop bindings
+        shell: bash
+        working-directory: kernel
+        # Per target from that target's own binary (07-compatibility), and
+        # --no-format so the output is the generator's own bytes rather
+        # than whatever formatter happens to be on the machine.
+        run: |
+          cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+            --library target/release/gilune_ffi.dll --language kotlin \
+            --out-dir ../app/composeApp/src/desktopMain/generated --no-format
+
+      - name: Stage the kernel as an app resource
+        shell: bash
+        run: |
+          mkdir -p app/composeApp/resources/windows-x64
+          cp kernel/target/release/gilune_ffi.dll app/composeApp/resources/windows-x64/
+
+      - name: Desktop test suite
+        shell: bash
+        working-directory: app
+        # Against the same release binary the installer will carry.
+        run: ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+
+      - name: Package the MSI
+        shell: bash
+        working-directory: app
+        # The Compose plugin fetches its own WiX 3 toolset (tasks
+        # :downloadWix / :unzipWix), so nothing is assumed of the image.
+        run: ./gradlew :composeApp:packageReleaseMsi ${{ needs.version.outputs.gradle_args }}
+
+      - name: What was packaged
+        shell: bash
+        run: ls -l app/composeApp/build/compose/binaries/main-release/msi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gilune-windows-msi
+          path: app/composeApp/build/compose/binaries/main-release/msi/*.msi
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-desktop-windows
+          path: app/composeApp/src/desktopMain/generated
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  linux:
+    name: Linux desktop (DEB)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: app
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+
+      - name: Build dependencies
+        # libclang-dev + cmake build whisper.cpp; fakeroot, binutils and
+        # desktop-file-utils are what jpackage shells out to for a DEB; xvfb,
+        # a GL stack and a font give the Compose UI tests something to draw
+        # on and something to draw with.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libclang-dev cmake fakeroot binutils desktop-file-utils \
+            xvfb libgl1 fonts-dejavu-core
+          libclang=$(find /usr/lib -name 'libclang.so*' -print -quit)
+          [ -n "$libclang" ] || { echo 'libclang not found after installing libclang-dev'; exit 1; }
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
+          echo "libclang: $libclang"
+
+      - name: Build the kernel with local transcription
+        working-directory: kernel
+        run: cargo build --release -p gilune-ffi --features whisper
+
+      - name: Kernel test suite
+        working-directory: kernel
+        run: cargo test --workspace
+
+      - name: Clippy
+        working-directory: kernel
+        # 09-engineering-conventions: clippy clean with warnings denied in
+        # CI. Once, on one platform — it is the same source either side.
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Generate the desktop bindings
+        working-directory: kernel
+        run: |
+          cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+            --library target/release/libgilune_ffi.so --language kotlin \
+            --out-dir ../app/composeApp/src/desktopMain/generated --no-format
+
+      - name: Stage the kernel as an app resource
+        # JNA resolves "gilune_ffi" to libgilune_ffi.so, and Compose looks
+        # for app resources under a per-OS-and-architecture directory.
+        run: |
+          mkdir -p app/composeApp/resources/linux-x64
+          cp kernel/target/release/libgilune_ffi.so app/composeApp/resources/linux-x64/
+
+      - name: Desktop test suite
+        working-directory: app
+        env:
+          # No GPU behind xvfb, and Skiko's default is to look for one.
+          SKIKO_RENDER_API: SOFTWARE
+        run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+
+      - name: Package the DEB
+        working-directory: app
+        run: ./gradlew :composeApp:packageReleaseDeb ${{ needs.version.outputs.gradle_args }}
+
+      - name: What was packaged
+        run: |
+          ls -l app/composeApp/build/compose/binaries/main-release/deb
+          dpkg-deb --info app/composeApp/build/compose/binaries/main-release/deb/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gilune-linux-deb
+          path: app/composeApp/build/compose/binaries/main-release/deb/*.deb
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-desktop-linux
+          path: app/composeApp/src/desktopMain/generated
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  android:
+    name: Android (APK)
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          build-root-directory: app
+
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          rustup target add aarch64-linux-android x86_64-linux-android
+          rustc --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kernel
+
+      - name: Build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libclang-dev cmake
+          libclang=$(find /usr/lib -name 'libclang.so*' -print -quit)
+          [ -n "$libclang" ] || { echo 'libclang not found after installing libclang-dev'; exit 1; }
+          echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
+
+      - name: Android SDK packages
+        run: |
+          set -euo pipefail
+          sdkmanager=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          yes 2>/dev/null | "$sdkmanager" --licenses > /dev/null || true
+          "$sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "build-tools;35.0.0" \
+            "ndk;${GILUNE_NDK_VERSION}"
+
+      - name: Cross-compile the kernel for both ABIs
+        run: bash .github/scripts/build-android.sh
+
+      - name: Debug-signed APK
+        working-directory: app
+        # Always built, always installable: the debug signing key is
+        # generated by AGP, so this needs no secret.
+        run: ./gradlew :composeApp:assembleDebug ${{ needs.version.outputs.gradle_args }}
+
+      - name: Is there a release keystore?
+        id: keystore
+        # A secret cannot be tested in an `if:`, so it becomes a flag here.
+        env:
+          KEYSTORE: ${{ secrets.GILUNE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE" ]; then
+            echo 'present=true' >> "$GITHUB_OUTPUT"
+            echo 'A release keystore is configured; a release-signed APK will be built.'
+          else
+            echo 'present=false' >> "$GITHUB_OUTPUT"
+            echo 'No release keystore is configured; the release-signed APK is skipped.'
+          fi
+
+      - name: Release-signed APK
+        if: steps.keystore.outputs.present == 'true'
+        working-directory: app
+        env:
+          KEYSTORE: ${{ secrets.GILUNE_KEYSTORE_BASE64 }}
+          GILUNE_KEYSTORE_PASSWORD: ${{ secrets.GILUNE_KEYSTORE_PASSWORD }}
+          GILUNE_KEY_ALIAS: ${{ secrets.GILUNE_KEY_ALIAS }}
+          GILUNE_KEY_PASSWORD: ${{ secrets.GILUNE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          keystore="$RUNNER_TEMP/gilune-release.jks"
+          printf '%s' "$KEYSTORE" | base64 -d > "$keystore"
+          GILUNE_KEYSTORE_PATH="$keystore" \
+            ./gradlew :composeApp:assembleRelease ${{ needs.version.outputs.gradle_args }}
+          rm -f "$keystore"
+
+      - name: What was built
+        run: |
+          ls -l app/composeApp/build/outputs/apk/debug
+          ls -l app/composeApp/build/outputs/apk/release || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gilune-android-apk
+          path: |
+            app/composeApp/build/outputs/apk/debug/*.apk
+            app/composeApp/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-android
+          path: app/composeApp/src/androidMain/generated
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------
+  # 07-compatibility has bindings generated per target from that target's
+  # own binary, on the reasoning that UniFFI's checksums are
+  # target-dependent. In practice all three have always come out
+  # byte-identical, which is worth knowing the moment it stops being true.
+  bindings:
+    name: Bindings parity
+    needs: [windows, linux, android]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bindings-*
+          path: bindings
+
+      - name: Compare the three generated surfaces
+        run: |
+          set -euo pipefail
+          find bindings -name '*.kt' | sort
+          reference=bindings/bindings-desktop-linux/uniffi/gilune_ffi/gilune_ffi.kt
+          status=0
+          for other in bindings-desktop-windows bindings-android; do
+            candidate="bindings/$other/uniffi/gilune_ffi/gilune_ffi.kt"
+            if diff -u "$reference" "$candidate"; then
+              echo "$other matches the Linux desktop bindings."
+            else
+              echo "::error title=Bindings diverged::$other no longer matches the Linux desktop bindings. Generating per target stays the rule, so this is not automatically wrong — but the three surfaces have been byte-identical since MB0, and a change means either the FFI surface moved on one target only or something regenerated stale. Read the diff above before shipping."
+              status=1
+            fi
+          done
+          exit $status
+
+  # ---------------------------------------------------------------------
+  release:
+    name: Release
+    needs: [version, windows, linux, android, bindings]
+    if: needs.version.outputs.is_release == 'true' || inputs.dry_run_release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: gilune-*
+          path: dist
+
+      - name: Collect what will be published
+        id: collect
+        run: |
+          set -euo pipefail
+          find dist -type f \( -name '*.msi' -o -name '*.deb' -o -name '*.apk' \) | sort
+          msi=$(find dist -name '*.msi' -print -quit)
+          deb=$(find dist -name '*.deb' -print -quit)
+          apk=$(find dist -path '*/debug/*.apk' -print -quit)
+          missing=''
+          [ -n "$msi" ] || missing="$missing MSI"
+          [ -n "$deb" ] || missing="$missing DEB"
+          [ -n "$apk" ] || missing="$missing debug-signed-APK"
+          if [ -n "$missing" ]; then
+            echo "::error title=Nothing to publish::Missing:$missing"
+            exit 1
+          fi
+          # Debug and release APKs are both called composeApp-*.apk, so the
+          # signing is spelled out in the published names.
+          mkdir -p publish
+          cp "$msi" publish/
+          cp "$deb" publish/
+          cp "$apk" "publish/gilune-debug-signed.apk"
+          release_apk=$(find dist -path '*/release/*.apk' -print -quit)
+          if [ -n "$release_apk" ]; then
+            cp "$release_apk" "publish/gilune-release-signed.apk"
+          else
+            echo 'No release-signed APK was produced: the repository holds no release keystore.'
+          fi
+          ls -l publish
+
+      - name: Dry run — stop before creating a Release
+        if: needs.version.outputs.is_release != 'true'
+        run: |
+          echo 'Dry run: the artefacts above are what a v* tag would publish.'
+          echo 'No Release was created.'
+
+      - name: Create the Release
+        if: needs.version.outputs.is_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Gilune $VERSION" \
+            --generate-notes \
+            publish/*
