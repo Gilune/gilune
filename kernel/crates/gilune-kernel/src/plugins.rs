@@ -139,7 +139,6 @@ impl Store {
         unseen: PluginState,
     ) -> Result<PluginState> {
         let existing = self.plugin_state(&descriptor.plugin_id)?;
-        let state = existing.unwrap_or(unseen);
         let manifest = manifest_json(descriptor);
         match existing {
             Some(_) => {
@@ -160,11 +159,25 @@ impl Store {
                 )?;
             }
             None => {
+                // The read above and this write are two statements, and
+                // multi-instance is supported use: a second process can
+                // register the same plugin in between, and did — a CI run
+                // of the twenty-process torture test died on
+                // `UNIQUE constraint failed: plugins.plugin_id`. Losing
+                // that race is not an error, it is the other branch: the
+                // conflict refreshes the declaration and leaves state,
+                // settings and installed_ms exactly as the winner wrote
+                // them, which is what `Some(_)` above does.
                 self.conn().execute(
                     "INSERT INTO plugins
                      (plugin_id, name, class, profile, required, processor_id,
                       manifest, settings, state, installed_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', ?8, ?9)",
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', ?8, ?9)
+                     ON CONFLICT(plugin_id) DO UPDATE
+                     SET name = excluded.name, class = excluded.class,
+                         profile = excluded.profile, required = excluded.required,
+                         processor_id = excluded.processor_id,
+                         manifest = excluded.manifest",
                     rusqlite::params![
                         descriptor.plugin_id,
                         descriptor.name,
@@ -173,12 +186,18 @@ impl Store {
                         descriptor.required as i64,
                         descriptor.processor_id,
                         manifest,
-                        state.as_str(),
+                        unseen.as_str(),
                         ids::now_ms(),
                     ],
                 )?;
             }
         }
+        // Read back rather than return what this call decided. The two
+        // registration doors start an unseen plugin in different states,
+        // so a caller that lost the race must act on the state the vault
+        // holds — an opt-in provider that arrived second must not have its
+        // subscription applied as though it were enabled.
+        let state = self.plugin_state(&descriptor.plugin_id)?.unwrap_or(unseen);
         self.apply_subscription(descriptor, state)?;
         Ok(state)
     }
@@ -891,5 +910,109 @@ mod tests {
         let store = Store::open(dir.path()).expect("reopen");
         let plugin = store.plugin("org.memory.transcription").expect("get").expect("present");
         assert_eq!(plugin.settings, r#"{"model":"tiny"}"#);
+    }
+
+    /// Registering reads whether the plugin is known and then writes, and
+    /// multi-instance is supported use: two processes opening one vault
+    /// both read no row and both insert. A CI runner found that door —
+    /// the twenty-process torture test died on `UNIQUE constraint failed:
+    /// plugins.plugin_id` while every one of those processes was doing
+    /// nothing more unusual than opening the vault.
+    #[test]
+    fn a_plugin_registered_by_two_processes_at_once_is_registered_once() {
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path();
+            // The schema is another vault's-first-open question; this test
+            // is about the registration, so the vault exists already.
+            drop(Store::open(path).expect("create the vault"));
+
+            std::thread::scope(|scope| {
+                let racers: Vec<_> = (0..8)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            Store::open(path).expect("open").register_plugin(&transcription())
+                        })
+                    })
+                    .collect();
+                for racer in racers {
+                    racer.join().expect("thread").expect(
+                        "registering a plugin another process is registering at the same \
+                         instant is not an error — it is the same plugin",
+                    );
+                }
+            });
+
+            let store = Store::open(path).expect("open");
+            let rows: i64 = store
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM plugins WHERE plugin_id = ?1",
+                    ["org.memory.transcription"],
+                    |row| row.get(0),
+                )
+                .expect("count");
+            assert_eq!(rows, 1, "one plugin, however many processes registered it");
+        }
+    }
+
+    /// One step past that. The two registration doors start an unseen
+    /// plugin in **different** states, so a process that loses the race
+    /// must act on the state the vault ended up holding rather than the
+    /// one it proposed — otherwise an opt-in provider that arrived second
+    /// has its subscription applied as though somebody had turned it on,
+    /// which is the whole point of `register_plugin_disabled`.
+    #[test]
+    fn the_process_that_loses_the_registration_race_takes_the_vaults_state() {
+        for _ in 0..20 {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path();
+            drop(Store::open(path).expect("create the vault"));
+
+            let returned: Vec<PluginState> = std::thread::scope(|scope| {
+                let racers: Vec<_> = (0..8)
+                    .map(|n| {
+                        scope.spawn(move || {
+                            let store = Store::open(path).expect("open");
+                            let descriptor = transcription();
+                            if n % 2 == 0 {
+                                store.register_plugin(&descriptor)
+                            } else {
+                                store.register_plugin_disabled(&descriptor)
+                            }
+                            .expect("register")
+                        })
+                    })
+                    .collect();
+                racers.into_iter().map(|r| r.join().expect("thread")).collect()
+            });
+
+            let store = Store::open(path).expect("open");
+            let held = store
+                .plugin("org.memory.transcription")
+                .expect("get")
+                .expect("present")
+                .state;
+            for state in returned {
+                assert_eq!(
+                    state, held,
+                    "a caller is told the state the vault holds, never the one it proposed"
+                );
+            }
+            let subscribed: i64 = store
+                .conn()
+                .query_row(
+                    "SELECT enabled FROM subscriptions WHERE subscription_id = 'transcribe'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("subscription");
+            assert_eq!(
+                subscribed != 0,
+                held == PluginState::Enabled,
+                "the subscription follows the state the vault holds, so the last writer \
+                 cannot leave an opt-in provider listening"
+            );
+        }
     }
 }
