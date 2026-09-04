@@ -30,19 +30,29 @@ class WidgetTest {
         // The count is drawn from the vault, not left at the layout's
         // placeholder.
         val count = root.findViewById<TextView>(R.id.widget_inbox_count).text.toString()
-        assertEquals(inboxCount(vaultDir(context)).toString(), count)
+        assertEquals(counted(vaultDir(context)).toString(), count)
         assertEquals("Record", root.findViewById<TextView>(R.id.widget_record_label).text.toString())
     }
 
+    /// A vault holding these files, brought into the index the way the
+    /// app brings anything in. The count is a query now (ADR 0020 § 2.4),
+    /// so a test about it needs a vault the kernel has seen. Written
+    /// first and reconciled once, because `reconcile_path` is about a
+    /// projected file and one of these is deliberately a `.wav`.
     private fun vaultWith(vararg relPaths: String): String {
-        val root = Files.createTempDirectory("gilune-widget").toFile()
+        val built = IndexedVault("gilune-widget")
         for (rel in relPaths) {
-            val file = File(root, rel)
-            file.parentFile?.mkdirs()
-            file.writeText("---\ngilune-id: x\n---\nbody\n")
+            File(built.dir, rel).apply {
+                parentFile?.mkdirs()
+                writeText("---\ngilune-id: x\n---\nbody\n")
+            }
         }
-        return root.absolutePath
+        built.catchUp()
+        return built.dir
     }
+
+    /// The count as a widget draw with no handle of its own takes it.
+    private fun counted(vaultDir: String): Int = inboxCountAt(vaultDir)
 
     @Test
     fun theInboxCountIsTheNotesInCaptures() {
@@ -55,20 +65,40 @@ class WidgetTest {
             // Filed notes have left the inbox by definition.
             "Notes/filed.md",
         )
-        assertEquals(2, inboxCount(vault))
+        assertEquals(2, counted(vault))
     }
 
     @Test
     fun anEmptyOrAbsentVaultCountsZeroRatherThanFailing() {
         // The launcher redraws the widget whenever it likes, including
-        // before the app has ever been opened.
-        assertEquals(0, inboxCount(vaultWith()))
-        assertEquals(0, inboxCount(File(vaultWith(), "nowhere").absolutePath))
+        // before the app has ever been opened. A vault that is not there
+        // counts nought and is **not created**: drawing a widget must
+        // never be what makes somebody's vault.
+        assertEquals(0, counted(vaultWith()))
+        val absent = File(vaultWith(), "nowhere")
+        assertEquals(0, counted(absent.absolutePath))
+        assertTrue(!absent.exists(), "and the vault was not created to answer")
     }
 
     @Test
-    fun dotEntriesAreKernelStateAndNeverInboxItems() {
-        assertEquals(0, inboxCount(vaultWith("Captures/.hidden.md")))
+    fun kernelStateIsNeverAnInboxItemAndADotInANameIsNotAHidingPlace() {
+        // `.gilune/` is where kernel state lives, and it is a dot
+        // *directory*: neither the kernel nor this count has ever looked
+        // inside one. Written behind the vault's back, because the kernel
+        // refuses to be asked about a path that is not a projected file.
+        val hidden = IndexedVault("gilune-widget-hidden")
+        File(hidden.dir, ".gilune/local/notes.md").apply {
+            parentFile?.mkdirs()
+            writeText("---\ngilune-id: x\n---\nbody\n")
+        }
+        hidden.catchUp()
+        assertEquals(0, counted(hidden.dir))
+        // A dot at the front of a *file* name is a different matter, and
+        // the answer changed with the count (ADR 0020 § 10, P/S): the
+        // kernel offers `.hidden.md` as an import like any other note, so
+        // it is in the vault and it is in the inbox. The directory
+        // listing this replaced had an opinion of its own about that.
+        assertEquals(1, counted(vaultWith("Captures/.hidden.md")))
     }
 
     @Test

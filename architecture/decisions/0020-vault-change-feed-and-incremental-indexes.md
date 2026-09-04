@@ -617,9 +617,218 @@ replica pulling streams out of order.
     kernel does not claim never reaches the feed and never reaches the
     index until the file is imported or the index is rebuilt; that is a
     K1 property, not an index one, and the property test avoids editing
-    imports because of it. The index reads a changed note a second time,
+    imports because of it. *(Closed by stage P — see below.)* The index
+    reads a changed note a second time,
     after reconciliation has already read it — threading the text
     through would couple the index into the projection's internals. A
     quarantined file's rows are deleted, so its text is unfindable while
     it waits for a person. There is no compaction, so nothing yet needs
     the reader cursors § 3 mentioned.
+
+- **2026-09-05, P1, P2 and S delivered.** The plugins and both shells sit
+  on the feed and the index; the walk is gone from every production path.
+  Gate items 5, 7 (the shell's half), 8 and 9 are evidence.
+
+  **Two kernel prerequisites, because the stage could not be built
+  without them.**
+
+  - **Imports reach the feed** (schema v8). `record_import` was
+    `INSERT OR IGNORE`, so a note written in Obsidian or dropped in by a
+    script — first-class use under constitution rule 13 — was announced
+    once and then went quiet, and every index built on the feed answered
+    for ever about words that had been rewritten. `imports` gains the
+    four columns `projections` already carries, so an import is decided
+    by git's index rule and git's racy safeguard like anything else: an
+    unchanged one is **not read** (the question has to be asked *before*
+    the read, because the front matter is what decides a file is an
+    import at all), a changed one is one `Modified / ExternalEdit`, a
+    vanished one is one `Removed` and its row goes so a file put back is
+    offered again. A fifth column, `object_id`, records the id such a
+    file carries: the `vault-deleted-note-edited` notice was re-derived
+    by reading the file on every pass, and the stat rule stops the
+    reading, so the fact had to be recorded rather than re-read. Tests:
+    an edited import is one `Modified`; a second edit is a second, and a
+    rewrite with the same bytes is none; an unchanged import reads zero
+    files and a changed one is read; a vanished import is announced once
+    and offered again if it returns; `reconcile_path` reaches all three
+    and announces nothing for a path the vault never held. K3's property
+    test now edits imports, which it deliberately avoided.
+
+  - **The feed says what the vault already held** (the same migration).
+    v7 created `vault_changes` empty and the fixture test recorded the
+    reasoning — an upgrade changes no file. True of a change log and
+    wrong of this one: the feed is *also* the enumeration a derived
+    index rebuilds from, and `project` announces a file only when the
+    vault did not have it. So a vault of a thousand notes upgraded into
+    v7 had an empty feed, an empty index, and a search that would have
+    found nothing until each note happened to be edited. The v8 step
+    announces every projection and every import the feed has never named,
+    once, in path order. **This overturns a K1 decision**, and the
+    fixture test now proves the other half: after the upgrade the
+    vault's notes are findable without anybody editing them.
+
+  - **Front matter as facts.** An indexer is handed the note's body,
+    header split off, so no plugin can see a `key: value` pair and
+    `[key:value]` — which the shipped language has always answered —
+    could compile to nothing. `frontmatter` is a **second kernel-owned
+    namespace** beside `text`, reserved on the same terms, one note-level
+    fact per top-level entry, and the kernel interprets none of it:
+    `gilune-id` is stored exactly as `mood` is. Predicates are
+    `frontmatter.<key>` with the key lower-cased. **A deviation from the
+    brief, deliberately**: it asked for the predicate to *be* the key,
+    and `Constraint::Fact` names a predicate and not a namespace — so an
+    unprefixed key would let a note whose header happened to say
+    `org.memory.tasks.due:` contribute to a plugin's vocabulary, which
+    is user data walking into somebody else's words. Lower-casing is
+    what keeps `[Mood]` and `[mood]` one question, as they have always
+    been. A list is one fact per item and a nested mapping is nothing —
+    pinned at the parser, because ADR 0007 quarantines a header that is
+    not `key: value` throughout and a vault cannot hold a YAML list
+    today at all.
+
+  **P1 — the tasks plugin's indexer and its operators.** Namespace
+  `org.memory.tasks` (the plugin id, so ADR 0011's removal rule takes
+  it), version 1, predicates `…​.state` (Text), `…​.due` and `…​.done`
+  (Date). Per non-fenced task line: the checkbox marker as `open`/`done`
+  and whichever of § 1's two date tokens it carries, read by the *same*
+  recognisers the operators use (`taskMarkerOf`, `taskDateIn` — published
+  from `TaskSearch.kt` rather than copied, so a fact and a query cannot
+  disagree about what a task line is or which of two `due:` tokens
+  counts). **The global filter is not applied when facts are derived**:
+  it is a setting, and facts derived under it would have to be thrown
+  away and re-derived whenever it changed — a pass over the whole vault
+  for a text field. It narrows at query time instead, as a text
+  constraint on the line, and `taskLines` decides exactly.
+
+  **P2 — the compilation table.** `SearchOperator.compile(argument,
+  negated)` and `SearchType.constraints` are the registration route
+  § 2.4 named:
+
+  | term | constraint |
+  |---|---|
+  | bare word, `"phrase"` | `Text(Any, …)` |
+  | `content:` | `Text(Body, …)` |
+  | `file:` | `Text(Name, …)` |
+  | `path:` | `Text(Path, …)` |
+  | `[key]` / `-[key]` | `Fact(frontmatter.key, Exists/NotExists)` |
+  | `[key:value]` | `Fact(frontmatter.key, Contains, value)` |
+  | `type:task` | `Fact(…state, Exists)`, plus `Text(Body, filter)` when the global filter is set |
+  | `due:none` / `-due:none` | `Fact(…due, NotExists/Exists)` |
+  | `due:today` | `Fact(…due, Eq, <iso>)` |
+  | `due:overdue` | `Fact(…due, Lt, <iso>)` |
+  | `due:week` | `Fact(…due, Ge, <iso>)` **and** `Fact(…due, Le, <iso+6>)` |
+  | `due:before:` / `due:after:` | `Fact(…due, Lt/Gt, <resolved>)` |
+  | `due:<iso>` | `Fact(…due, Eq, <iso>)` |
+  | `is:open` / `is:done` | `Fact(…state, Eq, open/done)` |
+  | `-is:open` / `-is:done` | `Fact(…state, Ne, …)` |
+  | a date value that is not a date | nothing at all — the query is answered with silence |
+  | everything else negated; any operator that has not been taught | nothing; the note decides |
+
+  - **The compilation is a pre-filter and the term is still the
+    decision.** Every answered note is read and judged by the same
+    predicates the walk used, so a constraint may name **more** anchors
+    than a term would keep and must never name fewer. That is what makes
+    the seam safe to extend: `compile` defaults to saying nothing, so an
+    operator written before this existed (the `tag:` fixture, and every
+    `"operator": true` field ADR 0015 § 3 promises) goes on working and
+    costs the reads it always cost. It is also why **`-term` needs no
+    negated text constraint**: a negation that cannot be stated exactly
+    simply narrows nothing.
+  - **Every anchor is asked for at `Note` scope**, even for a line-level
+    type: the hit needs the note's text anyway, and re-deriving the
+    type's candidate lines from it is the same question the index would
+    otherwise be asked twice.
+  - **A query with nothing positive in it answers with the vault, not
+    with silence.** `Ne` and `NotExists` name no anchors, so `-milk` and
+    a bare `type:note` would find nothing. Rather than special-casing
+    "no constraints" into a walk, the enumeration *is* a constraint —
+    `Text(Path, "")` — so such a query costs what it always cost and
+    means what it always meant.
+  - The **oracle**: `searchVault` moved verbatim into test sources, and
+    `SearchEquivalenceTest` runs 63 query strings — every operator, every
+    value form, negations, phrases, ties — over a 44-note corpus of
+    captures and hand-written notes through both engines and compares
+    hit for hit. It passed first run and fails when a compilation is
+    made wrong (falsified by weakening `type:task` to `state = open`).
+
+  **Observed semantic deltas, both asserted rather than described.** A
+  term of **one or two characters** is answered by a `LIKE` over the
+  indexed lines rather than by the trigram index (K3), and `LIKE` folds
+  case only for ASCII — so `ÉC` finds nothing where the walk found
+  `éclairs`; three characters and up are identical. A **quarantined
+  file** is not in the index, so its words are unfindable until a person
+  decides what it is, where the walk read every `.md` on disk. Nothing
+  else differed across the table.
+
+  **S — the tick becomes a cursor.** `GiluneState.vaultTick` is gone.
+  `vaultCursor` holds a `Cursor`; `advanceCursor` drains `changes_since`
+  to the end and answers whether it moved. Every vault-file consumer —
+  both search panels, both agendas, the filter blocks, the tree, the
+  notes list, the editor's stale-buffer watch, the widget refresh — keys
+  on it. Two consumers deliberately do **not**: the desktop settings
+  status line and the phone's per-plugin screen, which are about kernel
+  counts and plugin state rather than files, and now key on a
+  `refreshCount` that says "this state re-read the kernel". A consumer
+  may look at what changed; none does, and correctness does not depend
+  on it.
+
+  - `noteSaved(relPath)` is `reconcile_path` → `advance_index` → advance
+    the cursor, in that order, so a panel woken by the cursor reads an
+    index that already knows about the note that woke it (gate 7's shell
+    half). `flushEditor` — a tab losing the front, a tab closing, the
+    window closing — takes the same route through a hook on `TabsState`;
+    it wrote in silence before.
+  - **Registration gating**: `registerShellIndexers` runs on every handle
+    a shell opens (both shells' open path, and the phone's recording
+    service), and registers **whatever the plugin's switch says**.
+    Disabling turns the *words* off — the type and its operators leave
+    the language — which is the whole of what somebody asked for;
+    re-deriving a namespace on every toggle would be a pass over the
+    feed for a switch. Removal is different and is handled by the guard
+    being the plugin's **presence**: `plugins()` excludes tombstones, so
+    a removed plugin is not in the list and nothing puts back what was
+    taken away.
+  - The **widget's inbox count** is `query([Text(Path, "Captures/")],
+    Note)` rather than a directory listing. It takes the caller's handle
+    where there is one and opens a brief one where there is not, which
+    overturns the comment that said it must never open a vault to draw a
+    number: one question with two answers was the worse problem.
+    Deliberate consequence, stated: a note at `Work/Captures/x.md` counts
+    now and did not before, because `Text` has no prefix form.
+
+  **The measurement (§ 8.8), and the defect it found.** A first run of
+  the 1,000-note bench read *three ordinary words* — `note number 500` —
+  in **57 seconds**, against 204 ms for reading every file. The cause
+  was in K3's query builder and is worth stating: SQLite **inlines** a
+  common table expression into each clause that reads it, so a full-text
+  constraint was re-running its FTS query per row of whatever it was
+  inlined beside, and the conjunction was written as one correlated
+  `EXISTS` per constraint per candidate anchor. Both are fixed:
+  `MATERIALIZED` on every constraint and every intermediate, and the
+  conjunction counted once — positive rows unioned with a tag apiece, an
+  anchor a hit when it collects every tag, note-level facts broadcast
+  onto their note's candidate lines by the one join that needs it, and
+  negatives applied as two membership tests instead of an `OR` inside a
+  correlated subquery.
+
+  Measured after the fix, on this machine, release kernel, 1,000 notes ×
+  20 lines with a task line in about one note in ten:
+
+  | | scan | query |
+  |---|---|---|
+  | agenda refresh | 255 ms | **21 ms** |
+  | search, a word in every note | 233 ms | 177 ms |
+  | search, a phrase in one note | 210 ms | **70 ms** |
+  | reconcile, settled | — | 90 ms |
+  | build and index the vault | — | 2.9 s |
+
+  A search whose answer *is* the whole vault still reads the whole vault,
+  and should: the index takes the walk out, not the reading of what was
+  found. What changed is the curve — the cost is now proportional to the
+  hits.
+
+  **Left undone, stated.** The desktop's quick-open (`Ctrl+P`) still
+  walks the directory tree for file **names**: it reads no file
+  contents, the tree walks anyway to draw itself, and there is no
+  cheaper enumeration than the one the tree already has. Nothing else in
+  production walks the vault.

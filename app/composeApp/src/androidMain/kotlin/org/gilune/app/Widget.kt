@@ -97,7 +97,7 @@ fun widgetViews(context: Context, gilune: Gilune? = null): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.gilune_widget)
 
     val count = runCatching {
-        gilune?.let(::inboxCount) ?: countFromVault(vaultDir(context))
+        gilune?.let(::inboxCount) ?: inboxCountAt(vaultDir(context))
     }.getOrDefault(0)
     views.setTextViewText(R.id.widget_inbox_count, count.toString())
     views.setTextViewText(R.id.widget_inbox_label, if (count == 1) "capture in inbox" else "captures in inbox")
@@ -120,8 +120,9 @@ fun widgetViews(context: Context, gilune: Gilune? = null): RemoteViews {
 
 /// The count with a handle of its own, for a draw that arrived with none.
 /// Opening a vault costs a couple of database handles and no scan; a
-/// vault that is not there yet counts nought rather than being created.
-private fun countFromVault(vaultDir: String): Int {
+/// vault that is not there yet counts nought rather than being created —
+/// drawing a widget must never be what makes somebody's vault.
+internal fun inboxCountAt(vaultDir: String): Int {
     if (!File(vaultDir).isDirectory) return 0
     return Gilune.open(vaultDir).use(::inboxCount)
 }

@@ -137,9 +137,10 @@ class MobileAgendaTest {
     /// show: a ticked one and one past the horizon. Dates are relative to
     /// the day the test runs, so nothing here rots.
     private fun agendaVault(): GiluneState {
-        val vault = Files.createTempDirectory("gilune-mobile-agenda").toFile()
+        val vault = IndexedVault("gilune-mobile-agenda")
         val now = LocalDate.now()
-        vault.resolve("agenda.md").writeText(
+        vault.write(
+            "agenda.md",
             """
             ---
             gilune-id: agenda
@@ -154,7 +155,10 @@ class MobileAgendaTest {
             - [ ] far away due:${now.plusDays(30)}
             """.trimIndent(),
         )
-        return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        // The agenda is a query now (ADR 0020 § 2.4).
+        state.gilune.value = vault.gilune
+        return state
     }
 
     private fun showAgenda(
@@ -206,9 +210,11 @@ class MobileAgendaTest {
 
     /// A vault with no task line anywhere in it.
     private fun proseOnlyVault(): GiluneState {
-        val vault = Files.createTempDirectory("gilune-empty-agenda").toFile()
-        vault.resolve("prose.md").writeText("# Nothing\n\njust words\n")
-        return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val vault = IndexedVault("gilune-empty-agenda")
+        vault.write("prose.md", "# Nothing\n\njust words\n")
+        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        state.gilune.value = vault.gilune
+        return state
     }
 
     @Test
@@ -309,12 +315,14 @@ class MobileAgendaTest {
     /// here for one to fix.
     @Test
     fun anAgendaWhoseTasksAreAllDoneOrFarOffSaysSoInstead() {
-        val vault = Files.createTempDirectory("gilune-none-open").toFile()
+        val vault = IndexedVault("gilune-none-open")
         val now = LocalDate.now()
-        vault.resolve("done.md").writeText(
+        vault.write(
+            "done.md",
             "# Things\n\n- [x] already done due:$now\n- [ ] far away due:${now.plusDays(30)}\n",
         )
-        val state = GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        state.gilune.value = vault.gilune
         state.plugins.add(installedTasksPlugin())
         showAgenda(state)
         compose.waitForIdle()

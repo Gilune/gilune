@@ -617,6 +617,40 @@ Post-delivery amendments (owner, 2026-08-31, after all four stages shipped):
   checkbox marker itself off the line's bytes — the one fact about a task that
   is not a date, and what "not done" actually means. `done:none` remains the
   date-token question.
+- **2026-09-05, ADR 0020 stage P: the seams become the registration
+  route, and the scan is gone.** § 4 said "Scanning either way is
+  `searchVault`'s: whole vault, each file read once, no index", and
+  Consequences said an index plugin "is where the answer goes when they
+  stop doing". They stopped doing, and the answer went to the kernel
+  rather than to a plugin: the system index of ADR 0020 § 2.3.
+  - `SearchOperator` gains `compile(argument, negated)` and `SearchType`
+    gains `constraints`. That is the whole of "a plugin registers an
+    operator together with how it compiles to a constraint" (0020 § 2.4).
+    **The default says nothing**, so a registration written for this ADR
+    — the `tag:` fixture, and the `"operator": true` fields § 3 promises
+    a People plugin — goes on working unchanged and costs the reads it
+    always cost. Compilation narrows; the operator's own `matches` still
+    decides, over the note it always read.
+  - The tasks plugin registers a `NoteIndexer` under `org.memory.tasks`:
+    one fact per task line for the checkbox and each of § 1's two dates,
+    read by the same recognisers the operators use. **The global filter
+    is not applied when the facts are derived** — it is a setting, and
+    facts derived under it would be thrown away whenever it changed —
+    so it narrows at query time and `taskLines` decides exactly.
+  - The **agenda and every `filter` block are queries**. § 4's caps, the
+    four views, the horizon, the one order and the tick-not-keystroke
+    rule are all unchanged; what they were protecting is now much
+    cheaper (measured: an agenda refresh over a thousand notes, 255 ms
+    to 21 ms).
+  - **Removal is unchanged in what it means and stronger in what it
+    does**: `remove_plugin` drops the namespace, so the facts go with the
+    words, and the shell registers the indexer only while the plugin is
+    listed at all.
+  - Debt 7's last sentence stands, and debt 6 is untouched. The `filter`
+    fence is still the shell's own registration, so a block keeps
+    rendering — as the hint row naming the type that has gone — with the
+    plugin removed.
+
 - T4's Edit-mode rendering first shipped as the raw fence. **The owner
   declined that fallback (2026-09-01)**: a block "behaves like a checkbox —
   renders until the caret is placed within it". § 5's caret rule is

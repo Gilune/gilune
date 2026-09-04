@@ -33,13 +33,17 @@ class MobileFilterBlockTest {
     /// A vault with a note carrying a `filter` block, and a second note
     /// holding the task it should find.
     private fun blockVault(block: String): GiluneState {
-        val vault = Files.createTempDirectory("gilune-filter").toFile()
+        val vault = IndexedVault("gilune-filter")
         val now = LocalDate.now()
-        vault.resolve("board.md").writeText("# Board\n\n$fence" + "filter\n$block\n$fence\n")
-        vault.resolve("jobs.md").writeText(
+        vault.write("board.md", "# Board\n\n$fence" + "filter\n$block\n$fence\n")
+        vault.write(
+            "jobs.md",
             "---\ngilune-id: jobs\n---\n# Jobs\n\n- [ ] mend the gate due:$now\n",
         )
-        return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        // A block is a query now (ADR 0020 § 2.4).
+        state.gilune.value = vault.gilune
+        return state
     }
 
     private fun showRead(state: GiluneState, onOpen: (String) -> Unit = {}) {

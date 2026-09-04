@@ -88,11 +88,20 @@ class MobileSearchTest {
     // In front of a screen: the tab over a real vault
     // ------------------------------------------------------------------
 
+    /// The vault behind the last screen this test showed, so a test can
+    /// add a note to it and have the index hear about it.
+    private var built: IndexedVault? = null
+
     private fun searchVaultState(): GiluneState {
-        val vault = Files.createTempDirectory("gilune-search").toFile()
-        vault.resolve("kitchen.md").writeText("# Kitchen\n\nthe tap drips into the sink\n")
-        vault.resolve("garden.md").writeText("# Garden\n\nthe hedge needs cutting\n")
-        return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val vault = IndexedVault("gilune-search")
+        built = vault
+        vault.write("kitchen.md", "# Kitchen\n\nthe tap drips into the sink\n")
+        vault.write("garden.md", "# Garden\n\nthe hedge needs cutting\n")
+        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        // Search is a query now (ADR 0020 § 2.4), so the screen needs the
+        // handle that answers it.
+        state.gilune.value = vault.gilune
+        return state
     }
 
     private fun showSearch(state: GiluneState, onOpen: (String) -> Unit = {}) {
@@ -140,8 +149,7 @@ class MobileSearchTest {
     @Test
     fun taskLinesAreTheHitsUnderTypeTask() {
         val state = searchVaultState()
-        java.io.File(state.vaultDir, "list.md")
-            .writeText("# List\n\n- [ ] mend the fence\n\nprose about fences\n")
+        built!!.write("list.md", "# List\n\n- [ ] mend the fence\n\nprose about fences\n")
         state.plugins.add(installedTasksPlugin())
         showSearch(state)
         compose.waitForIdle()
