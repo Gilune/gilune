@@ -1,7 +1,7 @@
 // The Search destination (ADR 0017 § 1, MB3): the third shell tab, over
 // the shared DSL and nothing else.
 //
-// There is no mobile query language. `searchVault` is the same engine the
+// There is no mobile query language. `queryVault` is the same engine the
 // desktop rail runs, `searchTypesFor` builds the same registry from the
 // same live plugin list, and what a hit *is* therefore changes with the
 // plugins here exactly as it does there (ADR 0015 § 4): switch the tasks

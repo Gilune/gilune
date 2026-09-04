@@ -10,7 +10,8 @@
 // the same block from this same code (§ 7).
 //
 // Nothing here parses a second language. The block's text becomes one
-// query in the DSL `Search.kt` already takes, and `searchVault` answers it.
+// query in the DSL `Search.kt` already takes, and `queryVault` answers it
+// from the system index (ADR 0020 § 2.4).
 
 package org.gilune.app
 
@@ -104,7 +105,7 @@ fun filterQuery(block: String): String =
 /// Reads the block, and only reads it: which of the four it is.
 ///
 /// `note` resolves whether or not the caller listed it, exactly as
-/// `searchVault` resolves it, so classification can never call a block
+/// the engine resolves it, so classification can never call a block
 /// unknown that the engine would happily run.
 fun classifyFilterBlock(block: String, types: List<SearchType>): FilterBlock {
     val query = filterQuery(block)

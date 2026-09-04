@@ -86,7 +86,7 @@ data class TaskHit(
 /// A `type:task` result set as rows. **T4 calls this**, having run
 ///
 /// ```
-/// searchVault(dir, query, types = searchTypesFor(plugins), today = …, maxLines = <its cap>)
+/// queryVault(gilune, dir, query, types = searchTypesFor(plugins), today = …, maxLines = <its cap>)
 /// ```
 ///
 /// — `maxLines` because the engine's default quotes five lines of a note

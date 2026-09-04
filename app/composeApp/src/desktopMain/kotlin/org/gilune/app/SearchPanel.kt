@@ -1,13 +1,15 @@
 // The rail's search panel: a query over the vault's contents, answered
 // as the lines that matched, grouped under the note they came from.
-// Reading the files is the whole of it — no index to go stale, and other
-// tools' edits are found the moment they land (constitution rule 13).
 //
-// The query language lives in `searchVault`; this panel only shows it,
-// and hints at its forms while the box is empty. What a hit *is* comes
-// from the live plugin list (ADR 0015 § 4): switch the tasks plugin off
-// and `type:task` stops being a type and `due:` goes back to being a
-// word, here and in the hint both.
+// The language lives in `Search.kt` and `queryVault` answers it from the
+// system index (ADR 0020); this panel only shows the result, and hints at
+// the language's forms while the box is empty. An edit made by another
+// tool is still found the moment it lands (constitution rule 13) —
+// reconciliation looks, and the feed carries what it found.
+//
+// What a hit *is* comes from the live plugin list (ADR 0015 § 4): switch
+// the tasks plugin off and `type:task` stops being a type and `due:` goes
+// back to being a word, here and in the hint both.
 
 package org.gilune.app
 
