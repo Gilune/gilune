@@ -23,7 +23,12 @@ fn run() -> Result<(), String> {
     let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|\
                  external [--at <ms>]|apply --file <path>|project|reconcile|\
                  reconcile-path <rel>|changes [--since <epoch:seq>] [--limit <n>]|status|\
-                 verify|backfill|alerts|plugins [enable|disable|remove <id>]>";
+                 verify|backfill|alerts|plugins [enable|disable|remove <id>]|\
+                 index [status|rebuild [<namespace>]]|facts <rel>|\
+                 query <constraint>... [--scope line|note] [--limit <n>]>\n\
+                 a constraint is text:<words>, body:/name:/path:<words>, or one of \
+                 <predicate>=<value>, !=, ~ (contains), ^ (prefix), <, <=, >, >=, \
+                 <predicate>? (exists), <predicate>! (does not exist)";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
     };
@@ -330,6 +335,104 @@ fn run() -> Result<(), String> {
             println!("{}", serde_json::json!({ "plugins": listed }));
             Ok(())
         }
+        Some("index") => {
+            // The system index, for a person (ADR 0020 § 8.9). This tool
+            // registers no indexer, so `rebuild <namespace>` empties that
+            // namespace and puts its cursor back to the beginning — the
+            // process that carries the implementation derives it again on
+            // its next pass. `rebuild` with no namespace does the same for
+            // every one of them and rebuilds the kernel's own text index
+            // here and now.
+            match (args.next(), args.next()) {
+                (None, _) | (Some("status"), None) => {}
+                (Some("rebuild"), namespace) => {
+                    store
+                        .rebuild_index(namespace)
+                        .map_err(|e| e.to_string())?;
+                }
+                _ => return Err(usage.to_string()),
+            }
+            let status = store.index_status().map_err(|e| e.to_string())?;
+            let namespaces: Vec<_> = status
+                .namespaces
+                .iter()
+                .map(|n| {
+                    serde_json::json!({
+                        "namespace": n.namespace,
+                        "version": n.version,
+                        "cursor_seq": n.cursor_seq,
+                        "facts": n.facts,
+                        // Whether this process carries an implementation
+                        // of it. One that does not leaves it alone.
+                        "registered": n.registered,
+                        "last_error": n.last_error,
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::json!({
+                    "schema_version": status.schema_version,
+                    "epoch": status.epoch,
+                    "db_bytes": status.db_bytes,
+                    "notes": status.notes,
+                    "lines": status.lines,
+                    "namespaces": namespaces,
+                })
+            );
+            Ok(())
+        }
+        Some("facts") => {
+            let Some(rel) = args.next() else { return Err(usage.to_string()) };
+            let listed: Vec<_> = store
+                .facts_of(rel)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "namespace": f.namespace,
+                        "line": f.line,
+                        "predicate": f.predicate,
+                        "value": f.value,
+                    })
+                })
+                .collect();
+            println!("{}", serde_json::json!({ "rel_path": rel, "facts": listed }));
+            Ok(())
+        }
+        Some("query") => {
+            let mut constraints = Vec::new();
+            let mut scope = gilune_kernel::index::QueryScope::Line;
+            let mut limit = 50u32;
+            while let Some(token) = args.next() {
+                match token {
+                    "--scope" => {
+                        scope = match args.next() {
+                            Some("line") => gilune_kernel::index::QueryScope::Line,
+                            Some("note") => gilune_kernel::index::QueryScope::Note,
+                            _ => return Err(usage.to_string()),
+                        }
+                    }
+                    "--limit" => {
+                        let Some(value) = args.next() else { return Err(usage.to_string()) };
+                        limit = value.parse().map_err(|_| usage.to_string())?;
+                    }
+                    _ => constraints.push(parse_constraint(token)?),
+                }
+            }
+            if constraints.is_empty() {
+                return Err(usage.to_string());
+            }
+            let anchors = store
+                .query(&constraints, scope, limit)
+                .map_err(|e| e.to_string())?;
+            let listed: Vec<_> = anchors
+                .iter()
+                .map(|a| serde_json::json!({ "rel_path": a.rel_path, "line": a.line }))
+                .collect();
+            println!("{}", serde_json::json!({ "anchors": listed }));
+            Ok(())
+        }
         Some("verify") => {
             let problems = store.verify().map_err(|e| e.to_string())?;
             for problem in &problems {
@@ -344,4 +447,58 @@ fn run() -> Result<(), String> {
         }
         _ => Err(usage.to_string()),
     }
+}
+
+/// One query term as a person types it. Deliberately terse rather than a
+/// second query language: the DSL a person actually uses lives in the
+/// shells (ADR 0015), and this is a way to look at what the kernel holds.
+fn parse_constraint(token: &str) -> Result<gilune_kernel::index::Constraint, String> {
+    use gilune_kernel::index::{Constraint, ConstraintOp, TextField};
+    for (prefix, field) in [
+        ("text:", TextField::Any),
+        ("body:", TextField::Body),
+        ("name:", TextField::Name),
+        ("path:", TextField::Path),
+    ] {
+        if let Some(query) = token.strip_prefix(prefix) {
+            return Ok(Constraint::Text {
+                field,
+                query: query.to_string(),
+            });
+        }
+    }
+    // Longest operator first, or `a!=b` parses as `a!` with rubbish after
+    // it and `a>=b` as `a > =b`.
+    for (symbol, op) in [
+        ("!=", ConstraintOp::Ne),
+        (">=", ConstraintOp::Ge),
+        ("<=", ConstraintOp::Le),
+        ("=", ConstraintOp::Eq),
+        ("~", ConstraintOp::Contains),
+        ("^", ConstraintOp::Prefix),
+        (">", ConstraintOp::Gt),
+        ("<", ConstraintOp::Lt),
+    ] {
+        if let Some((predicate, value)) = token.split_once(symbol) {
+            if !predicate.is_empty() {
+                return Ok(Constraint::Fact {
+                    predicate: predicate.to_string(),
+                    op,
+                    value: value.to_string(),
+                });
+            }
+        }
+    }
+    for (suffix, op) in [("?", ConstraintOp::Exists), ("!", ConstraintOp::NotExists)] {
+        if let Some(predicate) = token.strip_suffix(suffix) {
+            if !predicate.is_empty() {
+                return Ok(Constraint::Fact {
+                    predicate: predicate.to_string(),
+                    op,
+                    value: String::new(),
+                });
+            }
+        }
+    }
+    Err(format!("{token} is not a constraint"))
 }
