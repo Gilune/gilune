@@ -62,6 +62,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -170,6 +171,12 @@ class EditorState {
     /// name arrives selected and ready to be typed over. The title field
     /// lowers it once it has the focus.
     var focusTitle by mutableStateOf(false)
+
+    /// Raised by the title field when Return is pressed in it (owner,
+    /// 2026-09-04: "I expect return to take me into the body"), so the
+    /// caret lands at the start of the body. The body field lowers it once
+    /// it has the focus.
+    var focusBody by mutableStateOf(false)
 
     /// Raised by the shell (menus, probes) to open the properties dialog
     /// for the current note; the pane lowers it once shown.
@@ -572,6 +579,25 @@ private fun OpenNote(
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
             var bodyFocused by remember { mutableStateOf(false) }
+            val bodyFocus = remember { FocusRequester() }
+            // Return in the title hands the caret to the body, at its
+            // start: the first line is where a name leads. Moving the
+            // caret is not an edit, so `dirty` is left alone.
+            LaunchedEffect(editor.focusBody) {
+                if (!editor.focusBody) return@LaunchedEffect
+                editor.text = editor.text.copy(selection = TextRange(0))
+                // The field may have been composed by the very key that
+                // raised the flag (a note being read switches to editing
+                // first), and a requester answers only once its node is
+                // attached — the same lesson as the rail's Ctrl+F. So ask,
+                // and if the field is not there yet, wait a frame and ask
+                // again, a few times at most.
+                var attempts = 0
+                while (runCatching { bodyFocus.requestFocus() }.isFailure && attempts++ < 5) {
+                    withFrameNanos { }
+                }
+                editor.focusBody = false
+            }
             val line =
                 if (bodyFocused) caretLine(editor.text.text, editor.text.selection.start) else null
 
@@ -736,6 +762,7 @@ private fun OpenNote(
                             // layout gives a rectangle in the field's own
                             // space, and this is what puts it on screen.
                             .onGloballyPositioned { fieldOrigin = it.localToWindow(Offset.Zero) }
+                            .focusRequester(bodyFocus)
                             // A field the caret has left cannot have a menu
                             // over its caret.
                             .onFocusChanged {
@@ -1024,14 +1051,23 @@ private fun NoteTitle(
             .fillMaxWidth()
             .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)
             .focusRequester(focus)
+            .testTag("note-title")
             // Losing the focus is a commit: a name left in the field is a
             // name the user meant.
             .onFocusChanged { if (!it.isFocused) commit() }
             .onPreviewKeyEvent { event ->
                 when {
                     event.type != KeyEventType.KeyDown -> false
+                    // Return commits the name and moves into the body
+                    // (owner, 2026-09-04) — whether or not the name
+                    // changed, or the key does nothing visible at all. A
+                    // note being read has no caret to move into, so it
+                    // is switched to editing first: entering the body is
+                    // editing.
                     event.key == Key.Enter -> {
                         commit()
+                        editor.reading = false
+                        editor.focusBody = true
                         true
                     }
                     event.key == Key.Escape -> {

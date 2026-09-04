@@ -1279,6 +1279,19 @@ gates promises) are ratified. **Next: application-level engineering — see
      shipped as v1.0.1. Installed location: C:\Program Files\Gilune\
      Gilune.exe. DPAPI KeyWrap is Windows-only by design; the DEB's
      identity file is unwrapped-with-reason.
+   - **Owner testing 1.0.1 on Windows (2026-09-04) — fixes HELD LOCALLY
+     by owner decision until a batch is worth a run**: (1) Return in the
+     note title did nothing visible — `NoteTitle`'s Enter branch committed
+     the rename (early-return when unchanged) and swallowed the key. Now
+     Enter commits, leaves reading mode if needed, and raises
+     `EditorState.focusBody`; the body field's LaunchedEffect puts the
+     caret at offset 0 and requests focus, retrying across frames because
+     the field may have been composed by that same key (the rail's Ctrl+F
+     lesson again — `FocusRequester.requestFocus()` THROWS on an
+     unattached requester and returns Unit in Compose 1.7.3, so retry on
+     `isFailure`). Title field gained testTag "note-title". Four
+     NoteEditorUiTest rows (unchanged name, renamed name + file follows,
+     reading mode switches to editing, Escape stays put); desktop 536/0.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
