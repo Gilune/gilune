@@ -55,15 +55,24 @@ The **Windows desktop app** is what exists and works today: writing, voice captu
 with local transcription, tasks, search, tabs and split panes. An **Android app** is
 in development and not ready to use. **Syncing between devices** is being designed
 and is not built yet — until it is, your vault is simply a folder, so back it up and
-copy it like any other. There are **no packaged downloads yet**, so getting Gilune
-today means building it from this repository.
+copy it like any other.
+
+Packaged builds are published on the
+[Releases page](https://github.com/Gilune/gilune/releases): an installer for
+Windows (`.msi`), a package for Debian-family Linux (`.deb`), and an Android APK
+to sideload. Windows is the platform Gilune is developed and used on; the Linux
+and Android packages are built by the same pipeline but are not yet anybody's
+daily driver. Building from this repository works too, and is described below.
 
 ## Building from source
 
 You will need **JDK 17+**, a **Rust toolchain** (1.98+), and — because the
-transcription engine compiles from C++ — **LLVM and CMake**
-(`scoop install llvm cmake`, with `LIBCLANG_PATH` pointing at the LLVM `bin`
-folder).
+transcription engine compiles from C++ — **LLVM and CMake**. On Windows that is
+`scoop install llvm cmake`, with `LIBCLANG_PATH` pointing at the LLVM `bin`
+folder; on Debian-family Linux it is
+`sudo apt-get install libclang-dev cmake`.
+
+On **Windows**:
 
 ```
 cd kernel
@@ -79,11 +88,32 @@ cd ../app
 gradlew :composeApp:createReleaseDistributable
 ```
 
+On **Linux** — the same three steps, with the shared library's own name and its
+own resource folder:
+
+```
+cd kernel
+cargo build --release -p gilune-ffi --features whisper
+
+cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+  --library target/release/libgilune_ffi.so --language kotlin \
+  --out-dir ../app/composeApp/src/desktopMain/generated
+
+mkdir -p ../app/composeApp/resources/linux-x64
+cp target/release/libgilune_ffi.so ../app/composeApp/resources/linux-x64/
+
+cd ../app
+./gradlew :composeApp:createReleaseDistributable
+```
+
 The app lands at
-`app/composeApp/build/compose/binaries/main-release/app/Gilune/Gilune.exe`. On first
-run, choose a vault folder in Settings — an empty one is fine. Voice notes need a
-~75 MiB speech model, which is downloaded only after you allow the transcription
-plugin network access under Settings ▸ Plugins.
+`app/composeApp/build/compose/binaries/main-release/app/Gilune/Gilune.exe`
+(`.../app/Gilune/bin/Gilune` on Linux). Swap the last task for
+`packageReleaseMsi` or `packageReleaseDeb` to build an installer instead of a
+folder you run in place. On first run, choose a vault folder in Settings — an
+empty one is fine. Voice notes need a 57 MiB speech model, which is downloaded
+only after you allow the transcription plugin network access under Settings ▸
+Plugins.
 
 ## For developers
 

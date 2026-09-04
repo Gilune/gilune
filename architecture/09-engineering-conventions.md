@@ -99,3 +99,67 @@ Applied as boundary discipline, not object-orientation ritual:
 - Coverage of invariants beats coverage of lines. No test theatre:
   asserting that a mock was called proves nothing a contract cares
   about.
+
+## Continuous builds and releases
+
+`.github/workflows/build.yml` is the only pipeline. Every push to `main`
+builds the three packages the project ships and runs every test that does
+not need a device; a `v*` tag additionally publishes a GitHub Release with
+those packages attached. `workflow_dispatch` exists so the pipeline can be
+driven by hand.
+
+- **Windows** (`windows-latest`) → **MSI**. Kernel built
+  `--release --features whisper`, `cargo test --workspace`, then the
+  desktop suite against that same release binary
+  (`-Pgilune.kernel.profile=release`) so the tests load what the
+  installer will carry, then `packageReleaseMsi`. The Compose plugin
+  fetches its own WiX 3, so nothing is assumed of the image.
+- **Linux** (`ubuntu-latest`) → **DEB**. The same, plus
+  `cargo clippy --workspace --all-targets -- -D warnings` — once, on one
+  platform, because it is the same source either side. The Compose UI
+  tests run under `xvfb-run` with `SKIKO_RENDER_API=SOFTWARE`: a display
+  and no GPU.
+- **Android** (`ubuntu-latest`) → **APK**. `gilune-ffi` cross-compiled
+  with whisper for `arm64-v8a` and `x86_64` by
+  `.github/scripts/build-android.sh`, which is the Linux counterpart of
+  `kernel/scripts/build-android.ps1` and does not replace it. The NDK is
+  pinned by version, not taken as whichever the image ships: an NDK is a
+  compiler.
+- **Bindings parity**. Generating bindings per target from that target's
+  own binary stays the rule (07-compatibility). The three generated
+  surfaces are then diffed, because they have been byte-identical since
+  MB0 and the moment that stops being true is worth knowing.
+
+`contents: write` is granted to the release job and to nothing else.
+
+### The version rule
+
+jpackage on Windows accepts only `MAJOR.MINOR.BUILD` with MAJOR greater
+than 0, so a `v0.x` tag cannot drive an MSI. A release tag therefore reads
+`v<MAJOR>.<MINOR>.<PATCH>` with MAJOR at least 1 and no suffix — `v1.0.0`,
+never `v0.9.0` and never `v1.0.0-rc1`. Anything else fails the run with
+that sentence rather than producing a mis-versioned installer.
+
+The tag drives `-Pgilune.version` (the desktop `packageVersion` and the
+Android `versionName`) and the run number drives `-Pgilune.versionCode`.
+Both are additive: a local build passes neither and keeps the values
+written in `build.gradle.kts`.
+
+### Signing
+
+The debug-signed APK is always produced and always installable. A
+release-signed APK is produced as well when the repository holds
+`GILUNE_KEYSTORE_BASE64`, `GILUNE_KEYSTORE_PASSWORD`, `GILUNE_KEY_ALIAS`
+and `GILUNE_KEY_PASSWORD`; without them there is no release signing
+configuration at all and the step is skipped rather than failed, because
+an unsigned APK looks installable and is not. The MSI and the DEB are
+unsigned.
+
+### What this does not cover
+
+- **No instrumented tests.** There is no emulator in CI; the Android
+  suite stays a local run against a real AVD, and the machine notes for
+  it live in `CLAUDE.md`.
+- **No macOS**, and no Linux format but the DEB.
+- **Building is not running.** A green pipeline says the three packages
+  build and the suites pass, not that a package installs and starts.
