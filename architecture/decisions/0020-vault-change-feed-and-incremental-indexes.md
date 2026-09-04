@@ -1,8 +1,8 @@
 # ADR 0020: A Vault Change Feed, and a System Index Plugins Feed Without Knowing Each Other
 
 Status: **Proposed** (drafted 2026-09-04 at the owner's direction; revised the
-same day after the owner's review — § 10; build authorised on the owner's
-word; flips to Accepted when § 8 is evidence)  
+same day after the owner's review — § 10; **ratified and build authorised by
+the owner 2026-09-04**; flips to Accepted when § 8 is evidence)  
 Validation: the acceptance gate in § 8, run against the production kernel.
 Staged K1–K3 (kernel), P1–P2 (plugins), S (shells) in § 9.
 
@@ -347,4 +347,6 @@ replica pulling streams out of order.
   shows without a focus change (§ 2.6). Also open, for the round to propose:
   the exact value typing of predicates, and anchor identity finer than a
   line number.
-- Awaiting the owner's word before the build round starts.
+- **2026-09-04, ratified by the owner ("ratified.") and the build
+  authorised.** Staged as § 9, one implementer per stage, sequential:
+  K1+K2, then K3, then P1+P2+S, each landing with its gate items.
