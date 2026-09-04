@@ -77,6 +77,17 @@ fn a_v4_vault_upgrades_in_place_without_losing_what_it_held() {
     let summary = store.project().expect("project");
     assert_eq!(summary.written, 0, "an upgrade rewrites nothing a person can see");
     assert_eq!(markdown_files(dir.path()), before);
+
+    // And the change feed the v7 step adds starts empty on it. An
+    // upgrade is not a change to the vault's files, so a consumer
+    // reading the feed for the first time is told about nothing that did
+    // not happen — it starts from the beginning, which is the sanctioned
+    // full read (ADR 0020 § 2.1).
+    let origin = store.change_origin().expect("origin");
+    assert_eq!(origin.seq, 0);
+    let page = store.changes_since(&origin, 100).expect("changes");
+    assert!(page.changes.is_empty(), "{:?}", page.changes);
+    assert!(page.complete);
 }
 
 #[test]

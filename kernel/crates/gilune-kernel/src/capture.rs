@@ -20,6 +20,10 @@ pub const SOURCE_READY_EVENT: &str = "org.memory.source-ready";
 /// writing, so it projects no note of its own.
 pub const ATTACHED_KEY: &str = "attached";
 
+/// The `revisions.origin` a capture's first revision carries. One home:
+/// the commit path writes it and the change feed classifies by it.
+pub(crate) const CAPTURE_ORIGIN: &str = "capture";
+
 /// Whether a source document says it is attached.
 pub fn is_attached(document: &serde_json::Value) -> bool {
     document
@@ -163,8 +167,8 @@ impl CaptureStage {
             )?;
             conn.execute(
                 "INSERT INTO revisions (revision_id, object_id, payload, origin, created_ms)
-                 VALUES (?1, ?2, ?3, 'capture', ?4)",
-                rusqlite::params![revision_id, source_id, payload, created_ms],
+                 VALUES (?1, ?2, ?3, ?5, ?4)",
+                rusqlite::params![revision_id, source_id, payload, created_ms, CAPTURE_ORIGIN],
             )?;
             conn.execute(
                 "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
@@ -189,7 +193,7 @@ impl CaptureStage {
                     "revision": {
                         "revision_id": revision_id,
                         "payload": payload,
-                        "origin": "capture",
+                        "origin": CAPTURE_ORIGIN,
                         "created_ms": created_ms,
                     },
                     "blob": {

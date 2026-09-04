@@ -15,11 +15,18 @@
 //! type and event identifiers remain `org.memory.*` per the permanent
 //! namespace rule — so a future rename touches keys only.
 
+use crate::changes::{Change, ChangeCause, ChangeKind};
 use crate::crashpoints::crashpoint;
 use crate::revisions::{add_revision, Announce};
 use crate::store::Store;
-use crate::{fs, ids, KernelError, Result};
+use crate::{changes, fs, ids, probe, KernelError, Result};
 use std::collections::BTreeMap;
+use std::path::Path;
+
+/// The `revisions.origin` an edit made outside the app carries. One
+/// home: `ingest_external_edit` writes it, the withdrawal rule reads it,
+/// and the change feed classifies by it.
+pub(crate) const EXTERNAL_EDIT_ORIGIN: &str = "external-edit";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ProjectSummary {
@@ -47,7 +54,32 @@ struct Head {
     created_ms: i64,
     revision_id: String,
     payload: String,
+    /// Where this revision came from, as `revisions.origin` records it.
+    /// Read for the change feed's `cause` and for nothing else.
+    origin: String,
     conflicted: bool,
+}
+
+/// What the projection last recorded about a file. Read as one row
+/// because every decision the projection makes needs several of its
+/// columns and asking twice is how two of them come to disagree.
+struct Recorded {
+    rel_path: String,
+    revision_id: String,
+    sha: String,
+    stat: Option<Stat>,
+    /// The moment the record was written, in nanoseconds since the Unix
+    /// epoch. Zero on a row written before there were stat facts.
+    recorded_ns: i64,
+}
+
+/// A file's size and modification time, as one stat call reports them.
+/// Nanoseconds on every platform (Windows file times are 100 ns ticks,
+/// Linux is finer), so the unit is one fact and comparisons are exact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Stat {
+    size: i64,
+    mtime_ns: i64,
 }
 
 /// This projection as a plugin declaration (ADR 0011). It lives beside
@@ -133,21 +165,21 @@ impl Store {
             }
             let canonical_sha = ids::sha256_hex(canonical.as_bytes());
             let target = self.vault().join(&rel_path);
-            let row: Option<(String, String, String)> = self
-                .conn()
-                .query_row(
-                    "SELECT content_sha256, rel_path, revision_id FROM projections
-                     WHERE object_id = ?1",
-                    [&head.object_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-                )
-                .map(Some)
-                .or_else(no_rows_none)?;
-            let recorded = row.as_ref().map(|(sha, _, _)| sha.clone());
-            // The disk read stays: it is what detects an external edit,
-            // and skipping it would be skipping reconciliation's input.
-            let on_disk = std::fs::read(&target).ok();
-            let disk_sha = on_disk.as_deref().map(ids::sha256_hex);
+            let row = self.recorded_for_object(&head.object_id)?;
+            let recorded = row.as_ref().map(|r| r.sha.clone());
+            // The disk state is what detects an external edit, so this
+            // never guesses — but it no longer *reads* to learn what it
+            // can stat (ADR 0020 § 2.5). A file whose size and mtime
+            // still match the record is the bytes the record names.
+            let disk_sha = match &row {
+                Some(record) if self.file_matches_record(&head.object_id, &target, record)? => {
+                    Some(record.sha.clone())
+                }
+                _ => {
+                    probe::file_read();
+                    std::fs::read(&target).ok().as_deref().map(ids::sha256_hex)
+                }
+            };
 
             match (&disk_sha, &recorded) {
                 (Some(d), _) if *d == canonical_sha => {
@@ -157,13 +189,18 @@ impl Store {
                     // note per project, which for the steady state of a
                     // vault is the whole vault rewritten to say that
                     // nothing happened.
-                    let unchanged = row.as_ref().is_some_and(|(sha, path, revision)| {
-                        sha == &canonical_sha
-                            && path == &rel_path
-                            && revision == &head.revision_id
+                    let unchanged = row.as_ref().is_some_and(|record| {
+                        record.sha == canonical_sha
+                            && record.rel_path == rel_path
+                            && record.revision_id == head.revision_id
                     });
                     if !unchanged {
-                        self.record_projection(&head, &rel_path, &canonical_sha)?;
+                        // The bytes on disk are already right, so the
+                        // vault's files did not change — unless this
+                        // kernel had never claimed the file at all, in
+                        // which case the vault has gained one.
+                        let announce = row.is_none().then_some(ChangeKind::Created);
+                        self.record_projection(&head, &rel_path, &canonical_sha, announce)?;
                     }
                     summary.unchanged += 1;
                 }
@@ -172,9 +209,19 @@ impl Store {
                     summary.held_back += 1;
                 }
                 _ => {
+                    // `Created` says the vault did not have this file.
+                    // Both ways that happens count: no record at all, and
+                    // a record whose file is missing — a tombstone
+                    // proposal that was rejected puts a file back, and
+                    // calling that `Modified` would describe a change to
+                    // something that was not there.
+                    let kind = match (row.is_none(), disk_sha.is_none()) {
+                        (false, false) => ChangeKind::Modified,
+                        _ => ChangeKind::Created,
+                    };
                     write_atomic(&target, canonical.as_bytes())?;
                     crashpoint("project.after_write");
-                    self.record_projection(&head, &rel_path, &canonical_sha)?;
+                    self.record_projection(&head, &rel_path, &canonical_sha, Some(kind))?;
                     summary.written += 1;
                 }
             }
@@ -233,6 +280,7 @@ impl Store {
         let mut removed = 0;
         for (object_id, rel_path, recorded_sha, projected_revision) in doomed {
             let target = self.vault().join(&rel_path);
+            probe::file_read();
             match std::fs::read(&target) {
                 Ok(bytes) => {
                     let disk_sha = ids::sha256_hex(&bytes);
@@ -261,10 +309,42 @@ impl Store {
                 // vault could be read, out of a transient failure.
                 Err(_) => continue,
             }
-            self.conn()
-                .execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
+            let cause = self.deletion_cause(&object_id)?;
+            let announce = !self.already_removed(&rel_path)?;
+            self.write_txn(|| {
+                self.conn()
+                    .execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
+                if announce {
+                    changes::record(
+                        self.conn(),
+                        Change {
+                            kind: ChangeKind::Removed,
+                            rel_path: &rel_path,
+                            previous_rel_path: None,
+                            object_id: Some(&object_id),
+                            revision_id: Some(&projected_revision),
+                            cause,
+                        },
+                    )?;
+                }
+                Ok(())
+            })?;
         }
         Ok(removed)
+    }
+
+    /// Whether a deletion this device is carrying out was decided
+    /// elsewhere. Exact: a tombstone recorded by another device is a
+    /// tombstone that arrived, and a tombstone this device recorded is
+    /// one a person took here.
+    fn deletion_cause(&self, object_id: &str) -> Result<ChangeCause> {
+        let elsewhere: i64 = self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM operations
+                            WHERE target_id = ?1 AND kind = ?2 AND device_id <> ?3)",
+            rusqlite::params![object_id, crate::operations::TOMBSTONE, self.device_id()?],
+            |row| row.get(0),
+        )?;
+        Ok(if elsewhere == 1 { ChangeCause::Sync } else { ChangeCause::Reconcile })
     }
 
     /// Ingest external changes to the vault. Never destructive: kernel
@@ -283,96 +363,12 @@ impl Store {
 
         for rel_path in self.markdown_files()? {
             seen_paths.push(rel_path.clone());
-            let text = std::fs::read_to_string(self.vault().join(&rel_path)).map_err(|e| {
-                KernelError::Io { path: self.vault().join(&rel_path), source: e }
-            })?;
-            let tracked_object: Option<(String, String)> = self
-                .conn()
-                .query_row(
-                    "SELECT object_id, content_sha256 FROM projections WHERE rel_path = ?1",
-                    [&rel_path],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .map(Some)
-                .or_else(no_rows_none)?;
-
-            match parse_front_matter(&text) {
-                FrontMatter::Absent | FrontMatter::Malformed if tracked_object.is_some() => {
-                    // A file the kernel wrote lost or broke its identity:
-                    // never guess, never overwrite — a person decides.
-                    summary.quarantined +=
-                        self.quarantine(&rel_path, "projection front matter missing or malformed")?;
-                }
-                FrontMatter::Malformed => {
-                    summary.quarantined += self.quarantine(&rel_path, "unparseable front matter")?;
-                }
-                FrontMatter::Absent => {
-                    summary.imports += self.record_import(&rel_path)?;
-                }
-                FrontMatter::Parsed { keys, body } => {
-                    let Some(object_id) = keys.get("gilune-id").cloned() else {
-                        summary.quarantined +=
-                            self.quarantine(&rel_path, "front matter has no gilune-id")?;
-                        continue;
-                    };
-                    let known: Option<(String, String)> = self
-                        .conn()
-                        .query_row(
-                            "SELECT rel_path, content_sha256 FROM projections WHERE object_id = ?1",
-                            [&object_id],
-                            |row| Ok((row.get(0)?, row.get(1)?)),
-                        )
-                        .map(Some)
-                        .or_else(no_rows_none)?;
-                    let Some((recorded_path, recorded_sha)) = known else {
-                        // A file carrying an id the kernel no longer
-                        // claims. When that object was deleted elsewhere,
-                        // this is the note being kept because it was
-                        // edited here, and its notice is still true.
-                        if self.is_deleted(&object_id)? {
-                            kept.insert(object_id.clone());
-                        }
-                        summary.imports += self.record_import(&rel_path)?;
-                        continue;
-                    };
-                    if recorded_path != rel_path {
-                        if self.vault().join(&recorded_path).exists() {
-                            summary.quarantined +=
-                                self.quarantine(&rel_path, "duplicate of a tracked projection")?;
-                            continue;
-                        }
-                        self.conn().execute(
-                            "UPDATE projections SET rel_path = ?2 WHERE object_id = ?1",
-                            [&object_id, &rel_path],
-                        )?;
-                        summary.renames += 1;
-                    }
-                    if ids::sha256_hex(text.as_bytes()) != recorded_sha {
-                        if self.is_deleted(&object_id)? {
-                            // The object was deleted on another device and
-                            // this file was edited here. The edit is the
-                            // person keeping it, so the words stay — as a
-                            // file the kernel no longer claims, which is
-                            // to say an import candidate. Ingesting the
-                            // edit instead would write a revision of a
-                            // deleted object and, worse, hand projection
-                            // the very hash that authorises deleting the
-                            // file (constitution rule 1: never destroy
-                            // what the kernel did not write).
-                            kept.insert(object_id.clone());
-                            summary.imports += self.keep_edit_of_deleted(&object_id, &rel_path)?;
-                        } else {
-                            self.ingest_external_edit(&object_id, &body, text.as_bytes())?;
-                            summary.edits += 1;
-                        }
-                    }
-                }
-            }
+            self.reconcile_file(&rel_path, &mut summary, &mut kept)?;
         }
 
         // Tracked projections whose file is gone become tombstone
         // proposals; the file is not resurrected while a proposal is open.
-        let missing: Vec<String> = {
+        let missing: Vec<(String, String)> = {
             let mut stmt = self
                 .conn()
                 .prepare("SELECT object_id, rel_path FROM projections")?;
@@ -383,20 +379,13 @@ impl Store {
             for row in rows {
                 let (object_id, rel_path) = row?;
                 if !seen_paths.contains(&rel_path) && !self.vault().join(&rel_path).exists() {
-                    missing.push(object_id);
+                    missing.push((object_id, rel_path));
                 }
             }
             missing
         };
-        for object_id in missing {
-            if !self.has_open_tombstone(&object_id)? {
-                self.conn().execute(
-                    "INSERT INTO proposals (proposal_id, object_id, kind, state, created_ms)
-                     VALUES (?1, ?2, 'tombstone', 'open', ?3)",
-                    rusqlite::params![ids::new_id(), object_id, ids::now_ms()],
-                )?;
-                summary.tombstone_proposals += 1;
-            }
+        for (object_id, rel_path) in missing {
+            summary.tombstone_proposals += self.propose_tombstone(&object_id, &rel_path)?;
         }
 
         // Withdraw every kept-edit notice the vault no longer bears out.
@@ -421,6 +410,180 @@ impl Store {
         Ok(summary)
     }
 
+    /// Reconcile **one** file, reaching the same decisions the full pass
+    /// reaches about it, in time that does not grow with the vault.
+    ///
+    /// It exists so that a writer's own save reaches the change feed
+    /// before anything refreshes (ADR 0020 § 2.2): a caller that has
+    /// just written a file calls this and the feed already carries it,
+    /// with no rescan and no indexer of the caller's own. Idempotent, so
+    /// calling it and then running the full pass records the change once
+    /// — the full pass finds the record already matching what is there.
+    ///
+    /// A path that is not a `.md` file inside this vault is refused:
+    /// only Markdown files are projected, and a path leading out of the
+    /// vault is never a path this can be asked about.
+    pub fn reconcile_path(&self, rel_path: &str) -> Result<ReconcileSummary> {
+        let rel = self.projected_path(rel_path)?;
+        let mut summary = ReconcileSummary::default();
+        let mut kept: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+        if self.vault().join(&rel).is_file() {
+            if let Some(object_id) = self.reconcile_file(&rel, &mut summary, &mut kept)? {
+                seen.insert(object_id);
+            }
+        } else if let Some(record) = self.recorded_at_path(&rel)? {
+            // The file the caller named is gone. The full pass answers
+            // that with a tombstone proposal, and so does this.
+            seen.insert(record.0.clone());
+            summary.tombstone_proposals += self.propose_tombstone(&record.0, &rel)?;
+        }
+
+        // Only notices about the object this path is *about* may be
+        // withdrawn here. The full pass observes the whole vault and can
+        // safely clear anything it did not see; a one-file pass has seen
+        // one file, and clearing on that evidence would withdraw a
+        // decision nobody had taken.
+        for object_id in seen.difference(&kept) {
+            crate::alerts::clear(
+                self.conn(),
+                crate::alerts::VAULT_DELETED_NOTE_EDITED,
+                object_id,
+            )?;
+        }
+        Ok(summary)
+    }
+
+    /// One file's reconciliation. Returns the object the file is about,
+    /// where it names one, so a single-file pass knows what it has seen.
+    fn reconcile_file(
+        &self,
+        rel_path: &str,
+        summary: &mut ReconcileSummary,
+        kept: &mut std::collections::BTreeSet<String>,
+    ) -> Result<Option<String>> {
+        let tracked = self.recorded_at_path(rel_path)?;
+        // Size and mtime that both match the record mean the bytes the
+        // record names, so there is no edit, no rename (the file is at
+        // its recorded path) and nothing to parse. This is the read the
+        // steady state used to pay for every file on every pass.
+        if let Some((object_id, record)) = &tracked {
+            if self.file_matches_record(object_id, &self.vault().join(rel_path), record)? {
+                return Ok(Some(object_id.clone()));
+            }
+        }
+        probe::file_read();
+        let text = std::fs::read_to_string(self.vault().join(rel_path)).map_err(|e| {
+            KernelError::Io { path: self.vault().join(rel_path), source: e }
+        })?;
+
+        match parse_front_matter(&text) {
+            FrontMatter::Absent | FrontMatter::Malformed if tracked.is_some() => {
+                // A file the kernel wrote lost or broke its identity:
+                // never guess, never overwrite — a person decides.
+                summary.quarantined +=
+                    self.quarantine(rel_path, "projection front matter missing or malformed")?;
+                Ok(tracked.map(|(object_id, _)| object_id))
+            }
+            FrontMatter::Malformed => {
+                summary.quarantined += self.quarantine(rel_path, "unparseable front matter")?;
+                Ok(None)
+            }
+            FrontMatter::Absent => {
+                summary.imports += self.record_import(rel_path)?;
+                Ok(None)
+            }
+            FrontMatter::Parsed { keys, body } => {
+                let Some(object_id) = keys.get("gilune-id").cloned() else {
+                    summary.quarantined +=
+                        self.quarantine(rel_path, "front matter has no gilune-id")?;
+                    return Ok(None);
+                };
+                let Some(known) = self.recorded_for_object(&object_id)? else {
+                    // A file carrying an id the kernel no longer claims.
+                    // When that object was deleted elsewhere, this is the
+                    // note being kept because it was edited here, and its
+                    // notice is still true.
+                    if self.is_deleted(&object_id)? {
+                        kept.insert(object_id.clone());
+                    }
+                    summary.imports += self.record_import(rel_path)?;
+                    return Ok(Some(object_id));
+                };
+                if known.rel_path != rel_path {
+                    if self.vault().join(&known.rel_path).exists() {
+                        summary.quarantined +=
+                            self.quarantine(rel_path, "duplicate of a tracked projection")?;
+                        return Ok(Some(object_id));
+                    }
+                    self.record_rename(&object_id, &known.rel_path, rel_path, &known.revision_id)?;
+                    summary.renames += 1;
+                }
+                if ids::sha256_hex(text.as_bytes()) != known.sha {
+                    if self.is_deleted(&object_id)? {
+                        // The object was deleted on another device and
+                        // this file was edited here. The edit is the
+                        // person keeping it, so the words stay — as a
+                        // file the kernel no longer claims, which is
+                        // to say an import candidate. Ingesting the
+                        // edit instead would write a revision of a
+                        // deleted object and, worse, hand projection
+                        // the very hash that authorises deleting the
+                        // file (constitution rule 1: never destroy
+                        // what the kernel did not write).
+                        kept.insert(object_id.clone());
+                        summary.imports += self.keep_edit_of_deleted(&object_id, rel_path)?;
+                    } else {
+                        self.ingest_external_edit(
+                            &object_id,
+                            rel_path,
+                            &body,
+                            text.as_bytes(),
+                        )?;
+                        summary.edits += 1;
+                    }
+                }
+                Ok(Some(object_id))
+            }
+        }
+    }
+
+    /// A tracked projection whose file has gone becomes a proposal for a
+    /// person to answer, and the feed says the file left the vault.
+    fn propose_tombstone(&self, object_id: &str, rel_path: &str) -> Result<i64> {
+        if self.has_open_tombstone(object_id)? {
+            return Ok(0);
+        }
+        let announce = !self.already_removed(rel_path)?;
+        self.write_txn(|| {
+            self.conn().execute(
+                "INSERT INTO proposals (proposal_id, object_id, kind, state, created_ms)
+                 VALUES (?1, ?2, 'tombstone', 'open', ?3)",
+                rusqlite::params![ids::new_id(), object_id, ids::now_ms()],
+            )?;
+            if announce {
+                // The projection row stays — rejecting the proposal is
+                // how a file comes back — but the vault does not have the
+                // file, and a consumer that was never told would answer
+                // for ever about words that are not there.
+                changes::record(
+                    self.conn(),
+                    Change {
+                        kind: ChangeKind::Removed,
+                        rel_path,
+                        previous_rel_path: None,
+                        object_id: Some(object_id),
+                        revision_id: None,
+                        cause: ChangeCause::Reconcile,
+                    },
+                )?;
+            }
+            Ok(())
+        })?;
+        Ok(1)
+    }
+
     /// Resolve a tombstone proposal. Accepting records the deletion as
     /// durable state and an operation; rejecting lets projection restore
     /// the file.
@@ -439,6 +602,13 @@ impl Store {
                 },
                 e => KernelError::Storage(e),
             })?;
+        // A proposal is only ever opened for a file that is missing, so
+        // the feed has normally said so already; this is the guard for
+        // the ordering where it has not.
+        let vacated = match self.recorded_for_object(&object_id)? {
+            Some(record) if !self.already_removed(&record.rel_path)? => Some(record),
+            _ => None,
+        };
         let conn = self.conn();
         conn.execute_batch("BEGIN IMMEDIATE;")?;
         let done: Result<()> = (|| {
@@ -468,6 +638,19 @@ impl Store {
                     carried,
                     ids::now_ms(),
                 )?;
+                if let Some(record) = &vacated {
+                    changes::record(
+                        conn,
+                        Change {
+                            kind: ChangeKind::Removed,
+                            rel_path: &record.rel_path,
+                            previous_rel_path: None,
+                            object_id: Some(&object_id),
+                            revision_id: Some(&record.revision_id),
+                            cause: ChangeCause::Reconcile,
+                        },
+                    )?;
+                }
             }
             Ok(())
         })();
@@ -503,6 +686,140 @@ impl Store {
             }
         }
         Ok(heads)
+    }
+
+    // ------------------------------------------ the projection's record
+
+    fn recorded_for_object(&self, object_id: &str) -> Result<Option<Recorded>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT rel_path, revision_id, content_sha256, size, mtime_ns, recorded_ns
+                 FROM projections WHERE object_id = ?1",
+                [object_id],
+                read_recorded,
+            )
+            .map(Some)
+            .or_else(no_rows_none)?)
+    }
+
+    fn recorded_at_path(&self, rel_path: &str) -> Result<Option<(String, Recorded)>> {
+        Ok(self
+            .conn()
+            .query_row(
+                "SELECT object_id, rel_path, revision_id, content_sha256,
+                        size, mtime_ns, recorded_ns
+                 FROM projections WHERE rel_path = ?1",
+                [rel_path],
+                |row| Ok((row.get::<_, String>(0)?, read_recorded_from(row, 1)?)),
+            )
+            .map(Some)
+            .or_else(no_rows_none)?)
+    }
+
+    /// Whether the file at `target` still holds the bytes the record
+    /// names, decided **without reading it** where that is sound.
+    ///
+    /// This is git's index rule (ADR 0020 § 2.5): size and mtime that
+    /// both match are enough. Openness is kept — a stat per file per
+    /// pass, so a file edited by any other tool is still noticed — but
+    /// the SHA-256 of every projected file on every pass is not the
+    /// price of noticing.
+    ///
+    /// **Git's racy-file safeguard, and it is not optional.** A file
+    /// whose mtime is not older than the moment its record was written
+    /// may have been rewritten inside the filesystem's timestamp
+    /// resolution, between the write and the record. Those are hashed
+    /// regardless, and when the hash says nothing changed the record's
+    /// moment is re-armed with a later one, so the entry settles instead
+    /// of being re-hashed for ever.
+    ///
+    /// Residual, stated because it is inherited rather than introduced:
+    /// a filesystem with coarse timestamps (two seconds on FAT) can
+    /// report an mtime older than a write that really happened, and a
+    /// rewrite that preserves the length is then invisible until
+    /// `verify` hashes everything.
+    fn file_matches_record(
+        &self,
+        object_id: &str,
+        target: &Path,
+        record: &Recorded,
+    ) -> Result<bool> {
+        let (Some(recorded_stat), Some(now)) = (record.stat, stat_of(target)) else {
+            return Ok(false);
+        };
+        if record.recorded_ns == 0 || now != recorded_stat {
+            return Ok(false);
+        }
+        if now.mtime_ns < record.recorded_ns {
+            return Ok(true);
+        }
+        probe::file_read();
+        let Ok(bytes) = std::fs::read(target) else { return Ok(false) };
+        if ids::sha256_hex(&bytes) != record.sha {
+            return Ok(false);
+        }
+        self.conn().execute(
+            "UPDATE projections SET recorded_ns = ?2 WHERE object_id = ?1",
+            rusqlite::params![object_id, now_ns()],
+        )?;
+        Ok(true)
+    }
+
+    /// Every projected file hashed, and anything the stat rule would
+    /// have missed both reported and re-armed.
+    ///
+    /// Reporting alone would be a diagnosis with no treatment: the stat
+    /// rule that missed the file once would go on missing it. So a
+    /// record whose file has changed underneath it has its stat facts
+    /// cleared, and the next reconciliation reads the file properly.
+    ///
+    /// A file whose record already says it is out of date is not a
+    /// problem and is not reported: that is an ordinary external edit
+    /// which reconciliation has yet to take in.
+    pub(crate) fn verify_projections(&self) -> Result<Vec<String>> {
+        let projections: Vec<(String, Recorded)> = {
+            let mut stmt = self.conn().prepare(
+                "SELECT object_id, rel_path, revision_id, content_sha256,
+                        size, mtime_ns, recorded_ns
+                 FROM projections",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, read_recorded_from(row, 1)?))
+            })?;
+            rows.collect::<std::result::Result<_, _>>()?
+        };
+        let mut problems = Vec::new();
+        for (object_id, record) in projections {
+            let target = self.vault().join(&record.rel_path);
+            probe::file_read();
+            let Ok(bytes) = std::fs::read(&target) else {
+                // A projected file that is not there is what reconcile
+                // turns into a tombstone proposal. Not damage, and
+                // saying so here would make an ordinary deletion look
+                // like one.
+                continue;
+            };
+            if ids::sha256_hex(&bytes) == record.sha {
+                continue;
+            }
+            let stat_agreed = matches!((record.stat, stat_of(&target)), (Some(a), Some(b)) if a == b)
+                && record.recorded_ns != 0;
+            if !stat_agreed {
+                continue;
+            }
+            problems.push(format!(
+                "projection {} differs from its record while its size and timestamp matched; \
+                 the record has been re-armed so reconciliation reads it",
+                record.rel_path
+            ));
+            self.conn().execute(
+                "UPDATE projections SET size = -1, mtime_ns = 0, recorded_ns = 0
+                 WHERE object_id = ?1",
+                [&object_id],
+            )?;
+        }
+        Ok(problems)
     }
 
     /// Whether every head this device holds for the object is named by a
@@ -596,7 +913,7 @@ impl Store {
                 )
                 .map(Some)
                 .or_else(no_rows_none)?;
-            return Ok(origin.as_deref() != Some("external-edit"));
+            return Ok(origin.as_deref() != Some(EXTERNAL_EDIT_ORIGIN));
         }
         Ok(heads.iter().all(|head| named.contains(head)))
     }
@@ -689,6 +1006,7 @@ impl Store {
         } else if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
             let name = blob_rel.rsplit('/').next().unwrap_or(blob_rel);
             if payload.get("media").and_then(|v| v.as_str()) == Some("txt") {
+                probe::file_read();
                 match std::fs::read_to_string(self.vault().join(blob_rel)) {
                     Ok(text) => text,
                     // Bytes that have not arrived yet are the ordinary
@@ -742,9 +1060,16 @@ impl Store {
         Ok(matches!(row, Some((state, origin)) if state != "ready" && origin == "sync"))
     }
 
-    fn ingest_external_edit(&self, object_id: &str, body: &str, disk: &[u8]) -> Result<()> {
+    fn ingest_external_edit(
+        &self,
+        object_id: &str,
+        rel_path: &str,
+        body: &str,
+        disk: &[u8],
+    ) -> Result<()> {
         let revision_id = ids::new_id();
         let created_ms = ids::now_ms();
+        let stat = stat_of(&self.vault().join(rel_path));
         // An edit changes the words, not the document's other facts: the
         // new text merges into the current head so `rel_path` and friends
         // survive. Replacing the document here would strip a voice note's
@@ -762,15 +1087,36 @@ impl Store {
                 object_id,
                 &revision_id,
                 &payload,
-                "external-edit",
+                EXTERNAL_EDIT_ORIGIN,
                 created_ms,
                 Announce::Event,
             )?;
             // Record the disk state we ingested so projection may
             // canonicalise over it.
             conn.execute(
-                "UPDATE projections SET revision_id = ?2, content_sha256 = ?3 WHERE object_id = ?1",
-                rusqlite::params![object_id, revision_id, ids::sha256_hex(disk)],
+                "UPDATE projections
+                    SET revision_id = ?2, content_sha256 = ?3,
+                        size = ?4, mtime_ns = ?5, recorded_ns = ?6
+                  WHERE object_id = ?1",
+                rusqlite::params![
+                    object_id,
+                    revision_id,
+                    ids::sha256_hex(disk),
+                    stat.map(|s| s.size).unwrap_or(-1),
+                    stat.map(|s| s.mtime_ns).unwrap_or(0),
+                    if stat.is_some() { now_ns() } else { 0 },
+                ],
+            )?;
+            changes::record(
+                conn,
+                Change {
+                    kind: ChangeKind::Modified,
+                    rel_path,
+                    previous_rel_path: None,
+                    object_id: Some(object_id),
+                    revision_id: Some(&revision_id),
+                    cause: ChangeCause::ExternalEdit,
+                },
             )?;
             Ok(())
         })();
@@ -784,17 +1130,146 @@ impl Store {
         Ok(())
     }
 
-    fn record_projection(&self, head: &Head, rel_path: &str, content_sha: &str) -> Result<()> {
-        // OR REPLACE covers both unique constraints (object_id, rel_path):
-        // two processes recording the same projection concurrently must
-        // both succeed, whichever constraint SQLite trips first.
-        self.conn().execute(
-            "INSERT OR REPLACE INTO projections
-             (object_id, rel_path, revision_id, content_sha256)
-             VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![head.object_id, rel_path, head.revision_id, content_sha],
-        )?;
-        Ok(())
+    /// Record what the kernel now claims at `rel_path`, and — when
+    /// `announce` names one — the change the vault's files just made.
+    /// One transaction, so the two can never disagree (ADR 0020 § 2.2).
+    fn record_projection(
+        &self,
+        head: &Head,
+        rel_path: &str,
+        content_sha: &str,
+        announce: Option<ChangeKind>,
+    ) -> Result<()> {
+        // Stat after the bytes have landed: this is what lets the next
+        // pass answer "unchanged" without reading the file.
+        let stat = stat_of(&self.vault().join(rel_path));
+        let cause = match announce {
+            Some(_) => self.projection_cause(head)?,
+            None => ChangeCause::LocalEdit,
+        };
+        self.write_txn(|| {
+            // OR REPLACE covers both unique constraints (object_id,
+            // rel_path): two processes recording the same projection
+            // concurrently must both succeed, whichever constraint
+            // SQLite trips first.
+            self.conn().execute(
+                "INSERT OR REPLACE INTO projections
+                 (object_id, rel_path, revision_id, content_sha256, size, mtime_ns, recorded_ns)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    head.object_id,
+                    rel_path,
+                    head.revision_id,
+                    content_sha,
+                    stat.map(|s| s.size).unwrap_or(-1),
+                    stat.map(|s| s.mtime_ns).unwrap_or(0),
+                    if stat.is_some() { now_ns() } else { 0 },
+                ],
+            )?;
+            if let Some(kind) = announce {
+                changes::record(
+                    self.conn(),
+                    Change {
+                        kind,
+                        rel_path,
+                        previous_rel_path: None,
+                        object_id: Some(&head.object_id),
+                        revision_id: Some(&head.revision_id),
+                        cause,
+                    },
+                )?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Follow a file that moved. Files are matched by front-matter id,
+    /// never by name (ADR 0007), so this is a metadata change — and the
+    /// bytes did not move with it, so the stat facts are re-taken rather
+    /// than assumed.
+    fn record_rename(
+        &self,
+        object_id: &str,
+        previous_rel_path: &str,
+        rel_path: &str,
+        revision_id: &str,
+    ) -> Result<()> {
+        let stat = stat_of(&self.vault().join(rel_path));
+        self.write_txn(|| {
+            self.conn().execute(
+                "UPDATE projections
+                    SET rel_path = ?2, size = ?3, mtime_ns = ?4, recorded_ns = ?5
+                  WHERE object_id = ?1",
+                rusqlite::params![
+                    object_id,
+                    rel_path,
+                    stat.map(|s| s.size).unwrap_or(-1),
+                    stat.map(|s| s.mtime_ns).unwrap_or(0),
+                    if stat.is_some() { now_ns() } else { 0 },
+                ],
+            )?;
+            changes::record(
+                self.conn(),
+                Change {
+                    kind: ChangeKind::Moved,
+                    rel_path,
+                    previous_rel_path: Some(previous_rel_path),
+                    object_id: Some(object_id),
+                    revision_id: Some(revision_id),
+                    cause: ChangeCause::Reconcile,
+                },
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Why a projection write happened, as far as the kernel can say.
+    ///
+    /// One question is exact and it is the one that matters: **did this
+    /// head arrive from another device?** The operations table records
+    /// whose each revision was, so a head carried here by somebody
+    /// else's operation is a synced change and nothing else. The rest is
+    /// read off `revisions.origin`, which the writer stamped, and
+    /// anything unrecognised is reported as a local edit rather than
+    /// guessed at (ADR 0020 § 2.1: consumers must not branch on `cause`
+    /// for correctness).
+    ///
+    /// Asked only where a change is being announced, which is to say
+    /// only where the projection actually wrote something. A settled
+    /// vault never reaches it.
+    fn projection_cause(&self, head: &Head) -> Result<ChangeCause> {
+        let origins = crate::operations::origins_of(self.conn(), &head.object_id)?;
+        if let Some(device) = origins.revisions.get(&head.revision_id) {
+            if *device != self.device_id()? {
+                return Ok(ChangeCause::Sync);
+            }
+        }
+        Ok(match head.origin.as_str() {
+            crate::capture::CAPTURE_ORIGIN => ChangeCause::Capture,
+            EXTERNAL_EDIT_ORIGIN => ChangeCause::ExternalEdit,
+            origin if origin.starts_with(crate::processor::ORIGIN_PREFIX) => ChangeCause::Processor,
+            _ => ChangeCause::LocalEdit,
+        })
+    }
+
+    /// A caller-supplied path, checked to be a projected file inside this
+    /// vault. Anything else is refused rather than acted on: `..` and an
+    /// absolute path both lead out of the vault, and only `.md` files are
+    /// ever projected.
+    fn projected_path(&self, rel_path: &str) -> Result<String> {
+        let rel = std::path::PathBuf::from(rel_path.replace('\\', "/"));
+        let usable = rel.is_relative()
+            && rel
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)))
+            && rel_path.ends_with(".md")
+            && !rel.starts_with(".gilune");
+        if !usable {
+            return Err(KernelError::VaultUnusable {
+                reason: format!("{rel_path} is not a projected file inside this vault"),
+            });
+        }
+        Ok(fs::portable_rel(&rel))
     }
 
     fn is_quarantined(&self, rel_path: &str) -> Result<bool> {
@@ -822,20 +1297,56 @@ impl Store {
     }
 
     fn quarantine(&self, rel_path: &str, reason: &str) -> Result<i64> {
-        let inserted = self.conn().execute(
-            "INSERT OR IGNORE INTO quarantine (rel_path, reason, created_ms)
-             VALUES (?1, ?2, ?3)",
-            rusqlite::params![rel_path, reason, ids::now_ms()],
-        )?;
-        Ok(inserted as i64)
+        self.write_txn(|| {
+            let inserted = self.conn().execute(
+                "INSERT OR IGNORE INTO quarantine (rel_path, reason, created_ms)
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![rel_path, reason, ids::now_ms()],
+            )?;
+            // OR IGNORE means a path already quarantined changes nothing,
+            // so it announces nothing: the feed carries what happened, not
+            // what was true again.
+            if inserted == 1 {
+                changes::record(
+                    self.conn(),
+                    Change {
+                        kind: ChangeKind::Quarantined,
+                        rel_path,
+                        previous_rel_path: None,
+                        object_id: None,
+                        revision_id: None,
+                        cause: ChangeCause::Reconcile,
+                    },
+                )?;
+            }
+            Ok(inserted as i64)
+        })
     }
 
     fn record_import(&self, rel_path: &str) -> Result<i64> {
-        let inserted = self.conn().execute(
-            "INSERT OR IGNORE INTO imports (rel_path, created_ms) VALUES (?1, ?2)",
-            rusqlite::params![rel_path, ids::now_ms()],
-        )?;
-        Ok(inserted as i64)
+        self.write_txn(|| {
+            let inserted = self.conn().execute(
+                "INSERT OR IGNORE INTO imports (rel_path, created_ms) VALUES (?1, ?2)",
+                rusqlite::params![rel_path, ids::now_ms()],
+            )?;
+            if inserted == 1 {
+                // A file the kernel does not claim, so it names no
+                // object: whatever id the file carries, this vault has
+                // no projection of it.
+                changes::record(
+                    self.conn(),
+                    Change {
+                        kind: ChangeKind::Imported,
+                        rel_path,
+                        previous_rel_path: None,
+                        object_id: None,
+                        revision_id: None,
+                        cause: ChangeCause::Reconcile,
+                    },
+                )?;
+            }
+            Ok(inserted as i64)
+        })
     }
 
     /// Every `.md` file in the vault outside `.gilune/`, as portable
@@ -874,7 +1385,7 @@ impl Store {
 fn head_sql() -> String {
     format!(
         "SELECT o.object_id, o.type_id, o.type_schema, o.created_ms,
-                r.revision_id, r.payload,
+                r.revision_id, r.payload, r.origin,
                 (SELECT COUNT(*) FROM heads h2 WHERE h2.object_id = o.object_id) AS head_count
          FROM objects o
          JOIN heads h ON h.object_id = o.object_id
@@ -893,8 +1404,53 @@ fn read_head(row: &rusqlite::Row<'_>) -> rusqlite::Result<Head> {
         created_ms: row.get(3)?,
         revision_id: row.get(4)?,
         payload: row.get(5)?,
-        conflicted: row.get::<_, i64>(6)? > 1,
+        origin: row.get(6)?,
+        conflicted: row.get::<_, i64>(7)? > 1,
     })
+}
+
+fn read_recorded(row: &rusqlite::Row<'_>) -> rusqlite::Result<Recorded> {
+    read_recorded_from(row, 0)
+}
+
+/// `rel_path, revision_id, content_sha256, size, mtime_ns, recorded_ns`,
+/// starting at column `first`.
+fn read_recorded_from(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result<Recorded> {
+    let size: i64 = row.get(first + 3)?;
+    let mtime_ns: i64 = row.get(first + 4)?;
+    Ok(Recorded {
+        rel_path: row.get(first)?,
+        revision_id: row.get(first + 1)?,
+        sha: row.get(first + 2)?,
+        // A row written before there were stat facts, or one written
+        // when the file could not be stat'd: absent rather than a pair
+        // of zeroes that would compare equal to something.
+        stat: (size >= 0).then_some(Stat { size, mtime_ns }),
+        recorded_ns: row.get(first + 5)?,
+    })
+}
+
+/// A file's size and modification time, or `None` when it cannot be
+/// stat'd — which is answered as "read it", never as "unchanged".
+fn stat_of(path: &Path) -> Option<Stat> {
+    let metadata = std::fs::metadata(path).ok()?;
+    let mtime_ns = metadata
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_nanos() as i64;
+    Some(Stat { size: metadata.len() as i64, mtime_ns })
+}
+
+/// Nanoseconds since the Unix epoch — the unit `projections.mtime_ns`
+/// and `projections.recorded_ns` share, so the racy comparison between
+/// them is exact on every platform.
+fn now_ns() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as i64)
+        .unwrap_or(0)
 }
 
 enum FrontMatter {
@@ -1047,6 +1603,351 @@ mod tests {
             .into_iter()
             .map(|a| a.kind)
             .collect()
+    }
+
+    /// Every change this vault has recorded, as (kind, path, cause).
+    fn feed(store: &Store) -> Vec<(ChangeKind, String, ChangeCause)> {
+        page(store, &store.change_origin().expect("origin"))
+    }
+
+    fn page(store: &Store, cursor: &crate::changes::Cursor) -> Vec<(ChangeKind, String, ChangeCause)> {
+        store
+            .changes_since(cursor, 1000)
+            .expect("changes")
+            .changes
+            .into_iter()
+            .map(|c| (c.kind, c.rel_path, c.cause))
+            .collect()
+    }
+
+    fn cursor_now(store: &Store) -> crate::changes::Cursor {
+        store
+            .changes_since(&store.change_origin().expect("origin"), crate::changes::MAX_PAGE)
+            .expect("changes")
+            .next
+    }
+
+    // ------------------------------------------- the vault change feed
+    //
+    // ADR 0020 § 8.1: every mutation path produces exactly its changes,
+    // one test per path.
+
+    #[test]
+    fn a_voice_capture_is_one_created_change_caused_by_the_capture() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        let receipt = store.capture_bytes("wav", &[3u8; 512]).expect("capture");
+        assert!(feed(&store).is_empty(), "committing is not projecting");
+
+        store.project().expect("project");
+        let rel = receipt.rel_path.replace(".wav", ".md");
+        assert_eq!(
+            feed(&store),
+            vec![(ChangeKind::Created, rel, ChangeCause::Capture)],
+            "one file appeared, and the kernel knows exactly why"
+        );
+    }
+
+    #[test]
+    fn a_typed_capture_is_one_created_change_and_projecting_again_says_nothing() {
+        let (_dir, store, rel) = captured("typed straight in");
+        assert_eq!(feed(&store), vec![(ChangeKind::Created, rel, ChangeCause::Capture)]);
+        // The second-order half: a feed that repeated itself on every
+        // idle pass would cost a consumer the whole vault per tick,
+        // which is the cost this exists to remove.
+        store.project().expect("again");
+        store.reconcile().expect("again");
+        assert_eq!(feed(&store).len(), 1, "a settled vault says nothing");
+    }
+
+    #[test]
+    fn a_processor_output_is_one_modified_change_caused_by_the_processor() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        store
+            .register_plugin(&crate::processor::fake_transcriber_descriptor())
+            .expect("processor plugin");
+        let receipt = store.capture_bytes("wav", &[7u8; 256]).expect("capture");
+        store.project().expect("project");
+        let rel = receipt.rel_path.replace(".wav", ".md");
+        let after_capture = cursor_now(&store);
+
+        let summary = store
+            .run_pending_jobs(&[&crate::processor::FakeTranscriber], ids::now_ms(), 30_000)
+            .expect("work");
+        assert_eq!(summary.outputs, 1);
+        store.project().expect("project the words");
+
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Modified, rel, ChangeCause::Processor)],
+            "the words landing in the note is a change to that file and nothing else"
+        );
+    }
+
+    #[test]
+    fn a_save_reaches_the_feed_through_reconcile_path_before_anything_rescans() {
+        // ADR 0020 § 8.7. The editor writes its own file and calls this;
+        // the change is in the feed before any full pass runs.
+        let (_dir, store, rel) = captured("what was typed");
+        let after_capture = cursor_now(&store);
+        let edited = read_rel(&store, &rel).replace("what was typed", "what was typed and then some");
+        std::fs::write(store.vault().join(&rel), &edited).expect("the editor's own save");
+
+        let summary = store.reconcile_path(&rel).expect("reconcile one file");
+        assert_eq!(summary.edits, 1);
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Modified, rel.clone(), ChangeCause::ExternalEdit)]
+        );
+
+        // The second-order half: the full pass afterwards must not
+        // record the same save a second time.
+        let after_save = cursor_now(&store);
+        store.reconcile().expect("the full pass");
+        assert!(
+            page(&store, &after_save).is_empty(),
+            "a file already reconciled is not reconciled again"
+        );
+    }
+
+    #[test]
+    fn an_external_rewrite_is_one_modified_change_and_canonicalising_is_another() {
+        let (_dir, store, rel) = captured("original text");
+        let after_capture = cursor_now(&store);
+        let edited = read_rel(&store, &rel).replace("original text", "edited text");
+        std::fs::write(store.vault().join(&rel), &edited).expect("external edit");
+
+        store.reconcile().expect("reconcile");
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Modified, rel.clone(), ChangeCause::ExternalEdit)]
+        );
+
+        // Projection then rewrites the file into canonical form, which
+        // is a second real change to the bytes on disk — the feed says
+        // what happened, not what was intended.
+        let after_edit = cursor_now(&store);
+        assert_eq!(store.project().expect("canonicalise").written, 1);
+        assert_eq!(
+            page(&store, &after_edit),
+            vec![(ChangeKind::Modified, rel, ChangeCause::ExternalEdit)]
+        );
+    }
+
+    #[test]
+    fn a_rename_by_id_is_one_move_that_names_where_the_file_was() {
+        let (_dir, store, rel) = captured("name me differently");
+        let after_capture = cursor_now(&store);
+        let moved = "Renamed/better-name.md";
+        std::fs::create_dir_all(store.vault().join("Renamed")).expect("mkdir");
+        std::fs::rename(store.vault().join(&rel), store.vault().join(moved)).expect("rename");
+
+        assert_eq!(store.reconcile().expect("reconcile").renames, 1);
+        let changes = store
+            .changes_since(&after_capture, 100)
+            .expect("changes")
+            .changes;
+        assert_eq!(changes.len(), 1, "a rename is one change, not a delete and a create");
+        assert_eq!(changes[0].kind, ChangeKind::Moved);
+        assert_eq!(changes[0].rel_path, moved);
+        assert_eq!(
+            changes[0].previous_rel_path.as_deref(),
+            Some(rel.as_str()),
+            "a consumer has to be able to move what it knew"
+        );
+    }
+
+    #[test]
+    fn a_rename_and_an_edit_in_the_same_pass_are_two_changes_in_the_order_they_happened() {
+        // The second-order case for the rename: moving a file and
+        // editing it are one visit to that path, and a feed that
+        // reported only the last thing it noticed would lose one of
+        // them.
+        let (_dir, store, rel) = captured("moved and edited");
+        let after_capture = cursor_now(&store);
+        let moved = "Elsewhere/renamed.md";
+        std::fs::create_dir_all(store.vault().join("Elsewhere")).expect("mkdir");
+        let text = read_rel(&store, &rel).replace("moved and edited", "and edited too");
+        std::fs::remove_file(store.vault().join(&rel)).expect("remove");
+        std::fs::write(store.vault().join(moved), &text).expect("write elsewhere");
+
+        let summary = store.reconcile().expect("reconcile");
+        assert_eq!((summary.renames, summary.edits), (1, 1));
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![
+                (ChangeKind::Moved, moved.to_string(), ChangeCause::Reconcile),
+                (ChangeKind::Modified, moved.to_string(), ChangeCause::ExternalEdit),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_deletion_that_becomes_a_withdrawn_tombstone_says_removed_once() {
+        let (_dir, store, rel) = captured("delete me");
+        let after_capture = cursor_now(&store);
+        std::fs::remove_file(store.vault().join(&rel)).expect("delete");
+
+        store.reconcile().expect("reconcile");
+        let (proposal_id, _) = store.open_proposals().expect("proposals")[0].clone();
+        store.resolve_tombstone(&proposal_id, true).expect("accept");
+        store.project().expect("project");
+
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Removed, rel, ChangeCause::Reconcile)],
+            "one file left the vault, and it is said once however many \
+             passes notice it"
+        );
+    }
+
+    #[test]
+    fn a_tombstone_arriving_from_elsewhere_withdraws_the_file_and_says_so() {
+        let (_dir, store, rel) = captured("nobody touched this");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let after_capture = cursor_now(&store);
+        tombstone_from_elsewhere(&store, &object_id);
+
+        assert_eq!(store.project().expect("project").removed, 1);
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Removed, rel, ChangeCause::Sync)],
+            "the kernel knows this deletion was decided somewhere else"
+        );
+    }
+
+    #[test]
+    fn a_file_the_kernel_did_not_write_is_one_imported_change() {
+        let (_dir, store, _rel) = captured("resident");
+        let after_capture = cursor_now(&store);
+        std::fs::write(store.vault().join("Notes.md"), "just my notes").expect("foreign file");
+
+        assert_eq!(store.reconcile().expect("reconcile").imports, 1);
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Imported, "Notes.md".to_string(), ChangeCause::Reconcile)]
+        );
+        // The second-order half: a candidate already recorded is not a
+        // change, so the feed does not repeat it on every pass.
+        store.reconcile().expect("again");
+        assert_eq!(page(&store, &after_capture).len(), 1);
+    }
+
+    #[test]
+    fn a_projection_that_loses_its_identity_is_one_quarantined_change() {
+        // Deliberately a file the kernel *had* projected: the
+        // second-order case, where a path already in the feed as
+        // `Created` leaves the kernel's hands.
+        let (_dir, store, rel) = captured("innocent text");
+        let after_capture = cursor_now(&store);
+        std::fs::write(store.vault().join(&rel), "---\nno colon here\n---\nbody").expect("mangle");
+
+        assert_eq!(store.reconcile().expect("reconcile").quarantined, 1);
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Quarantined, rel, ChangeCause::Reconcile)]
+        );
+        store.reconcile().expect("again");
+        assert_eq!(page(&store, &after_capture).len(), 1, "quarantine is said once");
+    }
+
+    #[test]
+    fn a_file_deleted_and_made_again_under_the_same_name_is_removed_and_then_created() {
+        // The second-order case for the removal guard: it suppresses a
+        // second notice of the *same* disappearance, and must never
+        // suppress a real one.
+        let (_dir, store, rel) = captured("here, then not, then here");
+        let after_capture = cursor_now(&store);
+        std::fs::remove_file(store.vault().join(&rel)).expect("delete");
+        store.reconcile().expect("reconcile");
+        let (proposal_id, _) = store.open_proposals().expect("proposals")[0].clone();
+
+        // Rejecting the proposal is how a file comes back.
+        store.resolve_tombstone(&proposal_id, false).expect("reject");
+        assert_eq!(store.project().expect("project").written, 1);
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![
+                (ChangeKind::Removed, rel.clone(), ChangeCause::Reconcile),
+                (ChangeKind::Created, rel, ChangeCause::Capture),
+            ],
+            "a file that was not there and now is has been created, not modified"
+        );
+    }
+
+    #[test]
+    fn a_second_process_writing_the_same_vault_is_seen_by_the_first_reader() {
+        // Multi-instance is supported use (owner decision 2026-08-31),
+        // and a tick raised in one process could never reach another.
+        // The feed can, because it is in the vault.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let reader = Store::open(dir.path()).expect("open");
+        let cursor = reader.change_origin().expect("origin");
+
+        {
+            let writer = Store::open(dir.path()).expect("a second handle on one vault");
+            writer.capture_bytes("txt", b"written by somebody else").expect("capture");
+            writer.project().expect("project");
+        }
+
+        let seen = page(&reader, &cursor);
+        assert_eq!(seen.len(), 1, "{seen:?}");
+        assert_eq!(seen[0].0, ChangeKind::Created);
+        assert_eq!(seen[0].2, ChangeCause::Capture);
+    }
+
+    #[test]
+    fn every_mutation_path_together_leaves_a_dense_gap_free_sequence() {
+        // ADR 0020 § 8.2, over the paths of § 8.1 in one vault: the
+        // numbering is the contract, and a consumer that saw a gap
+        // could not tell it from a row it had missed.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        store
+            .register_plugin(&crate::processor::fake_transcriber_descriptor())
+            .expect("processor plugin");
+
+        let voice = store.capture_bytes("wav", &[9u8; 128]).expect("capture");
+        let typed = store.capture_bytes("txt", b"typed").expect("capture");
+        store.project().expect("project");
+        store
+            .run_pending_jobs(&[&crate::processor::FakeTranscriber], ids::now_ms(), 30_000)
+            .expect("work");
+        store.project().expect("project");
+
+        let typed_rel = typed.rel_path.replace(".txt", ".md");
+        let edited = read_rel(&store, &typed_rel).replace("typed", "typed, then edited");
+        std::fs::write(store.vault().join(&typed_rel), &edited).expect("edit");
+        store.reconcile().expect("reconcile");
+        store.project().expect("project");
+
+        std::fs::write(store.vault().join("Foreign.md"), "not ours").expect("foreign");
+        std::fs::write(store.vault().join("Broken.md"), "---\nbroken\n---\n").expect("broken");
+        let voice_rel = voice.rel_path.replace(".wav", ".md");
+        std::fs::create_dir_all(store.vault().join("Moved")).expect("mkdir");
+        std::fs::rename(store.vault().join(&voice_rel), store.vault().join("Moved/voice.md"))
+            .expect("rename");
+        store.reconcile().expect("reconcile");
+
+        std::fs::remove_file(store.vault().join("Moved/voice.md")).expect("delete");
+        store.reconcile().expect("reconcile");
+
+        let page = store
+            .changes_since(&store.change_origin().expect("origin"), 1000)
+            .expect("changes");
+        assert!(page.complete);
+        assert!(page.changes.len() >= 8, "{:?}", page.changes);
+        let seqs: Vec<i64> = page.changes.iter().map(|c| c.seq).collect();
+        assert_eq!(
+            seqs,
+            (1..=seqs.len() as i64).collect::<Vec<_>>(),
+            "the sequence is dense across every path there is"
+        );
+        assert_eq!(page.next.seq, *seqs.last().expect("rows"));
     }
 
     #[test]
@@ -1559,6 +2460,186 @@ mod tests {
         assert_eq!(row(&store).0, moved, "the row followed the file rather than being skipped");
         assert!(!store.vault().join(&rel).exists(), "and nothing was rebuilt at the old path");
         assert!(store.verify().expect("verify").is_empty());
+    }
+
+    // ------------------------------ reconcile stops reading (§ 2.5, K2)
+
+    /// What the projection recorded about a file: its content hash and
+    /// the stat facts the short-cut compares against.
+    fn record_of(store: &Store, rel: &str) -> (String, i64, i64, i64) {
+        store
+            .conn()
+            .query_row(
+                "SELECT content_sha256, size, mtime_ns, recorded_ns
+                 FROM projections WHERE rel_path = ?1",
+                [rel],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("the projection record")
+    }
+
+    fn set_mtime(path: &std::path::Path, ns: i64) {
+        let file = std::fs::OpenOptions::new().write(true).open(path).expect("open");
+        file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_nanos(ns as u64))
+            .expect("set the file's timestamp");
+        file.sync_all().expect("flush");
+    }
+
+    #[test]
+    fn an_unchanged_vault_reads_no_files_at_all() {
+        // ADR 0020 § 8.6. Reconciliation used to SHA-256 every projected
+        // file on every pass to find external edits; a vault of a
+        // thousand notes paid a thousand reads to be told that nothing
+        // had happened, per pass, per consumer.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        for n in 0..1000 {
+            store
+                .capture_bytes("txt", format!("note number {n}").as_bytes())
+                .expect("capture");
+        }
+        store.project().expect("project");
+        // One settling pass: a file written and recorded inside the same
+        // clock tick is racy by git's rule and is hashed until the
+        // record is re-armed with a later moment. That is the rule doing
+        // its job, and it happens once.
+        store.reconcile().expect("settle");
+
+        probe::reset_file_reads();
+        let summary = store.reconcile().expect("reconcile an unchanged vault");
+        assert_eq!(summary, ReconcileSummary::default(), "nothing happened, and it says so");
+        assert_eq!(
+            probe::file_reads(),
+            0,
+            "an unchanged vault is answered from a stat per file and nothing else"
+        );
+    }
+
+    #[test]
+    fn a_file_rewritten_inside_the_timestamps_resolution_is_hashed_anyway() {
+        // Git's racy-file safeguard, and the reason the record keeps the
+        // moment it was written. A write that lands in the same instant
+        // as the record is indistinguishable from it by size and mtime,
+        // so the rule that stops at a stat has to make an exception for
+        // exactly that case or it loses the edit for ever.
+        let (_dir, store, rel) = captured("the same length here");
+        store.reconcile().expect("settle");
+        let path = store.vault().join(&rel);
+        let (_, size, _, recorded_ns) = record_of(&store, &rel);
+
+        // The file was written at the very moment the record was: put
+        // both the record and the file at that instant.
+        store
+            .conn()
+            .execute(
+                "UPDATE projections SET mtime_ns = recorded_ns WHERE rel_path = ?1",
+                [&rel],
+            )
+            .expect("stage the race");
+        let edited = read_rel(&store, &rel).replace("the same length here", "a different sentence");
+        assert_eq!(edited.len() as i64, size, "the rewrite must be the same length");
+        std::fs::write(&path, &edited).expect("rewrite inside the same instant");
+        set_mtime(&path, recorded_ns);
+
+        assert_eq!(
+            store.reconcile().expect("reconcile").edits,
+            1,
+            "a file whose timestamp is not older than its record is hashed regardless"
+        );
+    }
+
+    #[test]
+    fn verify_hashes_every_projected_file_and_re_arms_what_the_stat_rule_missed() {
+        // The other half of § 2.5, and the residual stated honestly: a
+        // rewrite that keeps the length and lands with an older
+        // timestamp is invisible to a stat. Hashing everything is what
+        // answers it, which is why it is an action a person takes rather
+        // than a cost every launch pays — and reporting alone would be a
+        // diagnosis with no treatment, so the record is re-armed too.
+        let (_dir, store, rel) = captured("the same length here");
+        store.reconcile().expect("settle");
+        let path = store.vault().join(&rel);
+        let (_, _, mtime_ns, _) = record_of(&store, &rel);
+
+        let edited = read_rel(&store, &rel).replace("the same length here", "a different sentence");
+        std::fs::write(&path, &edited).expect("rewrite");
+        set_mtime(&path, mtime_ns);
+
+        assert_eq!(
+            store.reconcile().expect("reconcile").edits,
+            0,
+            "by design: size and timestamp both agree, so nothing is read"
+        );
+
+        probe::reset_file_reads();
+        let problems = store.verify().expect("verify");
+        assert!(probe::file_reads() >= 1, "verify hashes what reconciliation stats");
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains(&rel));
+
+        assert_eq!(
+            store.reconcile().expect("reconcile").edits,
+            1,
+            "and the record it re-armed is read properly on the next pass"
+        );
+        assert!(store.verify().expect("verify").is_empty(), "the condition clears");
+    }
+
+    #[test]
+    fn an_ordinary_unreconciled_edit_is_not_reported_as_an_integrity_problem() {
+        // The second-order case for verify: a file the record already
+        // says is out of date is reconciliation's ordinary work, and
+        // calling it a problem would make every unsaved external edit
+        // look like damage.
+        let (_dir, store, rel) = captured("edited but not yet taken in");
+        let text = read_rel(&store, &rel);
+        std::fs::write(store.vault().join(&rel), text + "\nand more\n").expect("edit");
+        assert!(store.verify().expect("verify").is_empty());
+    }
+
+    #[test]
+    fn a_reconcile_path_on_a_file_nothing_happened_to_records_nothing() {
+        // The second-order case for the editor's call: a shell that
+        // calls it after every save, including the saves that wrote the
+        // same bytes back, must not fill the feed with nothing.
+        let (_dir, store, rel) = captured("unchanged by the save");
+        let settled = cursor_now(&store);
+        let summary = store.reconcile_path(&rel).expect("reconcile one file");
+        assert_eq!(summary, ReconcileSummary::default());
+        assert!(page(&store, &settled).is_empty());
+    }
+
+    #[test]
+    fn a_reconcile_path_answers_a_vanished_file_the_way_the_full_pass_does() {
+        let (_dir, store, rel) = captured("about to go");
+        let settled = cursor_now(&store);
+        std::fs::remove_file(store.vault().join(&rel)).expect("delete");
+
+        let summary = store.reconcile_path(&rel).expect("reconcile one file");
+        assert_eq!(summary.tombstone_proposals, 1);
+        assert_eq!(
+            page(&store, &settled),
+            vec![(ChangeKind::Removed, rel, ChangeCause::Reconcile)]
+        );
+        // And the full pass afterwards neither proposes twice nor says
+        // the file left twice.
+        assert_eq!(store.reconcile().expect("full pass").tombstone_proposals, 0);
+        assert_eq!(page(&store, &settled).len(), 1);
+    }
+
+    #[test]
+    fn a_reconcile_path_refuses_a_path_that_is_not_a_projected_file_in_this_vault() {
+        let (_dir, store, _rel) = captured("resident");
+        for outside in ["../elsewhere.md", "C:/windows/system32/note.md", ".gilune/local/x.md"] {
+            assert!(
+                matches!(store.reconcile_path(outside), Err(KernelError::VaultUnusable { .. })),
+                "{outside} was not refused"
+            );
+        }
+        assert!(matches!(
+            store.reconcile_path("Captures/recording.wav"),
+            Err(KernelError::VaultUnusable { .. })
+        ));
     }
 
     #[test]

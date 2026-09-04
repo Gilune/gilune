@@ -18,6 +18,11 @@ use crate::{ids, KernelError, Result};
 
 pub const OBJECT_CREATED_EVENT_PREFIX: &str = "org.memory.";
 
+/// What a revision written by a processor carries in `revisions.origin`,
+/// before the processor's own id. One home: the delivery path writes it
+/// and the change feed classifies by it.
+pub(crate) const ORIGIN_PREFIX: &str = "processor:";
+
 /// Where a subject's preserved bytes are and what they must hash to.
 /// Enough to read the blob without reading it — which is what lets the
 /// external route stream it instead of returning it whole (ADR 0018 § 2).
@@ -393,7 +398,7 @@ impl Store {
                  VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![ids::new_id(), processor_id, idempotency_key, job.event_id, created_ms],
             )?;
-            let origin = format!("processor:{processor_id}");
+            let origin = format!("{ORIGIN_PREFIX}{processor_id}");
             let mut committed = 0i64;
             for (index, output) in outputs.iter().enumerate() {
                 let revision_id = derived_id(&format!("{idempotency_key}:{index}:rev"));

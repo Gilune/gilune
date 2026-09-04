@@ -6,6 +6,7 @@
 pub mod alerts;
 pub mod blobs;
 pub mod capture;
+pub mod changes;
 pub mod crashpoints;
 pub mod external;
 pub mod fs;
@@ -14,6 +15,7 @@ pub mod jobs;
 pub mod limits;
 pub mod operations;
 pub mod plugins;
+mod probe;
 pub mod processor;
 pub mod query;
 pub mod revisions;
@@ -59,6 +61,17 @@ pub enum KernelError {
         subject_id: String,
         expected: String,
         found: String,
+    },
+    /// A change-feed cursor this vault cannot answer from: a foreign
+    /// epoch, or a sequence the table does not hold (ADR 0020 § 2.1).
+    /// Its own variant because the consumer's answer is neither "retry"
+    /// nor "fail" but "rebuild from the beginning", and a consumer that
+    /// had to read that out of a message string would be matching prose.
+    #[error("cursor {seq} in epoch {epoch} cannot be answered from: {reason}")]
+    CursorUnknown {
+        epoch: String,
+        seq: i64,
+        reason: String,
     },
     #[error("local state is corrupt: {detail}")]
     Corrupt { detail: String },

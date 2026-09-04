@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -180,6 +180,30 @@ impl Store {
         &self.conn
     }
 
+    /// Run `act` inside one `BEGIN IMMEDIATE` … `COMMIT`, rolling back
+    /// on any error.
+    ///
+    /// It exists for the sites that must commit a projection mutation
+    /// and the change row announcing it together (ADR 0020 § 2.2): a row
+    /// that could commit without its mutation would make the feed a
+    /// second source of truth, and a mutation that could commit without
+    /// its row would make the feed lossy. Never called from inside
+    /// another transaction — SQLite has no nesting, and the two callers
+    /// that own their own `BEGIN` keep it.
+    pub(crate) fn write_txn<T>(&self, act: impl FnOnce() -> Result<T>) -> Result<T> {
+        self.conn.execute_batch("BEGIN IMMEDIATE;")?;
+        match act() {
+            Ok(value) => {
+                self.conn.execute_batch("COMMIT;")?;
+                Ok(value)
+            }
+            Err(e) => {
+                let _ = self.conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
+    }
+
     pub(crate) fn local_dir(&self) -> PathBuf {
         self.vault.join(".gilune").join("local")
     }
@@ -225,10 +249,19 @@ impl Store {
     }
 
     /// Full integrity check: every blob row's bytes exist where the row
-    /// says, with the digest the row records. Returns problems rather than
-    /// failing fast so callers can report all of them.
+    /// says with the digest the row records, and **every projected file
+    /// hashed** (ADR 0020 § 2.5). Returns problems rather than failing
+    /// fast so callers can report all of them.
+    ///
+    /// This is the explicit full pass. Reconciliation stops at a stat
+    /// once size and mtime agree with the record, which is git's index
+    /// rule and inherits git's residual: a file rewritten to the same
+    /// length within the timestamp's resolution is indistinguishable
+    /// from one nobody touched. Hashing every file is what answers that,
+    /// so it is an action a person takes rather than a cost every launch
+    /// pays.
     pub fn verify(&self) -> Result<Vec<String>> {
-        let mut problems = Vec::new();
+        let mut problems = self.verify_projections()?;
         let mut stmt = self
             .conn
             .prepare("SELECT blob_id, rel_path, sha256, bytes, state, origin FROM blobs")?;
@@ -528,6 +561,50 @@ const MIGRATIONS: &[&str] = &[
     // its own object: an index is not user data, so a vault that acquired
     // one by any other route must not fail to open over it.
     "CREATE INDEX IF NOT EXISTS operations_target ON operations(target_id);",
+    // v6 -> v7: the vault change feed, and the stat facts that let
+    // reconciliation stop reading what has not changed (ADR 0020).
+    //
+    // `vault_changes` is a *view* of what the projection did, not a
+    // second event system: events stay the durable record processors
+    // subscribe to, and no fake event kind is invented for a rename, a
+    // withdrawal, an import or a quarantine — the four projection
+    // mutations that used to raise nothing anywhere.
+    //
+    // `seq` is an explicit INTEGER PRIMARY KEY and deliberately **not**
+    // AUTOINCREMENT: the number comes from `meta.vault_change_seq`,
+    // advanced inside the transaction that commits the change it
+    // numbers, so a rolled-back transaction leaves no gap for a reader
+    // to mistake for a row it missed.
+    //
+    // `vault_change_epoch` is stamped once, here. A cursor carrying any
+    // other epoch belongs to a different database — another vault's,
+    // swapped in — and is refused rather than answered from this one.
+    //
+    // `projections` gains what git's index records: a file whose size
+    // and mtime both match its record is not read (ADR 0020 § 2.5).
+    // `recorded_ns` is the moment the record was written, which is what
+    // makes git's racy-file safeguard expressible — see `vault.rs`. All
+    // three default to values that mean "nothing recorded", so every row
+    // written before this migration is read exactly as it was before.
+    "CREATE TABLE vault_changes (
+         seq INTEGER PRIMARY KEY,
+         kind TEXT NOT NULL CHECK (kind IN
+             ('created','modified','moved','removed','imported','quarantined')),
+         rel_path TEXT NOT NULL,
+         previous_rel_path TEXT,
+         object_id TEXT,
+         revision_id TEXT,
+         cause TEXT NOT NULL CHECK (cause IN
+             ('capture','processor','local-edit','external-edit','sync','reconcile')),
+         created_ms INTEGER NOT NULL
+     );
+     CREATE INDEX vault_changes_path ON vault_changes(rel_path);
+     INSERT INTO meta (key, value) VALUES ('vault_change_seq', 0);
+     INSERT INTO meta (key, value)
+         VALUES ('vault_change_epoch', lower(hex(randomblob(16))));
+     ALTER TABLE projections ADD COLUMN size INTEGER NOT NULL DEFAULT -1;
+     ALTER TABLE projections ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE projections ADD COLUMN recorded_ns INTEGER NOT NULL DEFAULT 0;",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
