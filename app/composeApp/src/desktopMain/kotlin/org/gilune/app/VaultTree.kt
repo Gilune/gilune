@@ -343,12 +343,12 @@ fun VaultTree(
 ) {
     var pending by remember { mutableStateOf<PendingName?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
-    val entries = remember(state.vaultTick.value, state.vaultDir, tree.expanded.toList()) {
+    val entries = remember(state.vaultCursor.value, state.vaultDir, tree.expanded.toList()) {
         listVault(state.vaultDir, tree.expanded.toSet())
     }
     // The Captures folder is the inbox: the count is simply how many
     // notes still sit in it, shown quietly — never a nagging badge.
-    val capturesCount = remember(state.vaultTick.value, state.vaultDir) {
+    val capturesCount = remember(state.vaultCursor.value, state.vaultDir) {
         File(state.vaultDir, "Captures").listFiles()?.count { it.name.endsWith(".md") } ?: 0
     }
     val colours = MaterialTheme.colorScheme

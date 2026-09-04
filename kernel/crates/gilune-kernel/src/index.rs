@@ -1476,13 +1476,38 @@ struct Piece {
 /// carries only the limit — the alternative, interleaving parameters
 /// between the clauses that reference them, is a positional-argument bug
 /// waiting to be written.
+///
+/// **Counted, not re-asked.** The conjunction was first written as one
+/// correlated `EXISTS` per constraint per candidate anchor, which reads
+/// as the rule it implements and costs a scan of every constraint's rows
+/// for every anchor any of them named: three ordinary words over a
+/// thousand notes measured **57 seconds**, against 200 ms for reading
+/// every file, which is the wrong curve twice over. So the positive
+/// constraints are unioned once, tagged with which constraint each row
+/// came from, and an anchor is a hit when it collects **every** tag —
+/// one pass and a grouping instead of a nested loop. A fact about a note
+/// is broadcast onto that note's candidate lines by the one join that
+/// needs it, which is the `line IS NULL` rule stated as a join rather
+/// than as a condition inside a subquery.
+///
+/// Negatives stay a filter and are applied as two membership tests: a
+/// negative that holds at the anchor's own line, and one that holds of
+/// the whole note. Both are equijoins the planner can index, where the
+/// `OR` inside one correlated subquery was neither.
 fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Value>) {
     let pieces: Vec<Piece> = constraints.iter().map(piece).collect();
     let mut params: Vec<Value> = Vec::new();
     let mut ctes: Vec<String> = Vec::new();
     for (index, piece) in pieces.iter().enumerate() {
         params.extend(piece.params.iter().cloned());
-        ctes.push(format!("c{index} AS ({})", piece.sql));
+        // **MATERIALIZED, and it is not a hint.** A constraint's rows are
+        // read by four of the clauses below, and SQLite's default is to
+        // inline a common table expression into each of them — which for
+        // a full-text constraint means running the same FTS query once
+        // per row of whatever it was inlined beside. Three ordinary words
+        // over a thousand notes took **111 seconds** that way. Computing
+        // each constraint once is the whole difference.
+        ctes.push(format!("c{index} AS MATERIALIZED ({})", piece.sql));
     }
     let positive: Vec<usize> = pieces
         .iter()
@@ -1497,70 +1522,64 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
         .map(|(index, _)| index)
         .collect();
 
-    // Candidate line anchors: every line any positive constraint named.
-    let candidates = positive
+    // Every positive row, carrying the constraint it satisfies.
+    let positive_rows = positive
         .iter()
-        .map(|index| format!("SELECT rel_path, line FROM c{index} WHERE line IS NOT NULL"))
+        .map(|index| format!("SELECT {index} AS tag, rel_path, line FROM c{index}"))
         .collect::<Vec<_>>()
-        .join(" UNION ");
-    let mut holds: Vec<String> = positive
-        .iter()
-        .map(|index| {
-            format!(
-                "EXISTS (SELECT 1 FROM c{index} WHERE c{index}.rel_path = a.rel_path \
-                 AND (c{index}.line IS NULL OR c{index}.line = a.line))"
-            )
-        })
-        .collect();
-    holds.extend(negative.iter().map(|index| {
-        format!(
-            "NOT EXISTS (SELECT 1 FROM c{index} WHERE c{index}.rel_path = a.rel_path \
-             AND (c{index}.line IS NULL OR c{index}.line = a.line))"
-        )
-    }));
-    let lines_sql = format!(
-        "SELECT DISTINCT a.rel_path AS rel_path, a.line AS line \
-         FROM ({candidates}) a WHERE {}",
-        holds.join(" AND ")
+        .join(" UNION ALL ");
+    // Every negative row. Which negative it came from does not matter:
+    // not this and not that is not (this or that).
+    let negative_rows = if negative.is_empty() {
+        "SELECT NULL AS rel_path, NULL AS line WHERE 0".to_string()
+    } else {
+        negative
+            .iter()
+            .map(|index| format!("SELECT rel_path, line FROM c{index}"))
+            .collect::<Vec<_>>()
+            .join(" UNION ALL ")
+    };
+    let wanted = positive.len();
+
+    let shared = format!(
+        "pos AS MATERIALIZED ({positive_rows}), \
+         neg AS MATERIALIZED ({negative_rows}), \
+         anchors AS MATERIALIZED \
+             (SELECT DISTINCT rel_path, line FROM pos WHERE line IS NOT NULL), \
+         matched AS MATERIALIZED ( \
+             SELECT rel_path, line, tag FROM pos WHERE line IS NOT NULL \
+             UNION ALL \
+             SELECT a.rel_path, a.line, p.tag FROM anchors a \
+               JOIN pos p ON p.rel_path = a.rel_path AND p.line IS NULL), \
+         hits AS MATERIALIZED (SELECT rel_path, line FROM matched \
+                   GROUP BY rel_path, line HAVING COUNT(DISTINCT tag) = {wanted}), \
+         denied_line AS MATERIALIZED (SELECT rel_path, line FROM neg WHERE line IS NOT NULL), \
+         denied_whole AS MATERIALIZED (SELECT DISTINCT rel_path FROM neg WHERE line IS NULL), \
+         kept AS MATERIALIZED (SELECT rel_path, line FROM hits \
+                   WHERE (rel_path, line) NOT IN (SELECT rel_path, line FROM denied_line) \
+                     AND rel_path NOT IN (SELECT rel_path FROM denied_whole))"
     );
 
     let sql = match scope {
         QueryScope::Line => format!(
-            "WITH {} {lines_sql} ORDER BY rel_path, line LIMIT ?",
+            "WITH {}, {shared} SELECT rel_path, line FROM kept ORDER BY rel_path, line LIMIT ?",
             ctes.join(", ")
         ),
         QueryScope::Note => {
             // The second half of the note-scope answer: a note whose
             // note-level facts satisfy everything on their own, with no
-            // line involved at all.
-            let paths = positive
-                .iter()
-                .map(|index| format!("SELECT rel_path FROM c{index}"))
-                .collect::<Vec<_>>()
-                .join(" UNION ");
-            let mut whole: Vec<String> = positive
-                .iter()
-                .map(|index| {
-                    format!(
-                        "EXISTS (SELECT 1 FROM c{index} WHERE c{index}.rel_path = a.rel_path \
-                         AND c{index}.line IS NULL)"
-                    )
-                })
-                .collect();
-            whole.extend(negative.iter().map(|index| {
-                format!(
-                    "NOT EXISTS (SELECT 1 FROM c{index} WHERE c{index}.rel_path = a.rel_path \
-                     AND c{index}.line IS NULL)"
-                )
-            }));
+            // line involved at all. A negative is judged at the anchor,
+            // so only a note-level negative excludes a note-level hit.
             format!(
-                "WITH {}, hits AS ({lines_sql}), whole AS (SELECT DISTINCT a.rel_path AS rel_path \
-                 FROM ({paths}) a WHERE {}) \
+                "WITH {}, {shared}, \
+                 whole AS (SELECT rel_path FROM pos WHERE line IS NULL \
+                            GROUP BY rel_path HAVING COUNT(DISTINCT tag) = {wanted}) \
                  SELECT rel_path, NULL AS line FROM \
-                 (SELECT rel_path FROM hits UNION SELECT rel_path FROM whole) \
+                 (SELECT rel_path FROM kept \
+                   UNION SELECT rel_path FROM whole \
+                    WHERE rel_path NOT IN (SELECT rel_path FROM denied_whole)) \
                  ORDER BY rel_path LIMIT ?",
-                ctes.join(", "),
-                whole.join(" AND ")
+                ctes.join(", ")
             )
         }
     };

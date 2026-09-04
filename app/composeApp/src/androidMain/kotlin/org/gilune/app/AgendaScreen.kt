@@ -79,21 +79,14 @@ fun AgendaScreen(
     val types = searchTypesFor(plugins)
     val filter = plugins.tasksFilter()
 
-    // One pass over the vault per recompute, keyed exactly as the desktop
-    // panel is: the vault, its tick, the live types and the global filter.
+    // One query per recompute, keyed exactly as the desktop panel is: the
+    // vault, its change cursor, the live types and the global filter.
     // Never per keystroke. `today` is read inside the pass and carried out
     // of it, so the day every view means is the day the pass ran.
-    val computed = remember(state.vaultTick.value, state.vaultDir, types.size, filter) {
+    val open = state.gilune.value
+    val computed = remember(state.vaultCursor.value, state.vaultDir, types.size, filter, open) {
         val today = LocalDate.now()
-        val rows = taskRows(
-            searchVault(
-                state.vaultDir,
-                AGENDA_QUERY,
-                types = types,
-                today = today,
-                maxLines = AGENDA_SCAN_LINES,
-            ),
-        )
+        val rows = taskRows(agendaHits(open, state.vaultDir, types, today))
         val sections = agenda(rows, today)
         // The rows are kept only long enough to say *why* the agenda is
         // empty (`agendaEmpty`); nothing draws them.
@@ -127,11 +120,11 @@ fun AgendaScreen(
             // not happen, and the list is re-read so the screen agrees
             // with the disk again.
             state.message.value = "that task changed on disk; the agenda reloaded"
-            state.noteSaved()
+            state.noteSaved(hit.relPath)
             return
         }
         runCatching { file.writeText(updated) }
-            .onSuccess { state.noteSaved() }
+            .onSuccess { state.noteSaved(hit.relPath) }
             .onFailure { state.message.value = "could not save: ${it.message}" }
     }
 

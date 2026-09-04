@@ -225,9 +225,10 @@ class TasksPanelTest {
     /// show: a ticked one and one past the horizon. Dates are relative to
     /// the day the test runs, so nothing here rots.
     private fun agendaVault(): GiluneState {
-        val vault = Files.createTempDirectory("gilune-agenda").toFile()
         val now = LocalDate.now()
-        vault.resolve("agenda.md").writeText(
+        val indexed = IndexedVault("gilune-agenda")
+        indexed.write(
+            "agenda.md",
             """
             # Things
 
@@ -239,7 +240,11 @@ class TasksPanelTest {
             - [ ] far away due:${now.plusDays(30)}
             """.trimIndent(),
         )
-        return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(indexed.dir, CoroutineScope(Dispatchers.Default))
+        // The panel is a query now (ADR 0020 § 2.4), so it needs the
+        // handle that answers it.
+        state.gilune.value = indexed.gilune
+        return state
     }
 
     private fun showPanel(state: GiluneState, onOpen: (String) -> Unit = {}) {
@@ -286,9 +291,10 @@ class TasksPanelTest {
 
     @Test
     fun aVaultWithNothingOpenSaysSoRatherThanShowingEmptyHeadings() {
-        val vault = Files.createTempDirectory("gilune-agenda-empty").toFile()
-        vault.resolve("prose.md").writeText("no checkboxes here")
-        val state = GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val indexed = IndexedVault("gilune-agenda-empty")
+        indexed.write("prose.md", "no checkboxes here")
+        val state = GiluneState(indexed.dir, CoroutineScope(Dispatchers.Default))
+        state.gilune.value = indexed.gilune
         state.plugins.add(installedTasksPlugin())
         showPanel(state)
         compose.waitForIdle()

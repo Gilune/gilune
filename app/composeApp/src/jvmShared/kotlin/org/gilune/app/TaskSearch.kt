@@ -14,7 +14,10 @@ package org.gilune.app
 
 import java.time.LocalDate
 import java.util.Locale
+import uniffi.gilune_ffi.Constraint
+import uniffi.gilune_ffi.ConstraintOp
 import uniffi.gilune_ffi.PluginInfo
+import uniffi.gilune_ffi.TextTarget
 
 /// The key this plugin registers. A hit is a task line, not a note.
 const val TASK_SEARCH_TYPE = "task"
@@ -28,12 +31,23 @@ const val TASK_SEARCH_TYPE = "task"
 /// The type is a registration and carries no day: its date operators are
 /// built per query, against the day that query runs. `is:` needs no day,
 /// so it is one value registered beside them.
+///
+/// `constraints` is how the type reaches the index (ADR 0020 § 2.4):
+/// every task line carries a state fact, so its existence *is* "this
+/// anchor is a task line". The global filter rides beside it as a text
+/// constraint on the line — case-insensitively, where [taskLines] is
+/// exact — which is the safe direction: the index may name more lines
+/// than the plugin claims, and [taskLines] then decides.
 fun taskSearchType(filter: String = ""): SearchType = SearchType(
     key = TASK_SEARCH_TYPE,
     operators = { today ->
         listOf(DateFieldOperator(DUE_FIELD, today), DateFieldOperator(DONE_FIELD, today), MARKER_OPERATOR)
     },
     extract = { note -> taskLines(note, filter) },
+    constraints = buildList {
+        add(Constraint.Fact(TASK_STATE_PREDICATE, ConstraintOp.EXISTS, ""))
+        if (filter.isNotEmpty()) add(Constraint.Text(TextTarget.BODY, filter))
+    },
 )
 
 /// The types the language offers right now, from the live plugin list:
@@ -138,7 +152,7 @@ private fun taskLines(note: SearchedNote, filter: String): List<CandidateLine> {
         val fenced = inFence || delimiter
         if (delimiter) inFence = !inFence
         if (fenced) return@forEachIndexed
-        if (!TASK_SEARCH_TASK_LINE.containsMatchIn(line)) return@forEachIndexed
+        if (taskMarkerOf(line) == null) return@forEachIndexed
         if (filter.isNotEmpty() && !line.contains(filter)) return@forEachIndexed
         candidates.add(CandidateLine(index + 1, line))
     }
@@ -149,8 +163,6 @@ private fun taskLines(note: SearchedNote, filter: String): List<CandidateLine> {
 // The operators.
 // ---------------------------------------------------------------------
 
-private const val DUE_FIELD = "due"
-private const val DONE_FIELD = "done"
 private const val MARKER_FIELD = "is"
 
 /// `due:` and `done:`, the two § 1 stores and the only dates this type
@@ -162,9 +174,47 @@ private const val MARKER_FIELD = "is"
 /// nothing the row does not already show.
 private class DateFieldOperator(override val name: String, private val today: LocalDate) : SearchOperator {
     private val token = tokenPattern(name)
+    private val predicate = if (name == DUE_FIELD) TASK_DUE_PREDICATE else TASK_DONE_PREDICATE
 
     override fun matches(note: SearchedNote, argument: String): Boolean =
         dateMatches(dateIn(note.body, token), argument, today)
+
+    /// The value forms, as constraints on the indexed date (ADR 0020
+    /// § 2.4). `none` is the interesting one and it is the reason
+    /// `NotExists` exists at all: the plugin's own operator asks whether
+    /// a token is **absent**, which nothing else in the operator set can
+    /// say, and its negation is the plainest possible `Exists`.
+    ///
+    /// Every other negation is left to the read. `-due:week` is "not
+    /// between two dates", whose complement is a disjunction, and a
+    /// conjunction cannot hold one — so it narrows nothing and the note
+    /// decides, which is exactly the fallback this seam is built around.
+    override fun compile(argument: String, negated: Boolean): Compiled {
+        val value = argument.trim().lowercase(Locale.ROOT)
+        if (value == NONE_VALUE) {
+            val op = if (negated) ConstraintOp.EXISTS else ConstraintOp.NOT_EXISTS
+            return Compiled.Terms(listOf(Constraint.Fact(predicate, op, "")))
+        }
+        if (negated) return Compiled.Scan
+        return when {
+            value == TODAY_VALUE -> on(ConstraintOp.EQ, today)
+            value == OVERDUE_VALUE -> on(ConstraintOp.LT, today)
+            value == WEEK_VALUE -> Compiled.Terms(
+                listOf(
+                    Constraint.Fact(predicate, ConstraintOp.GE, today.toString()),
+                    Constraint.Fact(predicate, ConstraintOp.LE, today.plusDays(WEEK_DAYS).toString()),
+                ),
+            )
+            value.startsWith(BEFORE_VALUE) ->
+                boundary(value, BEFORE_VALUE, today)?.let { on(ConstraintOp.LT, it) } ?: Compiled.Never
+            value.startsWith(AFTER_VALUE) ->
+                boundary(value, AFTER_VALUE, today)?.let { on(ConstraintOp.GT, it) } ?: Compiled.Never
+            else -> isoDate(value)?.let { on(ConstraintOp.EQ, it) } ?: Compiled.Never
+        }
+    }
+
+    private fun on(op: ConstraintOp, date: LocalDate) =
+        Compiled.Terms(listOf(Constraint.Fact(predicate, op, date.toString())))
 }
 
 /// `is:` — the checkbox itself, the one thing about a task that is not a
@@ -183,6 +233,21 @@ private val MARKER_OPERATOR = object : SearchOperator {
 
     override fun matches(note: SearchedNote, argument: String): Boolean =
         markerMatches(markerIn(note.body), argument)
+
+    /// A task line carries exactly one state fact, so the negation is
+    /// expressible here where it is not for a date: "no fact saying
+    /// open" and "the fact says done" are the same set of lines.
+    override fun compile(argument: String, negated: Boolean): Compiled {
+        val value = when (argument.trim().lowercase(Locale.ROOT)) {
+            OPEN_VALUE -> TASK_STATE_OPEN
+            DONE_VALUE -> TASK_STATE_DONE
+            // A value that is neither keeps nothing, and its negation
+            // keeps everything the rest of the query found.
+            else -> return if (negated) Compiled.Scan else Compiled.Never
+        }
+        val op = if (negated) ConstraintOp.NE else ConstraintOp.EQ
+        return Compiled.Terms(listOf(Constraint.Fact(TASK_STATE_PREDICATE, op, value)))
+    }
 }
 
 /// § 4's value forms, and the whole of them:
@@ -246,8 +311,23 @@ private fun markerMatches(marker: Char?, argument: String): Boolean {
 
 /// The marker a line carries, lower-cased, or null when the line is not a
 /// task at all — which under `type:task` it always is.
-private fun markerIn(line: String): Char? =
+private fun markerIn(line: String): Char? = taskMarkerOf(line)
+
+/// The one reader of a task line's checkbox, shared by the operator that
+/// asks about it and the indexer that records it. Two answers to "is this
+/// a task, and is it ticked" would be one fact with two homes, and the
+/// index would drift from the language the moment either was touched.
+internal fun taskMarkerOf(line: String): Char? =
     TASK_SEARCH_TASK_LINE.find(line)?.groupValues?.get(4)?.firstOrNull()?.lowercaseChar()
+
+/// The ISO date one field's token carries on a line, or null. The same
+/// reader the operators use, so a fact and a query see the same token —
+/// including "the first one wins" on a line somebody wrote twice.
+internal fun taskDateIn(line: String, field: String): String? =
+    dateIn(line, tokenPattern(field))?.toString()
+
+internal const val DUE_FIELD = "due"
+internal const val DONE_FIELD = "done"
 
 private const val NONE_VALUE = "none"
 private const val TODAY_VALUE = "today"

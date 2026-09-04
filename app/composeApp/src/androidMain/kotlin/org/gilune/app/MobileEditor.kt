@@ -473,7 +473,7 @@ fun EditScreen(
     fun save(force: Boolean = false) {
         if (!editor.dirty && !force) return
         if (editor.write(state.vaultDir, relPath, force)) {
-            state.noteSaved()
+            state.noteSaved(relPath)
         } else {
             state.message.value = "$relPath changed on disk; choose which version to keep"
         }
@@ -488,7 +488,7 @@ fun EditScreen(
         save()
     }
     // A clean buffer follows the file; a dirty one is protected instead.
-    LaunchedEffect(state.vaultTick.value, relPath) {
+    LaunchedEffect(state.vaultCursor.value, relPath) {
         val file = File(state.vaultDir, relPath)
         val current = if (file.exists()) runCatching { contentHash(file.readBytes()) }.getOrNull() else null
         if (current == null || current == editor.hashAtOpen) return@LaunchedEffect
@@ -550,7 +550,7 @@ fun EditScreen(
                     if (editor.dirty) editor.write(state.vaultDir, relPath)
                     val renamed = renameNote(state.vaultDir, relPath, wanted)
                     if (renamed != null && renamed != relPath) {
-                        state.noteSaved()
+                        state.noteSaved(renamed)
                         onRenamed(renamed)
                     } else if (renamed == null) {
                         state.message.value = "could not rename to “$wanted”"

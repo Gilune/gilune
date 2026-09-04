@@ -351,7 +351,7 @@ private fun DesktopApp(
 
     DisposableEffect(tabs) {
         val preserve = {
-            for (pane in tabs.panes()) for (tab in pane.tabs) flushEditor(vaultDir, tab.editor)
+            for (pane in tabs.panes()) for (tab in pane.tabs) flushEditor(vaultDir, tab.editor, tabs.onNoteSaved)
             Prefs.saveTabsLayout(vaultDir, tabs.serialise())
         }
         shutdown.run = preserve
@@ -408,6 +408,12 @@ private fun DesktopApp(
     }
 
     LaunchedEffect(Unit) {
+        // A save the tab machinery makes — a tab losing the front, a tab
+        // closing, the window closing — goes to the feed by the same
+        // route the editor's own save takes (ADR 0020 § 2.2). It was
+        // silent until this round, so a note flushed by switching tabs
+        // reached the disk and nothing else in the app knew.
+        tabs.onNoteSaved = { relPath -> state.noteSaved(relPath) }
         // Enrolment is the shell's to arrange and the kernel's to decide
         // (ADR 0019 § 4): this says where the identity lives and what
         // protects it, and `openVault` runs it before anything else reads
@@ -652,7 +658,7 @@ private fun QuickOpenBox(
     val colours = MaterialTheme.colorScheme
     var query by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
-    val matches = remember(query, state.vaultTick.value) { searchNotes(state.vaultDir, query) }
+    val matches = remember(query, state.vaultCursor.value) { searchNotes(state.vaultDir, query) }
 
     fun open(relPath: String) {
         onOpen(relPath)

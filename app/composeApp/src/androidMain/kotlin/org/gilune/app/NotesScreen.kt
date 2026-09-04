@@ -44,7 +44,7 @@ fun NotesScreen(
     modifier: Modifier = Modifier,
 ) {
     val colours = MaterialTheme.colorScheme
-    val notes = remember(state.vaultTick.value) { listNotes(state.vaultDir) }
+    val notes = remember(state.vaultCursor.value) { listNotes(state.vaultDir) }
     if (notes.isEmpty()) {
         Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
@@ -101,7 +101,7 @@ fun ReadScreen(
     var content by remember(relPath) { mutableStateOf("") }
     var hashAtRead by remember(relPath) { mutableStateOf("") }
     var reloadTick by remember(relPath) { mutableStateOf(0) }
-    LaunchedEffect(relPath, state.vaultTick.value, reloadTick) {
+    LaunchedEffect(relPath, state.vaultCursor.value, reloadTick) {
         val text = runCatching { file.readText() }.getOrDefault("")
         content = text
         hashAtRead = contentHash(text)
@@ -116,9 +116,9 @@ fun ReadScreen(
     // also the removal story. Rebuilt when the plugin list changes, since
     // that is what decides whether `type:task` is a type at all.
     val plugins = state.plugins.toList()
-    val tick = state.vaultTick.value
+    val tick = state.vaultCursor.value
     val renderers = remember(state.vaultDir, tick, plugins) {
-        BlockRenderers(listOf(mobileFilterBlockRegistration(state.vaultDir, tick, plugins, onOpenNote)))
+        BlockRenderers(listOf(mobileFilterBlockRegistration(state, plugins, onOpenNote)))
     }
 
     // The chain the editors fold over a line they are toggling, gated the
@@ -156,7 +156,7 @@ fun ReadScreen(
             .onSuccess {
                 content = updated
                 hashAtRead = contentHash(updated)
-                state.noteSaved()
+                state.noteSaved(relPath)
             }
             .onFailure { state.message.value = "could not save: ${it.message}" }
     }

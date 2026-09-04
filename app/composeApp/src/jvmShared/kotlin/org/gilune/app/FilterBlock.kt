@@ -15,6 +15,7 @@
 package org.gilune.app
 
 import java.time.LocalDate
+import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.PluginInfo
 
 /// The info string the shell claims (§ 4). No surveyed tool uses it —
@@ -135,22 +136,27 @@ const val FILTER_NO_MATCHES = "nothing matches"
 /// off and `type:task` is a type nobody registered, which is the honest
 /// answer rather than an empty list.
 fun runFilterBlock(
+    gilune: Gilune,
     vaultDir: String,
     block: String,
     plugins: List<PluginInfo>,
     today: LocalDate,
     cap: Int = FILTER_ROW_CAP,
-): FilterResult = evaluateFilterBlock(vaultDir, block, searchTypesFor(plugins), today, cap)
+): FilterResult = evaluateFilterBlock(gilune, vaultDir, block, searchTypesFor(plugins), today, cap)
 
 /// The same against a type registry directly — what [runFilterBlock] calls
 /// once it has one, and the form a renderer uses when it has already built
 /// the registry for this composition. Two names rather than an overload
 /// because both lists erase to the same JVM signature.
 ///
-/// One pass over the vault per block (§ 4: whole vault, each file read
-/// once, no index), so a note carrying several blocks pays several passes.
-/// The tick-not-keystroke rule and the row cap are what keep that honest.
+/// One query per block, answered from the index and reading only the
+/// notes it named (ADR 0020 § 2.4) — where § 4 of ADR 0015 said "whole
+/// vault, each file read once", which is what a note carrying several
+/// blocks used to pay several times over. The tick-not-keystroke rule and
+/// the row cap stand unchanged; what they are protecting is now much
+/// cheaper.
 fun evaluateFilterBlock(
+    gilune: Gilune,
     vaultDir: String,
     block: String,
     types: List<SearchType>,
@@ -162,7 +168,8 @@ fun evaluateFilterBlock(
         // Total by construction: only a runnable block has no hint.
         return FilterResult.Hint(filterHint(classified, types).orEmpty())
     }
-    val hits = searchVault(
+    val hits = queryVault(
+        gilune,
         vaultDir,
         classified.query,
         types = types,

@@ -38,6 +38,27 @@ const val AGENDA_SCAN_LINES = 200
 /// keeps them from overlapping.
 const val AGENDA_QUERY = "type:$TASK_SEARCH_TYPE"
 
+/// The agenda's one query, for both shells: every task line the vault
+/// holds, as hits carrying the lines to draw.
+///
+/// It asks for tasks rather than *open* tasks deliberately — the empty
+/// agenda has two different things to say (see [agendaEmpty]), and only
+/// the whole set can tell them apart. The index narrows it to the notes
+/// that have a task line at all, and only those are read.
+///
+/// A vault not open yet answers with nothing, which is what a screen
+/// composed before its handle should draw.
+fun agendaHits(
+    gilune: uniffi.gilune_ffi.Gilune?,
+    vaultDir: String,
+    types: List<SearchType>,
+    today: LocalDate,
+): List<SearchHit> = if (gilune == null) {
+    emptyList()
+} else {
+    queryVault(gilune, vaultDir, AGENDA_QUERY, types = types, today = today, maxLines = AGENDA_SCAN_LINES)
+}
+
 /// The four bounded views (§ 6, T3), in the order a panel shows them.
 /// They **partition** the tasks they cover: no task appears twice, which
 /// is why the views divide one result set by its due date rather than

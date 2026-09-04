@@ -482,7 +482,7 @@ private fun switchPlugin(state: GiluneState, plugin: PluginInfo, enable: Boolean
 private fun TranscriberCatchUp(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
     var wordless by remember { mutableStateOf<Int?>(null) }
-    LaunchedEffect(state.vaultTick.value, plugin.pluginId, plugin.state) {
+    LaunchedEffect(state.refreshCount.value, plugin.pluginId, plugin.state) {
         val gilune = state.gilune.value ?: return@LaunchedEffect
         wordless = withContext(Dispatchers.IO) {
             runCatching { wordlessRecordings(gilune).size }.getOrNull()

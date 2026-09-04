@@ -41,16 +41,15 @@ import java.time.LocalDate
 import uniffi.gilune_ffi.PluginInfo
 
 /// The shell's registration of the `filter` fence for the phone's Read
-/// view. `tick` is the vault tick: a block is recomputed when the vault
-/// says it may have changed, never per keystroke — Read has no keystrokes,
-/// and the rule is the same one the desktop keeps.
+/// view. A block is recomputed when the change cursor moves — when the
+/// vault's files actually changed — never per keystroke; Read has no
+/// keystrokes, and the rule is the same one the desktop keeps.
 fun mobileFilterBlockRegistration(
-    vaultDir: String,
-    tick: Int,
+    state: GiluneState,
     plugins: List<PluginInfo>,
     onOpen: ((String) -> Unit)? = null,
 ): BlockRegistration = BlockRegistration(FILTER_FENCE) { block ->
-    MobileFilterBlock(vaultDir, tick, plugins, block.text, onOpen)
+    MobileFilterBlock(state, plugins, block.text, onOpen)
 }
 
 /// A `filter` block as a live list. Group-less — a block asked one
@@ -59,8 +58,7 @@ fun mobileFilterBlockRegistration(
 /// get their single hint row.
 @Composable
 fun MobileFilterBlock(
-    vaultDir: String,
-    tick: Int,
+    state: GiluneState,
     plugins: List<PluginInfo>,
     block: String,
     onOpen: ((String) -> Unit)? = null,
@@ -72,9 +70,13 @@ fun MobileFilterBlock(
     // `type:task` block into its hint on the next composition.
     val types = searchTypesFor(plugins)
     val filter = plugins.tasksFilter()
-    val computed = remember(vaultDir, tick, block, types.size, filter) {
+    val open = state.gilune.value
+    val computed = remember(state.vaultDir, state.vaultCursor.value, block, types.size, filter, open) {
         val today = LocalDate.now()
-        today to runFilterBlock(vaultDir, block, plugins, today)
+        today to when (open) {
+            null -> FilterResult.Hint(FILTER_NO_MATCHES)
+            else -> runFilterBlock(open, state.vaultDir, block, plugins, today)
+        }
     }
     val today = computed.first
     val result = computed.second

@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import uniffi.gilune_ffi.Cursor
 import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.SourceSummary
@@ -18,6 +19,11 @@ import uniffi.gilune_ffi.TombstoneProposal
 /// How much of a recording crosses the boundary at a time. Streamed
 /// capture is chunk-by-chunk so a process kill loses only the tail.
 const val CAPTURE_CHUNK = 64 * 1024
+
+/// How many changes one read of the feed takes. The shell only wants to
+/// know **that** the vault moved, so the page is a bound on memory and
+/// nothing more; a long feed is several short reads.
+private const val CHANGE_PAGE = 500u
 
 /// Whether a device exchange left this vault anything to re-project.
 ///
@@ -72,8 +78,52 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// here came from another tool — supported use (rule 13).
     val proposals = mutableStateListOf<TombstoneProposal>()
 
-    /// Bumped whenever vault contents may have changed; file panels watch it.
-    val vaultTick = mutableStateOf(0)
+    /// Where this shell has read up to in the vault's change feed
+    /// (ADR 0020 § 2.1). Panels, the tree and every query watch it and
+    /// re-run when it moves.
+    ///
+    /// **A cursor, not a tick.** The tick it replaces was bumped by
+    /// anything that might have touched the vault and carried no identity
+    /// at all, so it fired when nothing had changed and stayed silent
+    /// when another process changed everything. A cursor is the kernel's
+    /// answer to "what has happened since I last looked", so it moves
+    /// exactly when the vault's files did — a second desktop instance's
+    /// save and the phone's recording service included, because the feed
+    /// lives beside the vault rather than in a process.
+    ///
+    /// Null until the vault is open. The first advance discards the
+    /// history it finds: a shell opening a vault has nothing to catch up
+    /// on, it has everything to draw.
+    val vaultCursor = mutableStateOf<Cursor?>(null)
+
+    /// Bring the cursor up to the end of the feed, and say whether it
+    /// moved. Cheap on a settled vault: one indexed read that finds
+    /// nothing waiting.
+    ///
+    /// A cursor the vault will not answer from — a different vault's
+    /// database swapped in behind an open handle — is not an error to
+    /// report but a reader to reseat, which is what `change_origin` is
+    /// for.
+    private fun advanceCursor(g: Gilune): Boolean {
+        val from = vaultCursor.value ?: runCatching { g.changeOrigin() }.getOrNull() ?: return false
+        var at = from
+        var reseated = false
+        while (true) {
+            val page = runCatching { g.changesSince(at, CHANGE_PAGE) }.getOrNull()
+            if (page == null) {
+                // Once. A second refusal from the beginning of the feed
+                // is the vault failing, not this reader being stale.
+                if (reseated) return false
+                reseated = true
+                at = runCatching { g.changeOrigin() }.getOrNull() ?: return false
+                continue
+            }
+            at = page.next
+            if (page.complete) break
+        }
+        vaultCursor.value = at
+        return at != from
+    }
 
     /// Processors this host implements **outside** the kernel (ADR 0018
     /// § 2). `runProcessing` deliberately leaves their jobs alone — the
@@ -405,6 +455,12 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 // tombstone all apply with no new machinery, and a plugin
                 // the user removed is never resurrected.
                 g.registerPlugin(tasksDeclaration())
+                // What this process can derive about the vault, declared
+                // straight after the plugins it belongs to and before the
+                // first pass, so the projection below brings the index up
+                // with it rather than leaving a pass to catch up
+                // (ADR 0020 § 2.3).
+                registerShellIndexers(g)
                 // Enrolment happens on open (ADR 0019 § 4) and before
                 // anything else reads the vault, because it is what
                 // decides whether this machine is the device the vault
@@ -427,14 +483,36 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         }
     }
 
-    /// The editor's own writes announce themselves: the agenda panel,
-    /// the search panel and every filter block read the vault off
-    /// `vaultTick`, and a save nobody hears about leaves them showing a
-    /// task that is already done (owner report, 2026-08-31). Kernel
-    /// ingestion still waits for sync — this is a display fact, not a
-    /// history one.
-    fun noteSaved() {
-        vaultTick.value += 1
+    /// A save this shell made, reaching the feed and the index before
+    /// anything refreshes (ADR 0020 § 2.2, gate 7).
+    ///
+    /// The order is the whole of it: reconcile **that one file**, let the
+    /// indexers run over it, and only then move the cursor. A consumer
+    /// woken by the cursor therefore reads an index that already knows
+    /// about the note that woke it — which is what "the agenda updates
+    /// when you tick a box" turns out to require.
+    ///
+    /// `relPath` is the note that was written, or null for a save whose
+    /// path the caller does not know; without one the file still reaches
+    /// the feed, on the next full pass rather than now.
+    fun noteSaved(relPath: String? = null) {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) { applySave(g, relPath) }
+    }
+
+    /// [noteSaved] without the dispatch, for a caller that is already off
+    /// the main thread and for tests that want the ordering to be a fact
+    /// rather than a race.
+    internal fun applySave(g: Gilune, relPath: String?) {
+        if (relPath != null) {
+            runCatching { g.reconcilePath(relPath) }
+                .onFailure { GiluneLog.warn("could not reconcile $relPath after a save", it) }
+        }
+        // Belt and braces, and cheap: `reconcile_path` advances the index
+        // itself, and a save with no path has nothing to reconcile but may
+        // still have left the feed something from elsewhere.
+        runCatching { g.advanceIndex() }
+        advanceCursor(g)
     }
 
     fun refresh() {
@@ -448,8 +526,16 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         val open = g.openProposals()
         proposals.clear()
         proposals.addAll(open)
-        vaultTick.value += 1
+        advanceCursor(g)
+        refreshCount.value += 1
     }
+
+    /// How many times this state has re-read the kernel's own facts —
+    /// plugins, proposals, counts. Deliberately **not** the cursor: a
+    /// plugin switched off or a job finishing changes what Settings
+    /// should draw and changes no file in the vault, and a screen that
+    /// watched the cursor for it would not refresh at all.
+    val refreshCount = mutableStateOf(0)
 
     /// Reconcile external edits, run local processing, canonicalise,
     /// refresh. Reconcile precedes projection deliberately: the reverse

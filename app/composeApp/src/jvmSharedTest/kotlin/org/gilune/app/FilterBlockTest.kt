@@ -28,14 +28,14 @@ class FilterBlockTest {
     private val types: List<SearchType> = searchTypesFor(withTasks)
     private val typesWithoutTasks: List<SearchType> = searchTypesFor(withoutTasks)
 
-    private val vault: String by lazy { buildVault() }
+    private val indexed: IndexedVault by lazy { buildVault() }
+    private val vault: String get() = indexed.dir
+    private val gilune get() = indexed.gilune
 
-    private fun buildVault(): String {
-        val root = Files.createTempDirectory("gilune-filter-block").toFile()
+    private fun buildVault(): IndexedVault {
+        val built = IndexedVault("gilune-filter-block")
         fun write(relPath: String, text: String) {
-            val file = File(root, relPath)
-            file.parentFile?.mkdirs()
-            file.writeText(text)
+            built.write(relPath, text)
         }
         write(
             "Work/project.md",
@@ -78,11 +78,11 @@ class FilterBlockTest {
             ```
             """.trimIndent(),
         )
-        return root.absolutePath
+        return built
     }
 
     private fun run(block: String, cap: Int = FILTER_ROW_CAP, registry: List<SearchType> = types) =
-        evaluateFilterBlock(vault, block, registry, today, cap)
+        evaluateFilterBlock(gilune, vault, block, registry, today, cap)
 
     /// The task's own words. The panel's `taskLabel` says this properly
     /// and is tested where it lives; it is desktop code and this test is
@@ -240,9 +240,10 @@ class FilterBlockTest {
 
     @Test
     fun fiftyIsTheShippedCap() {
-        val root = Files.createTempDirectory("gilune-filter-cap").toFile()
-        File(root, "many.md").writeText((1..60).joinToString("\n") { "- [ ] task $it due:2026-09-05" })
-        val result = evaluateFilterBlock(root.absolutePath, "type:task", types, today) as FilterResult.Tasks
+        val many = IndexedVault("gilune-filter-cap")
+        many.write("many.md", (1..60).joinToString("\n") { "- [ ] task $it due:2026-09-05" })
+        val result =
+            evaluateFilterBlock(many.gilune, many.dir, "type:task", types, today) as FilterResult.Tasks
         assertEquals(FILTER_ROW_CAP, result.rows.size)
         assertEquals(10, result.more)
     }
@@ -255,10 +256,11 @@ class FilterBlockTest {
 
     @Test
     fun theEditModeCapIsEightRowsAndTheRestAreCounted() {
-        val root = Files.createTempDirectory("gilune-filter-edit-cap").toFile()
-        File(root, "many.md").writeText((1..20).joinToString("\n") { "- [ ] task $it due:2026-09-05" })
+        val many = IndexedVault("gilune-filter-edit-cap")
+        many.write("many.md", (1..20).joinToString("\n") { "- [ ] task $it due:2026-09-05" })
         val result = evaluateFilterBlock(
-            root.absolutePath,
+            many.gilune,
+            many.dir,
             "type:task",
             types,
             today,
@@ -337,8 +339,8 @@ class FilterBlockTest {
     fun theLivePluginListIsWhatDecidesAndTheShellsEntryReadsIt() {
         // The entry the renderer calls: types come from the plugins, so
         // the removal story cannot be got wrong by a caller.
-        assertTrue(runFilterBlock(vault, "type:task", withTasks, today) is FilterResult.Tasks)
-        assertTrue(runFilterBlock(vault, "type:task", withoutTasks, today) is FilterResult.Hint)
+        assertTrue(runFilterBlock(gilune, vault, "type:task", withTasks, today) is FilterResult.Tasks)
+        assertTrue(runFilterBlock(gilune, vault, "type:task", withoutTasks, today) is FilterResult.Hint)
     }
 
     @Test
@@ -346,7 +348,7 @@ class FilterBlockTest {
         val disabled: List<PluginInfo> = listOf(installedTasksPlugin(state = "disabled"))
         assertEquals(
             FilterResult.Hint("no type called task is registered — is its plugin on?"),
-            runFilterBlock(vault, "type:task", disabled, today),
+            runFilterBlock(gilune, vault, "type:task", disabled, today),
         )
     }
 
@@ -389,7 +391,7 @@ class FilterBlockTest {
     @Test
     fun theGlobalFilterNarrowsWhatABlockCallsATask() {
         val filtered: List<PluginInfo> = listOf(installedTasksPlugin(settings = tasksSettingsDocument("#task")))
-        val result = runFilterBlock(vault, "type:task", filtered, today) as FilterResult.Tasks
+        val result = runFilterBlock(gilune, vault, "type:task", filtered, today) as FilterResult.Tasks
         assertTrue(result.rows.isEmpty(), "no line in the vault carries #task, so none of them is one")
     }
 }

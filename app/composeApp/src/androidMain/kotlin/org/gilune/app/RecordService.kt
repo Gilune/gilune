@@ -238,6 +238,12 @@ class RecordService : Service() {
         var transcriptionFailed = 0L
         try {
             Gilune.open(vaultDir(this)).use { gilune ->
+                // This handle indexes what it writes (ADR 0020 § 2.3).
+                // Registration is per handle and per process, so without
+                // this the recording's note reached the kernel's own text
+                // index — every process maintains that — and the tasks
+                // plugin's namespace waited for the app to be opened.
+                registerShellIndexers(gilune)
                 val writer = gilune.beginCapture("wav")
                 // The header goes across on its own, before any PCM: an
                 // abandoned stage file is then still a readable WAV

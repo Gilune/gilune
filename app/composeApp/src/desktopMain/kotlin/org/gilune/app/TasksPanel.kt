@@ -65,12 +65,11 @@ import uniffi.gilune_ffi.PluginInfo
 /// one (§ 4 asks for a click to open the note *at* that line; opening the
 /// note is what the shell can do today).
 ///
-/// One pass over the vault per recompute, keyed exactly as the search
-/// panel is: the vault tick, the vault, the live types and the global
-/// filter. Never per keystroke (§ 4). Honestly, that means the same
-/// staleness the search panel has — a task typed into an open buffer
-/// shows once autosave's write has been followed by a tick, not on the
-/// keystroke.
+/// One query per recompute, keyed exactly as the search panel is: the
+/// change cursor, the vault, the live types and the global filter. Never
+/// per keystroke (§ 4). Honestly, that means the same staleness the
+/// search panel has — a task typed into an open buffer shows once
+/// autosave's write has reached the feed, not on the keystroke.
 @Composable
 fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier = Modifier) {
     val colours = MaterialTheme.colorScheme
@@ -79,20 +78,10 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
     // `today` is read inside the pass and carried out of it, so the day
     // every view means — and the day every row's date is coloured against
     // — is the day the pass ran, not the day a recomposition happened.
-    val computed = remember(state.vaultTick.value, state.vaultDir, types.size, filter) {
+    val open = state.gilune.value
+    val computed = remember(state.vaultCursor.value, state.vaultDir, types.size, filter, open) {
         val today = LocalDate.now()
-        today to agenda(
-            taskRows(
-                searchVault(
-                    state.vaultDir,
-                    AGENDA_QUERY,
-                    types = types,
-                    today = today,
-                    maxLines = AGENDA_SCAN_LINES,
-                ),
-            ),
-            today,
-        )
+        today to agenda(taskRows(agendaHits(open, state.vaultDir, types, today)), today)
     }
     val today = computed.first
     val sections = computed.second
@@ -251,12 +240,11 @@ private fun dueColour(due: LocalDate, today: LocalDate): Color = when {
 /// plugin's, which is why a block keeps rendering — as a hint row naming
 /// the type it wanted — when every removable plugin is gone.
 fun filterBlockRegistration(
-    vaultDir: String,
-    tick: Int,
+    state: GiluneState,
     plugins: List<PluginInfo>,
     onOpen: ((String) -> Unit)? = null,
 ): BlockRegistration = BlockRegistration(FILTER_FENCE) { block ->
-    FilterBlockView(vaultDir, tick, plugins, block.text, onOpen)
+    FilterBlockView(state, plugins, block.text, onOpen)
 }
 
 /// The id the shell's **Edit-mode** registration answers to.
@@ -415,8 +403,7 @@ private fun FilterTextLine(text: String, rowHeight: Dp, italic: Boolean) {
 /// is composed at all, so no evaluation runs.
 @Composable
 fun FilterBlockView(
-    vaultDir: String,
-    tick: Int,
+    state: GiluneState,
     plugins: List<PluginInfo>,
     block: String,
     onOpen: ((String) -> Unit)? = null,
@@ -425,9 +412,13 @@ fun FilterBlockView(
     val colours = MaterialTheme.colorScheme
     val types = searchTypesFor(plugins)
     val filter = plugins.tasksFilter()
-    val computed = remember(vaultDir, tick, block, types.size, filter) {
+    val open = state.gilune.value
+    val computed = remember(state.vaultDir, state.vaultCursor.value, block, types.size, filter, open) {
         val today = LocalDate.now()
-        today to evaluateFilterBlock(vaultDir, block, types, today)
+        today to when (open) {
+            null -> FilterResult.Hint(FILTER_NO_MATCHES)
+            else -> evaluateFilterBlock(open, state.vaultDir, block, types, today)
+        }
     }
     val today = computed.first
     val result = computed.second

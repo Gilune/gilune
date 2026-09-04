@@ -59,9 +59,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.time.LocalDate
 
-/// Searching is one pass over the vault per keystroke, on the composing
-/// thread: honest for a personal vault, and the thing to reach for if a
-/// large one ever feels it (debounce, or move the pass off-thread).
+/// Searching is one query per keystroke on the composing thread. A query
+/// is microseconds against the system index (ADR 0020); what it costs
+/// beyond that is reading the notes it answered with, so the bill is
+/// proportional to the hits rather than to the vault.
 @Composable
 fun SearchPanel(
     state: GiluneState,
@@ -80,13 +81,14 @@ fun SearchPanel(
     // list's identity.
     val types = searchTypesFor(state.plugins)
     val filter = state.tasksFilter()
-    val hits = remember(query, state.vaultTick.value, types.size, filter) {
-        if (query.isBlank()) {
+    val open = state.gilune.value
+    val hits = remember(query, state.vaultCursor.value, types.size, filter, open) {
+        if (query.isBlank() || open == null) {
             emptyList()
         } else {
             // `today` is read here rather than inside the engine so the
             // day a relative word means is the day the query ran.
-            searchVault(state.vaultDir, query, types = types, today = LocalDate.now())
+            queryVault(open, state.vaultDir, query, types = types, today = LocalDate.now())
         }
     }
 

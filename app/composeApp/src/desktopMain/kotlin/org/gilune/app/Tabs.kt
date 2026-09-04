@@ -73,6 +73,12 @@ class TabsState(val vaultDir: String) {
     var root: PaneNode by mutableStateOf<PaneNode>(TabPane())
     var activePane: TabPane by mutableStateOf(root as TabPane)
 
+    /// Where a save made by the tab machinery — a deactivation, a close —
+    /// is announced. The shell sets it to `GiluneState::noteSaved`; the
+    /// model is testable without one, which is why it is a hook rather
+    /// than a handle on the state.
+    var onNoteSaved: ((String) -> Unit)? = null
+
     /// The dictation session's target: one at a time, so the words land
     /// in the note that started it even after a switch. Starting and
     /// stopping belong to the UI; this only remembers whose caret it is.
@@ -138,7 +144,7 @@ class TabsState(val vaultDir: String) {
         // The tab that left the front stops being composed, so nothing
         // would save it. A refused flush leaves it dirty and stale — it
         // will refuse to close — but the switch still happens.
-        if (leaving != null && leaving !== tab) flushEditor(vaultDir, leaving.editor)
+        if (leaving != null && leaving !== tab) flushEditor(vaultDir, leaving.editor, onNoteSaved)
     }
 
     /// Ctrl+1…9: the nth tab of the active pane, counting from one.
@@ -160,7 +166,7 @@ class TabsState(val vaultDir: String) {
     /// the front to ask for an answer instead of being closed.
     fun close(pane: TabPane, tab: Tab): Boolean {
         if (pane.tabs.none { it === tab }) return false
-        if (!flushEditor(vaultDir, tab.editor)) {
+        if (!flushEditor(vaultDir, tab.editor, onNoteSaved)) {
             select(pane, tab)
             return false
         }
@@ -519,7 +525,7 @@ private fun normalised(weights: List<Float>): List<Float> {
 /// and closing one save exactly as autosave does. False means the file
 /// changed under the buffer: nothing is written, and the buffer stays
 /// dirty and stale until someone answers for it (ADR 0012).
-fun flushEditor(vaultDir: String, editor: EditorState): Boolean {
+fun flushEditor(vaultDir: String, editor: EditorState, onSaved: ((String) -> Unit)? = null): Boolean {
     if (!editor.dirty) return true
     val relPath = editor.openRelPath ?: return true
     val file = File(vaultDir, relPath)
@@ -533,5 +539,10 @@ fun flushEditor(vaultDir: String, editor: EditorState): Boolean {
     editor.hashAtOpen = contentHash(document)
     editor.dirty = false
     editor.staleBuffer = false
+    // A tab losing the front, a tab closing, a window closing: all of
+    // them write, and until this round none of them said so. The note
+    // reached the disk and nothing else in the app knew, which is the
+    // same silence `write` was fixed for and one call further out.
+    onSaved?.invoke(relPath)
     return true
 }

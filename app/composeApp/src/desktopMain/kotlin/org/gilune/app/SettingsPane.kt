@@ -595,7 +595,7 @@ private fun VaultSection(state: GiluneState, vaultDir: String, onVaultChange: (S
     if (gilune == null) {
         Text("not open", fontSize = 12.sp)
     } else {
-        val status = remember(state.vaultTick.value) { runCatching { gilune.status() }.getOrNull() }
+        val status = remember(state.refreshCount.value) { runCatching { gilune.status() }.getOrNull() }
         Text(
             buildString {
                 appendLine("schema version: ${runCatching { gilune.schemaVersion() }.getOrNull()}")

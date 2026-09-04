@@ -255,7 +255,7 @@ private fun deliverDictation(state: GiluneState, tabs: TabsState, tabId: Long, w
     }
     val (pane, target) = located
     insertAtCaret(target.editor, words)
-    if (pane.active !== target) flushEditor(tabs.vaultDir, target.editor)
+    if (pane.active !== target) flushEditor(tabs.vaultDir, target.editor, tabs.onNoteSaved)
 }
 
 /// The tab arguments are how a pane hands the editor its place in the
@@ -339,9 +339,11 @@ private fun OpenNote(
     // all go through the same guard (ADR 0012). `force` is the answer the
     // stale-buffer banner takes, and only it may pass the guard.
     //
-    // A write announces itself: panels and filter blocks read the vault
-    // off `vaultTick`, and a save nobody hears about is an agenda that
-    // only catches up on reload (owner report, 2026-08-31).
+    // A write announces itself, by name: the file it just wrote is
+    // reconciled and indexed before the cursor moves, so a panel woken by
+    // the cursor reads an index that already knows about this note
+    // (ADR 0020 § 2.2). A save nobody hears about is an agenda that only
+    // catches up on reload (owner report, 2026-08-31).
     fun write(force: Boolean = false) {
         if (force) {
             val document = editor.document()
@@ -349,14 +351,14 @@ private fun OpenNote(
             editor.hashAtOpen = contentHash(document)
             editor.dirty = false
             editor.staleBuffer = false
-            state.noteSaved()
+            state.noteSaved(relPath)
             return
         }
         val wasDirty = editor.dirty
         if (!flushEditor(state.vaultDir, editor)) {
             state.message.value = "$relPath changed on disk; choose which version to keep"
         } else if (wasDirty) {
-            state.noteSaved()
+            state.noteSaved(relPath)
         }
     }
 
@@ -370,7 +372,7 @@ private fun OpenNote(
     }
 
     // A clean buffer follows the file; a dirty one is protected instead.
-    LaunchedEffect(state.vaultTick.value, relPath) {
+    LaunchedEffect(state.vaultCursor.value, relPath) {
         val current = onDiskHash() ?: return@LaunchedEffect
         if (current == editor.hashAtOpen) return@LaunchedEffect
         if (editor.dirty) editor.staleBuffer = true else editor.open(state.vaultDir, relPath)
@@ -515,8 +517,9 @@ private fun OpenNote(
             // resolves through a table keyed by info string; the shell's
             // own `filter` is its only entry, and every other fence — and
             // every fence at all with this list empty — is the code box it
-            // has always been. Reading `vaultTick` here is what makes a
-            // block recompute on the tick rather than per keystroke (§ 4).
+            // has always been. Reading the cursor here is what makes a
+            // block recompute when the vault moves rather than per
+            // keystroke (§ 4).
             MarkdownBody(
                 remember(editor.text.text) { parseMarkdown(editor.text.text) },
                 Modifier
@@ -526,8 +529,7 @@ private fun OpenNote(
                 renderers = BlockRenderers(
                     listOf(
                         filterBlockRegistration(
-                            state.vaultDir,
-                            state.vaultTick.value,
+                            state,
                             state.plugins.toList(),
                             onOpen = openRow,
                         ),
@@ -622,11 +624,16 @@ private fun OpenNote(
                     .distinct()
                     .filterNot { it == caretBody }
             }
-            val evaluated = remember(state.vaultDir, state.vaultTick.value, wanted, plugins, filter) {
+            val open = state.gilune.value
+            val evaluated = remember(state.vaultDir, state.vaultCursor.value, wanted, plugins, filter, open) {
                 val day = LocalDate.now()
                 val types = searchTypesFor(plugins)
                 day to wanted.associateWith { body ->
-                    evaluateFilterBlock(state.vaultDir, body, types, day, FILTER_EDIT_ROW_CAP)
+                    if (open == null) {
+                        FilterResult.Hint(FILTER_NO_MATCHES)
+                    } else {
+                        evaluateFilterBlock(open, state.vaultDir, body, types, day, FILTER_EDIT_ROW_CAP)
+                    }
                 }
             }
             val blockDay = evaluated.first

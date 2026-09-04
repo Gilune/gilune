@@ -344,10 +344,11 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
         if (asked.launch.askForMic) askForMic += 1
     }
 
-    // The widget's inbox count follows the vault. `vaultTick` is bumped by
-    // every refresh, so this is "updated on app refresh" with nothing new
-    // to remember to call.
-    LaunchedEffect(state.vaultTick.value) { refreshWidgets(context) }
+    // The widget's inbox count follows the vault. The cursor moves when
+    // the vault's files do — this process's writes and the recording
+    // service's alike — so this is "updated when something changed" with
+    // nothing new to remember to call.
+    LaunchedEffect(state.vaultCursor.value) { refreshWidgets(context, state.gilune.value) }
 
     // The idle timer (§ 1). The composer's own text is the only state it
     // governs, and expiry commits rather than discards.

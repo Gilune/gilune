@@ -74,13 +74,14 @@ fun SearchScreen(
     // without changing the list's identity.
     val types = searchTypesFor(state.plugins)
     val filter = state.plugins.tasksFilter()
-    val hits = remember(query, state.vaultTick.value, types.size, filter) {
-        if (query.isBlank()) {
+    val open = state.gilune.value
+    val hits = remember(query, state.vaultCursor.value, types.size, filter, open) {
+        if (query.isBlank() || open == null) {
             emptyList()
         } else {
             // `today` is read here rather than inside the engine so the
             // day a relative word means is the day the query ran.
-            searchVault(state.vaultDir, query, types = types, today = LocalDate.now())
+            queryVault(open, state.vaultDir, query, types = types, today = LocalDate.now())
         }
     }
 

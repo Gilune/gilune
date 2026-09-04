@@ -20,6 +20,10 @@ import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import java.io.File
+import uniffi.gilune_ffi.Constraint
+import uniffi.gilune_ffi.Gilune
+import uniffi.gilune_ffi.QueryScope
+import uniffi.gilune_ffi.TextTarget
 
 /// Asks every placed widget to redraw. Explicit component, never an
 /// implicit broadcast: this is the app talking to its own receiver.
@@ -38,12 +42,15 @@ class GiluneWidget : AppWidgetProvider() {
 }
 
 /// Redraw now, from whichever component noticed the vault had changed.
-fun refreshWidgets(context: Context) {
+/// `gilune` is that component's own handle where it has one — the app and
+/// the recording service both do — so the number is read from the index
+/// without opening a second vault to draw it.
+fun refreshWidgets(context: Context, gilune: Gilune? = null) {
     runCatching {
         val manager = AppWidgetManager.getInstance(context) ?: return
         val ids = manager.getAppWidgetIds(ComponentName(context, GiluneWidget::class.java))
         if (ids.isEmpty()) return
-        val views = widgetViews(context)
+        val views = widgetViews(context, gilune)
         for (id in ids) manager.updateAppWidget(id, views)
     }
 }
@@ -57,30 +64,41 @@ fun requestWidgetRefresh(context: Context) {
 /// How many captures are sitting in the inbox.
 ///
 /// `Captures/` **is** the inbox — ADR 0017 § 1 says so, and the kernel
-/// projects every capture there — so this counts the notes in that one
-/// folder and nothing else. It is deliberately a cheap directory read
-/// rather than a kernel query: the widget is redrawn by the launcher, off
-/// any thread it likes, and must never open a vault to draw a number.
+/// projects every capture there — so this asks the system index for the
+/// notes whose path names that folder (ADR 0020 § 2.4). One question, one
+/// answer: the count and the search panel now read the same index, where
+/// the directory listing this replaced was a second opinion about what
+/// the vault holds.
 ///
-/// It is therefore approximate in exactly one way, honestly: a capture
-/// committed but not yet projected is not counted until the next
-/// projection, which in practice is the same moment.
-fun inboxCount(vaultDir: String): Int {
-    val captures = File(vaultDir, "Captures")
-    if (!captures.isDirectory) return 0
-    return captures.listFiles()
-        ?.count { it.isFile && it.name.endsWith(".md") && !it.name.startsWith(".") }
-        ?: 0
-}
+/// It is approximate in exactly one way, honestly: a capture committed
+/// but not yet projected is not counted until the next projection, which
+/// in practice is the same moment.
+fun inboxCount(gilune: Gilune): Int = gilune
+    .query(
+        listOf(Constraint.Text(TextTarget.PATH, "$CAPTURES_FOLDER/")),
+        QueryScope.NOTE,
+        MAX_QUERY_NOTES,
+    )
+    .size
+
+private const val CAPTURES_FOLDER = "Captures"
 
 /// The widget as it will be drawn. Public because a `RemoteViews` only
 /// fails when the launcher inflates it — an unsupported view or a wrong
 /// id is a silent "problem loading widget" on someone's home screen and
 /// nothing at build time — so the test net inflates it here instead.
-fun widgetViews(context: Context): RemoteViews {
+///
+/// `gilune` is the caller's own handle where it has one. Where it has
+/// none — the launcher asking a cold process to redraw — one is opened
+/// for the length of the count and closed again, and only if the vault is
+/// already there: drawing a widget must never be what creates somebody's
+/// vault.
+fun widgetViews(context: Context, gilune: Gilune? = null): RemoteViews {
     val views = RemoteViews(context.packageName, R.layout.gilune_widget)
 
-    val count = runCatching { inboxCount(vaultDir(context)) }.getOrDefault(0)
+    val count = runCatching {
+        gilune?.let(::inboxCount) ?: countFromVault(vaultDir(context))
+    }.getOrDefault(0)
     views.setTextViewText(R.id.widget_inbox_count, count.toString())
     views.setTextViewText(R.id.widget_inbox_label, if (count == 1) "capture in inbox" else "captures in inbox")
 
@@ -98,6 +116,14 @@ fun widgetViews(context: Context): RemoteViews {
     views.setOnClickPendingIntent(R.id.widget_search, shellPendingIntent(context, REQ_SEARCH, Routes.SEARCH))
     views.setOnClickPendingIntent(R.id.widget_inbox, shellPendingIntent(context, REQ_INBOX, Routes.NOTES))
     return views
+}
+
+/// The count with a handle of its own, for a draw that arrived with none.
+/// Opening a vault costs a couple of database handles and no scan; a
+/// vault that is not there yet counts nought rather than being created.
+private fun countFromVault(vaultDir: String): Int {
+    if (!File(vaultDir).isDirectory) return 0
+    return Gilune.open(vaultDir).use(::inboxCount)
 }
 
 /// The one cell that is not an activity.

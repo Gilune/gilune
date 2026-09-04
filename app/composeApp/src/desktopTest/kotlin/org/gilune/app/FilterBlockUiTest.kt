@@ -44,17 +44,16 @@ class FilterBlockUiTest {
     /// blocks under test. The task is deliberately **not** in the note
     /// being read, so a row can only have come from the query.
     private fun vaultWith(blocks: String): Pair<GiluneState, EditorState> {
-        val root = Files.createTempDirectory("gilune-filter-ui").toFile()
-        fun write(relPath: String, text: String) {
-            val file = File(root, relPath)
-            file.parentFile?.mkdirs()
-            file.writeText(text)
-        }
-        write("Home/kitchen.md", "---\ngilune-id: id-kitchen\n---\n- [ ] buy milk due:$soon\n")
-        write("agenda.md", "---\ngilune-id: id-agenda\n---\n# Agenda\n\n$blocks")
-        val state = GiluneState(root.absolutePath, CoroutineScope(Dispatchers.Default))
+        val indexed = IndexedVault("gilune-filter-ui")
+        indexed.write("Home/kitchen.md", "---\ngilune-id: id-kitchen\n---\n- [ ] buy milk due:$soon\n")
+        indexed.write("agenda.md", "---\ngilune-id: id-agenda\n---\n# Agenda\n\n$blocks")
+        val state = GiluneState(indexed.dir, CoroutineScope(Dispatchers.Default))
+        // A block is a query now (ADR 0020 § 2.4), so a screen showing one
+        // needs the handle that answers it — the same handle the shell has
+        // by the time it draws anything.
+        state.gilune.value = indexed.gilune
         val editor = EditorState()
-        editor.open(root.absolutePath, "agenda.md")
+        editor.open(indexed.dir, "agenda.md")
         editor.reading = true
         return state to editor
     }
