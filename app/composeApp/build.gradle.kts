@@ -1,9 +1,19 @@
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+
 plugins {
     kotlin("multiplatform") version "2.1.20"
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.20"
     id("org.jetbrains.compose") version "1.7.3"
     id("com.android.application") version "8.10.1"
 }
+
+// A released build stamps one version across all three packages; a local
+// build passes nothing and keeps the defaults below. jpackage on Windows
+// will only accept MAJOR.MINOR.BUILD with MAJOR > 0, so the continuous
+// build refuses a `v0.x` tag rather than producing an unversioned MSI —
+// see architecture/09-engineering-conventions.md § Continuous builds.
+val releaseVersion = project.findProperty("gilune.version") as String?
+val releaseVersionCode = (project.findProperty("gilune.versionCode") as String?)?.toInt()
 
 kotlin {
     jvm("desktop")
@@ -185,8 +195,8 @@ android {
         applicationId = "org.gilune.app"
         minSdk = 29
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = releaseVersionCode ?: 1
+        versionName = releaseVersion ?: "0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // The two ABIs this app ships, stated so that a dependency's
@@ -210,6 +220,31 @@ android {
             // light theme went, so dark mode follows the system from the
             // very first frame rather than from Compose's first paint.
             res.srcDir("src/androidMain/res")
+        }
+    }
+
+    // Release signing exists only when a keystore is handed to the build
+    // through the environment, which is how the continuous build supplies
+    // one from repository secrets. Absent it there is no release signing
+    // config at all — `assembleDebug` is unaffected, and `assembleRelease`
+    // is simply not asked for rather than producing an unsigned APK that
+    // looks installable and is not.
+    val keystore = System.getenv("GILUNE_KEYSTORE_PATH")
+        ?.let(::file)
+        ?.takeIf { it.isFile }
+    if (keystore != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = keystore
+                storePassword = System.getenv("GILUNE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("GILUNE_KEY_ALIAS")
+                keyPassword = System.getenv("GILUNE_KEY_PASSWORD")
+            }
+        }
+        buildTypes {
+            getByName("release") {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 }
@@ -240,11 +275,26 @@ compose.desktop {
         }
 
         nativeDistributions {
+            // The two installer formats the project ships. Formats the
+            // current OS cannot build are ignored by the packaging tasks,
+            // so this list is the same on both build machines.
+            targetFormats(TargetFormat.Msi, TargetFormat.Deb)
             packageName = "Gilune"
-            packageVersion = "1.0.0"
+            packageVersion = releaseVersion ?: "1.0.0"
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             windows {
                 iconFile.set(project.file("src/desktopMain/resources/gilune-v2.ico"))
+            }
+            linux {
+                // Debian package names are lower-case by policy, and
+                // jpackage rejects the capitalised one rather than
+                // folding it. The icon must be a PNG here; the .ico
+                // above is Windows-only.
+                packageName = "gilune"
+                iconFile.set(project.file("src/desktopMain/resources/gilune-logo-v2.png"))
+                debMaintainer = "gilune@users.noreply.github.com"
+                menuGroup = "Office"
+                appCategory = "utils"
             }
         }
         buildTypes.release.proguard {
