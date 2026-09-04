@@ -1226,25 +1226,44 @@ gates promises) are ratified. **Next: application-level engineering — see
    `scripts/move-android-to-d.ps1` / `verify-android-on-d.ps1` (untracked,
    owner-authored) describe a planned move to `D:\Android` that has NOT
    been run; `kernel/scripts/build-android.ps1` now reads ANDROID_HOME
-   first (owner edit). **EMULATOR UNUSABLE ON THIS HOST AS OF
-   2026-09-04 — four instrumented attempts, zero tests ran.** Diagnosis:
-   the reinstalled SDK has NO `extras;google;Android_Emulator_Hypervisor_
-   Driver` (AEHD), so emulator 37.1.11 runs on WHPX; this host is an AMD
-   Ryzen 9 3900X with Hyper-V (`vmcompute`) and WSL running. Symptoms: a
-   wiped, idle API-36 guest sits at 300–500% SYSTEM time (6 vCPUs/3 GB),
-   bytecode verification at ~5 bytecodes/s, our app ANRs at startup
-   ("failed to complete startup"), and twice `system_server` crashed the
-   instant instrumentation attached (`INSTRUMENTATION_ABORTED: System
-   has crashed`). Not our code — the same tree ran 769/0 on the previous
-   SDK. OWNER DECISION NEEDED: (a) disable Hyper-V/WSL and install AEHD
-   via SDK Manager ▸ SDK Tools (then `silent_install.bat` as admin) —
-   the fast path on AMD; or (b) keep Hyper-V and accept WHPX, in which
-   case this rig may simply not be viable. ALSO: `C:\Android\adb.exe`
-   (2016, v1.0.32) is FIRST on PATH and fights the SDK's v1.0.41 server
-   on port 5037 ("adb server version (32) doesn't match this client
-   (41); killing") — delete/rename it or drop `C:\Android` from PATH;
-   always call the SDK adb by absolute path. The surgical round's two
-   new instrumented tests remain UNEXECUTED.
+   first (owner edit). **Emulator after the reinstall (2026-09-04) —
+   what went wrong, CORRECTED RECORD.** Four instrumented attempts ran
+   zero tests: our app ANRed at startup ("failed to complete startup",
+   bytecode verification logged at ~5 bytecodes/s) and twice
+   `system_server` crashed the instant instrumentation attached
+   (`INSTRUMENTATION_ABORTED: System has crashed`). The coordinator
+   FIRST blamed the hypervisor (WHPX on an AMD Ryzen 3900X with Hyper-V
+   + WSL running; no AEHD package) — WRONG: the rig ran 769/0 on WHPX
+   before, and AEHD is incompatible with Hyper-V, which the owner needs
+   for Docker (the failed AEHD install left a STOPPED `aehd` kernel
+   service — owner to remove via its `silent_uninstall.bat`). The real
+   cause was a FRESHLY CREATED AVD: first-run GMS services (Play
+   services ~320 MB, Messaging, Search, Android System Intelligence) on
+   a 2–2.5 GB guest → 130–180 MB free and hundreds of MB swapped → our
+   app's startup starved → ANR; `system_server` fell over under the
+   same pressure. MEASUREMENT TRAP that misled the diagnosis: toybox
+   `top -n 1`'s summary line is CUMULATIVE SINCE BOOT (it showed
+   "300–500% sys" long after the first-boot dexopt storm) — always read
+   the SECOND iteration of `top -n 2 -d 5 -b` for live load. Working
+   config: `gilune-s1` = API 36 `google_apis` x86_64, `hw.cpu.ncore=4`,
+   `hw.ramSize=3072`, `hw.gpu.enabled=yes`, booted `-no-window -gpu
+   swiftshader_indirect -no-audio -no-boot-anim`; after a FRESH AVD's
+   first boot let GMS settle ~3 min before the first instrumented run.
+   ALSO REAL: `C:\Android\adb.exe` (2016, v1.0.32) is FIRST on PATH and
+   fights the SDK's v1.0.41 server on port 5037 ("adb server version
+   (32) doesn't match this client (41); killing") — delete/rename it or
+   drop `C:\Android` from PATH; always call the SDK adb by absolute
+   path. **RESULT on the settled AVD (2026-09-04): instrumented 772
+   ran / 0 failed / 12 skipped in 212 s** — the surgical round's two
+   new tests executed green, so that round is now fully verified. The
+   12 skips = R0's a03 (network) + 11 MODEL-GATED rows (R0 a04–a09,
+   MoonshineCaptionTest ×2, MoonshineProviderTest real-engine): the
+   seeded Moonshine model at `/data/local/tmp/gilune-r0/models` died
+   with the old emulator. To re-seed: fetch the 8 files per
+   spikes/r0-moonshine/README.md (45.23 MB, crc32c) and `adb push` them
+   to that path, or let the app's consented download run once and copy
+   `filesDir/models/moonshine-tiny-streaming-en` out. Until then the
+   real-engine rows skip honestly.
 4. ~~Owner decisions~~ — all closed 2026-08-30: ADR 0009 ratified, the
    S5 threat-model workshop held
    (`spikes/s5-distribution-policy/threat-model.md`), and the Gilune
