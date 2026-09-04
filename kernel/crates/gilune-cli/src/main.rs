@@ -453,16 +453,16 @@ fn run() -> Result<(), String> {
 /// second query language: the DSL a person actually uses lives in the
 /// shells (ADR 0015), and this is a way to look at what the kernel holds.
 fn parse_constraint(token: &str) -> Result<gilune_kernel::index::Constraint, String> {
-    use gilune_kernel::index::{Constraint, ConstraintOp, TextField};
-    for (prefix, field) in [
-        ("text:", TextField::Any),
-        ("body:", TextField::Body),
-        ("name:", TextField::Name),
-        ("path:", TextField::Path),
+    use gilune_kernel::index::{Constraint, ConstraintOp, TextTarget};
+    for (prefix, target) in [
+        ("text:", TextTarget::Any),
+        ("body:", TextTarget::Body),
+        ("name:", TextTarget::Name),
+        ("path:", TextTarget::Path),
     ] {
         if let Some(query) = token.strip_prefix(prefix) {
             return Ok(Constraint::Text {
-                field,
+                target,
                 query: query.to_string(),
             });
         }

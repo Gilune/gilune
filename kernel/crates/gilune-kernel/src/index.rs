@@ -169,8 +169,12 @@ impl ConstraintOp {
 }
 
 /// Which indexed text a full-text constraint reads.
+///
+/// Not `TextField`, which is what it describes: that name is taken by a
+/// Compose composable, and a generated Kotlin type of the same name
+/// would collide in exactly the files that use both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TextField {
+pub enum TextTarget {
     /// A note's body lines **and** its name — what a bare term in the
     /// shipped search language matches, and the reason the name is
     /// indexed at all.
@@ -193,7 +197,7 @@ pub enum Constraint {
         value: String,
     },
     Text {
-        field: TextField,
+        target: TextTarget,
         query: String,
     },
 }
@@ -1444,7 +1448,7 @@ fn piece(constraint: &Constraint) -> Piece {
             op,
             value,
         } => fact_piece(predicate, *op, value),
-        Constraint::Text { field, query } => text_piece(*field, query),
+        Constraint::Text { target, query } => text_piece(*target, query),
     }
 }
 
@@ -1495,12 +1499,12 @@ fn fact_piece(predicate: &str, op: ConstraintOp, value: &str) -> Piece {
     }
 }
 
-fn text_piece(field: TextField, query: &str) -> Piece {
-    let fields = match field {
-        TextField::Any => "l.field IN ('body','name')",
-        TextField::Body => "l.field = 'body'",
-        TextField::Name => "l.field = 'name'",
-        TextField::Path => "l.field = 'path'",
+fn text_piece(target: TextTarget, query: &str) -> Piece {
+    let fields = match target {
+        TextTarget::Any => "l.field IN ('body','name')",
+        TextTarget::Body => "l.field = 'body'",
+        TextTarget::Name => "l.field = 'name'",
+        TextTarget::Path => "l.field = 'path'",
     };
     // Substring semantics, which is what every text term in the shipped
     // language means. The trigram index answers three characters or

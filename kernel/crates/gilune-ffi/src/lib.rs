@@ -649,6 +649,341 @@ impl From<gilune_kernel::changes::VaultChange> for VaultChange {
     }
 }
 
+// ---------------------------------------------------- the system index
+
+/// A plugin's reading of a note (ADR 0020 § 2.3), implemented in Kotlin
+/// on both shells. **Pure over text**: it is handed a note's prose and
+/// answers with facts, and it is given no vault access at all — which is
+/// what lets the same function be a sandboxed component later.
+///
+/// The text is the note's **body**, front matter split off, and a fact's
+/// `line` is **1-based within that body** — the same line number
+/// `MatchedLine` and `TaskHit` already carry, so an anchor addresses the
+/// buffer a person sees. `None` anchors the fact to the note itself,
+/// which then holds on every line of it.
+///
+/// Throwing is allowed and is not a crash: the pass keeps what it has,
+/// this namespace's cursor stops short of the note, every other
+/// namespace carries on, and the message is readable from
+/// `index_status`.
+#[uniffi::export(with_foreign)]
+pub trait NoteIndexer: Send + Sync {
+    fn index(&self, rel_path: String, text: String) -> FfiResult<Vec<Fact>>;
+}
+
+/// Bridges the foreign trait onto the kernel's own, which knows nothing
+/// about uniffi.
+struct IndexerAdapter(Arc<dyn NoteIndexer>);
+
+impl gilune_kernel::index::NoteIndexer for IndexerAdapter {
+    fn index(&self, rel_path: &str, text: &str) -> Result<Vec<gilune_kernel::index::Fact>, String> {
+        self.0
+            .index(rel_path.to_string(), text.to_string())
+            .map(|facts| {
+                facts
+                    .into_iter()
+                    .map(|fact| gilune_kernel::index::Fact {
+                        line: fact.line,
+                        predicate: fact.predicate,
+                        value: fact.value,
+                    })
+                    .collect()
+            })
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// One thing a plugin says about an anchor.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Fact {
+    /// `None` for the note itself; 1-based within the note's body
+    /// otherwise.
+    pub line: Option<u32>,
+    /// Namespaced and **opaque to the kernel**, exactly as an event type
+    /// is: nothing here is interpreted or special-cased.
+    pub predicate: String,
+    pub value: String,
+}
+
+/// What a predicate's values are, so that ranges over them mean
+/// something. It says how to order values, never what they mean.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ValueKind {
+    Text,
+    /// Ordered as a number. A value that will not parse is stored as it
+    /// came and takes no part in an ordered comparison.
+    Number,
+    /// Normalised to `YYYY-MM-DD`, where reading in order reads in time.
+    /// A value that is not a date is stored as it came and takes no part
+    /// in an ordered comparison.
+    Date,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct PredicateKind {
+    pub predicate: String,
+    pub kind: ValueKind,
+}
+
+/// How a fact's value is compared.
+///
+/// `Ne` and `NotExists` **narrow** the anchors other constraints found
+/// and name none of their own, so a query made only of them answers
+/// nothing rather than answering with the vault.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ConstraintOp {
+    Eq,
+    /// No fact with this predicate **and this value** at the anchor — so
+    /// a line carrying two values of one predicate is excluded by either
+    /// of them.
+    Ne,
+    /// The value contains this text, case-insensitively for ASCII: what
+    /// every `keyword:argument` in the shipped search language means.
+    Contains,
+    Prefix,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    /// Any fact with this predicate; the value is ignored.
+    Exists,
+    /// No fact with this predicate at the anchor, whatever its value.
+    NotExists,
+}
+
+/// Which indexed text a full-text constraint reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum TextTarget {
+    /// Body lines **and** the note's name — what a bare term in the
+    /// shipped search language matches. The `or` lives inside the one
+    /// constraint because a conjunction cannot express it.
+    Any,
+    /// Body lines only.
+    Body,
+    /// The note's name, without its extension.
+    Name,
+    /// The note's path.
+    Path,
+}
+
+/// One term of a query. A query is a conjunction of these and nothing
+/// else: there is no `OR` (ADR 0020 § 2.4).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum Constraint {
+    Fact {
+        predicate: String,
+        op: ConstraintOp,
+        value: String,
+    },
+    Text {
+        target: TextTarget,
+        /// Matched as a **substring**, case-insensitively. Three
+        /// characters or more are answered from the full-text index;
+        /// shorter than that is answered by scanning the indexed lines,
+        /// because a trigram index holds no token that short.
+        query: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum QueryScope {
+    /// Lines satisfying every constraint **at the same anchor**.
+    Line,
+    /// Notes holding such a line, plus notes whose note-level facts
+    /// satisfy every constraint on their own.
+    Note,
+}
+
+/// A place in the vault. `line` is `None` for the note itself, and for
+/// every answer at `Note` scope.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Anchor {
+    pub rel_path: String,
+    pub line: Option<u32>,
+}
+
+/// A stored fact, with the namespace that said it.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IndexedFact {
+    pub namespace: String,
+    pub rel_path: String,
+    pub line: Option<u32>,
+    pub predicate: String,
+    pub value: String,
+}
+
+/// What one maintenance pass did.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IndexPass {
+    /// Notes re-derived, counted once per namespace.
+    pub indexed: i64,
+    pub removed: i64,
+    pub moved: i64,
+    /// A namespace whose indexer refused a note, as
+    /// `<namespace>: <message>`. Its cursor stopped there and every
+    /// other namespace carried on.
+    pub failures: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IndexNamespaceStatus {
+    pub namespace: String,
+    pub version: i64,
+    pub cursor_seq: i64,
+    pub facts: i64,
+    pub last_error: Option<String>,
+    /// Whether **this process** carries an indexer for it. A namespace
+    /// with no implementation here is left exactly as it is.
+    pub registered: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct IndexStatus {
+    pub schema_version: i64,
+    /// The change-feed epoch this index was built against. An index
+    /// carrying any other is discarded and rebuilt.
+    pub epoch: String,
+    pub db_bytes: i64,
+    pub notes: i64,
+    pub lines: i64,
+    pub namespaces: Vec<IndexNamespaceStatus>,
+}
+
+impl From<ValueKind> for gilune_kernel::index::ValueKind {
+    fn from(k: ValueKind) -> Self {
+        use gilune_kernel::index::ValueKind as K;
+        match k {
+            ValueKind::Text => K::Text,
+            ValueKind::Number => K::Number,
+            ValueKind::Date => K::Date,
+        }
+    }
+}
+
+impl From<PredicateKind> for gilune_kernel::index::PredicateKind {
+    fn from(k: PredicateKind) -> Self {
+        gilune_kernel::index::PredicateKind {
+            predicate: k.predicate,
+            kind: k.kind.into(),
+        }
+    }
+}
+
+impl From<ConstraintOp> for gilune_kernel::index::ConstraintOp {
+    fn from(op: ConstraintOp) -> Self {
+        use gilune_kernel::index::ConstraintOp as O;
+        match op {
+            ConstraintOp::Eq => O::Eq,
+            ConstraintOp::Ne => O::Ne,
+            ConstraintOp::Contains => O::Contains,
+            ConstraintOp::Prefix => O::Prefix,
+            ConstraintOp::Lt => O::Lt,
+            ConstraintOp::Le => O::Le,
+            ConstraintOp::Gt => O::Gt,
+            ConstraintOp::Ge => O::Ge,
+            ConstraintOp::Exists => O::Exists,
+            ConstraintOp::NotExists => O::NotExists,
+        }
+    }
+}
+
+impl From<TextTarget> for gilune_kernel::index::TextTarget {
+    fn from(target: TextTarget) -> Self {
+        use gilune_kernel::index::TextTarget as T;
+        match target {
+            TextTarget::Any => T::Any,
+            TextTarget::Body => T::Body,
+            TextTarget::Name => T::Name,
+            TextTarget::Path => T::Path,
+        }
+    }
+}
+
+impl From<Constraint> for gilune_kernel::index::Constraint {
+    fn from(constraint: Constraint) -> Self {
+        match constraint {
+            Constraint::Fact {
+                predicate,
+                op,
+                value,
+            } => gilune_kernel::index::Constraint::Fact {
+                predicate,
+                op: op.into(),
+                value,
+            },
+            Constraint::Text { target, query } => gilune_kernel::index::Constraint::Text {
+                target: target.into(),
+                query,
+            },
+        }
+    }
+}
+
+impl From<QueryScope> for gilune_kernel::index::QueryScope {
+    fn from(scope: QueryScope) -> Self {
+        match scope {
+            QueryScope::Line => gilune_kernel::index::QueryScope::Line,
+            QueryScope::Note => gilune_kernel::index::QueryScope::Note,
+        }
+    }
+}
+
+impl From<gilune_kernel::index::Anchor> for Anchor {
+    fn from(anchor: gilune_kernel::index::Anchor) -> Self {
+        Anchor {
+            rel_path: anchor.rel_path,
+            line: anchor.line,
+        }
+    }
+}
+
+impl From<gilune_kernel::index::IndexedFact> for IndexedFact {
+    fn from(fact: gilune_kernel::index::IndexedFact) -> Self {
+        IndexedFact {
+            namespace: fact.namespace,
+            rel_path: fact.rel_path,
+            line: fact.line,
+            predicate: fact.predicate,
+            value: fact.value,
+        }
+    }
+}
+
+impl From<gilune_kernel::index::IndexPass> for IndexPass {
+    fn from(pass: gilune_kernel::index::IndexPass) -> Self {
+        IndexPass {
+            indexed: pass.indexed,
+            removed: pass.removed,
+            moved: pass.moved,
+            failures: pass.failures,
+        }
+    }
+}
+
+impl From<gilune_kernel::index::IndexStatus> for IndexStatus {
+    fn from(status: gilune_kernel::index::IndexStatus) -> Self {
+        IndexStatus {
+            schema_version: status.schema_version,
+            epoch: status.epoch,
+            db_bytes: status.db_bytes,
+            notes: status.notes,
+            lines: status.lines,
+            namespaces: status
+                .namespaces
+                .into_iter()
+                .map(|n| IndexNamespaceStatus {
+                    namespace: n.namespace,
+                    version: n.version,
+                    cursor_seq: n.cursor_seq,
+                    facts: n.facts,
+                    last_error: n.last_error,
+                    registered: n.registered,
+                })
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct SourceSummary {
     pub object_id: String,
@@ -1332,6 +1667,108 @@ impl Gilune {
             next: page.next.into(),
             complete: page.complete,
         })
+    }
+
+    /// Declare that **this host process** carries an indexer for
+    /// `namespace` (ADR 0020 § 2.3).
+    ///
+    /// Per handle and per session, exactly as `register_external_
+    /// processor` is: which code exists here is a fact about this
+    /// process, never about the vault, so a tool that carries no
+    /// implementation leaves that namespace exactly where the app left
+    /// it rather than emptying it.
+    ///
+    /// `namespace` is the plugin's own id, or a name under it —
+    /// `org.memory.tasks`, `org.memory.tasks.lines` — because removing
+    /// the plugin removes what it said about the vault, and the id is
+    /// how the kernel knows which facts those are. `predicate_kinds`
+    /// declares how a predicate's values are ordered; anything not named
+    /// is text. `version` is the indexer's own: change it and this
+    /// namespace is derived again from the beginning of the feed, alone.
+    ///
+    /// The kernel's own `text` namespace cannot be registered.
+    pub fn register_indexer(
+        &self,
+        namespace: String,
+        version: i64,
+        predicate_kinds: Vec<PredicateKind>,
+        indexer: Arc<dyn NoteIndexer>,
+    ) -> FfiResult<()> {
+        let kinds: Vec<gilune_kernel::index::PredicateKind> =
+            predicate_kinds.into_iter().map(Into::into).collect();
+        Ok(self.store().register_indexer(
+            &namespace,
+            version,
+            &kinds,
+            Arc::new(IndexerAdapter(indexer)),
+        )?)
+    }
+
+    /// Bring every namespace this process maintains up to the feed.
+    ///
+    /// It runs at the end of `project`, `reconcile` and
+    /// `reconcile_path` already, so a shell that projects has nothing to
+    /// call. This is for the case those do not cover: an indexer
+    /// registered after the vault was opened, which has a feed to catch
+    /// up with and no pass to ride on.
+    pub fn advance_index(&self) -> FfiResult<IndexPass> {
+        Ok(self.store().advance_index()?.into())
+    }
+
+    /// Throw a namespace away and derive it again from the beginning of
+    /// the feed — `None` for all of them, the kernel's text index
+    /// included. The sanctioned full scan, and the only one.
+    ///
+    /// A namespace this process carries no indexer for is emptied and
+    /// its cursor put back, and the process that does carry one derives
+    /// it again on its next pass.
+    pub fn rebuild_index(&self, namespace: Option<String>) -> FfiResult<IndexPass> {
+        Ok(self.store().rebuild_index(namespace.as_deref())?.into())
+    }
+
+    /// Anchors satisfying every constraint (ADR 0020 § 2.4).
+    ///
+    /// A conjunction, joined on the anchor: a fact about a note holds on
+    /// every line of it, so a note-level constraint and a line-level one
+    /// together are a question about one line. At `Line` scope the
+    /// answer is the lines that satisfy everything **at the same
+    /// anchor** — two facts on two different lines of one note are not a
+    /// hit — and at `Note` scope it is the notes of those lines, plus
+    /// the notes whose note-level facts satisfy everything alone.
+    ///
+    /// Ordered by path and then line, always, so paging and diffing are
+    /// stable. `limit` bounds the rows. A query with no positive
+    /// constraint — nothing but `Ne` and `NotExists` — answers nothing
+    /// rather than answering with the vault.
+    pub fn query(
+        &self,
+        constraints: Vec<Constraint>,
+        scope: QueryScope,
+        limit: u32,
+    ) -> FfiResult<Vec<Anchor>> {
+        let constraints: Vec<gilune_kernel::index::Constraint> =
+            constraints.into_iter().map(Into::into).collect();
+        Ok(self
+            .store()
+            .query(&constraints, scope.into(), limit)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Everything every namespace recorded about one file. A diagnostic:
+    /// what a plugin actually said, as against what a query answered.
+    pub fn facts_of(&self, rel_path: String) -> FfiResult<Vec<IndexedFact>> {
+        Ok(self
+            .store()
+            .facts_of(&rel_path)?
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    pub fn index_status(&self) -> FfiResult<IndexStatus> {
+        Ok(self.store().index_status()?.into())
     }
 
     pub fn status(&self) -> FfiResult<GiluneStatus> {

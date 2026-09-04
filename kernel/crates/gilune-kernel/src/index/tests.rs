@@ -152,7 +152,7 @@ fn eq(predicate: &str, value: &str) -> Constraint {
 
 fn text(query: &str) -> Constraint {
     Constraint::Text {
-        field: TextField::Any,
+        target: TextTarget::Any,
         query: query.to_string(),
     }
 }
@@ -670,7 +670,7 @@ fn a_note_that_only_moved_carries_its_facts_across_without_being_read_again() {
         notes(
             &store,
             &[Constraint::Text {
-                field: TextField::Path,
+                target: TextTarget::Path,
                 query: "Moved/".to_string()
             }]
         ),
@@ -1123,7 +1123,7 @@ fn text_terms_match_a_substring_of_a_line_or_of_the_notes_name() {
         lines(
             &store,
             &[Constraint::Text {
-                field: TextField::Body,
+                target: TextTarget::Body,
                 query: "second line".to_string()
             }]
         ),
@@ -1135,7 +1135,7 @@ fn text_terms_match_a_substring_of_a_line_or_of_the_notes_name() {
         notes(
             &store,
             &[Constraint::Text {
-                field: TextField::Name,
+                target: TextTarget::Name,
                 query: name[..6].to_string()
             }]
         ),
@@ -1180,7 +1180,7 @@ fn a_text_term_matching_the_notes_name_holds_on_every_line_of_it() {
             &store,
             &[
                 Constraint::Text {
-                    field: TextField::Any,
+                    target: TextTarget::Any,
                     query: name
                 },
                 Constraint::Fact {
