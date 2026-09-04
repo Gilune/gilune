@@ -141,6 +141,67 @@ class CaptureRowTest {
         assertEquals(Transcription.Absent, transcriptionState("   \n ", emptyList(), TranscriptionPhase.Ready))
     }
 
+    // ------------------------------------------------------------------
+    // A recording with no speech in it (ADR 0017 amendment 2026-09-04)
+    //
+    // Found on the owner's phone: a recording of silence was transcribed
+    // in six seconds, the job finished, the body stayed empty, and the row
+    // said "transcribing…" for ever. An empty body was being read as *not
+    // yet*, which is a guess; whether anything is coming is a fact the
+    // kernel records (`SourceSummary.interpreted`).
+    // ------------------------------------------------------------------
+
+    @Test
+    fun aFinishedTranscriptionWithNoWordsSaysNoSpeechHeard() {
+        val on = listOf(plugin(TRANSCRIPTION_PLUGIN, "enabled"))
+        assertEquals(Transcription.Silent, transcriptionState("", on, TranscriptionPhase.Ready, interpreted = true))
+        assertEquals(
+            "recorded · 0:01 · no speech heard",
+            voiceStatus(1_000, Transcription.Silent),
+        )
+    }
+
+    /// **Second-order.** The same empty body, the same enabled plugin, the
+    /// same loaded model — and the job has *not* run yet. That one is
+    /// still "transcribing…", and reading it as silence would be the new
+    /// wording lying in the direction the old one did.
+    @Test
+    fun aRecordingWhoseJobHasNotRunYetIsStillTranscribing() {
+        val on = listOf(plugin(TRANSCRIPTION_PLUGIN, "enabled"))
+        assertEquals(Transcription.Pending, transcriptionState("", on, TranscriptionPhase.Ready, interpreted = false))
+    }
+
+    /// The other two second-order cases. Words already landed are words,
+    /// whatever else is true; and a recording made while the transcriber
+    /// was off has had nothing over it, so it keeps § 4's "needs" wording
+    /// rather than being called silent.
+    @Test
+    fun silenceIsNotClaimedForWordsOrForWorkThatNeverRan() {
+        val on = listOf(plugin(TRANSCRIPTION_PLUGIN, "enabled"))
+        val off = listOf(plugin(TRANSCRIPTION_PLUGIN, "disabled"))
+        assertEquals(
+            Transcription.Done,
+            transcriptionState("the words", on, TranscriptionPhase.Ready, interpreted = true),
+        )
+        assertEquals(
+            Transcription.Absent,
+            transcriptionState("", off, TranscriptionPhase.Ready, interpreted = false),
+            "nothing has been over it, so it still needs a transcriber",
+        )
+    }
+
+    /// Work already done is not undone by switching the transcriber off
+    /// afterwards: the row must not go back to asking for a model it does
+    /// not need.
+    @Test
+    fun aSilentRecordingStaysSilentWhenTheTranscriberIsSwitchedOff() {
+        val off = listOf(plugin(TRANSCRIPTION_PLUGIN, "disabled"))
+        assertEquals(
+            Transcription.Silent,
+            transcriptionState("", off, TranscriptionPhase.Absent, interpreted = true),
+        )
+    }
+
     @Test
     fun durationsReadAsMinutesAndSeconds() {
         assertEquals("0:00", formatDuration(0))

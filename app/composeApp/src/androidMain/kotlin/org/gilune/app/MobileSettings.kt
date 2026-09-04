@@ -834,6 +834,7 @@ private fun CaptureSection(idleTimeout: IdleTimeout, onIdleTimeoutChange: (IdleT
 
 @Composable
 private fun AboutSection(state: GiluneState) {
+    GiluneLogo()
     Text("Gilune", style = MaterialTheme.typography.titleSmall)
     Text(
         buildString {

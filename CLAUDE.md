@@ -1137,6 +1137,67 @@ gates promises) are ratified. **Next: application-level engineering — see
      machine notes above are STALE until the owner confirms the new
      layout).** Kotlin compiles for both source sets; two new
      instrumented tests unexecuted.
+   - **Android design pass (2026-09-04, owner feedback from the running
+     emulator; one Opus implementer, Fable reproducing/validating on the
+     device; four items ratified via AskUserQuestion, all recommended
+     options taken).** Findings: the `<application>` element named NO
+     icon (launcher showed the stock robot; `:113`'s icon is the QS
+     tile's); "stuck after creating a note" was the CAPTURE screen — the
+     bottom nav hides while the IME is up (`MainActivity` Home &&
+     !isImeVisible), ✓ left the composer focused, so the only exit was
+     the system back gesture; the agenda's empty state was "Nothing
+     open."; and a silent recording read "transcribing…" forever though
+     the kernel showed its job done in 6 s with an empty transcript.
+     Shipped: adaptive launcher icon (`mipmap-anydpi-v26`, white
+     `@color/gilune_launcher_background` in values/ only, 512 px
+     `drawable-nodpi` foreground with the v2 artwork at 58% of the
+     canvas, monochrome layer; `GiluneLogo()` in About + the first-run
+     vault notice); `rememberComposerDismiss()` = clearFocus+hide, ONE
+     definition, called by ✓ (guarded on non-blank) and the idle-timer
+     commit, plus a `composer-dismiss` button ("dismiss-keyboard", the
+     editor's glyph) drawn only while the composer has focus; the
+     composer now owns a `TextFieldValue` so an OUTSIDE draft (agenda
+     seed, commit clear) lands with the caret at its end (real defect:
+     Compose's String overload kept offset 0 in front of a seeded
+     `- [ ] `); `agendaEmpty(rows, sections)` in jvmShared/Agenda.kt —
+     NO_TASKS → explainer + "Start a task" (Capture tab, `taskDraft`
+     never overwrites a non-blank draft, focus nonce) / NONE_OPEN →
+     bounded-views sentence naming `type:task`; kernel
+     `SourceSummary.interpreted` = EXISTS processing_run for an event
+     whose subject is the source (the RUN, not the revision origin:
+     Moonshine writes zero outputs for silence) → shell
+     `Transcription.Silent` → "no speech heard", asked BEFORE the plugin
+     questions. FFI +1 field; bindings byte-identical both targets; dll
+     5.69 MB restaged; ABIs 6.39/6.55 MB. ADR 0017 Amendments record
+     all four; capture + tasks guides gained prose (no reshoots).
+     Suites: cargo 347/0, desktop 532/0 (--rerun-tasks), instrumented
+     785/1/12 warm AVD — the 1 = SyncScreenUiTest ActivityScenario
+     teardown timeout, 14/14 class-alone; 12 = model-gated skips.
+     **RIG LESSON (my authorisation, my fault): the instrumented runs
+     WIPED the emulator's app data — the owner's vault on it, the
+     whisper model the owner had downloaded, grants, sync identity.
+     dumpsys showed the package removed and re-added (uid walked
+     10216→10222→10226) across installs; gradle connected tests
+     uninstall the app under test after the run. RULE: an emulator
+     holding anything the owner cares about gets its vault exported
+     (Settings ▸ Export a copy) BEFORE any install or instrumented run,
+     or the run waits.** Machine note: `cargo build` of the whisper dll
+     from Git Bash fails — a stale CMakeCache pins NMake while cmake-rs
+     defaults to VS 17 2022 (only 2019 Build Tools exist); build from
+     vcvars64 with CMAKE_GENERATOR="NMake Makefiles" +
+     CMAKE_POLICY_VERSION_MINIMUM=3.5 + LIBCLANG_PATH. Closed gap: the
+     phone's consented model download ran end-to-end in the owner's
+     session (31 MB tiny-q5_1 landed in filesDir/models). Open after
+     the pass: TEXT captures queue a `transcribe` job (subscriptions key
+     on the event, not the media) that sits pending with 0 attempts
+     until some OTHER pass runs — `GiluneState.captureText` alone never
+     calls processAll (owner decision: run a pass after a text capture,
+     or let the next pass sweep); desktop `TasksPanel.kt:111` still says
+     one lower-case "nothing open" for both cases (`agendaEmpty` is
+     there for it); `interpreted` means ANY processor finished, which
+     coincides with "a transcriber did" only while one processor
+     subscribes to source-ready; the idle-timer dismissal is structural
+     (same function) but no row drives a real background cycle.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+The launcher icon: the mark the desktop window already wears, on white.
+
+Three layers, because Android draws three. `background` is a flat colour
+so every launcher mask — circle, squircle, teardrop — cuts a clean edge;
+`foreground` is the mark itself, drawn at 58% of the 108dp canvas so it
+sits inside the 66dp circle every launcher promises to show, whatever it
+does with the corners; `monochrome` is the same silhouette for themed
+icons, where the system supplies the colour and only the alpha is read.
+
+The white is stated here rather than taken from the palette: a launcher
+draws this in its own process and its own configuration, and an icon that
+changed with the phone's theme would stop being the thing people look for.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/gilune_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_monochrome" />
+</adaptive-icon>

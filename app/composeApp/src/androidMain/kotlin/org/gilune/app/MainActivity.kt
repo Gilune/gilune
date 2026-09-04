@@ -351,6 +351,13 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
 
     // The idle timer (§ 1). The composer's own text is the only state it
     // governs, and expiry commits rather than discards.
+    //
+    // The dismissal is the composer's own (`rememberComposerDismiss`), not
+    // a second copy of it: a commit lets go of the composer whether the
+    // tick made it or the timer did, and coming back to a field that has
+    // just been emptied on your behalf with the keyboard still up and the
+    // bottom bar still hidden is the same defect either way.
+    val dismissComposer = rememberComposerDismiss()
     var backgroundedAt by remember { mutableStateOf<Long?>(null) }
     val lifecycle = (context as? ComponentActivity)?.lifecycle
     DisposableEffect(lifecycle, idleTimeout) {
@@ -363,6 +370,7 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                         val text = draft.trim()
                         draft = ""
                         state.captureText(text)
+                        dismissComposer()
                     }
                     // A return, not the first start — which is what tells
                     // this apart from opening the app, whose own sync runs
@@ -448,6 +456,20 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                                 key = activePanel.key,
                                 state = state,
                                 onOpenNote = { screen = Screen.Read(it) },
+                                // An empty agenda's way in: the composer,
+                                // holding a task marker, with the caret
+                                // after it. **A draft already being
+                                // written is never overwritten** — the
+                                // person is taken to it and left alone,
+                                // because losing a half-written thought to
+                                // a convenience is the one thing capture
+                                // may not do (rule 1).
+                                onStartTask = {
+                                    destination = Destination.Capture
+                                    panelKey = null
+                                    draft = taskDraft(draft)
+                                    focusComposer += 1
+                                },
                             )
                         } else {
                             when (destination) {
@@ -664,9 +686,14 @@ private fun navigationIcon(key: String): ImageVector = when (key) {
 /// named and this shell has no screen for, which is said plainly rather
 /// than shown as a blank page.
 @Composable
-internal fun NavigationPanelScreen(key: String, state: GiluneState, onOpenNote: (String) -> Unit) {
+internal fun NavigationPanelScreen(
+    key: String,
+    state: GiluneState,
+    onOpenNote: (String) -> Unit,
+    onStartTask: () -> Unit = {},
+) {
     when (key) {
-        TASKS_RAIL_PANEL -> AgendaScreen(state, onOpenNote)
+        TASKS_RAIL_PANEL -> AgendaScreen(state, onOpenNote, onStartTask)
         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
                 "This shell has no screen for “$key”.",
@@ -683,6 +710,9 @@ internal fun NavigationPanelScreen(key: String, state: GiluneState, onOpenNote: 
 private fun VaultNotice(onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        // The first thing the app ever shows is also the first place it
+        // says who it is, so the mark goes here rather than nowhere.
+        icon = { GiluneLogo() },
         title = { Text("About your vault") },
         text = { Text(VAULT_TRUTH, style = MaterialTheme.typography.bodyMedium) },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Got it") } },

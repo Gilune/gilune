@@ -11,11 +11,17 @@
 
 package org.gilune.app
 
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -36,6 +42,23 @@ private val Mobile = Typography().run {
 /// Android's minimum touch target, and the size of every control this
 /// shell draws that a thumb has to find.
 val TouchTarget = 48.dp
+
+/// The product's mark, drawn from the same artwork the launcher icon and
+/// the desktop window wear. One composable rather than two call sites
+/// each reaching for a resource, so the two places the phone shows the
+/// logo cannot drift apart.
+///
+/// It is decoration: `contentDescription` is null deliberately, because
+/// both places that draw it name the product in words directly beside it
+/// and a screen reader announcing "Gilune" twice helps nobody.
+@Composable
+fun GiluneLogo(size: Dp = 64.dp, modifier: Modifier = Modifier) {
+    Image(
+        painter = painterResource(R.drawable.gilune_logo),
+        contentDescription = null,
+        modifier = modifier.size(size).testTag("logo"),
+    )
+}
 
 @Composable
 fun GiluneTheme(dark: Boolean, content: @Composable () -> Unit) {

@@ -222,5 +222,6 @@ class TranscriptionProviderTest {
         blobRelPath = blob,
         projectionRelPath = null,
         preview = "",
+        interpreted = false,
     )
 }

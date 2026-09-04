@@ -11,6 +11,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -69,6 +73,101 @@ class MobileShellUiTest {
         }
         rule.onNodeWithTag("feed").assertExists()
         assertEquals(1, state.recent.size)
+    }
+
+    // ------------------------------------------------------------------
+    // Letting go of the composer (ADR 0017 amendment 2026-09-04)
+    //
+    // What these assert is **focus**, which is the link this round adds.
+    // The bottom bar's own rule is `!isImeVisible` (`MainActivity`), and
+    // whether a keyboard is on screen is the platform's answer to where
+    // focus is — the one thing MS1 measured as the least deterministic
+    // part of this rig. So the chain is pinned at the end we own, and the
+    // platform's half is left to the platform.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun committingLetsGoOfTheComposer() {
+        val state = openedState()
+        rule.setContent { GiluneTheme(dark = false) { Home(state) } }
+        rule.waitUntil(WAIT) { state.gilune.value != null }
+
+        rule.onNodeWithTag("composer").performTextInput("Remember the milk")
+        rule.onNodeWithTag("composer").assertIsFocused()
+        rule.onNodeWithTag("commit").performClick()
+
+        rule.waitUntil(WAIT) { state.recent.size == 1 }
+        // The caret is gone, so the keyboard goes with it and the bottom
+        // bar comes back. Before this, the composer kept focus and the
+        // only way out was the system back gesture.
+        rule.onNodeWithTag("composer").assertIsNotFocused()
+        rule.onNodeWithTag("composer-dismiss").assertDoesNotExist()
+    }
+
+    @Test
+    fun theDismissControlIsDrawnOnlyWhileTheComposerHasFocus() {
+        val state = openedState()
+        rule.setContent { GiluneTheme(dark = false) { Home(state) } }
+
+        // Not a permanent button: with nothing being typed there is
+        // nothing for it to dismiss.
+        rule.onNodeWithTag("composer-dismiss").assertDoesNotExist()
+        rule.onNodeWithTag("composer").performClick()
+        rule.onNodeWithTag("composer-dismiss").assertIsDisplayed()
+    }
+
+    @Test
+    fun dismissingKeepsTheDraftAndCapturesNothing() {
+        val state = openedState()
+        rule.setContent { GiluneTheme(dark = false) { Home(state) } }
+        rule.waitUntil(WAIT) { state.gilune.value != null }
+
+        rule.onNodeWithTag("composer").performTextInput("half a thought")
+        rule.onNodeWithTag("composer-dismiss").performClick()
+
+        rule.onNodeWithTag("composer").assertIsNotFocused()
+        rule.onNodeWithTag("composer").assertTextContains("half a thought")
+        assertTrue(state.recent.isEmpty(), "dismissing is not committing")
+    }
+
+    /// **Second-order.** Dismissing must not be a one-way door: the
+    /// composer takes focus again, the control comes back with it, and
+    /// the words continue where they stopped.
+    @Test
+    fun theComposerCanBeTypedIntoAgainAfterDismissing() {
+        val state = openedState()
+        rule.setContent { GiluneTheme(dark = false) { Home(state) } }
+        rule.waitUntil(WAIT) { state.gilune.value != null }
+
+        rule.onNodeWithTag("composer").performTextInput("half")
+        rule.onNodeWithTag("composer-dismiss").performClick()
+        rule.onNodeWithTag("composer").assertIsNotFocused()
+
+        rule.onNodeWithTag("composer").performTextInput(" a thought")
+        rule.onNodeWithTag("composer").assertIsFocused()
+        rule.onNodeWithTag("composer").assertTextContains("half a thought")
+        rule.onNodeWithTag("composer-dismiss").assertIsDisplayed()
+    }
+
+    /// **Adversarial.** A tick with nothing to commit captures nothing
+    /// *and takes nothing away*: somebody who taps it mid-thought keeps
+    /// their keyboard. The button is disabled, which is how the rule is
+    /// kept; the guard inside its click is what keeps it if the button
+    /// is ever enabled for another reason.
+    @Test
+    fun aTickWithNothingToCommitTakesNothingAway() {
+        val state = openedState()
+        rule.setContent { GiluneTheme(dark = false) { Home(state) } }
+        rule.waitUntil(WAIT) { state.gilune.value != null }
+
+        rule.onNodeWithTag("composer").performClick()
+        rule.onNodeWithTag("composer").assertIsFocused()
+        rule.onNodeWithTag("commit").assertIsNotEnabled()
+        rule.onNodeWithTag("commit").performClick()
+
+        rule.onNodeWithTag("composer").assertIsFocused()
+        rule.onNodeWithTag("composer-dismiss").assertIsDisplayed()
+        assertTrue(state.recent.isEmpty())
     }
 
     @Test
@@ -143,6 +242,31 @@ class MobileShellUiTest {
         // Its own screen shows the permission the desktop policy governs.
         rule.onNodeWithText("Permissions").assertExists()
         rule.onNodeWithText("platform.audio-record").assertExists()
+    }
+
+    /// The product's mark is in the app, not only on the launcher
+    /// (ADR 0017 amendment 2026-09-04). About is where it says who this
+    /// is, so the mark belongs beside the words that say it.
+    @Test
+    fun aboutWearsTheProductsMark() {
+        val state = openedState()
+        rule.setContent {
+            GiluneTheme(dark = false) {
+                SettingsScreen(
+                    state = state,
+                    route = SettingsRoute.About,
+                    onNavigate = {},
+                    theme = ThemeChoice.System,
+                    onThemeChange = {},
+                    idleTimeout = IdleTimeout.Default,
+                    onIdleTimeoutChange = {},
+                    onExport = {},
+                )
+            }
+        }
+        rule.onNodeWithTag("logo").assertIsDisplayed()
+        // And the wording it stands beside is unchanged.
+        rule.onNodeWithText("Gilune").assertExists()
     }
 
     @androidx.compose.runtime.Composable

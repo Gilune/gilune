@@ -51,6 +51,8 @@
          check somebody has to remember. -->
     <application
         android:label="Gilune"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:theme="@style/Theme.Gilune">

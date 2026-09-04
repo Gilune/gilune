@@ -71,13 +71,22 @@
     already safely on disk.</p>
   </div>
 
+  <h2>Capturing on the phone</h2>
+
+  <p>The phone app opens straight onto a composer, so the first thing you can do is
+  tap it and type. While the keyboard is up the row of tabs along the bottom steps
+  aside to make room. The tick beside the composer keeps what you have written and puts
+  the keyboard away, which brings the tabs back. If you want the keyboard down without
+  keeping anything yet, the keyboard button next to the tick does that and leaves your
+  words where they are.</p>
+
   <h2>Transcription runs on your machine</h2>
 
   <p>Your speech is not sent anywhere. Gilune uses a speech model that lives on your
   computer, and once it is in place everything happens offline.</p>
 
-  <p>That model is about 75 MiB, and it is <strong>not</strong> fetched behind your
-  back. Nothing downloads until you open <strong>Settings ▸ Plugins</strong>, open the
+  <p>That model is about 57 MiB on the desktop and smaller on the phone, and it is
+  <strong>not</strong> fetched behind your back. Nothing downloads until you open <strong>Settings ▸ Plugins</strong>, open the
   transcription plugin, and allow it network access. Until you do, the status bar tells
   you plainly that transcription is waiting for permission — and everything else in the
   app carries on working. Once the model is there, the download never happens again.</p>
@@ -90,6 +99,14 @@
   clips. Set it to a language code you actually speak — <code>en</code>,
   <code>sv</code>, <code>de</code> and so on — and transcription is quicker. The change
   takes effect the next time you start Gilune.</p>
+
+  <h2>When a recording has no words in it</h2>
+
+  <p>Sometimes there is nothing to transcribe — the microphone did not pick you up, or
+  the recording is a few seconds of a quiet room. Gilune says <strong>no speech
+  heard</strong> beside that recording rather than leaving it looking like it is still
+  being worked on. The recording itself is kept and still plays; there simply were no
+  words in it.</p>
 
   <h2>Catching up on recordings that were missed</h2>
 

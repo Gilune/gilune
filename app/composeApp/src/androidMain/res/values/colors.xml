@@ -12,4 +12,10 @@ values-night — both in full, on the palette's rule.
     <color name="gilune_widget_muted">#FF5C626D</color>
     <color name="gilune_widget_accent">#FF3F5B8B</color>
     <color name="gilune_widget_recording">#FFB3261E</color>
+
+    <!-- The launcher icon's background layer. Deliberately absent from
+         values-night: the launcher draws the icon in its own process and
+         its own configuration, and an app icon that changed colour with
+         the phone's theme would stop being the thing people look for. -->
+    <color name="gilune_launcher_background">#FFFFFFFF</color>
 </resources>

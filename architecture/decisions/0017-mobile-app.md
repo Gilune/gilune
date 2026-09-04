@@ -542,3 +542,52 @@ does not bind a caption that has no caret in it; ADR 0018 § 1 says so
 explicitly, so a later reader does not obey it there and lose the feature.
 **MS2 widens**: it now measures both engines on the same device over the same
 clips, and it sets the packaged mobile default.
+
+**2026-09-04 (owner, from a design pass over the running app):** three rule
+changes and one addition to § 4's pending vocabulary.
+
+- **§ 1 — committing lets go of the composer.** The tick captures the
+  thought *and* clears the caret and the keyboard. The bar standing aside
+  while the keyboard is up is unchanged; what was missing was any way back:
+  after a commit the composer kept focus, so the keyboard stayed, so the bar
+  stayed hidden, and the system back gesture was the only exit. A tick with
+  nothing to commit changes nothing, keyboard included. **The composer also
+  gains a dismiss control** — the editor toolbar's own keyboard-down button
+  and its own name — drawn beside the tick while the composer has focus,
+  which puts the keyboard away without committing and keeps the draft. Both
+  paths that commit go through the one dismissal, the idle timer's included:
+  coming back to a field emptied on your behalf with the keyboard still up is
+  the same defect whichever thing emptied it.
+- **§ 1, § 8 — an empty agenda says which empty it is.** No task lines
+  anywhere is somebody who has not met the idea, so the screen explains what
+  a task is and offers **Start a task**, which switches to the capture
+  destination with `- [ ] ` in the composer and the caret after it — and
+  hands back an occupied composer untouched, because a convenience may never
+  cost a half-written thought (rule 1). Tasks that exist but are all ticked
+  or all beyond the horizon is the other case: it says the views are bounded
+  and names `type:task` in search, which is where § 8's deliberately-bounded
+  fourth view sends people. The classification is arithmetic over the same
+  rows the screen already has, shared with the desktop panel's `Agenda.kt`;
+  the desktop panel's own empty state is unchanged and still says one thing.
+- **The launcher icon is the product's mark on white.** An adaptive icon —
+  white background, the logo at 58% of the canvas so it sits inside the
+  guaranteed-visible circle, and a monochrome silhouette for themed icons —
+  replacing a manifest that named no application icon at all. The white is
+  stated in the icon rather than taken from the palette: a launcher draws it
+  in its own configuration, and an icon that followed the phone's theme would
+  stop being the thing people look for. The same mark appears in Settings ▸
+  About and in the first-run vault notice.
+- **§ 4 gains a fourth pending state: *no speech heard*.** § 4 names two
+  states and this shell already added a third for the download; the fourth is
+  the end of the sequence rather than a stage in it. A recording of silence
+  was transcribed in seconds, its job finished, its body stayed empty, and
+  the row read "transcribing…" for ever — because an empty body was being
+  taken as *not yet*. **The state comes from a fact the kernel records**, not
+  from a timeout: `SourceSummary.interpreted` says a processor has finished a
+  run over that source. The run rather than the revision, because one engine
+  writes an empty transcript for silence and the other writes nothing at all,
+  and only the run record is written by both. It is asked before the plugin
+  questions, so work already done is not undone by switching a transcriber
+  off afterwards. A recording whose job has not run is still "transcribing…",
+  and one made while there was no transcriber still "needs the transcription
+  model".

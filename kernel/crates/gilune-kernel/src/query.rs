@@ -13,6 +13,28 @@ pub struct SourceSummary {
     pub blob_rel_path: Option<String>,
     pub projection_rel_path: Option<String>,
     pub preview: String,
+    /// Whether **a processor has finished a run over this source**: a
+    /// `processing_runs` row exists for an event this object was the
+    /// subject of.
+    ///
+    /// It exists because a shell cannot otherwise tell *no words yet*
+    /// from *no words, ever*. An empty preview on a recording means the
+    /// body is empty; whether anything is still coming is a different
+    /// question, and the honest answer is a fact rather than a timeout.
+    ///
+    /// **The run, not the revision.** A processor that finds nothing to
+    /// say completes with no outputs and writes no revision at all — a
+    /// silent recording under one transcriber does exactly that — so a
+    /// revision-origin test would report finished work as pending
+    /// forever. The run record is written for every completed delivery,
+    /// outputs or none, and it survives whatever is written over the
+    /// document afterwards.
+    ///
+    /// Deliberately not "transcribed": the kernel does not know what a
+    /// transcriber is (02-kernel-contract). It reports that an
+    /// interpretation was attempted and finished; what that means for a
+    /// row is the shell's reading.
+    pub interpreted: bool,
 }
 
 const PREVIEW_CHARS: usize = 160;
@@ -28,7 +50,10 @@ impl Store {
         // concurrent heads appears once, not once per head.
         let mut stmt = self.conn().prepare(&format!(
             "SELECT o.object_id, o.created_ms, r.payload,
-                    (SELECT p.rel_path FROM projections p WHERE p.object_id = o.object_id)
+                    (SELECT p.rel_path FROM projections p WHERE p.object_id = o.object_id),
+                    EXISTS (SELECT 1 FROM processing_runs pr
+                            JOIN events e ON e.event_id = pr.event_id
+                            WHERE e.subject_id = o.object_id)
              FROM objects o
              JOIN revisions r ON r.revision_id = (
                  SELECT h.revision_id FROM heads h
@@ -47,11 +72,12 @@ impl Store {
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, Option<String>>(3)?,
+                row.get::<_, bool>(4)?,
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (object_id, created_ms, payload, projection_rel_path) = row?;
+            let (object_id, created_ms, payload, projection_rel_path, interpreted) = row?;
             let payload: serde_json::Value = serde_json::from_str(&payload)?;
             let blob_rel_path = payload
                 .get("rel_path")
@@ -79,6 +105,7 @@ impl Store {
                 blob_rel_path,
                 projection_rel_path,
                 preview,
+                interpreted,
             });
         }
         Ok(out)
@@ -189,6 +216,55 @@ mod tests {
         assert_eq!(sources.len(), 1, "dictation is not a capture of its own");
         assert_eq!(sources[0].preview, "a thought of my own");
         assert!(store.object_text(&attached.source_id).expect("text").is_none());
+    }
+
+    /// The ordinary case: a processor ran, wrote words, and the source
+    /// says so. A capture nothing has looked at yet says the opposite —
+    /// which is what keeps "waiting" and "finished" apart.
+    #[test]
+    fn a_finished_processing_run_marks_a_source_interpreted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        store.subscribe("transcribe", crate::capture::SOURCE_READY_EVENT).expect("subscribe");
+        store.capture_bytes("wav", &[7u8; 32]).expect("capture");
+        assert!(
+            !store.recent_sources(1).expect("query")[0].interpreted,
+            "a capture whose job has not run is not interpreted"
+        );
+
+        store
+            .run_pending_jobs(&[&crate::processor::FakeTranscriber], 1_000, 30_000)
+            .expect("run");
+        assert!(store.recent_sources(1).expect("query")[0].interpreted);
+    }
+
+    /// **The second-order case, and the one this field exists for.** A
+    /// processor that finds nothing to say completes with *no outputs*:
+    /// no revision is written, the head is the capture's own, and the
+    /// document is exactly as empty as it was before the engine ran.
+    /// Reading the head revision's origin would call that pending
+    /// forever; the run record calls it finished, which it is.
+    ///
+    /// `FakeTranscriber` takes that branch for a non-audio capture, which
+    /// is the same branch a transcriber takes for a recording of silence.
+    #[test]
+    fn a_run_that_wrote_nothing_still_marks_a_source_interpreted() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let store = Store::open(dir.path()).expect("open");
+        store.subscribe("transcribe", crate::capture::SOURCE_READY_EVENT).expect("subscribe");
+        store.capture_bytes("txt", b"nothing for a transcriber here").expect("capture");
+        let summary = store
+            .run_pending_jobs(&[&crate::processor::FakeTranscriber], 1_000, 30_000)
+            .expect("run");
+        assert_eq!(summary.outputs, 0, "the processor had nothing to say");
+
+        let source = store.recent_sources(1).expect("query").remove(0);
+        assert_eq!(
+            store.revision_count(&source.object_id).expect("revisions"),
+            1,
+            "no revision was written, so a revision-origin test would see only the capture's own"
+        );
+        assert!(source.interpreted);
     }
 
     #[test]

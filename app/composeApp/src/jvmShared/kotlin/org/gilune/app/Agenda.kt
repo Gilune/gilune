@@ -90,6 +90,33 @@ fun agenda(rows: List<TaskHit>, today: LocalDate, cap: Int = AGENDA_ROW_CAP): Li
     }
 }
 
+/// Why an agenda has nothing to draw. Two different facts, and telling a
+/// person the wrong one is worse than saying nothing: somebody with no
+/// tasks at all needs to know what a task **is**, and somebody whose
+/// tasks are all done or all far off needs to know the views are bounded
+/// and where the rest are.
+enum class AgendaEmpty {
+    /// The vault holds no task lines at all.
+    NO_TASKS,
+
+    /// Tasks exist; none of them is open inside the four views — every
+    /// one is ticked, or due beyond the horizon (see [agenda]).
+    NONE_OPEN,
+}
+
+/// Which of the two an empty agenda is, or `null` when there is something
+/// to draw. Pure over the same inputs the screen already has, so the
+/// screen chooses a sentence rather than deciding what is true.
+///
+/// Asked of the **rows**, not of the sections: a vault whose every task
+/// is ticked produces no sections at all, and rows are the only evidence
+/// that the person has ever written one.
+fun agendaEmpty(rows: List<TaskHit>, sections: List<AgendaSection>): AgendaEmpty? = when {
+    sections.isNotEmpty() -> null
+    rows.isEmpty() -> AgendaEmpty.NO_TASKS
+    else -> AgendaEmpty.NONE_OPEN
+}
+
 private fun AgendaGroup.holds(due: LocalDate?, today: LocalDate, horizon: LocalDate): Boolean = when (this) {
     AgendaGroup.OVERDUE -> due != null && due < today
     AgendaGroup.TODAY -> due == today

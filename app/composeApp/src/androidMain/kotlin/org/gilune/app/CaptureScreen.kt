@@ -31,6 +31,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.KeyboardHide
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PlayArrow
 import androidx.compose.material.icons.outlined.Stop
@@ -44,6 +45,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,9 +55,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import uniffi.gilune_ffi.PluginInfo
@@ -77,7 +84,7 @@ private val AUDIO_EXTENSIONS = listOf(".wav", ".m4a", ".mp3", ".ogg", ".opus")
 /// What the kernel knows about a recording's words, which is all the row
 /// is allowed to claim (§ 4: "the pending state is shown and is never
 /// written to the file").
-enum class Transcription { Absent, Downloading, Pending, Done }
+enum class Transcription { Absent, Downloading, Pending, Silent, Done }
 
 /// Read off kernel state and nothing else. `preview` carries the source's
 /// words once a processor has landed them (ADR 0013 puts the transcript
@@ -94,12 +101,27 @@ enum class Transcription { Absent, Downloading, Pending, Done }
 /// `enableWhisper` succeeded on this handle ([TranscriptionPhase.Ready])?
 /// Nothing short of that may render "transcribing…", because a job that
 /// cannot run is not running.
+/// **`interpreted` is the kernel's answer to "is anything still coming?"**
+/// — a processor has finished a run over this source (see
+/// `SourceSummary.interpreted`). Without it an empty body was read as *not
+/// yet*, and a recording of silence said "transcribing…" for ever: the job
+/// was done, the run recorded, and nothing was ever going to change. It is
+/// a recorded fact rather than a timeout, so the row never guesses, and it
+/// is asked of the run rather than of the words because one engine writes
+/// an empty transcript for silence and the other writes nothing at all.
+///
+/// Asked **before** the plugin questions, deliberately: work that has
+/// already happened is not undone by switching a transcriber off
+/// afterwards, and a row that then asked for a model would be asking for
+/// something it does not need.
 fun transcriptionState(
     preview: String,
     plugins: List<PluginInfo>,
     phase: TranscriptionPhase,
+    interpreted: Boolean = false,
 ): Transcription {
     if (preview.isNotBlank()) return Transcription.Done
+    if (interpreted) return Transcription.Silent
     val transcriber = plugins.firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }
     val switchedOn = transcriber != null && transcriber.state == "enabled"
     if (!switchedOn) return Transcription.Absent
@@ -128,6 +150,11 @@ fun voiceStatus(durationMs: Long?, transcription: Transcription): String {
         Transcription.Done -> return ""
         Transcription.Pending -> parts += "transcribing…"
         Transcription.Downloading -> parts += "downloading the transcription model…"
+        // The fourth line, and the owner's words. A transcriber has been
+        // over this recording and found no speech in it — so the empty
+        // body is the answer rather than the wait. The recording is still
+        // there and still plays: nothing was lost, nothing is coming.
+        Transcription.Silent -> parts += "no speech heard"
         Transcription.Absent -> parts += "needs the transcription model"
     }
     return parts.joinToString(" · ")
@@ -142,6 +169,31 @@ fun captureStamp(createdMs: Long): String =
 /// announces itself in a list.
 fun firstLine(preview: String): String =
     preview.lineSequence().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+
+/// Letting go of the composer: focus off, keyboard down, nothing written.
+///
+/// **Both halves, always.** Hiding the keyboard while the field keeps
+/// focus leaves the window still reporting an IME — which is what the
+/// bottom bar reads to decide it should stand aside (`MainActivity`,
+/// § 1's mode-swapped bottom) — and clearing focus alone leaves it to the
+/// platform whether the keyboard follows. Doing one without the other is
+/// how the bar goes missing, so this is one function and there is no
+/// second copy of the pair.
+///
+/// One definition and two callers, deliberately: the tick and the
+/// dismiss control here, and the idle timer's commit in the activity,
+/// which reaches the same composer from outside it.
+@Composable
+fun rememberComposerDismiss(): () -> Unit {
+    val focus = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    return remember(focus, keyboard) {
+        {
+            focus.clearFocus()
+            keyboard?.hide()
+        }
+    }
+}
 
 @Composable
 fun CaptureScreen(
@@ -266,6 +318,42 @@ private fun Composer(
     }
 
     val composerFocus = remember { FocusRequester() }
+    val dismiss = rememberComposerDismiss()
+
+    // ------------------------------------------------- the caret's owner
+    //
+    // The draft is a `String` because that is all the shell has an opinion
+    // about; the **caret** is the field's, and it stays the field's for
+    // every keystroke — this is the same projection Compose's own
+    // `String` overload performs, with one addition.
+    //
+    // The addition: a draft that arrives from **outside** the field — the
+    // agenda seeding `- [ ] `, a commit clearing it — lands with the caret
+    // at its end. Compose's overload leaves the caret exactly where it was,
+    // which for a field nobody had touched is offset zero, so a seeded
+    // marker would put the caret in front of it and the next thing typed
+    // would not be a task at all.
+    //
+    // Nothing here changes which field implementation is used (MS1
+    // condition 3): it is the same legacy field the composer has always
+    // been, and the app never writes a selection the field did not report,
+    // except on that outside replacement.
+    // Both ends of that rule, and the first one is not decoration: the
+    // composer is composed **fresh** when the shell arrives at it, so a
+    // seeded draft is here on the very first composition and never takes
+    // the replacement branch at all. Measured, not assumed — the caret sat
+    // at offset 0 in front of a `- [ ] ` this branch had never seen.
+    val buffer = remember { mutableStateOf(TextFieldValue(draft, TextRange(draft.length))) }
+    val field = if (buffer.value.text == draft) {
+        buffer.value
+    } else {
+        TextFieldValue(draft, TextRange(draft.length))
+    }
+    SideEffect { buffer.value = field }
+    // Whether the composer is the thing being typed into. It is what the
+    // dismiss control is drawn for: a way out that is on the screen,
+    // rather than the system back gesture being the only one.
+    var composerFocused by remember { mutableStateOf(false) }
     LaunchedEffect(focusNonce) {
         if (focusNonce > 0) runCatching { composerFocus.requestFocus() }
     }
@@ -317,10 +405,14 @@ private fun Composer(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 OutlinedTextField(
-                    value = draft,
-                    onValueChange = onDraftChange,
+                    value = field,
+                    onValueChange = { typed ->
+                        buffer.value = typed
+                        if (typed.text != draft) onDraftChange(typed.text)
+                    },
                     modifier = Modifier.weight(1f).heightIn(min = TouchTarget, max = 180.dp)
                         .focusRequester(composerFocus)
+                        .onFocusChanged { composerFocused = it.isFocused }
                         .testTag("composer"),
                     placeholder = { Text("What's on your mind?") },
                     // Multi-line, and the action key is a newline: commit
@@ -329,6 +421,28 @@ private fun Composer(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
                     textStyle = MaterialTheme.typography.bodyLarge,
                 )
+                // A way out that is on the screen. While the keyboard is
+                // up the bottom bar stands aside (§ 1), so without this
+                // the only exit from a focused composer is the system
+                // back gesture — which is not an affordance, it is a
+                // thing you have to know. Drawn only while the composer
+                // has focus, because at any other moment it would be a
+                // button that does nothing.
+                //
+                // The same glyph and the same name as the editor's, so
+                // the gesture is one gesture wherever the keyboard is up.
+                if (composerFocused) {
+                    IconButton(
+                        onClick = dismiss,
+                        modifier = Modifier.size(TouchTarget).testTag("composer-dismiss"),
+                    ) {
+                        Icon(
+                            Icons.Outlined.KeyboardHide,
+                            contentDescription = "dismiss-keyboard",
+                            tint = colours.onSurfaceVariant,
+                        )
+                    }
+                }
                 if (micOffered) {
                     IconButton(
                         onClick = {
@@ -368,7 +482,22 @@ private fun Composer(
                     }
                 }
                 IconButton(
-                    onClick = onCommit,
+                    // **Committing lets go of the composer.** The thought
+                    // is captured; keeping the caret and the keyboard
+                    // afterwards left the bottom bar hidden with nothing
+                    // on screen to bring it back.
+                    //
+                    // The blank case is stated here rather than left to
+                    // the `enabled` flag alone: a tick with nothing to
+                    // commit captures nothing **and takes nothing away**,
+                    // so somebody who taps it mid-thought keeps their
+                    // keyboard.
+                    onClick = {
+                        if (draft.isNotBlank()) {
+                            onCommit()
+                            dismiss()
+                        }
+                    },
                     enabled = ready && draft.isNotBlank(),
                     modifier = Modifier.size(TouchTarget).testTag("commit"),
                 ) {
@@ -527,7 +656,12 @@ private fun CaptureRow(
                 val duration = remember(recording) { readWavDuration(File(state.vaultDir, recording)) }
                 voiceStatus(
                     duration,
-                    transcriptionState(source.preview, state.plugins, transcription.phase),
+                    transcriptionState(
+                        source.preview,
+                        state.plugins,
+                        transcription.phase,
+                        source.interpreted,
+                    ),
                 )
             }
             Text(

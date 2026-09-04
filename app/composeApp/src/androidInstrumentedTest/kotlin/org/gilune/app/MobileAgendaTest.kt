@@ -15,14 +15,26 @@ package org.gilune.app
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextRange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
@@ -145,12 +157,58 @@ class MobileAgendaTest {
         return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
     }
 
-    private fun showAgenda(state: GiluneState, onOpen: (String) -> Unit = {}) {
+    private fun showAgenda(
+        state: GiluneState,
+        onOpen: (String) -> Unit = {},
+        onStartTask: () -> Unit = {},
+    ) {
         compose.setContent {
             GiluneTheme(dark = false) {
-                Box(Modifier.fillMaxSize()) { AgendaScreen(state, onOpen, Modifier.fillMaxSize()) }
+                Box(Modifier.fillMaxSize()) {
+                    AgendaScreen(state, onOpen, onStartTask, Modifier.fillMaxSize())
+                }
             }
         }
+    }
+
+    /// The agenda and the composer with the shell's own wiring between
+    /// them — what "Start a task" actually does, end to end, without
+    /// standing up the whole activity. The seeding rule itself is
+    /// [taskDraft], which is what `MainActivity` calls too, so the one
+    /// decision with a second-order case is shared rather than copied.
+    @Composable
+    private fun ShellWithAgenda(state: GiluneState, initialDraft: String = "") {
+        var draft by remember { mutableStateOf(initialDraft) }
+        var onAgenda by remember { mutableStateOf(true) }
+        var focusNonce by remember { mutableStateOf(0) }
+        if (onAgenda) {
+            AgendaScreen(
+                state,
+                onOpenNote = {},
+                onStartTask = {
+                    onAgenda = false
+                    draft = taskDraft(draft)
+                    focusNonce += 1
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            CaptureScreen(
+                state = state,
+                draft = draft,
+                onDraftChange = { draft = it },
+                onCommit = {},
+                onOpenNote = {},
+                focusNonce = focusNonce,
+            )
+        }
+    }
+
+    /// A vault with no task line anywhere in it.
+    private fun proseOnlyVault(): GiluneState {
+        val vault = Files.createTempDirectory("gilune-empty-agenda").toFile()
+        vault.resolve("prose.md").writeText("# Nothing\n\njust words\n")
+        return GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
     }
 
     @Test
@@ -194,7 +252,7 @@ class MobileAgendaTest {
         val state = agendaVault()
         state.plugins.add(installedTasksPlugin())
         var opened: String? = null
-        showAgenda(state) { opened = it }
+        showAgenda(state, onOpen = { opened = it })
         compose.waitForIdle()
 
         compose.onNodeWithText("phone the council").performClick()
@@ -209,7 +267,7 @@ class MobileAgendaTest {
         state.plugins.add(installedTasksPlugin())
         val file = File(state.vaultDir, "agenda.md")
         var opened: String? = null
-        showAgenda(state) { opened = it }
+        showAgenda(state, onOpen = { opened = it })
         compose.waitForIdle()
 
         // The first row of the first view is the overdue one.
@@ -229,16 +287,89 @@ class MobileAgendaTest {
         compose.onNodeWithText("overdue (1)").assertDoesNotExist()
     }
 
+    /// A vault with no tasks in it is somebody who has not met the idea
+    /// yet, so the screen explains what a task is and offers a way in
+    /// rather than reporting an emptiness they cannot act on.
     @Test
-    fun anEmptyAgendaSaysSoRatherThanShowingFourEmptyHeadings() {
-        val vault = Files.createTempDirectory("gilune-empty-agenda").toFile()
-        vault.resolve("prose.md").writeText("# Nothing\n\njust words\n")
+    fun anAgendaWithNoTasksExplainsWhatOneIsAndOffersAWayIn() {
+        val state = proseOnlyVault()
+        state.plugins.add(installedTasksPlugin())
+        showAgenda(state)
+        compose.waitForIdle()
+
+        compose.onNodeWithText("No tasks yet").assertIsDisplayed()
+        compose.onNodeWithText("- [ ]", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag("start-task").assertIsDisplayed()
+    }
+
+    /// **The second-order row.** Tasks exist; none is open in the four
+    /// views. The screen must not explain what a task is to somebody who
+    /// has written six of them — it says the views are bounded and where
+    /// the rest are, and it offers no button, because there is nothing
+    /// here for one to fix.
+    @Test
+    fun anAgendaWhoseTasksAreAllDoneOrFarOffSaysSoInstead() {
+        val vault = Files.createTempDirectory("gilune-none-open").toFile()
+        val now = LocalDate.now()
+        vault.resolve("done.md").writeText(
+            "# Things\n\n- [x] already done due:$now\n- [ ] far away due:${now.plusDays(30)}\n",
+        )
         val state = GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
         state.plugins.add(installedTasksPlugin())
         showAgenda(state)
         compose.waitForIdle()
 
-        compose.onNodeWithText("Nothing open.").assertIsDisplayed()
+        compose.onNodeWithText("Nothing open").assertIsDisplayed()
+        compose.onNodeWithText("type:task", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("No tasks yet").assertDoesNotExist()
+        compose.onNodeWithTag("start-task").assertDoesNotExist()
+    }
+
+    @Test
+    fun startingATaskSeedsTheComposerWithTheCaretAfterTheMarker() {
+        val state = proseOnlyVault()
+        state.plugins.add(installedTasksPlugin())
+        compose.setContent { GiluneTheme(dark = false) { ShellWithAgenda(state) } }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("start-task").performClick()
+        compose.waitForIdle()
+
+        val composer = compose.onNodeWithTag("composer")
+        composer.assertIsDisplayed()
+        composer.assertTextContains(TASK_DRAFT)
+        composer.assertIsFocused()
+        // After the marker, not in front of it: the next thing typed is
+        // the task's words.
+        composer.assert(
+            SemanticsMatcher.expectValue(
+                SemanticsProperties.TextSelectionRange,
+                TextRange(TASK_DRAFT.length),
+            ),
+        )
+    }
+
+    /// **The second-order row.** The button is a convenience; the draft is
+    /// a thought. An occupied composer is handed back untouched and the
+    /// person is simply taken to it.
+    @Test
+    fun startingATaskNeverOverwritesAHalfWrittenThought() {
+        val state = proseOnlyVault()
+        state.plugins.add(installedTasksPlugin())
+        compose.setContent {
+            GiluneTheme(dark = false) { ShellWithAgenda(state, initialDraft = "half a thought") }
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("start-task").performClick()
+        compose.waitForIdle()
+
+        val composer = compose.onNodeWithTag("composer")
+        composer.assertIsDisplayed()
+        composer.assertTextContains("half a thought")
+        // The rule, stated where it is kept.
+        assertEquals("half a thought", taskDraft("half a thought"))
+        assertEquals(TASK_DRAFT, taskDraft("   \n "), "whitespace is not a thought")
     }
 
     // ------------------------------------------------------------------

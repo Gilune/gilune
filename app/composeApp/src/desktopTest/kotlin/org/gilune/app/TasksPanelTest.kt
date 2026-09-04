@@ -160,6 +160,47 @@ class TasksPanelTest {
     }
 
     // ------------------------------------------------------------------
+    // Why an agenda is empty (ADR 0017 amendment 2026-09-04)
+    // ------------------------------------------------------------------
+
+    private fun why(rows: List<TaskHit>) = agendaEmpty(rows, agenda(rows, today))
+
+    @Test
+    fun anAgendaWithSomethingInItIsNotEmptyAtAll() {
+        assertEquals(null, why(listOf(task("- [ ] milk", today))))
+    }
+
+    @Test
+    fun aVaultWithNoTaskLinesIsTheCaseThatNeedsExplaining() {
+        assertEquals(AgendaEmpty.NO_TASKS, why(emptyList()))
+    }
+
+    /// **The second-order case.** Rows exist and the agenda is still
+    /// empty, which is the reading that a check on the sections alone
+    /// cannot make: every task is ticked, or every task is due beyond the
+    /// horizon. Somebody in either position knows what a task is and is
+    /// owed the other sentence — that these views are bounded and where
+    /// the rest of their tasks are.
+    @Test
+    fun tasksThatAreAllDoneOrAllFarOffAreEmptyForTheOtherReason() {
+        assertEquals(
+            AgendaEmpty.NONE_OPEN,
+            why(listOf(task("- [x] milk", today))),
+            "a ticked task is evidence that tasks exist",
+        )
+        assertEquals(
+            AgendaEmpty.NONE_OPEN,
+            why(listOf(task("- [ ] far away", today.plusDays(AGENDA_HORIZON_DAYS + 1)))),
+            "a task past the horizon is in no view and is still a task",
+        )
+        assertEquals(
+            AgendaEmpty.NONE_OPEN,
+            why(listOf(task("- [x] done", today), task("- [ ] later", today.plusMonths(2)))),
+            "and both together",
+        )
+    }
+
+    // ------------------------------------------------------------------
     // What a row says
     // ------------------------------------------------------------------
 

@@ -511,6 +511,10 @@ pub struct SourceSummary {
     pub blob_rel_path: Option<String>,
     pub projection_rel_path: Option<String>,
     pub preview: String,
+    /// Whether a processor has finished a run over this source — see
+    /// `gilune_kernel::query::SourceSummary`. A shell showing a pending
+    /// state reads this to tell *no words yet* from *no words at all*.
+    pub interpreted: bool,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -1139,6 +1143,7 @@ impl Gilune {
                 blob_rel_path: s.blob_rel_path,
                 projection_rel_path: s.projection_rel_path,
                 preview: s.preview,
+                interpreted: s.interpreted,
             })
             .collect())
     }
