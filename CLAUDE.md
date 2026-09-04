@@ -1254,6 +1254,31 @@ gates promises) are ratified. **Next: application-level engineering — see
      `nativeDistributions.vendor` is set (check the MSI install path
      first); the locally staged dll + jniLibs are stale relative to the
      plugins.rs fix until rebuilt (dev-run gotcha).
+   - **v1.0.0 RELEASED (2026-09-04)** — the owner wanted a first listed
+     build ("the windows app is essentially usable now"); a v0.0.1 tag was
+     refused by the rule, v1.0.0 chosen instead. Run 33898099309 green
+     incl. the Release job (`gh release create` proven):
+     https://github.com/Gilune/gilune/releases/tag/v1.0.0 with MSI 102.9
+     MB, DEB 95.8 MB, gilune-debug-signed.apk 114.0 MB. Main run
+     (33895536902) also green. WARM-CACHE BASELINE (tag run): Windows
+     14.6 min (kernel build 1.8, cargo test 7.1 = the largest step, MSI
+     2.8), Android 11.2 (cross-compile 8.0 — NOT cached: the script builds
+     under RUNNER_TEMP while rust-cache covers kernel/target only), Linux
+     5.0. Cold first run: 24.0/19.9/13.3. Speed levers agreed as an
+     assessment, not yet built: kernel artefacts cached by source hash
+     (skip the build when kernel/ is unchanged), test suites off the
+     packaging critical path, ABI matrix, Android target dir under
+     kernel/target, paths-ignore for docs-only pushes (each push bills a
+     full run). **INSTALLER DEFECT found by the owner installing 1.0.0**:
+     no Start-menu entry (jpackage adds one only when asked; the windows
+     block asked for nothing) and no fixed `upgradeUuid` (a random one per
+     build ⇒ a newer MSI installs BESIDE the older). Fixed in the windows
+     block (menu=true, menuGroup "Gilune", upgradeUuid
+     c077b799-5193-4ce3-b93a-411c67e29e37 — fixed for the life of the
+     product; 1.0.0 predates it and must be uninstalled by hand) and
+     shipped as v1.0.1. Installed location: C:\Program Files\Gilune\
+     Gilune.exe. DPAPI KeyWrap is Windows-only by design; the DEB's
+     identity file is unwrapped-with-reason.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

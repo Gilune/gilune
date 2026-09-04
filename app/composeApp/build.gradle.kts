@@ -284,6 +284,18 @@ compose.desktop {
             appResourcesRootDir.set(project.layout.projectDirectory.dir("resources"))
             windows {
                 iconFile.set(project.file("src/desktopMain/resources/gilune-v2.ico"))
+                // jpackage adds a Start-menu entry only when asked. The
+                // 1.0.0 installer asked for nothing, installed cleanly, and
+                // left the owner unable to find the app anywhere but
+                // Program Files.
+                menu = true
+                menuGroup = "Gilune"
+                // The MSI's UpgradeCode. Without a fixed one jpackage mints
+                // a fresh UUID per build, so a newer installer sits beside
+                // the older install instead of replacing it. Fixed here for
+                // the life of the product; 1.0.0 predates it and must be
+                // uninstalled by hand.
+                upgradeUuid = "c077b799-5193-4ce3-b93a-411c67e29e37"
             }
             linux {
                 // Debian package names are lower-case by policy, and
