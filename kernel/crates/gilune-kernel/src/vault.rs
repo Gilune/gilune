@@ -1803,6 +1803,72 @@ mod tests {
     }
 
     #[test]
+    fn a_revision_that_arrived_from_elsewhere_projects_as_a_synced_change() {
+        // The one part of `cause` that is exact rather than read off a
+        // string the writer stamped: the operations table records whose
+        // each revision was, so a head carried here by somebody else's
+        // operation is a synced change and can be nothing else.
+        let (_dir, store, rel) = captured("first words");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let seen = head_of(&store, &object_id);
+        let after_capture = cursor_now(&store);
+
+        from_elsewhere(
+            &store,
+            1,
+            crate::operations::OBJECT_REVISED,
+            &object_id,
+            serde_json::json!({
+                "object_id": object_id,
+                "revision": {
+                    "revision_id": "rev-elsewhere",
+                    "payload": serde_json::json!({ "text": "second words" }).to_string(),
+                    "origin": "capture",
+                    "created_ms": 1_700_000_000_500i64,
+                },
+                "supersedes": [seen],
+            }),
+        );
+        assert_eq!(store.project().expect("project").written, 1);
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Modified, rel, ChangeCause::Sync)],
+            "the same `origin` string a local capture carries, and a \
+             different answer, because the question is whose operation it was"
+        );
+    }
+
+    #[test]
+    fn a_file_that_left_the_vault_is_announced_once_however_many_passes_notice_it() {
+        // The second-order case for the removal guard, and the ordering
+        // that has two passes looking at one disappearance: reconcile
+        // finds the file gone and opens a proposal, and then the same
+        // deletion arrives from another device, so the projection drops
+        // a claim on a file that was already not there. One file left
+        // the vault; a consumer that was told twice would forget it
+        // twice and could not tell that from two files.
+        let (_dir, store, rel) = captured("gone from here, then gone from there");
+        let object_id: String = store
+            .conn()
+            .query_row("SELECT object_id FROM projections", [], |row| row.get(0))
+            .expect("the projection");
+        let after_capture = cursor_now(&store);
+
+        std::fs::remove_file(store.vault().join(&rel)).expect("delete here");
+        assert_eq!(store.reconcile().expect("reconcile").tombstone_proposals, 1);
+        tombstone_from_elsewhere(&store, &object_id);
+        store.project().expect("project");
+
+        assert_eq!(
+            page(&store, &after_capture),
+            vec![(ChangeKind::Removed, rel, ChangeCause::Reconcile)]
+        );
+    }
+
+    #[test]
     fn a_tombstone_arriving_from_elsewhere_withdraws_the_file_and_says_so() {
         let (_dir, store, rel) = captured("nobody touched this");
         let object_id: String = store
