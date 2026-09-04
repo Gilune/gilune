@@ -13,7 +13,6 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import java.io.File
-import java.nio.file.Files
 
 class WidgetTest {
     @Test
