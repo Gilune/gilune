@@ -21,7 +21,8 @@ fn run() -> Result<(), String> {
     let mut args = args.iter().map(String::as_str);
 
     let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|\
-                 external [--at <ms>]|apply --file <path>|project|reconcile|status|\
+                 external [--at <ms>]|apply --file <path>|project|reconcile|\
+                 reconcile-path <rel>|changes [--since <epoch:seq>] [--limit <n>]|status|\
                  verify|backfill|alerts|plugins [enable|disable|remove <id>]>";
     let (Some("--vault"), Some(vault)) = (args.next(), args.next()) else {
         return Err(usage.to_string());
@@ -218,6 +219,73 @@ fn run() -> Result<(), String> {
                     "tombstone_proposals": r.tombstone_proposals,
                     "imports": r.imports,
                     "quarantined": r.quarantined,
+                })
+            );
+            Ok(())
+        }
+        Some("reconcile-path") => {
+            let Some(rel) = args.next() else { return Err(usage.to_string()) };
+            let r = store.reconcile_path(rel).map_err(|e| e.to_string())?;
+            println!(
+                "{}",
+                serde_json::json!({
+                    "edits": r.edits,
+                    "renames": r.renames,
+                    "tombstone_proposals": r.tombstone_proposals,
+                    "imports": r.imports,
+                    "quarantined": r.quarantined,
+                })
+            );
+            Ok(())
+        }
+        Some("changes") => {
+            // The vault change feed, for a person (ADR 0020 § 8.9).
+            // `--since` takes a cursor as this command prints it —
+            // `<epoch>:<seq>` — and defaults to the beginning, which is
+            // the sanctioned full read.
+            let mut cursor = store.change_origin().map_err(|e| e.to_string())?;
+            let mut limit = 100u32;
+            loop {
+                match (args.next(), args.next()) {
+                    (None, _) => break,
+                    (Some("--since"), Some(value)) => {
+                        let (epoch, seq) = value.rsplit_once(':').ok_or_else(|| usage.to_string())?;
+                        cursor = gilune_kernel::changes::Cursor {
+                            epoch: epoch.to_string(),
+                            seq: seq.parse().map_err(|_| usage.to_string())?,
+                        };
+                    }
+                    (Some("--limit"), Some(value)) => {
+                        limit = value.parse().map_err(|_| usage.to_string())?
+                    }
+                    _ => return Err(usage.to_string()),
+                }
+            }
+            let page = store.changes_since(&cursor, limit).map_err(|e| e.to_string())?;
+            let listed: Vec<_> = page
+                .changes
+                .iter()
+                .map(|c| {
+                    serde_json::json!({
+                        "seq": c.seq,
+                        "kind": c.kind.as_str(),
+                        "rel_path": c.rel_path,
+                        "previous_rel_path": c.previous_rel_path,
+                        "object_id": c.object_id,
+                        "revision_id": c.revision_id,
+                        // Best-effort by contract: exact where the
+                        // kernel knows, never something to branch on.
+                        "cause": c.cause.as_str(),
+                        "created_ms": c.created_ms,
+                    })
+                })
+                .collect();
+            println!(
+                "{}",
+                serde_json::json!({
+                    "changes": listed,
+                    "next": format!("{}:{}", page.next.epoch, page.next.seq),
+                    "complete": page.complete,
                 })
             );
             Ok(())

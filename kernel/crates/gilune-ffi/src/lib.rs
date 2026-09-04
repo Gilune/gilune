@@ -33,6 +33,14 @@ pub enum GiluneError {
     /// this machine no longer has.
     #[error("identity unreadable: {detail}")]
     IdentityUnreadable { detail: String },
+    /// A change-feed cursor this vault cannot answer from: it was taken
+    /// against a different database, or names a sequence the vault does
+    /// not hold (ADR 0020 § 2.1). Its own variant because the caller's
+    /// answer is a specific one — rebuild from `change_origin` — and a
+    /// caller that had to recognise it by matching prose would be one
+    /// release away from silently never rebuilding.
+    #[error("cursor unknown: {detail}")]
+    CursorUnknown { detail: String },
 }
 
 impl From<gilune_kernel::KernelError> for GiluneError {
@@ -45,6 +53,7 @@ impl From<gilune_kernel::KernelError> for GiluneError {
             // invalid argument: M5a adds no boundary variant, and the
             // shells learn about halts from the integrity alerts (M5c),
             // not from an error code.
+            K::CursorUnknown { .. } => GiluneError::CursorUnknown { detail: e.to_string() },
             K::NoSuchJob { .. }
             | K::NoSuchPlugin { .. }
             | K::PluginRequired { .. }
@@ -502,6 +511,142 @@ pub struct ReconcileSummary {
     pub tombstone_proposals: i64,
     pub imports: i64,
     pub quarantined: i64,
+}
+
+impl From<gilune_kernel::vault::ReconcileSummary> for ReconcileSummary {
+    fn from(s: gilune_kernel::vault::ReconcileSummary) -> Self {
+        ReconcileSummary {
+            edits: s.edits,
+            renames: s.renames,
+            tombstone_proposals: s.tombstone_proposals,
+            imports: s.imports,
+            quarantined: s.quarantined,
+        }
+    }
+}
+
+/// What happened to a file in the vault (ADR 0020 § 2.1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ChangeKind {
+    /// The vault did not have this file and now does.
+    Created,
+    /// The file's bytes changed.
+    Modified,
+    /// The same file is at a different path; `previousRelPath` says
+    /// where it was.
+    Moved,
+    /// The file is no longer in the vault.
+    Removed,
+    /// A file the kernel did not write, offered as something to bring
+    /// in. Nothing on disk was touched.
+    Imported,
+    /// A file the kernel will not act on until a person decides.
+    /// Nothing on disk was touched.
+    Quarantined,
+}
+
+/// Why it happened, as far as the kernel can say.
+///
+/// **Best-effort by contract.** Exact where the kernel knows — a synced
+/// head, an edit found by reconciliation — and `LocalEdit` where a
+/// change reached the projection without its provenance being plumbed
+/// there. A consumer must not branch on it for correctness: it is for
+/// diagnostics and for a person reading a feed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum ChangeCause {
+    Capture,
+    Processor,
+    LocalEdit,
+    ExternalEdit,
+    Sync,
+    Reconcile,
+}
+
+/// Where a reader is in the change feed.
+///
+/// `epoch` identifies the vault database the sequence belongs to; a
+/// cursor carrying any other epoch is refused with `CursorUnknown`
+/// rather than answered from somebody else's history. `seq` 0 with the
+/// right epoch means "everything", which is the sanctioned full rebuild.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct Cursor {
+    pub epoch: String,
+    pub seq: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct VaultChange {
+    pub seq: u64,
+    pub kind: ChangeKind,
+    pub rel_path: String,
+    /// Where the file was, on a `Moved`.
+    pub previous_rel_path: Option<String>,
+    /// The object the file projects, where there is one. Imports and
+    /// quarantines are files the kernel does not claim, so they carry
+    /// none.
+    pub object_id: Option<String>,
+    pub revision_id: Option<String>,
+    pub cause: ChangeCause,
+    pub created_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ChangePage {
+    pub changes: Vec<VaultChange>,
+    /// Where to resume. Equals the cursor that was handed in when the
+    /// page is empty, so resuming is always the same call.
+    pub next: Cursor,
+    /// Nothing else was waiting when this page was read.
+    pub complete: bool,
+}
+
+impl From<gilune_kernel::changes::ChangeKind> for ChangeKind {
+    fn from(k: gilune_kernel::changes::ChangeKind) -> Self {
+        use gilune_kernel::changes::ChangeKind as K;
+        match k {
+            K::Created => ChangeKind::Created,
+            K::Modified => ChangeKind::Modified,
+            K::Moved => ChangeKind::Moved,
+            K::Removed => ChangeKind::Removed,
+            K::Imported => ChangeKind::Imported,
+            K::Quarantined => ChangeKind::Quarantined,
+        }
+    }
+}
+
+impl From<gilune_kernel::changes::ChangeCause> for ChangeCause {
+    fn from(c: gilune_kernel::changes::ChangeCause) -> Self {
+        use gilune_kernel::changes::ChangeCause as C;
+        match c {
+            C::Capture => ChangeCause::Capture,
+            C::Processor => ChangeCause::Processor,
+            C::LocalEdit => ChangeCause::LocalEdit,
+            C::ExternalEdit => ChangeCause::ExternalEdit,
+            C::Sync => ChangeCause::Sync,
+            C::Reconcile => ChangeCause::Reconcile,
+        }
+    }
+}
+
+impl From<gilune_kernel::changes::Cursor> for Cursor {
+    fn from(c: gilune_kernel::changes::Cursor) -> Self {
+        Cursor { epoch: c.epoch, seq: c.seq.max(0) as u64 }
+    }
+}
+
+impl From<gilune_kernel::changes::VaultChange> for VaultChange {
+    fn from(c: gilune_kernel::changes::VaultChange) -> Self {
+        VaultChange {
+            seq: c.seq.max(0) as u64,
+            kind: c.kind.into(),
+            rel_path: c.rel_path,
+            previous_rel_path: c.previous_rel_path,
+            object_id: c.object_id,
+            revision_id: c.revision_id,
+            cause: c.cause.into(),
+            created_ms: c.created_ms,
+        }
+    }
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -1137,13 +1282,55 @@ impl Gilune {
     }
 
     pub fn reconcile(&self) -> FfiResult<ReconcileSummary> {
-        let s = self.store().reconcile()?;
-        Ok(ReconcileSummary {
-            edits: s.edits,
-            renames: s.renames,
-            tombstone_proposals: s.tombstone_proposals,
-            imports: s.imports,
-            quarantined: s.quarantined,
+        Ok(self.store().reconcile()?.into())
+    }
+
+    /// Reconcile **one** file, reaching the same decisions the full pass
+    /// reaches about it, in time that does not grow with the vault.
+    ///
+    /// Call it after writing a file: the change feed carries the save
+    /// before anything refreshes, with no rescan and no indexer of the
+    /// caller's own (ADR 0020 § 2.2). Idempotent — calling it and then
+    /// running the full pass records the change once.
+    ///
+    /// `rel_path` is `/`-separated and relative to the vault root, and
+    /// names a `.md` file: only Markdown files are projected, and a path
+    /// leading out of the vault is refused rather than acted on.
+    pub fn reconcile_path(&self, rel_path: String) -> FfiResult<ReconcileSummary> {
+        Ok(self.store().reconcile_path(&rel_path)?.into())
+    }
+
+    /// A cursor at the beginning of this vault's change feed. What a
+    /// consumer starts from, and what it falls back to when a cursor is
+    /// refused.
+    pub fn change_origin(&self) -> FfiResult<Cursor> {
+        Ok(self.store().change_origin()?.into())
+    }
+
+    /// Changes after `cursor`, oldest first, at most `limit` of them.
+    ///
+    /// The feed describes the vault's **files**: objects that never
+    /// project are absent from it, and object-level change stays what
+    /// the events table carries. Raises `CursorUnknown` for a cursor
+    /// this vault cannot answer from — a foreign epoch, or a sequence it
+    /// does not hold — and the caller's answer to that is to rebuild
+    /// from `change_origin`.
+    pub fn changes_since(&self, cursor: Cursor, limit: u32) -> FfiResult<ChangePage> {
+        let page = self.store().changes_since(
+            &gilune_kernel::changes::Cursor {
+                epoch: cursor.epoch,
+                // A shell's `seq` is unsigned and the kernel's is
+                // SQLite's signed integer; a value past that range is
+                // not a sequence this vault could ever have written, so
+                // it is handed on as one it cannot answer from.
+                seq: i64::try_from(cursor.seq).unwrap_or(i64::MAX),
+            },
+            limit,
+        )?;
+        Ok(ChangePage {
+            changes: page.changes.into_iter().map(VaultChange::from).collect(),
+            next: page.next.into(),
+            complete: page.complete,
         })
     }
 
