@@ -1314,8 +1314,39 @@ gates promises) are ratified. **Next: application-level engineering — see
      per-note cache by sha; editor updates its own entry on write);
      reconcile stats size+mtime before reading (git's index rule, full
      hash pass on open); no file watcher. Staged K1/K2/P1/P2/S with a
-     7-item gate. AWAITS OWNER RATIFICATION; build after the memory
-     round lands (both touch the kernel + FFI).
+     7-item gate. **REVISED same day after the owner's review** (points
+     of contention the coordinator listed, plus the owner's question
+     "what happens when we add people… a task has a person"): dense via a
+     `meta` counter in the same txn (NOT AUTOINCREMENT — rollback gaps);
+     git's racy-file rule instead of a full hash pass on every open
+     (Verify vault = the explicit full hash); NO retention, an EPOCH in
+     the cursor instead (CursorUnknown = foreign epoch or unheld seq);
+     projection-only scope stated (attached captures never appear —
+     events stay the object-level record); `cause` best-effort; crash
+     window between file write and row commit stated;
+     `reconcile_path(rel_path)` O(1) for the editor's own save. **INDEX
+     HALF REWRITTEN — private per-plugin indexes REJECTED (the owner's
+     point: cross-plugin queries would need one plugin to know another).
+     Now: a kernel-hosted SYSTEM INDEX of FACTS `(anchor, predicate,
+     value)` — anchor = note or note#line; predicates namespaced by
+     plugin id and OPAQUE to the kernel (data, like event types) — in a
+     device-local INDEX DB beside the vault (never in it, never synced,
+     disposable, own schema outside the fixture chain) with FTS5 for
+     text; plugins register pure INDEXERS text→facts (uniffi foreign
+     trait `NoteIndexer` now, WIT `index-note` later — pure over text so a
+     sandboxed plugin needs no vault access); the kernel re-derives ONE
+     note's facts per change; operators COMPILE to constraints (plugins
+     own the DSL words; SearchOperators/SearchType become the
+     registration route), the kernel answers conjunctions with a join on
+     the anchor (`type:task due:week @alice` — nobody wrote the join);
+     scope from the anchor (line vs note); plugin removal drops its
+     namespace; private indexes allowed only for non-facts (embeddings
+     later). Staged K1 feed / K2 reconcile / K3 system index / P1 tasks
+     indexer+operators / P2 search / S shells; 9-item gate incl. two
+     shared-nothing indexers joining, incremental==rebuilt property,
+     racy-rule row, 1k-note measurement. OPEN (owner deferred): desktop
+     watcher-as-hint vs periodic stat while focused. AWAITS OWNER
+     RATIFICATION; build after the memory round (landed 579872e).
    - **Memory round DONE (2026-09-04, one Opus implementer; commit
      579872e HELD LOCALLY with the batch).** Owner: 335 MB in Task
      Manager with one note is not a lightweight app. Measured on a probe

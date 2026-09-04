@@ -56,12 +56,17 @@ These require an external security review before production deployment.
 
 - Server framework, database, deployment platform, and billing model.
 - ~~How do plugins and shells learn what changed without rescanning the
-  vault?~~ Proposed answer 2026-09-04: ADR 0020 — a dense change feed read
-  from the durable record, consumer-owned incremental indexes, and a
-  stat-before-read reconcile. Closes when its gate passes.
-- Vector index implementation and embedding model (ADR 0020's per-note cache
-  is the substrate an inverted index would sit on; the index itself stays
-  open).
+  vault, and how does the search DSL query across plugins that do not know
+  each other?~~ Proposed answer 2026-09-04: ADR 0020 — a dense change feed
+  read from the durable record; a kernel-hosted system index of
+  plugin-contributed facts about anchors plus FTS5, with operators compiling
+  to constraints the kernel joins; a stat-before-read reconcile. Closes when
+  its gate passes.
+- Should the desktop take a file watcher as a hint, or a periodic stat-walk
+  while focused, so an edit made beside Gilune shows without a focus change?
+  (ADR 0020 § 2.6; owner deferred 2026-09-04.)
+- Vector index implementation and embedding model (a private index under
+  ADR 0020's feed-and-cursor pattern; which model and where stays open).
 - Hosted transcription and LLM providers.
 - Marketplace discovery and ranking.
 - Shared/multi-user memory semantics.
