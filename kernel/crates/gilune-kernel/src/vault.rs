@@ -392,6 +392,16 @@ impl Store {
             summary.tombstone_proposals += self.propose_tombstone(&object_id, &rel_path)?;
         }
 
+        // Import candidates whose files have gone. No proposal: nothing
+        // here was ever kernel history, so there is nothing for a person
+        // to decide — but a reader told about the file has to be told it
+        // left, or it answers for ever about words that are not there.
+        for rel_path in self.recorded_imports()? {
+            if !self.vault().join(&rel_path).exists() {
+                self.forget_missing_import(&rel_path)?;
+            }
+        }
+
         // Withdraw every kept-edit notice the vault no longer bears out.
         // The alert had no exit at all: it was raised when the edit was
         // first noticed and stood for ever, so a person who read it and
@@ -443,6 +453,11 @@ impl Store {
             // that with a tombstone proposal, and so does this.
             seen.insert(record.0.clone());
             summary.tombstone_proposals += self.propose_tombstone(&record.0, &rel)?;
+        } else {
+            // An import candidate that has gone leaves the same way here
+            // as in the full pass, so a one-file call reaches the same
+            // decision about the one file it was asked about.
+            self.forget_missing_import(&rel)?;
         }
 
         // Only notices about the object this path is *about* may be
@@ -481,6 +496,27 @@ impl Store {
                 return Ok(Some(object_id.clone()));
             }
         }
+        // The same rule for a file the kernel does not claim. It has to
+        // be asked *before* the read, because an import has no projection
+        // record to shortcut on and the front matter is what decides it
+        // is one — so without this every import in the vault was read on
+        // every pass, which is exactly the cost § 2.5 removed for the
+        // files the kernel writes.
+        if tracked.is_none() {
+            if let Some(object_id) = self.import_matches_record(rel_path)? {
+                // A kept note is still about its object while its file is
+                // there, and the notice that says so is withdrawn by not
+                // being renewed — so the record answers what the read
+                // used to.
+                if let Some(object_id) = object_id {
+                    if self.is_deleted(&object_id)? {
+                        kept.insert(object_id.clone());
+                    }
+                    return Ok(Some(object_id));
+                }
+                return Ok(None);
+            }
+        }
         probe::file_read();
         let text = std::fs::read_to_string(self.vault().join(rel_path)).map_err(|e| {
             KernelError::Io { path: self.vault().join(rel_path), source: e }
@@ -499,7 +535,7 @@ impl Store {
                 Ok(None)
             }
             FrontMatter::Absent => {
-                summary.imports += self.record_import(rel_path)?;
+                summary.imports += self.record_import(rel_path, &text, None)?;
                 Ok(None)
             }
             FrontMatter::Parsed { keys, body } => {
@@ -516,7 +552,7 @@ impl Store {
                     if self.is_deleted(&object_id)? {
                         kept.insert(object_id.clone());
                     }
-                    summary.imports += self.record_import(rel_path)?;
+                    summary.imports += self.record_import(rel_path, &text, Some(&object_id))?;
                     return Ok(Some(object_id));
                 };
                 if known.rel_path != rel_path {
@@ -541,7 +577,8 @@ impl Store {
                         // file (constitution rule 1: never destroy
                         // what the kernel did not write).
                         kept.insert(object_id.clone());
-                        summary.imports += self.keep_edit_of_deleted(&object_id, rel_path)?;
+                        summary.imports +=
+                            self.keep_edit_of_deleted(&object_id, rel_path, &text)?;
                     } else {
                         self.ingest_external_edit(
                             &object_id,
@@ -943,7 +980,7 @@ impl Store {
     /// claiming it as a projection, record it as an import candidate, and
     /// raise the notice that says what happened. Nothing on disk is
     /// touched — the whole point is that these are the person's words.
-    fn keep_edit_of_deleted(&self, object_id: &str, rel_path: &str) -> Result<i64> {
+    fn keep_edit_of_deleted(&self, object_id: &str, rel_path: &str, text: &str) -> Result<i64> {
         self.conn()
             .execute("DELETE FROM projections WHERE object_id = ?1", [object_id])?;
         crate::alerts::raise(
@@ -955,7 +992,7 @@ impl Store {
                  the edited file is kept at {rel_path} and is offered as an import"
             ),
         )?;
-        self.record_import(rel_path)
+        self.record_import(rel_path, text, Some(object_id))
     }
 
     fn projection_path(&self, head: &Head) -> Result<String> {
@@ -1331,20 +1368,187 @@ impl Store {
         })
     }
 
-    fn record_import(&self, rel_path: &str) -> Result<i64> {
+    /// Record a file the kernel does not claim, and announce what
+    /// happened to it.
+    ///
+    /// **Offered once, but heard from for ever.** The first sighting is
+    /// `Imported` — something to bring in, nothing on disk touched. Every
+    /// later pass compares the bytes against what was recorded and
+    /// announces `Modified / ExternalEdit` when they differ, because a
+    /// file written by another tool is a file that changes, and a feed
+    /// that said nothing after the first sighting left every index
+    /// answering about words that had been rewritten (constitution
+    /// rule 13: third-party editing is supported use, and supporting it
+    /// means noticing it).
+    ///
+    /// Returns 1 only for a *new* import candidate: the summary's
+    /// `imports` counts what is newly on offer, and an edit to something
+    /// already offered is not a second offer.
+    fn record_import(&self, rel_path: &str, text: &str, object_id: Option<&str>) -> Result<i64> {
+        let sha = ids::sha256_hex(text.as_bytes());
+        let stat = stat_of(&self.vault().join(rel_path));
+        let held: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT content_sha256 FROM imports WHERE rel_path = ?1",
+                [rel_path],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(no_rows_none)?;
+        // An empty recorded hash is a row written before there were any:
+        // the bytes are taken as what is there now rather than announced
+        // as a change nobody made.
+        let announce = match held.as_deref() {
+            None => Some(ChangeKind::Imported),
+            Some("") => None,
+            Some(recorded) if recorded == sha => None,
+            Some(_) => Some(ChangeKind::Modified),
+        };
+        let fresh = held.is_none();
         self.write_txn(|| {
-            let inserted = self.conn().execute(
-                "INSERT OR IGNORE INTO imports (rel_path, created_ms) VALUES (?1, ?2)",
-                rusqlite::params![rel_path, ids::now_ms()],
+            self.conn().execute(
+                "INSERT INTO imports
+                     (rel_path, created_ms, content_sha256, size, mtime_ns, recorded_ns,
+                      object_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+                 ON CONFLICT(rel_path) DO UPDATE SET
+                     content_sha256 = ?3, size = ?4, mtime_ns = ?5, recorded_ns = ?6,
+                     object_id = ?7",
+                rusqlite::params![
+                    rel_path,
+                    ids::now_ms(),
+                    sha,
+                    stat.map(|s| s.size).unwrap_or(-1),
+                    stat.map(|s| s.mtime_ns).unwrap_or(0),
+                    now_ns(),
+                    object_id,
+                ],
             )?;
-            if inserted == 1 {
+            if let Some(kind) = announce {
                 // A file the kernel does not claim, so it names no
                 // object: whatever id the file carries, this vault has
                 // no projection of it.
                 changes::record(
                     self.conn(),
                     Change {
-                        kind: ChangeKind::Imported,
+                        kind,
+                        rel_path,
+                        previous_rel_path: None,
+                        object_id: None,
+                        revision_id: None,
+                        cause: if kind == ChangeKind::Imported {
+                            ChangeCause::Reconcile
+                        } else {
+                            // Exact: the kernel did not write this file,
+                            // so whoever changed it was outside.
+                            ChangeCause::ExternalEdit
+                        },
+                    },
+                )?;
+            }
+            Ok(())
+        })?;
+        Ok(if fresh { 1 } else { 0 })
+    }
+
+    /// Whether the import at `rel_path` still holds the bytes its record
+    /// names, decided **without reading it** where that is sound.
+    ///
+    /// `file_matches_record`'s rule, applied to the other table: size and
+    /// mtime that both match are enough, and git's racy-file safeguard
+    /// hashes anything whose mtime is not older than the moment its
+    /// record was written, re-arming that moment when the hash agrees so
+    /// the entry settles instead of being hashed for ever.
+    ///
+    /// A row with no recorded hash — written before this was a question —
+    /// is never a match, so it is read once and then behaves like the
+    /// rest.
+    ///
+    /// `Some(object_id)` on a match, where the inner option is the id the
+    /// file carries: a note kept after being deleted elsewhere is still
+    /// about an object, and the notice that says so is only true while
+    /// the file is there. Reading it off the record is what lets the pass
+    /// answer that question **without** reading the file, which is the
+    /// whole point of the rule.
+    #[allow(clippy::type_complexity)]
+    fn import_matches_record(&self, rel_path: &str) -> Result<Option<Option<String>>> {
+        let held: Option<(String, i64, i64, i64, Option<String>)> = self
+            .conn()
+            .query_row(
+                "SELECT content_sha256, size, mtime_ns, recorded_ns, object_id FROM imports
+                  WHERE rel_path = ?1",
+                [rel_path],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .map(Some)
+            .or_else(no_rows_none)?;
+        let Some((sha, size, mtime_ns, recorded_ns, object_id)) = held else {
+            return Ok(None);
+        };
+        if sha.is_empty() || size < 0 || recorded_ns == 0 {
+            return Ok(None);
+        }
+        let target = self.vault().join(rel_path);
+        let Some(now) = stat_of(&target) else {
+            return Ok(None);
+        };
+        if now != (Stat { size, mtime_ns }) {
+            return Ok(None);
+        }
+        if now.mtime_ns < recorded_ns {
+            return Ok(Some(object_id));
+        }
+        probe::file_read();
+        let Ok(bytes) = std::fs::read(&target) else {
+            return Ok(None);
+        };
+        if ids::sha256_hex(&bytes) != sha {
+            return Ok(None);
+        }
+        self.conn().execute(
+            "UPDATE imports SET recorded_ns = ?2 WHERE rel_path = ?1",
+            rusqlite::params![rel_path, now_ns()],
+        )?;
+        Ok(Some(object_id))
+    }
+
+    /// An import candidate whose file has gone: the feed says so once,
+    /// and the row goes, so a file put back is offered again.
+    ///
+    /// The projection's disappearance rule, without the proposal: nothing
+    /// here was ever kernel history, so there is no decision for a person
+    /// to make — the words were theirs, and they took them away.
+    fn forget_missing_import(&self, rel_path: &str) -> Result<()> {
+        let held: Option<i64> = self
+            .conn()
+            .query_row("SELECT 1 FROM imports WHERE rel_path = ?1", [rel_path], |row| {
+                row.get(0)
+            })
+            .map(Some)
+            .or_else(no_rows_none)?;
+        if held.is_none() {
+            // Never offered, so nothing left: a path the vault has never
+            // heard of must not be announced as having gone.
+            return Ok(());
+        }
+        let announce = !self.already_removed(rel_path)?;
+        self.write_txn(|| {
+            self.conn()
+                .execute("DELETE FROM imports WHERE rel_path = ?1", [rel_path])?;
+            if announce {
+                changes::record(
+                    self.conn(),
+                    Change {
+                        kind: ChangeKind::Removed,
                         rel_path,
                         previous_rel_path: None,
                         object_id: None,
@@ -1353,8 +1557,17 @@ impl Store {
                     },
                 )?;
             }
-            Ok(inserted as i64)
+            Ok(())
         })
+    }
+
+    /// Every import candidate this vault is holding, in path order.
+    fn recorded_imports(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn()
+            .prepare("SELECT rel_path FROM imports ORDER BY rel_path")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
     /// Every `.md` file in the vault outside `.gilune/`, as portable
@@ -1909,6 +2122,120 @@ mod tests {
         // change, so the feed does not repeat it on every pass.
         store.reconcile().expect("again");
         assert_eq!(page(&store, &after_capture).len(), 1);
+    }
+
+    #[test]
+    fn an_edit_to_a_file_the_kernel_did_not_write_is_one_modified_change() {
+        // Constitution rule 13: a note written in another editor is
+        // first-class, and a feed that announced it once and then went
+        // quiet left every reader answering about words that had been
+        // rewritten. It is `ExternalEdit` by construction — the kernel
+        // does not claim the file, so nobody here wrote it.
+        let (_dir, store, _rel) = captured("resident");
+        std::fs::write(store.vault().join("Notes.md"), "just my notes").expect("foreign file");
+        store.reconcile().expect("first sighting");
+
+        let after_import = cursor_now(&store);
+        std::fs::write(store.vault().join("Notes.md"), "my notes, revised").expect("their edit");
+        store.reconcile().expect("reconcile");
+        assert_eq!(
+            page(&store, &after_import),
+            vec![(ChangeKind::Modified, "Notes.md".to_string(), ChangeCause::ExternalEdit)]
+        );
+
+        // One step past the obvious: a second edit is a second change,
+        // and a rewrite with the same bytes is none — the feed carries
+        // what happened to the words, not what happened to the file's
+        // timestamp.
+        let after_edit = cursor_now(&store);
+        std::fs::write(store.vault().join("Notes.md"), "my notes, revised again").expect("edit");
+        store.reconcile().expect("reconcile");
+        std::fs::write(store.vault().join("Notes.md"), "my notes, revised again").expect("touch");
+        store.reconcile().expect("reconcile");
+        assert_eq!(
+            page(&store, &after_edit),
+            vec![(ChangeKind::Modified, "Notes.md".to_string(), ChangeCause::ExternalEdit)]
+        );
+    }
+
+    #[test]
+    fn an_unchanged_import_is_not_read() {
+        // K2's rule reaches the files the kernel does *not* write. It has
+        // to be asked before the read, because the front matter is what
+        // decides a file is an import at all — so a vault of imports used
+        // to be read whole on every pass however settled it was.
+        let (_dir, store, _rel) = captured("resident");
+        std::fs::write(store.vault().join("Theirs.md"), "somebody else's words")
+            .expect("foreign file");
+        store.reconcile().expect("first sighting");
+        store.reconcile().expect("settle the racy record");
+
+        probe::reset_file_reads();
+        store.reconcile().expect("a settled pass");
+        assert_eq!(probe::file_reads(), 0, "nothing changed, so nothing was read");
+
+        // And the second-order half: the rule must still notice a change.
+        std::fs::write(store.vault().join("Theirs.md"), "somebody else's newer words")
+            .expect("their edit");
+        probe::reset_file_reads();
+        assert_eq!(store.reconcile().expect("reconcile").imports, 0, "not a new offer");
+        assert!(probe::file_reads() > 0, "a changed file is read");
+    }
+
+    #[test]
+    fn an_import_that_leaves_the_vault_is_announced_once_and_offered_again_if_it_returns() {
+        let (_dir, store, _rel) = captured("resident");
+        std::fs::write(store.vault().join("Theirs.md"), "words from elsewhere").expect("write");
+        store.reconcile().expect("first sighting");
+
+        let after_import = cursor_now(&store);
+        std::fs::remove_file(store.vault().join("Theirs.md")).expect("they deleted it");
+        store.reconcile().expect("reconcile");
+        store.reconcile().expect("and again");
+        assert_eq!(
+            page(&store, &after_import),
+            vec![(ChangeKind::Removed, "Theirs.md".to_string(), ChangeCause::Reconcile)],
+            "said once per disappearance, however many passes notice it"
+        );
+
+        // One step past: a file put back at the same path is a new offer,
+        // not a silence, because the row that would have suppressed it
+        // went with the file.
+        let after_removal = cursor_now(&store);
+        std::fs::write(store.vault().join("Theirs.md"), "words from elsewhere").expect("back");
+        assert_eq!(store.reconcile().expect("reconcile").imports, 1);
+        assert_eq!(
+            page(&store, &after_removal),
+            vec![(ChangeKind::Imported, "Theirs.md".to_string(), ChangeCause::Reconcile)]
+        );
+    }
+
+    #[test]
+    fn reconcile_path_reaches_an_import_the_same_way_the_full_pass_does() {
+        // The editor's own route: a one-file pass has to reach the same
+        // decisions about that one file, imports included, or a note
+        // written in another tool and saved here would be invisible
+        // until something unrelated ran a full pass.
+        let (_dir, store, _rel) = captured("resident");
+        std::fs::write(store.vault().join("Theirs.md"), "their words").expect("write");
+        let before = cursor_now(&store);
+        assert_eq!(store.reconcile_path("Theirs.md").expect("one file").imports, 1);
+        std::fs::write(store.vault().join("Theirs.md"), "their newer words").expect("edit");
+        store.reconcile_path("Theirs.md").expect("one file");
+        std::fs::remove_file(store.vault().join("Theirs.md")).expect("delete");
+        store.reconcile_path("Theirs.md").expect("one file");
+        assert_eq!(
+            page(&store, &before),
+            vec![
+                (ChangeKind::Imported, "Theirs.md".to_string(), ChangeCause::Reconcile),
+                (ChangeKind::Modified, "Theirs.md".to_string(), ChangeCause::ExternalEdit),
+                (ChangeKind::Removed, "Theirs.md".to_string(), ChangeCause::Reconcile),
+            ]
+        );
+        // A path the vault never held is not announced as having gone.
+        let after = cursor_now(&store);
+        store.reconcile_path("Never/existed.md").expect("one file");
+        assert!(page(&store, &after).is_empty());
     }
 
     #[test]

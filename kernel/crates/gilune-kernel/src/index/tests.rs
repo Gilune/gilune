@@ -166,6 +166,18 @@ fn lines(store: &Store, constraints: &[Constraint]) -> Vec<(String, u32)> {
         .collect()
 }
 
+/// What one namespace said about a note. The kernel reads a note's front
+/// matter into its own namespace beside whatever a plugin contributes, so
+/// a test about a plugin's facts asks for that plugin's facts.
+fn said(store: &Store, rel_path: &str, namespace: &str) -> Vec<crate::index::IndexedFact> {
+    store
+        .facts_of(rel_path)
+        .expect("facts")
+        .into_iter()
+        .filter(|fact| fact.namespace == namespace)
+        .collect()
+}
+
 fn notes(store: &Store, constraints: &[Constraint]) -> Vec<String> {
     store
         .query(constraints, QueryScope::Note, 100)
@@ -834,7 +846,7 @@ fn a_line_beyond_the_end_of_the_note_is_stored_exactly_as_the_plugin_gave_it() {
         vec![(rel.clone(), 9_999)]
     );
     assert_eq!(
-        store.facts_of(&rel).expect("facts")[0].line,
+        said(&store, &rel, "test.beyond")[0].line,
         Some(9_999),
         "and it reads back as what was said, not as something tidied"
     );
@@ -1042,7 +1054,7 @@ fn dates_are_normalised_so_that_reading_them_in_order_reads_them_in_time() {
         .expect("register");
     let rel = note(&store, "due=2026-09-10T09:00:00 a moment on a day");
     assert_eq!(
-        store.facts_of(&rel).expect("facts")[0].value,
+        said(&store, &rel, "test.dates")[0].value,
         "2026-09-10",
         "day granularity: a value that needs a time of day declares itself text"
     );
@@ -1273,6 +1285,166 @@ fn a_query_bounds_its_answer_and_orders_it_the_same_way_every_time() {
         .is_empty());
 }
 
+// ------------------------------------------------------- the front matter
+
+/// A note with keys of somebody's own added to the header the kernel
+/// wrote. A `.md` file whose front matter carries no `gilune-id` is
+/// quarantined (ADR 0007), so this is how arbitrary front matter really
+/// reaches a vault: on a note the kernel already claims, edited outside.
+fn keyed(store: &Store, rel_path: &str, keys: &str) {
+    let path = store.vault().join(rel_path);
+    let text = std::fs::read_to_string(&path).expect("read the note");
+    let head = text
+        .split_inclusive("\n---\n")
+        .next()
+        .expect("front matter")
+        .to_string();
+    let body = text[head.len()..].to_string();
+    let reopened = format!("{}{keys}---\n{body}", head.trim_end_matches("---\n"));
+    std::fs::write(&path, reopened).expect("write the note");
+    store.reconcile().expect("reconcile");
+}
+
+/// The indexed text of a note, as the full-text half holds it.
+fn text_of(store: &Store, rel_path: &str) -> Vec<String> {
+    store
+        .with_index(|db| {
+            let mut stmt = db.prepare(
+                "SELECT text FROM lines WHERE rel_path = ?1 AND field = 'body' ORDER BY line",
+            )?;
+            let rows = stmt.query_map([rel_path], |row| row.get::<_, String>(0))?;
+            Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+        })
+        .expect("lines")
+}
+
+fn front_matter(store: &Store, rel_path: &str) -> Vec<(String, String)> {
+    said(store, rel_path, crate::index::FRONT_MATTER_NAMESPACE)
+        .into_iter()
+        .map(|fact| (fact.predicate, fact.value))
+        .collect()
+}
+
+#[test]
+fn a_notes_front_matter_is_read_into_facts_the_kernel_interprets_none_of() {
+    let (_dir, store) = store();
+    let rel = note(&store, "the wall needs plastering");
+    keyed(&store, &rel, "mood: calm\nTags: home\n");
+    let said = front_matter(&store, &rel);
+    assert!(
+        said.contains(&("frontmatter.mood".to_string(), "calm".to_string()))
+            && said.contains(&("frontmatter.tags".to_string(), "home".to_string())),
+        "the key is lower-cased so [Tags] and [tags] are one question, \
+         and the value is exactly what was written: {said:?}"
+    );
+    assert!(
+        said.iter().any(|(predicate, _)| predicate == "frontmatter.gilune-id"),
+        "and the kernel's own keys are stored like anybody else's: {said:?}"
+    );
+    // Note-level, so it holds of the whole note and of every line in it.
+    assert_eq!(
+        notes(&store, &[eq("frontmatter.mood", "calm")]),
+        vec![rel.clone()]
+    );
+    assert!(
+        !said.is_empty()
+            && store
+                .facts_of(&rel)
+                .expect("facts")
+                .iter()
+                .all(|fact| fact.line.is_none()),
+        "front matter describes the note, not a line of it"
+    );
+}
+
+#[test]
+fn a_note_with_no_front_matter_says_nothing_about_itself() {
+    let (_dir, store) = store();
+    std::fs::write(store.vault().join("Bare.md"), "just prose, no header at all\n")
+        .expect("write");
+    store.reconcile().expect("reconcile");
+    assert!(front_matter(&store, "Bare.md").is_empty());
+    assert!(
+        !text_of(&store, "Bare.md").is_empty(),
+        "and its words are still findable"
+    );
+}
+
+#[test]
+fn a_list_is_one_pair_per_item_and_a_nested_mapping_is_none() {
+    // The two shapes YAML offers beyond `key: value`, read at the parser
+    // because a vault cannot hold one today: ADR 0007 quarantines a note
+    // whose front matter is not `key: value` throughout, so a list in a
+    // real header is a quarantined file rather than a fact. The rule is
+    // written anyway, and pinned here, because the reading is not
+    // obvious — a list is one fact per item, since that is what somebody
+    // tagging a note is asking to be found by, and a nested mapping is
+    // nothing at all, since a fact anchors to a note and not to a path
+    // into a tree.
+    assert_eq!(
+        front_matter_of(
+            "---\ntags:\n  - home\n  - chores\nauthor:\n  name: nobody\ntitle: a note\n---\nbody\n"
+        ),
+        vec![
+            ("tags".to_string(), "home".to_string()),
+            ("tags".to_string(), "chores".to_string()),
+            ("title".to_string(), "a note".to_string()),
+        ]
+    );
+    // And the degenerate shapes: no header, an unterminated one, a line
+    // with no key, and a key with nothing under it.
+    assert!(front_matter_of("no header here\n").is_empty());
+    assert!(front_matter_of("---\nmood: calm\nnever closed\n").is_empty());
+    assert_eq!(
+        front_matter_of("---\n: value\nmood: calm\nempty:\n---\nbody\n"),
+        vec![("mood".to_string(), "calm".to_string())]
+    );
+}
+
+#[test]
+fn front_matter_facts_follow_a_rename_and_go_with_the_note() {
+    let (_dir, store) = store();
+    let rel = note(&store, "movable");
+    keyed(&store, &rel, "mood: calm\n");
+    std::fs::rename(store.vault().join(&rel), store.vault().join("Moved.md")).expect("rename");
+    store.reconcile().expect("reconcile");
+    assert_eq!(
+        notes(&store, &[eq("frontmatter.mood", "calm")]),
+        vec!["Moved.md".to_string()],
+        "a fact about a note is about it wherever it is"
+    );
+
+    std::fs::remove_file(store.vault().join("Moved.md")).expect("delete");
+    store.reconcile().expect("reconcile");
+    assert!(notes(&store, &[eq("frontmatter.mood", "calm")]).is_empty());
+}
+
+#[test]
+fn an_edit_to_the_header_replaces_what_the_note_said_about_itself() {
+    // The second-order case: facts are replaced whole per note, so a key
+    // whose value changed must not go on answering for the old one.
+    let (_dir, store) = store();
+    let rel = note(&store, "the kitchen");
+    keyed(&store, &rel, "mood: calm\n");
+    let path = store.vault().join(&rel);
+    let text = std::fs::read_to_string(&path).expect("read");
+    std::fs::write(&path, text.replace("mood: calm", "mood: fraught")).expect("write");
+    store.reconcile().expect("reconcile");
+    assert!(
+        front_matter(&store, &rel).contains(&("frontmatter.mood".to_string(), "fraught".to_string()))
+    );
+    assert!(notes(&store, &[eq("frontmatter.mood", "calm")]).is_empty());
+}
+
+#[test]
+fn the_front_matter_namespace_is_not_a_plugins_to_register() {
+    let (_dir, store) = store();
+    let (marks, _) = Marks::new("test.colour", "colour=");
+    assert!(store
+        .register_indexer(crate::index::FRONT_MATTER_NAMESPACE, 1, &[], marks)
+        .is_err());
+}
+
 // ------------------------------------------------- incremental == rebuilt
 
 /// A deterministic generator, so a failing seed is a failing seed for
@@ -1303,6 +1475,20 @@ fn projected(store: &Store) -> Vec<String> {
         .collect()
 }
 
+/// Files the vault is holding as import candidates and still has.
+fn imported(store: &Store) -> Vec<String> {
+    let mut stmt = store
+        .conn()
+        .prepare("SELECT rel_path FROM imports ORDER BY rel_path")
+        .expect("prepare");
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .expect("query");
+    rows.filter_map(std::result::Result::ok)
+        .filter(|rel| store.vault().join(rel).is_file())
+        .collect()
+}
+
 fn randomised_vault(seed: u64, steps: usize) -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Store::open(dir.path()).expect("open");
@@ -1324,8 +1510,28 @@ fn randomised_vault(seed: u64, steps: usize) -> (tempfile::TempDir, Store) {
 
     for step in 0..steps {
         let live = projected(&store);
-        let action = if live.is_empty() { 0 } else { rolls.next(5) };
+        let brought_in = imported(&store);
+        let action = if live.is_empty() { 0 } else { rolls.next(6) };
         match action {
+            5 if brought_in.is_empty() => {}
+            5 => {
+                // An edit to a file the kernel does not claim. The
+                // property test deliberately avoided this until imports
+                // reached the feed: an announcement nobody made is a
+                // difference between keeping up and rebuilding, which is
+                // exactly what this test is for.
+                let rel = brought_in[rolls.next(brought_in.len())].clone();
+                std::fs::write(
+                    store.vault().join(&rel),
+                    format!(
+                        "colour={} weight={} rewritten elsewhere at {step}",
+                        palette[rolls.next(palette.len())],
+                        rolls.next(50)
+                    ),
+                )
+                .expect("their edit");
+                store.reconcile().expect("reconcile");
+            }
             0 => {
                 store
                     .capture_bytes(
@@ -1372,7 +1578,7 @@ fn randomised_vault(seed: u64, steps: usize) -> (tempfile::TempDir, Store) {
             }
             _ => {
                 // A file the kernel did not write: an import candidate,
-                // announced once and never touched.
+                // offered once and never touched.
                 std::fs::write(
                     store.vault().join(format!("brought-in-{step}.md")),
                     format!("colour=blue weight=7 a file from somewhere else, {step}"),

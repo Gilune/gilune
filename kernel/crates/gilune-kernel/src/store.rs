@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -619,6 +619,39 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE projections ADD COLUMN size INTEGER NOT NULL DEFAULT -1;
      ALTER TABLE projections ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE projections ADD COLUMN recorded_ns INTEGER NOT NULL DEFAULT 0;",
+    // v7 -> v8: an import is a file too, and the feed had only ever heard
+    // of it once.
+    //
+    // `record_import` was `INSERT OR IGNORE`, so a file the kernel does
+    // not claim — every note somebody writes in Obsidian or drops in with
+    // a script, first-class use under constitution rule 13 — was announced
+    // the first time it was seen and never again. Later edits to it
+    // reached no reader and no index, which made "the vault is open to
+    // other tools" true of the files and false of everything built on
+    // them.
+    //
+    // The four columns are the ones `projections` already carries and they
+    // mean exactly the same thing, so an import is decided by git's index
+    // rule and git's racy-file safeguard like anything else here: size and
+    // mtime that both match are enough not to read it, and a file whose
+    // mtime is not older than the moment its record was written is hashed
+    // regardless. `content_sha256` is what makes the racy re-check
+    // conclusive rather than a guess — without it a racy import would be
+    // announced as modified every pass. All four default to values meaning
+    // "nothing recorded", so every row written before this migration is
+    // read once and then settles.
+    //
+    // `object_id` is the id such a file carries when it carries one — a
+    // note kept because it was edited here after being deleted somewhere
+    // else. Reconciliation used to learn that by reading the file's front
+    // matter on every pass; once the stat rule stops it reading, the fact
+    // has to be recorded rather than re-derived, or the standing notice
+    // about that note is withdrawn the moment the file settles.
+    "ALTER TABLE imports ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT '';
+     ALTER TABLE imports ADD COLUMN size INTEGER NOT NULL DEFAULT -1;
+     ALTER TABLE imports ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE imports ADD COLUMN recorded_ns INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE imports ADD COLUMN object_id TEXT;",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {

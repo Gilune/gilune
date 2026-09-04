@@ -51,9 +51,15 @@ fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
     assert_eq!(status["notes"], 2);
     assert!(status["epoch"].as_str().expect("an epoch").len() >= 8);
     let namespaces = status["namespaces"].as_array().expect("namespaces");
-    assert_eq!(namespaces.len(), 1, "{status}");
-    assert_eq!(namespaces[0]["namespace"], "text");
-    assert_eq!(namespaces[0]["cursor_seq"], 2, "it caught up with the feed");
+    // The two the kernel owns and nobody registers: the note text every
+    // full-text query is answered from, and the front matter no indexer
+    // is ever shown.
+    assert_eq!(namespaces.len(), 2, "{status}");
+    assert_eq!(namespaces[0]["namespace"], "frontmatter");
+    assert_eq!(namespaces[1]["namespace"], "text");
+    for namespace in namespaces {
+        assert_eq!(namespace["cursor_seq"], 2, "it caught up with the feed");
+    }
 
     let found = json(&cli(dir.path(), &["query", "text:plasterer", "--scope", "note"]));
     assert_eq!(paths(&found).len(), 1, "{found}");
@@ -62,13 +68,28 @@ fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
     let nothing = json(&cli(dir.path(), &["query", "text:nobody wrote this"]));
     assert!(paths(&nothing).is_empty());
 
-    // A namespace nobody registered here holds nothing, and asking about
-    // it is an empty answer rather than an error.
+    // What a note says about itself, and nothing a plugin said: no
+    // plugin is registered in this process, so every fact here is the
+    // kernel's own reading of the front matter it wrote.
     let facts = json(&cli(
         dir.path(),
         &["facts", line["anchors"][0]["rel_path"].as_str().expect("a path")],
     ));
-    assert!(facts["facts"].as_array().expect("facts").is_empty());
+    let rows = facts["facts"].as_array().expect("facts");
+    assert!(!rows.is_empty(), "{facts}");
+    assert!(rows.iter().all(|f| f["namespace"] == "frontmatter"), "{facts}");
+    assert!(
+        rows.iter().any(|f| f["predicate"] == "frontmatter.gilune-type"),
+        "the kernel stores its own keys like any other: {facts}"
+    );
+
+    // And the front matter is answerable as a query, which is what
+    // `[key:value]` in the shipped search language will compile to.
+    let typed = json(&cli(
+        dir.path(),
+        &["query", "frontmatter.gilune-type=org.memory.source", "--scope", "note"],
+    ));
+    assert_eq!(paths(&typed).len(), 2, "{typed}");
 }
 
 #[test]

@@ -44,6 +44,28 @@ pub const SCHEMA_VERSION: i64 = 1;
 /// is maintained by whichever process passes, registrations or none.
 pub const TEXT_NAMESPACE: &str = "text";
 
+/// The other kernel-owned namespace: a note's front matter, one fact per
+/// top-level entry. Reserved on the same terms as [`TEXT_NAMESPACE`].
+///
+/// It is here and not in a plugin because an indexer is handed the note's
+/// **body**, front matter already split off — so no plugin can see a
+/// `key: value` header at all, and `[key:value]`, which the shipped
+/// search language has always answered, would have had no substrate. The
+/// kernel interprets none of it: `gilune-id` is stored exactly as
+/// `mood` is, and which keys mean anything stays the reader's question.
+pub const FRONT_MATTER_NAMESPACE: &str = "frontmatter";
+
+/// A front-matter key as a predicate. Namespaced, because
+/// `Constraint::Fact` names a predicate and not a namespace: without the
+/// prefix a note whose front matter happened to say
+/// `org.memory.tasks.due:` would be contributing to the tasks plugin's
+/// predicate, which is user data walking into a plugin's vocabulary. The
+/// key is lower-cased, which is what makes `[Mood]` and `[mood]` the same
+/// question as they have always been.
+pub fn front_matter_predicate(key: &str) -> String {
+    format!("{FRONT_MATTER_NAMESPACE}.{}", key.to_lowercase())
+}
+
 /// Rows one query may answer with, whatever a caller asks for. A query
 /// crosses a boundary as owned values (02-kernel-contract), so the bound
 /// is here rather than in a caller's arithmetic.
@@ -459,22 +481,44 @@ struct Plan {
     stopped: bool,
 }
 
-/// Note bodies read during one pass, so a note changed under several
+/// What one namespace's rows are derived from.
+///
+/// Two of the three are the kernel's own and ask nobody: the full-text
+/// rows, and the front-matter facts no indexer could contribute because
+/// no indexer is shown a note's header.
+#[derive(Clone, Copy)]
+enum Source<'a> {
+    Text,
+    FrontMatter,
+    Plugin(&'a Registration),
+}
+
+/// A note as one pass reads it: the prose an indexer sees and the header
+/// it does not.
+struct NoteText {
+    body: String,
+    front_matter: Vec<(String, String)>,
+}
+
+/// Notes read during one pass, so a note changed under several
 /// namespaces is read once (ADR 0020 § 2.3: the indexers run in the pass
 /// that recorded the change, over that note only).
 #[derive(Default)]
-struct Bodies(BTreeMap<String, Option<String>>);
+struct Notes(BTreeMap<String, Option<NoteText>>);
 
-impl Bodies {
-    fn of(&mut self, store: &Store, rel_path: &str) -> Option<&String> {
+impl Notes {
+    fn of(&mut self, store: &Store, rel_path: &str) -> Option<&NoteText> {
         if !self.0.contains_key(rel_path) {
             probe::file_read();
             let read = std::fs::read_to_string(store.vault().join(rel_path))
                 .ok()
-                .map(|text| body_of(&text));
+                .map(|text| NoteText {
+                    body: body_of(&text),
+                    front_matter: front_matter_of(&text),
+                });
             self.0.insert(rel_path.to_string(), read);
         }
-        self.0.get(rel_path).and_then(|body| body.as_ref())
+        self.0.get(rel_path).and_then(|note| note.as_ref())
     }
 }
 
@@ -496,6 +540,64 @@ pub(crate) fn body_of(text: &str) -> String {
         return lines.join("\n");
     };
     lines[close + 2..].join("\n")
+}
+
+/// A note's front matter as `(key, value)` pairs, in the order written.
+///
+/// The block is the one [`body_of`] splits off, so a note's header and
+/// its prose are decided once. What is read out of it is deliberately
+/// small, because the kernel is storing somebody else's vocabulary and
+/// not interpreting it:
+///
+/// - a **top-level** `key: value` is one pair;
+/// - a top-level key with nothing after the colon followed by indented
+///   `- item` lines is one pair **per item**, which is how a YAML list of
+///   tags asks to be searched;
+/// - anything else indented is a nested mapping and is **ignored** — a
+///   fact whose anchor is the note cannot express a path into a tree, and
+///   flattening one would invent a key nobody wrote.
+///
+/// A line with no colon, or whose colon is first, contributes nothing:
+/// there is no key to name it by.
+pub(crate) fn front_matter_of(text: &str) -> Vec<(String, String)> {
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|line| line.strip_suffix('\r').unwrap_or(line))
+        .collect();
+    if lines.first().map(|line| line.trim()) != Some("---") {
+        return Vec::new();
+    }
+    let Some(close) = lines.iter().skip(1).position(|line| line.trim() == "---") else {
+        return Vec::new();
+    };
+    let mut pairs = Vec::new();
+    let mut list_key: Option<String> = None;
+    for line in &lines[1..close + 1] {
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if indented {
+            let trimmed = line.trim();
+            let Some(key) = list_key.as_ref() else { continue };
+            let Some(item) = trimmed.strip_prefix('-') else { continue };
+            let item = item.trim();
+            if !item.is_empty() {
+                pairs.push((key.clone(), item.to_string()));
+            }
+            continue;
+        }
+        list_key = None;
+        let Some((key, value)) = line.split_once(':') else { continue };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let value = value.trim();
+        if value.is_empty() {
+            list_key = Some(key.to_string());
+        } else {
+            pairs.push((key.to_string(), value.to_string()));
+        }
+    }
+    pairs
 }
 
 /// The note's name as a person sees it: the file's stem.
@@ -550,7 +652,10 @@ impl Store {
         kinds: &[PredicateKind],
         indexer: Arc<dyn NoteIndexer>,
     ) -> Result<()> {
-        if namespace.trim().is_empty() || namespace == TEXT_NAMESPACE {
+        if namespace.trim().is_empty()
+            || namespace == TEXT_NAMESPACE
+            || namespace == FRONT_MATTER_NAMESPACE
+        {
             return Err(KernelError::VaultUnusable {
                 reason: format!("{namespace} is not a namespace a plugin may index into"),
             });
@@ -618,15 +723,22 @@ impl Store {
     pub fn advance_index(&self) -> Result<IndexPass> {
         let epoch = self.change_epoch()?;
         let mut pass = IndexPass::default();
-        let mut bodies = Bodies::default();
-        self.advance_namespace(TEXT_NAMESPACE, None, &epoch, &mut bodies, &mut pass)?;
+        let mut notes = Notes::default();
+        self.advance_namespace(TEXT_NAMESPACE, Source::Text, &epoch, &mut notes, &mut pass)?;
+        self.advance_namespace(
+            FRONT_MATTER_NAMESPACE,
+            Source::FrontMatter,
+            &epoch,
+            &mut notes,
+            &mut pass,
+        )?;
         let registered: Vec<Registration> = self.indexers.borrow().clone();
         for registration in &registered {
             self.advance_namespace(
                 &registration.namespace,
-                Some(registration),
+                Source::Plugin(registration),
                 &epoch,
-                &mut bodies,
+                &mut notes,
                 &mut pass,
             )?;
         }
@@ -777,7 +889,9 @@ impl Store {
                 let rows = stmt.query_map([], |row| {
                     let namespace: String = row.get(0)?;
                     Ok(NamespaceStatus {
-                        registered: namespace == TEXT_NAMESPACE || registered.contains(&namespace),
+                        registered: namespace == TEXT_NAMESPACE
+                            || namespace == FRONT_MATTER_NAMESPACE
+                            || registered.contains(&namespace),
                         namespace,
                         version: row.get(1)?,
                         cursor_seq: row.get(2)?,
@@ -812,9 +926,9 @@ impl Store {
     fn advance_namespace(
         &self,
         namespace: &str,
-        registration: Option<&Registration>,
+        source: Source<'_>,
         epoch: &str,
-        bodies: &mut Bodies,
+        notes: &mut Notes,
         pass: &mut IndexPass,
     ) -> Result<()> {
         let mut rebuilt = false;
@@ -845,7 +959,7 @@ impl Store {
             if page.changes.is_empty() {
                 return Ok(());
             }
-            let plan = self.plan(namespace, registration, &page.changes, bodies)?;
+            let plan = self.plan(namespace, source, &page.changes, notes)?;
             let stopped = plan.stopped;
             if let Some(message) = &plan.failure {
                 pass.failures.push(format!("{namespace}: {message}"));
@@ -863,9 +977,9 @@ impl Store {
     fn plan(
         &self,
         namespace: &str,
-        registration: Option<&Registration>,
+        source: Source<'_>,
         changes: &[VaultChange],
-        bodies: &mut Bodies,
+        notes: &mut Notes,
     ) -> Result<Plan> {
         let mut steps: Vec<(i64, Step)> = Vec::new();
         let mut current: BTreeSet<String> = BTreeSet::new();
@@ -885,7 +999,7 @@ impl Store {
                         cursor = change.seq;
                         continue;
                     }
-                    match self.derive(registration, &change.rel_path, bodies) {
+                    match self.derive(source, &change.rel_path, notes) {
                         Ok(step) => steps.push((change.seq, step)),
                         Err(message) => {
                             failure = Some(message);
@@ -910,7 +1024,7 @@ impl Store {
                 }
                 ChangeKind::Moved => {
                     let from = change.previous_rel_path.clone().unwrap_or_default();
-                    match self.plan_move(namespace, registration, &from, change, bodies)? {
+                    match self.plan_move(namespace, source, &from, change, notes)? {
                         Ok(moved) => {
                             // Only a step that actually re-derived makes
                             // the path current. Rows carried across by a
@@ -959,10 +1073,10 @@ impl Store {
     fn plan_move(
         &self,
         namespace: &str,
-        registration: Option<&Registration>,
+        source: Source<'_>,
         from: &str,
         change: &VaultChange,
-        bodies: &mut Bodies,
+        notes: &mut Notes,
     ) -> Result<std::result::Result<Vec<Step>, String>> {
         let held: i64 = if namespace == TEXT_NAMESPACE {
             0
@@ -982,7 +1096,7 @@ impl Store {
             }]));
         }
         Ok(self
-            .derive(registration, &change.rel_path, bodies)
+            .derive(source, &change.rel_path, notes)
             .map(|step| {
                 vec![
                     Step::Forget {
@@ -993,25 +1107,37 @@ impl Store {
             }))
     }
 
-    /// One note's rows for one namespace, or the indexer's refusal. No
-    /// registration is the kernel's own text index, which asks nobody.
+    /// One note's rows for one namespace, or the indexer's refusal. The
+    /// two kernel-owned sources ask nobody and cannot refuse.
     fn derive(
         &self,
-        registration: Option<&Registration>,
+        source: Source<'_>,
         rel_path: &str,
-        bodies: &mut Bodies,
+        notes: &mut Notes,
     ) -> std::result::Result<Step, String> {
-        let Some(body) = bodies.of(self, rel_path) else {
+        let Some(note) = notes.of(self, rel_path) else {
             // A file the feed named and the vault does not hold: the
             // honest reading of the index is that it is not there.
             return Ok(Step::Forget {
                 rel_path: rel_path.to_string(),
             });
         };
-        let rows = match registration {
-            None => Rows::Lines(text_rows(rel_path, body)),
-            Some(registration) => {
-                let facts = registration.indexer.index(rel_path, body)?;
+        let rows = match source {
+            Source::Text => Rows::Lines(text_rows(rel_path, &note.body)),
+            Source::FrontMatter => Rows::Facts(
+                note.front_matter
+                    .iter()
+                    .map(|(key, value)| FactRow {
+                        line: None,
+                        predicate: front_matter_predicate(key),
+                        value: value.clone(),
+                        num: None,
+                        typed: true,
+                    })
+                    .collect(),
+            ),
+            Source::Plugin(registration) => {
+                let facts = registration.indexer.index(rel_path, &note.body)?;
                 Rows::Facts(
                     facts
                         .into_iter()

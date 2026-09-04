@@ -116,8 +116,15 @@ fn a_foreign_indexer_is_asked_about_a_note_and_its_facts_come_back_as_anchors() 
     );
 
     let facts = gilune.facts_of(hits[0].rel_path.clone()).expect("facts");
-    assert_eq!(facts.len(), 2);
-    assert_eq!(facts[0].namespace, "test.colours");
+    let contributed: Vec<_> = facts
+        .iter()
+        .filter(|f| f.namespace == "test.colours")
+        .collect();
+    assert_eq!(contributed.len(), 2);
+    assert!(
+        facts.iter().any(|f| f.namespace == "frontmatter"),
+        "the note's own header is read by the kernel beside them"
+    );
 
     let status = gilune.index_status().expect("status");
     assert_eq!(status.schema_version, 1);
