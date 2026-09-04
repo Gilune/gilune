@@ -1,8 +1,9 @@
 # ADR 0020: A Vault Change Feed, and a System Index Plugins Feed Without Knowing Each Other
 
-Status: **Proposed** (drafted 2026-09-04 at the owner's direction; revised the
-same day after the owner's review — § 10; **ratified and build authorised by
-the owner 2026-09-04**; flips to Accepted when § 8 is evidence)  
+Status: **Accepted** (drafted 2026-09-04 at the owner's direction; revised the
+same day after the owner's review — § 10; ratified and build authorised by
+the owner 2026-09-04; **every § 8 gate item evidenced 2026-09-05**, see the
+last § 10 entry)  
 Validation: the acceptance gate in § 8, run against the production kernel.
 Staged K1–K3 (kernel), P1–P2 (plugins), S (shells) in § 9.
 
@@ -832,3 +833,29 @@ replica pulling streams out of order.
   contents, the tree walks anyway to draw itself, and there is no
   cheaper enumeration than the one the tree already has. Nothing else in
   production walks the vault.
+- **2026-09-05, Accepted: the gate is evidence.** Three stages, one
+  implementer each, sequential, each reviewed before the next began.
+  Item 1 (every mutation path, incl. the out-of-order third replica and a
+  second process) K1; item 2 (dense across a rolled-back transaction,
+  bounded pages, foreign epoch, unheld seq) K1; items 3-4 (two shared-nothing
+  indexers joining on a line, namespace removal and versioned re-derivation,
+  incremental == rebuilt over 4 seeds x 200 steps for facts and text) K3,
+  plus the 63-query / 44-note oracle equivalence in P2; item 5 (one indexer
+  call for N edits to one note) P1; item 6 (an unchanged 1,000-note vault
+  reads zero files; the racy rule; Verify vault) K2; item 7 (a save is in the
+  index before the cursor moves) K1 + S; item 8 measured on the owner's
+  desktop against a release kernel, 1,000 notes x 20 lines: agenda refresh
+  255 -> 21 ms, one-note phrase search 210 -> 70 ms, a word in every note
+  233 -> 177 ms (an answer that is the whole vault still reads the whole
+  vault), settled reconcile 90 ms, build + index 2.9 s; item 9: cargo 439/0,
+  desktop 568/0, instrumented 814/0/12 on gilune-s1, bindings byte-identical,
+  gilune-cli changes / query / facts / index. Two contract corrections were
+  forced by the build and are recorded above: schema v8 backfills the feed
+  with everything a v7 vault already held (an upgraded vault had an empty
+  index), and imports are stat-tracked like projections so a note the kernel
+  never wrote keeps reaching the feed. One K3 defect found by the
+  measurement: SQLite inlined a CTE per clause and re-ran each full-text
+  query per row (57 s for three words); MATERIALIZED and a counted
+  conjunction fixed it. Remaining walks in production read directory NAMES
+  only (the desktop tree, quick-open, export, the sync screen's count) -
+  no file contents are read outside the index and the answered notes.

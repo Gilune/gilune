@@ -1345,8 +1345,91 @@ gates promises) are ratified. **Next: application-level engineering — see
      indexer+operators / P2 search / S shells; 9-item gate incl. two
      shared-nothing indexers joining, incremental==rebuilt property,
      racy-rule row, 1k-note measurement. OPEN (owner deferred): desktop
-     watcher-as-hint vs periodic stat while focused. AWAITS OWNER
-     RATIFICATION; build after the memory round (landed 579872e).
+     watcher-as-hint vs periodic stat while focused. **RATIFIED 2026-09-04
+     ("ratified."); BUILT 2026-09-04/05 in three sequential Opus stages,
+     Fable reviewing between; ACCEPTED 2026-09-05 (every gate item
+     evidenced; ~24 local commits, HELD unpushed with the batch).**
+     K1+K2: schema v7 (`vault_changes`, `meta.vault_change_seq` upserted
+     `RETURNING` in the mutation's own txn — NOT AUTOINCREMENT,
+     `meta.vault_change_epoch`, projections.size/mtime_ns/recorded_ns);
+     `changes.rs`; ten mutation sites write rows (Created = the vault did
+     not have the file; Removed said ONCE per disappearance); `Store::
+     write_txn`; `changes_since`/`change_origin`/`reconcile_path` FFI +
+     typed CursorUnknown; `gilune-cli changes|reconcile-path`; K2 racy
+     rule in `file_matches_record` (mtime_ns < recorded_ns ⇒ clean;
+     else hash and RE-ARM recorded_ns so nothing is re-hashed forever);
+     `verify` hashes every projection and re-arms what stat missed;
+     `probe.rs` test-only read counter (1,000 notes ⇒ 0 reads). No
+     compaction. K3: `index.rs` + `<vault>/.gilune/local/index.db`
+     (index_meta, namespaces{version,cursor_seq,last_error},
+     predicate_kinds, facts{rel_path,line,namespace,predicate,value,num,
+     typed}, lines + `lines_fts` external-content FTS5 **trigram** —
+     Search.kt matched contains(ignoreCase) so unicode61 would have
+     changed every query's meaning; <3-char terms take a LIKE path with
+     ASCII-only folding); lines 1-based body-relative; Note-scope join =
+     SAME anchor projected + note-level facts alone; Ne narrows only;
+     unparseable typed values kept verbatim, excluded from ordered
+     compares; out-of-range lines stored as given; Moved re-keys (derives
+     if nothing to re-key); throwing indexer stops ITS namespace's cursor
+     one short, durable in last_error, not an integrity alert; per-
+     namespace cursors so a process with no indexer (CLI) never touches
+     another's facts; FFI `registerIndexer/advanceIndex/rebuildIndex/
+     query/factsOf/indexStatus`, `NoteIndexer` foreign trait, `Constraint.
+     {Fact,Text}`, `ConstraintOp` (+NotExists, Contains), `TextTarget{ANY,
+     BODY,NAME,PATH}`, `QueryScope`; `gilune-cli index status|rebuild,
+     query, facts`; contracts/indexer/README.md = the third plugin
+     contract (WIT half deferred). **index_meta version/epoch stored as
+     TEXT — an affinity-less column returned a number and every handle
+     discarded the last one's work until a test caught it.** P/S: schema
+     **v8** = imports gain content_sha256/size/mtime_ns/recorded_ns/
+     object_id (stat rule + racy rule; Modified/ExternalEdit, Removed
+     once) AND **a backfill announcing every projection/import the feed
+     never named — a v7-upgraded vault had an EMPTY feed/index** (K1's
+     "feed starts empty on upgrade" overturned; fixture test rewritten);
+     kernel `frontmatter` namespace (note-level facts, predicate
+     `frontmatter.<key>` lower-cased — NOT the bare key, else a header
+     could forge a plugin's predicate); tasks indexer `org.memory.tasks`
+     v1 (state/due/done, SAME recognisers as the operators —
+     `taskMarkerOf`/`taskDateIn` published from TaskSearch.kt; global
+     filter applied at QUERY time as Text(Body) not at derivation);
+     agenda reads line text from disk for the answered notes only
+     (`agendaHits`); compilation = PRE-FILTER, `matches` still decides
+     (a constraint may name more anchors, never fewer) — so `-term` and
+     untaught operators compile to Scan and cost only the answered
+     reads; `searchVault` moved VERBATIM to test sources
+     (SearchScan.kt) as the ORACLE: `SearchEquivalenceTest` 63 queries ×
+     44 notes hit-for-hit (deltas asserted: <3-char ASCII folding;
+     quarantined files unfindable); `GiluneState.vaultCursor` replaces
+     vaultTick (advanceCursor drains changesSince, reseats from
+     changeOrigin on refusal), `noteSaved(rel)` = reconcilePath →
+     advanceIndex → advance; `flushEditor` gained onSaved (was silent);
+     `refreshCount` for the two non-file consumers; registration per
+     handle in openVault incl. RecordService, gated on plugin PRESENCE
+     (disable turns the WORDS off; tombstoned plugins excluded); widget
+     count = query(Text(PATH,"Captures/"), NOTE) — opens a brief handle
+     when none (Work/Captures/ and .hidden.md now count, tested). Docs:
+     0015 amendment (seams = registration route, scan gone), 0007
+     amendment (reconcile rule), search.html one sentence. MEASURED
+     (release kernel, 1k×20): agenda 255→21 ms, phrase-in-one-note
+     210→70, word-in-every-note 233→177 (the answer IS the vault),
+     reconcile 90 ms, build+index 2.9 s. **DEFECT the measurement
+     found in K3: SQLite INLINED a CTE per clause ⇒ each FTS query re-ran
+     per row (57 s, then 111 s); fixed with MATERIALIZED + a counted
+     conjunction (tags unioned, anchor hits when it collects every tag,
+     note-level facts broadcast by one join).** Suites: cargo 439/0,
+     clippy silent (+whisper), desktop 568/0 (--rerun-tasks), instrumented
+     **814/0/12** on gilune-s1 (booted headless by the agent, cold boot,
+     killed after), bindings byte-identical and UNCHANGED from K3, dll
+     6,049,792 B restaged, ABIs 6.74/6.93 MB. Remaining production walks
+     read directory NAMES only (VaultTree/quick-open, Export, SyncScreen
+     count). Gaps: no compaction; `project()` still renders every live
+     object per pass (reads one blob per text note — needs the object's
+     own stat facts; parked-debt-12 shape); the index reads a changed
+     note a second time after reconcile read it; quarantined text is
+     dropped while waiting; YAML-list front matter unreachable (0007
+     quarantines it); widget's no-handle draw opens a vault on the
+     caller's thread (~10 ms); `changedPaths` not exposed; desktop
+     watcher-as-hint still the owner's open point.
    - **Memory round DONE (2026-09-04, one Opus implementer; commit
      579872e HELD LOCALLY with the batch).** Owner: 335 MB in Task
      Manager with one note is not a lightweight app. Measured on a probe
