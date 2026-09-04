@@ -2,10 +2,18 @@
 //! Local-only by decision: audio never leaves the machine. Accepts the
 //! app's canonical WAV (16 kHz mono s16, the format both recorders emit);
 //! anything else fails the job visibly rather than guessing.
+//!
+//! The model is resident only while there is work for it (owner decision
+//! 2026-09-04): the ggml weights cost 59 MB of a 335 MB desktop process
+//! and used to be read at vault open and held for the life of the app,
+//! whether or not anybody ever spoke.
 
 use gilune_kernel::jobs::Job;
 use gilune_kernel::plugins::{Contribution, PluginClass, PluginDescriptor, PluginProfile};
 use gilune_kernel::processor::{OutputTarget, Processor, ProcessorCtx, ProposedOutput};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 pub const PLUGIN_ID: &str = "org.memory.transcription";
@@ -37,8 +45,142 @@ pub fn descriptor() -> PluginDescriptor {
     }
 }
 
+/// How long the weights may sit unused before they are dropped. Ten
+/// minutes is long enough that a person dictating a series of notes never
+/// pays a reload, and short enough that an app left open all day is not
+/// holding a model nobody asked for.
+const IDLE_UNLOAD_MS: i64 = 10 * 60 * 1000;
+
+/// How often the sweeper looks. Granularity, not the threshold: a minute
+/// of overshoot on ten costs nothing and one wakeup a minute is free.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(60);
+
+/// The model file and whatever is currently loaded from it.
+///
+/// Loading is deferred to the first job (`enable_whisper` only checks
+/// that the file is there and readable), and a sweeper drops the weights
+/// again once no job has wanted them for `idle_ms`. Both directions are
+/// invisible to callers: `transcribe` loads if it must and can be called
+/// any number of times either side of an unload.
+pub struct WhisperEngine {
+    model_path: String,
+    idle_ms: i64,
+    slot: Mutex<Slot>,
+    /// How many times the weights have been read off disk. The
+    /// observable that says a concurrent first call loaded once, not
+    /// twice.
+    loads: AtomicUsize,
+}
+
+#[derive(Default)]
+struct Slot {
+    ctx: Option<Arc<WhisperContext>>,
+    /// Transcriptions holding this context right now. The sweeper reads
+    /// it because "unused for ten minutes" is not the same question as
+    /// "not in use": a recording longer than the threshold would
+    /// otherwise have the model pulled out from under it.
+    in_flight: usize,
+    last_used_ms: i64,
+}
+
+/// A context borrowed for one transcription. Its existence is what makes
+/// the slot busy; dropping it starts the idle clock again.
+struct Lease<'a> {
+    engine: &'a WhisperEngine,
+    ctx: Arc<WhisperContext>,
+}
+
+impl Drop for Lease<'_> {
+    fn drop(&mut self) {
+        let mut slot = self.engine.slot.lock().unwrap_or_else(|e| e.into_inner());
+        slot.in_flight = slot.in_flight.saturating_sub(1);
+        slot.last_used_ms = gilune_kernel::ids::now_ms();
+    }
+}
+
+impl WhisperEngine {
+    /// Check the model file without reading it. The failure a caller sees
+    /// for a path that is not there, or not a file, or not readable, is
+    /// the one it saw when this call loaded the weights.
+    fn new(model_path: &str, idle_ms: i64) -> Result<Self, String> {
+        let readable = std::fs::File::open(model_path)
+            .and_then(|file| file.metadata())
+            .map_err(|e| format!("loading whisper model {model_path}: {e}"))?;
+        if !readable.is_file() {
+            return Err(format!("loading whisper model {model_path}: not a file"));
+        }
+        Ok(Self {
+            model_path: model_path.to_string(),
+            idle_ms,
+            slot: Mutex::new(Slot::default()),
+            loads: AtomicUsize::new(0),
+        })
+    }
+
+    /// Borrow the context, loading it if this is the first job since the
+    /// last unload. The slot lock is held across the load — which is what
+    /// makes two jobs arriving together share one context — and released
+    /// before any transcription runs.
+    fn lease(&self) -> Result<Lease<'_>, String> {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        let ctx = match slot.ctx.as_ref() {
+            Some(ctx) => Arc::clone(ctx),
+            None => {
+                let loaded = WhisperContext::new_with_params(
+                    &self.model_path,
+                    WhisperContextParameters::default(),
+                )
+                .map_err(|e| format!("loading whisper model {}: {e}", self.model_path))?;
+                self.loads.fetch_add(1, Ordering::Relaxed);
+                let loaded = Arc::new(loaded);
+                slot.ctx = Some(Arc::clone(&loaded));
+                loaded
+            }
+        };
+        slot.in_flight += 1;
+        slot.last_used_ms = gilune_kernel::ids::now_ms();
+        Ok(Lease { engine: self, ctx })
+    }
+
+    /// Drop the weights if nothing holds them and nothing has wanted them
+    /// for `idle_ms`. Idempotent, and safe to call on an empty slot.
+    fn sweep(&self, now_ms: i64) {
+        let mut slot = self.slot.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.in_flight == 0
+            && slot.ctx.is_some()
+            && now_ms.saturating_sub(slot.last_used_ms) >= self.idle_ms
+        {
+            slot.ctx = None;
+        }
+    }
+
+    /// Whether the weights are in memory right now.
+    pub(crate) fn is_resident(&self) -> bool {
+        self.slot.lock().unwrap_or_else(|e| e.into_inner()).ctx.is_some()
+    }
+
+    #[cfg(test)]
+    fn loads(&self) -> usize {
+        self.loads.load(Ordering::Relaxed)
+    }
+}
+
+/// Sweep `engine` every `interval` for as long as anything still holds
+/// it. The thread keeps only a weak reference, so dropping the
+/// transcriber ends the thread — one per engine, however many handles a
+/// process opens, and none once the last is gone. Detached: a sleeping
+/// thread cannot delay process exit, and there is nothing to flush.
+fn sweep_while_alive(engine: &Arc<WhisperEngine>, interval: Duration) {
+    let watched = Arc::downgrade(engine);
+    std::thread::spawn(move || loop {
+        std::thread::sleep(interval);
+        let Some(engine) = watched.upgrade() else { return };
+        engine.sweep(gilune_kernel::ids::now_ms());
+    });
+}
+
 pub struct WhisperTranscriber {
-    ctx: WhisperContext,
+    engine: Arc<WhisperEngine>,
     /// BCP-47-ish whisper language code, or "auto". An explicit language
     /// skips whisper's detection pass, which costs a full encoder run —
     /// worth ~20% on short clips. Comes from the plugin's settings.
@@ -46,14 +188,34 @@ pub struct WhisperTranscriber {
 }
 
 impl WhisperTranscriber {
-    pub fn load(model_path: &str, language: &str) -> Result<Self, String> {
-        let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
-            .map_err(|e| format!("loading whisper model {model_path}: {e}"))?;
-        Ok(Self { ctx, language: language.to_string() })
+    /// Accept a model without loading it: the first job pays that cost
+    /// (74 ms measured for base-q5_1 off a warm page cache, against a
+    /// whole job of ~880 ms). A caller still learns straight away that
+    /// the path is wrong.
+    pub fn new(model_path: &str, language: &str) -> Result<Self, String> {
+        Self::with_policy(model_path, language, IDLE_UNLOAD_MS, SWEEP_INTERVAL)
+    }
+
+    fn with_policy(
+        model_path: &str,
+        language: &str,
+        idle_ms: i64,
+        sweep_interval: Duration,
+    ) -> Result<Self, String> {
+        let engine = Arc::new(WhisperEngine::new(model_path, idle_ms)?);
+        sweep_while_alive(&engine, sweep_interval);
+        Ok(Self { engine, language: language.to_string() })
+    }
+
+    /// The engine behind this transcriber, so a host can observe whether
+    /// the model is resident without owning it.
+    pub(crate) fn engine(&self) -> &Arc<WhisperEngine> {
+        &self.engine
     }
 
     fn transcribe(&self, samples: &[f32]) -> Result<String, String> {
-        let mut state = self.ctx.create_state().map_err(|e| e.to_string())?;
+        let lease = self.engine.lease()?;
+        let mut state = lease.ctx.create_state().map_err(|e| e.to_string())?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -183,6 +345,160 @@ mod tests {
         assert_eq!(clean_transcript(""), "");
         assert_eq!(clean_transcript("   "), "");
         assert_eq!(clean_transcript("  two   words  "), "two words");
+    }
+}
+
+/// The residency policy, against the real engine. Needs a model, so each
+/// row skips (rather than fails) when `GILUNE_TEST_MODEL` is unset —
+/// the house rule the smoke tests already follow.
+///
+/// Every row drives `sweep` by hand with an hour-long sweep interval, so
+/// the background thread can never be the thing that made a test pass.
+#[cfg(test)]
+mod residency {
+    use super::{WhisperTranscriber, IDLE_UNLOAD_MS};
+    use std::time::Duration;
+
+    const NEVER_SWEEPS: Duration = Duration::from_secs(3600);
+
+    fn model() -> Option<String> {
+        match std::env::var("GILUNE_TEST_MODEL") {
+            Ok(path) => Some(path),
+            Err(_) => {
+                eprintln!("skipped: set GILUNE_TEST_MODEL to a ggml model path");
+                None
+            }
+        }
+    }
+
+    /// A second of digital silence. Transcribes to nothing, which is all
+    /// these rows need: the question is what is in memory, not what was
+    /// said.
+    fn silence() -> Vec<f32> {
+        vec![0.0; 16_000]
+    }
+
+    #[test]
+    fn accepting_a_model_does_not_read_it_off_disk() {
+        let Some(path) = model() else { return };
+        let transcriber =
+            WhisperTranscriber::with_policy(&path, "en", IDLE_UNLOAD_MS, NEVER_SWEEPS)
+                .expect("a present model is accepted");
+        assert!(!transcriber.engine().is_resident(), "nothing is loaded until a job asks");
+        assert_eq!(transcriber.engine().loads(), 0);
+    }
+
+    #[test]
+    fn a_missing_model_is_refused_without_waiting_for_a_job() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let absent = dir.path().join("no-such-model.bin");
+        let Err(err) = WhisperTranscriber::new(&absent.to_string_lossy(), "en") else {
+            panic!("a path with no model behind it cannot be accepted");
+        };
+        assert!(err.starts_with("loading whisper model "), "{err}");
+    }
+
+    #[test]
+    fn the_first_job_loads_the_model_and_later_jobs_reuse_it() {
+        let Some(path) = model() else { return };
+        let transcriber =
+            WhisperTranscriber::with_policy(&path, "en", IDLE_UNLOAD_MS, NEVER_SWEEPS)
+                .expect("model accepted");
+        let started = std::time::Instant::now();
+        transcriber.transcribe(&silence()).expect("first transcription");
+        let cold = started.elapsed();
+        assert!(transcriber.engine().is_resident());
+        assert_eq!(transcriber.engine().loads(), 1);
+
+        let started = std::time::Instant::now();
+        transcriber.transcribe(&silence()).expect("second transcription");
+        let warm = started.elapsed();
+        assert_eq!(transcriber.engine().loads(), 1, "a warm model is not read again");
+        println!(
+            "MODEL LOAD: cold job {} ms, warm job {} ms, so the load costs about {} ms",
+            cold.as_millis(),
+            warm.as_millis(),
+            cold.saturating_sub(warm).as_millis()
+        );
+    }
+
+    #[test]
+    fn the_model_leaves_memory_once_no_job_has_wanted_it() {
+        let Some(path) = model() else { return };
+        let transcriber = WhisperTranscriber::with_policy(&path, "en", 0, NEVER_SWEEPS)
+            .expect("model accepted");
+        transcriber.transcribe(&silence()).expect("transcription");
+        assert!(transcriber.engine().is_resident());
+
+        transcriber.engine().sweep(gilune_kernel::ids::now_ms());
+        assert!(!transcriber.engine().is_resident(), "an idle model is dropped");
+        transcriber.engine().sweep(gilune_kernel::ids::now_ms());
+        assert!(!transcriber.engine().is_resident(), "sweeping an empty slot is a no-op");
+    }
+
+    #[test]
+    fn a_model_still_inside_its_idle_window_is_left_alone() {
+        let Some(path) = model() else { return };
+        let transcriber =
+            WhisperTranscriber::with_policy(&path, "en", IDLE_UNLOAD_MS, NEVER_SWEEPS)
+                .expect("model accepted");
+        transcriber.transcribe(&silence()).expect("transcription");
+        transcriber.engine().sweep(gilune_kernel::ids::now_ms());
+        assert!(transcriber.engine().is_resident(), "ten minutes have not passed");
+    }
+
+    #[test]
+    fn a_job_after_an_unload_loads_the_model_again_and_still_transcribes() {
+        let Some(path) = model() else { return };
+        let transcriber = WhisperTranscriber::with_policy(&path, "en", 0, NEVER_SWEEPS)
+            .expect("model accepted");
+        let first = transcriber.transcribe(&silence()).expect("first transcription");
+        transcriber.engine().sweep(gilune_kernel::ids::now_ms());
+        assert!(!transcriber.engine().is_resident());
+
+        let second = transcriber.transcribe(&silence()).expect("transcription after an unload");
+        assert_eq!(second, first, "the same audio gives the same words either side of an unload");
+        assert!(transcriber.engine().is_resident());
+        assert_eq!(transcriber.engine().loads(), 2, "the second job read the model again");
+    }
+
+    #[test]
+    fn two_jobs_racing_the_first_load_share_one_context() {
+        let Some(path) = model() else { return };
+        let transcriber =
+            WhisperTranscriber::with_policy(&path, "en", IDLE_UNLOAD_MS, NEVER_SWEEPS)
+                .expect("model accepted");
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                scope.spawn(|| {
+                    transcriber.transcribe(&silence()).expect("transcription");
+                });
+            }
+        });
+        assert_eq!(
+            transcriber.engine().loads(),
+            1,
+            "59 MB of weights are read once however many jobs arrive together"
+        );
+    }
+
+    #[test]
+    fn the_sweep_never_takes_the_model_from_a_running_transcription() {
+        let Some(path) = model() else { return };
+        // Idle threshold zero: by the "unused for long enough" question
+        // alone this model is always due to be dropped, so only the
+        // in-flight count can keep it.
+        let transcriber = WhisperTranscriber::with_policy(&path, "en", 0, NEVER_SWEEPS)
+            .expect("model accepted");
+        let lease = transcriber.engine().lease().expect("lease");
+        transcriber.engine().sweep(gilune_kernel::ids::now_ms());
+        assert!(
+            transcriber.engine().is_resident(),
+            "a transcription in flight holds the model however idle the clock says it is"
+        );
+        drop(lease);
+        transcriber.engine().sweep(gilune_kernel::ids::now_ms());
+        assert!(!transcriber.engine().is_resident(), "the last job out drops it");
     }
 }
 

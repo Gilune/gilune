@@ -20,16 +20,20 @@ fn speech_wav_becomes_the_text_of_its_own_note() {
     };
     let dir = tempfile::tempdir().expect("tempdir");
     let gilune = Gilune::open(dir.path().to_string_lossy().to_string()).expect("open");
-    gilune.enable_whisper(model).expect("model loads");
+    gilune.enable_whisper(model).expect("model accepted");
+    assert!(!gilune.whisper_model_resident(), "accepting a model reads no weights");
 
     let wav = std::fs::read(&wav_path).expect("wav bytes");
     let writer = gilune.clone().begin_capture("wav".into()).expect("begin");
     writer.write_chunk(wav).expect("chunk");
     let receipt = writer.finish().expect("finish");
 
+    let started = std::time::Instant::now();
     let summary = gilune.run_processing().expect("processing");
+    println!("FIRST JOB (model load + transcription): {} ms", started.elapsed().as_millis());
     assert_eq!(summary.completed, 1, "the transcription job completed");
     assert_eq!(summary.outputs, 1, "one revision committed");
+    assert!(gilune.whisper_model_resident(), "the job that needed the model loaded it");
 
     let text = gilune
         .object_text(receipt.source_id.clone())
@@ -58,7 +62,7 @@ fn a_silent_recording_leaves_the_note_empty() {
     };
     let dir = tempfile::tempdir().expect("tempdir");
     let gilune = Gilune::open(dir.path().to_string_lossy().to_string()).expect("open");
-    gilune.enable_whisper(model).expect("model loads");
+    gilune.enable_whisper(model).expect("model accepted");
 
     let writer = gilune.clone().begin_capture("wav".into()).expect("begin");
     writer.write_chunk(silent_wav(2)).expect("chunk");
@@ -77,6 +81,41 @@ fn a_silent_recording_leaves_the_note_empty() {
     println!("SILENT CAPTURE NOTE:\n{note}");
     assert!(note.ends_with("---\n"), "front matter and nothing else: {note}");
     assert!(note.contains("gilune-blob: "), "the recording itself is still preserved and linked");
+}
+
+/// The vault opens, the shell says "here is the model", and 59 MB of
+/// weights stay on disk until something actually needs transcribing
+/// (owner decision 2026-09-04). Needs a model: the point of the row is
+/// that a *present* model is not read.
+#[test]
+fn accepting_a_model_loads_nothing_at_all() {
+    let Ok(model) = std::env::var("GILUNE_TEST_MODEL") else {
+        eprintln!("skipped: set GILUNE_TEST_MODEL to a ggml model path");
+        return;
+    };
+    let dir = tempfile::tempdir().expect("tempdir");
+    let gilune = Gilune::open(dir.path().to_string_lossy().to_string()).expect("open");
+    assert!(!gilune.whisper_model_resident(), "opening a vault loads no model");
+    gilune.enable_whisper(model).expect("a present model is accepted");
+    assert!(!gilune.whisper_model_resident(), "and accepting one still loads none");
+}
+
+/// Deferring the load must not defer the *answer*. A shell reads Ok as
+/// "this build can transcribe and the model is there", and it decides
+/// what it shows a person on the strength of it, so a path with nothing
+/// behind it has to fail here rather than at the first recording. Needs
+/// no model — the absence is the subject.
+#[test]
+fn a_model_that_is_not_there_is_refused_when_it_is_offered() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let gilune = Gilune::open(dir.path().to_string_lossy().to_string()).expect("open");
+    let absent = dir.path().join("models").join("ggml-nothing.bin");
+    let err = gilune
+        .enable_whisper(absent.to_string_lossy().to_string())
+        .expect_err("a model that is not on disk cannot be accepted");
+    let message = err.to_string();
+    assert!(message.contains("loading whisper model"), "{message}");
+    assert!(!gilune.whisper_model_resident());
 }
 
 /// `seconds` of digital silence as the app's canonical WAV: 16 kHz mono

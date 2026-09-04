@@ -90,6 +90,36 @@ Applied as boundary discipline, not object-orientation ritual:
   (S1 proves the drop crosses — code may rely on it).
 - ktlint defaults.
 
+## Desktop footprint
+
+An idle app is measured, not assumed. Gilune's desktop process sat at
+504 MB private / 360 MB working set / 101 threads on an empty vault
+(2026-09-04), and almost none of it was the app's own data: 80 MB of Java
+heap holding 13, **75 MB of G1 bookkeeping** sized from a 16 GB default
+maximum, and 59 MB of speech model loaded at vault open for a person who
+had not spoken. The rules that follow from it:
+
+- The packaged launcher is told what an installed app needs, and nothing
+  a build machine needed. Compose's `application { jvmArgs }` feeds the
+  `run` task **and** the jpackage cfg, so a dev path put there ships: the
+  1.0.1 MSI carried the CI runner's `kernel/target/debug`. Dev arguments
+  go on the `run` task.
+- The footprint flags in the distributable, each with its measurement:
+  `-XX:+UseSerialGC` (a single-user desktop app has no pause budget that
+  needs a concurrent collector, and G1's tables cost more than the heap),
+  `-Xms32m -Xmx768m` (the default maximum is a quarter of RAM and the
+  collector sizes itself from it), `-XX:CICompilerCount=2` (the minimum
+  for tiered compilation, in a process that measured 101 threads).
+  Together: **504/360/101 → 376/310/63**, native-memory-tracking
+  committed 216 → 91 MB.
+- **A model is resident for the work, not for the session.** Anything
+  costing tens of megabytes loads on the first job that needs it and is
+  dropped when none has for a while (ADR 0018, 2026-09-04). "Available"
+  is a question about the file, and answering it must stay cheap.
+- The renderer is not a footprint lever. Direct3D costs ≈135 MB private
+  over `SOFTWARE`, and that is the price of the app drawing properly
+  (owner decision 2026-09-04).
+
 ## Tests
 
 - Test the invariant, not the implementation: crash matrices, duplicate

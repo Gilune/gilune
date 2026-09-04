@@ -258,21 +258,32 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "org.gilune.app.MainKt"
-        // Dev runs load the kernel dylib from the cargo target dir; the
-        // packaged distributable carries it as an app resource instead.
-        // Debug by default; override with -Pgilune.kernel.profile=release.
-        val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
-        val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
-        // Forward slashes: jpackage's launcher cfg treats backslashes as
-        // escapes and mangles Windows paths (observed 2026-08-30).
-        jvmArgs += "-Djna.library.path=${kernelDir.invariantSeparatorsPath}"
-        // Dev-run affordances only: -Pgilune.vault points a `run` at a
-        // scratch vault, -Pgilune.probe opens a screen for UI probes.
-        // Neither is ever passed while packaging, so distributables are
-        // unaffected.
-        listOf("gilune.vault", "gilune.probe").forEach { key ->
-            (project.findProperty(key) as String?)?.let { jvmArgs += "-D$key=$it" }
-        }
+        // These reach BOTH `run` and the jpackage launcher cfg, so only
+        // arguments true of an installed app belong here. A dev-machine
+        // path put here ships to every user (the 1.0.1 installer carried
+        // the CI runner's `D:/a/gilune/gilune/kernel/target/debug`); dev
+        // arguments live on the `run` task below.
+        //
+        // The footprint flags, each measured on this machine against an
+        // idle app with one small note (2026-09-04):
+        //  - SerialGC: G1's bookkeeping had committed 75 MB of native
+        //    memory to collect a heap using 13 MB. A single-user desktop
+        //    app has no pause budget that needs a concurrent collector.
+        //  - Xms32m/Xmx768m: the default maximum is a quarter of RAM
+        //    (16 GB on a 64 GB machine), and the collector sizes its
+        //    tables from that, not from what is used.
+        //  - CICompilerCount=2: the minimum for tiered compilation; the
+        //    JIT threads it saves are threads and stacks in a process
+        //    that measured 101 of them.
+        // Together: 504 MB private / 360 MB working set / 101 threads →
+        // 376 / 310 / 63, with native-memory tracking's committed total
+        // 216 → 91 MB.
+        jvmArgs += listOf(
+            "-XX:+UseSerialGC",
+            "-Xms32m",
+            "-Xmx768m",
+            "-XX:CICompilerCount=2",
+        )
 
         nativeDistributions {
             // The two installer formats the project ships. Formats the
@@ -312,6 +323,31 @@ compose.desktop {
         buildTypes.release.proguard {
             isEnabled.set(false)
         }
+    }
+}
+
+// Dev runs only. A dev run loads the kernel dylib from the cargo target
+// dir; the packaged app carries it as an app resource and Main.kt puts
+// `compose.application.resources.dir` on `jna.library.path` itself, so
+// the packaged launcher needs no path of its own — and must not inherit
+// this one, which is a path on whichever machine built it.
+//
+// -Pgilune.vault points a run at a scratch vault and -Pgilune.probe opens
+// a screen for UI probes; both are dev affordances and neither can now
+// reach a distributable.
+//
+// Matched rather than named: the Compose plugin registers `run` after this
+// file is evaluated, so `tasks.named("run")` would not find it yet.
+tasks.matching { it.name == "run" }.configureEach {
+    val run = this as JavaExec
+    // Forward slashes in a Windows path in a JVM argument. It was a
+    // jpackage rule first — its launcher cfg reads a backslash as an
+    // escape (observed 2026-08-30) — and stays the habit here.
+    val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
+    val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
+    run.jvmArgs("-Djna.library.path=${kernelDir.invariantSeparatorsPath}")
+    listOf("gilune.vault", "gilune.probe").forEach { key ->
+        (project.findProperty(key) as String?)?.let { run.jvmArgs("-D$key=$it") }
     }
 }
 

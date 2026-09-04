@@ -781,6 +781,29 @@ pub struct Gilune {
     /// vault, and only the shell knows where that is on its platform
     /// (ADR 0019 § 4).
     sync: Mutex<Option<gilune_sync::SyncService>>,
+    /// A view of the speech engine's loaded state, for tests that need to
+    /// see that `enable_whisper` loaded nothing. Weak on purpose: the
+    /// transcriber in `processors` owns the engine, so unloading the
+    /// plugin must make this answer "not resident" rather than keep 59 MB
+    /// of weights alive to be observed.
+    #[cfg(feature = "whisper")]
+    whisper: Mutex<std::sync::Weak<whisper::WhisperEngine>>,
+}
+
+/// Not part of the FFI surface — no `uniffi::export` here, so bindings
+/// are unaffected.
+#[cfg(feature = "whisper")]
+impl Gilune {
+    /// Whether the speech model is in memory. False before the first
+    /// transcription job and again once one has not run for ten minutes.
+    #[doc(hidden)]
+    pub fn whisper_model_resident(&self) -> bool {
+        self.whisper
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .upgrade()
+            .is_some_and(|engine| engine.is_resident())
+    }
 }
 
 impl Gilune {
@@ -868,14 +891,24 @@ impl Gilune {
             processors: Mutex::new(Vec::new()),
             external: Mutex::new(Vec::new()),
             sync: Mutex::new(None),
+            #[cfg(feature = "whisper")]
+            whisper: Mutex::new(std::sync::Weak::new()),
         }))
     }
 
-    /// Load the local speech-to-text model. Desktop builds only
+    /// Accept the local speech-to-text model. Desktop builds only
     /// (`whisper` feature); Android v0 captures and lets a paired
     /// coordinator transcribe (threat-model decision 1). Refused while
     /// the transcription plugin is disabled or removed — the registry,
     /// not the caller, decides what may run.
+    ///
+    /// Returning Ok means what it has always meant to a shell: this
+    /// build can transcribe and the model is there. It no longer means
+    /// the weights are in memory — the first job reads them (74 ms
+    /// measured) and an idle sweep drops them again, so an app nobody
+    /// dictates into does not carry 59 MB for the day (owner decision
+    /// 2026-09-04). A
+    /// path with no readable model behind it is still refused here.
     pub fn enable_whisper(&self, model_path: String) -> FfiResult<()> {
         #[cfg(feature = "whisper")]
         {
@@ -899,8 +932,10 @@ impl Gilune {
                 .and_then(|p| serde_json::from_str::<serde_json::Value>(&p.settings).ok())
                 .and_then(|s| s.get("language").and_then(|v| v.as_str()).map(str::to_string))
                 .unwrap_or_else(|| "auto".to_string());
-            let transcriber = whisper::WhisperTranscriber::load(&model_path, &language)
+            let transcriber = whisper::WhisperTranscriber::new(&model_path, &language)
                 .map_err(|detail| GiluneError::Invalid { detail })?;
+            *self.whisper.lock().unwrap_or_else(|e| e.into_inner()) =
+                std::sync::Arc::downgrade(transcriber.engine());
             let mut processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
             processors.retain(|p| p.id() != transcriber.id());
             processors.push(Box::new(transcriber));

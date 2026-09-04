@@ -519,6 +519,38 @@ neighbourhood and one shell-policy gap; the fixes amend § 2 and § 3.
   registration (not only the one-transcriber rule) and raises the
   switched-off notice itself when it is the handle that did the switching.
 
+## Post-delivery amendment (2026-09-04, owner: the model is not resident all day)
+
+**A speech model is loaded for the job that needs it and dropped when none
+does.** `enable_whisper` read 59 MB of ggml weights at vault open and held
+them for the life of the process, in a desktop app measured at 504 MB
+private / 360 MB working set sitting idle on one small note. It now checks
+that the model file is there and readable and returns; the first
+transcription job loads it — 74 ms measured for base-q5_1 off a warm page
+cache, against a whole job of ~880 ms — and a sweeper in the kernel drops
+it again after ten idle minutes, reloading transparently for the next job.
+
+**What a shell sees is unchanged, deliberately.** Ok still means what it
+meant: this build can transcribe and the model is present. The mobile
+`TranscriptionPhase.Ready` set when the call returns, and the pending
+wording that hangs off it, are untouched; a path with no readable model
+behind it is still refused at the call rather than at the first recording.
+The rule holds on Android too, where `enable_whisper` is per handle and
+MainActivity and RecordService each make it — neither carries the weights
+between recordings now.
+
+**Two invariants the sweep must keep**, each pinned by a falsified test: a
+transcription in flight holds the model however idle the clock says it is,
+so live leases are counted rather than the last-used time alone (a
+recording longer than the threshold would otherwise have the model taken
+out from under it); and two jobs arriving together load it once, because
+the load happens under the slot lock — which is never held across
+`process()`.
+
+The `enable_whisper` asymmetry recorded above is unaffected: Moonshine
+loads and releases its own engine in the shell, and this is the same
+policy applied on the side of the door the kernel owns.
+
 ## R0's verdict and corrected numbers
 
 R0 ran 2026-09-02 (`spikes/r0-moonshine/README.md`): **PASS WITH
