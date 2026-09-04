@@ -1316,6 +1316,61 @@ gates promises) are ratified. **Next: application-level engineering — see
      hash pass on open); no file watcher. Staged K1/K2/P1/P2/S with a
      7-item gate. AWAITS OWNER RATIFICATION; build after the memory
      round lands (both touch the kernel + FFI).
+   - **Memory round DONE (2026-09-04, one Opus implementer; commit
+     579872e HELD LOCALLY with the batch).** Owner: 335 MB in Task
+     Manager with one note is not a lightweight app. Measured on a probe
+     copy of installed 1.0.1 (empty vault, idle): 504 MB private / 360 WS
+     / 101 threads; NMT committed 216 MB = heap 80 (13 used) + **G1 GC
+     bookkeeping 75 (MaxHeapSize defaulted to 16 GB on a 64 GB machine)**
+     + metaspace 30 + code 11 + symbols 10; whisper base-q5_1 59 MB
+     loaded AT VAULT OPEN and idle; Direct3D renderer ≈135 MB private /
+     85 WS (measured via -Dskiko.renderApi=SOFTWARE — kept, owner
+     decision); ~100 MB untracked native (DLL images, CRT, SQLite, JNA,
+     mDNS, AWT). Shipped: (1) `compose.desktop.application.jvmArgs` =
+     `-XX:+UseSerialGC -Xms32m -Xmx768m -XX:CICompilerCount=2` (each with
+     its measured reason; ReservedCodeCacheSize/MaxMetaspaceSize measured
+     ≈1 MB, NOT added); (2) **whisper on demand**: `WhisperEngine`
+     {model_path, idle 10 min, Mutex<Slot{Arc<ctx>, in_flight,
+     last_used}>}; `enable_whisper` validates the file (is_file) and
+     returns Ok WITHOUT loading (FFI unchanged; shells' Ready semantics
+     unchanged); `lease()` loads under the slot lock (racing first jobs
+     share ONE context) and never holds it across process(); a Lease
+     holds its own Arc so the sweep cannot take a running job's model;
+     `sweep` drops only when in_flight==0 && idle ≥ 10 min; one detached
+     std::thread per engine holding a Weak, wakes every 60 s, exits when
+     the engine drops (cannot pin process exit); non-uniffi
+     `Gilune::whisper_model_resident()` for tests; **model load measured
+     74 ms** (cold job 883 vs warm 809 ms on 1 s audio); (3) the CI path
+     leak `-Djna.library.path=D:/a/gilune/...` was `application {}`-level
+     jvmArgs → moved to `tasks.matching { it.name == "run" }` (Compose
+     registers `run` after evaluation, `tasks.named` fails) together with
+     -Dgilune.vault/-Dgilune.probe. RESULT (same probe method):
+     **308 MB private / 243 WS / 64 threads / NMT 91 / GC 0 / no
+     whisper_model_load line at open** (err.log zero bytes). Tests: 8
+     residency rows in whisper.rs (skip without GILUNE_TEST_MODEL; sweep
+     driven by hand with an hour-long interval so the thread can't be why
+     one passes), 2 whisper_smoke rows + the e2e row asserts
+     not-resident→resident, 3 DesktopLaunchArgumentsTest rows reading
+     build.gradle.kts (comments stripped — they name the forbidden path);
+     falsified in three reverts (4+1, 4+1, 2/1 rows red). Suites: cargo
+     349/0/2 + clippy silent (incl. --features whisper); desktop 539/0
+     (--rerun-tasks, release profile); Android compiles both source sets,
+     ABIs 6.41/6.57 MB rebuilt via the owner's script (run, not edited);
+     instrumented NOT run (no emulator; no Android test added); bindings
+     byte-identical; dll 5,702,144 B restaged. Docs: 0018 post-delivery
+     amendment (owns the enable_whisper door), 09 § Desktop footprint,
+     capture guide one sentence. **FINDING: uniffi 0.29 folds DOC COMMENTS
+     into the metadata checksum — editing `enable_whisper`'s docstring
+     changed `uniffi_gilune_ffi_checksum_method_gilune_enable_whisper`
+     (48408→34755) and made the targets' bindings differ until BOTH
+     binaries were rebuilt from the same source. A prose-only edit to a
+     `#[uniffi::export]` item IS a bindings change.** Gaps: sweeper wakes
+     once a minute for the engine's life even with nothing resident
+     (parking it is tidier; simplest-safe shipped); phone's freed 59 MB
+     inferred from the shared path, not measured on a device; whisper
+     stderr spam untouched (now appears at the first job, not at open).
+     Jpackage note: Task Manager's second "Gilune" (1 MB) is the launcher
+     relaunching itself with an adjusted PATH and waiting on the child.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
