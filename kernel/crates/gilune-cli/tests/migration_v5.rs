@@ -15,6 +15,8 @@
 //! the global counter stopped. The last assertion is the real one: the
 //! adopted operations are applied into a fresh replica, which converges.
 
+use gilune_kernel::changes::ChangeKind;
+use gilune_kernel::index::{Constraint, QueryScope, TextTarget};
 use gilune_kernel::limits::Limits;
 use gilune_kernel::operations;
 use gilune_kernel::store::{Store, SCHEMA_VERSION};
@@ -78,16 +80,47 @@ fn a_v4_vault_upgrades_in_place_without_losing_what_it_held() {
     assert_eq!(summary.written, 0, "an upgrade rewrites nothing a person can see");
     assert_eq!(markdown_files(dir.path()), before);
 
-    // And the change feed the v7 step adds starts empty on it. An
-    // upgrade is not a change to the vault's files, so a consumer
-    // reading the feed for the first time is told about nothing that did
-    // not happen — it starts from the beginning, which is the sanctioned
-    // full read (ADR 0020 § 2.1).
+    // And the change feed says what the vault already holds.
+    //
+    // **This overturns what the v7 step decided**, and the reason is the
+    // index. v7 left the feed empty on an upgrade, on the honest ground
+    // that an upgrade changes no file. But the feed is not only a change
+    // log: it is the enumeration a derived index rebuilds from
+    // (ADR 0020 § 2.3), and `project` announces a file only when the
+    // vault did not have it — so a feed that begins empty over a vault of
+    // a thousand notes is an index that begins empty over a vault of a
+    // thousand notes, and a search that finds nothing until each note
+    // happens to be edited. The v8 step therefore announces every
+    // projection and every import the feed has never named, once.
     let origin = store.change_origin().expect("origin");
     assert_eq!(origin.seq, 0);
     let page = store.changes_since(&origin, 100).expect("changes");
-    assert!(page.changes.is_empty(), "{:?}", page.changes);
+    let projected: Vec<String> = before
+        .iter()
+        .map(|(name, _)| name.clone())
+        .filter(|name| name.ends_with(".md"))
+        .map(|name| format!("Captures/{name}"))
+        .collect();
+    let announced: Vec<String> = page
+        .changes
+        .iter()
+        .map(|change| change.rel_path.clone())
+        .collect();
+    assert_eq!(announced, projected, "everything already there, in path order");
+    assert!(page.changes.iter().all(|c| c.kind == ChangeKind::Created));
     assert!(page.complete);
+
+    // Which is to say: what the vault held is findable, without anybody
+    // editing it to make it so.
+    store.advance_index().expect("index");
+    let found = store
+        .query(
+            &[Constraint::Text { target: TextTarget::Path, query: String::new() }],
+            QueryScope::Note,
+            100,
+        )
+        .expect("query");
+    assert_eq!(found.len(), projected.len(), "every note the upgrade found is indexed");
 }
 
 #[test]

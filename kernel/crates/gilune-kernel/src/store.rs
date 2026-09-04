@@ -647,11 +647,43 @@ const MIGRATIONS: &[&str] = &[
     // matter on every pass; once the stat rule stops it reading, the fact
     // has to be recorded rather than re-derived, or the standing notice
     // about that note is withdrawn the moment the file settles.
+    //
+    // The second half is the feed's own beginning. v7 created
+    // `vault_changes` empty, so a vault that already held a thousand
+    // notes announced none of them: the feed's first word about a file
+    // was whatever happened to it next, and anything derived from the
+    // feed — the system index, and so every query built on it — knew
+    // only the files that had changed since. A reader starting at the
+    // origin has to be told what was already there, so every projection
+    // and every import the feed has never named is announced once here,
+    // in path order, with the counter advanced past them. `Reconcile` is
+    // the cause because this is the site noticing files rather than a
+    // provenance anybody recorded.
     "ALTER TABLE imports ADD COLUMN content_sha256 TEXT NOT NULL DEFAULT '';
      ALTER TABLE imports ADD COLUMN size INTEGER NOT NULL DEFAULT -1;
      ALTER TABLE imports ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT 0;
      ALTER TABLE imports ADD COLUMN recorded_ns INTEGER NOT NULL DEFAULT 0;
-     ALTER TABLE imports ADD COLUMN object_id TEXT;",
+     ALTER TABLE imports ADD COLUMN object_id TEXT;
+     INSERT INTO vault_changes
+         (seq, kind, rel_path, previous_rel_path, object_id, revision_id, cause, created_ms)
+     SELECT (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'vault_change_seq')
+                + ROW_NUMBER() OVER (ORDER BY rel_path),
+            'created', rel_path, NULL, object_id, revision_id, 'reconcile',
+            CAST(strftime('%s', 'now') AS INTEGER) * 1000
+       FROM projections
+      WHERE NOT EXISTS (SELECT 1 FROM vault_changes c WHERE c.rel_path = projections.rel_path);
+     UPDATE meta SET value = (SELECT IFNULL(MAX(seq), 0) FROM vault_changes)
+      WHERE key = 'vault_change_seq';
+     INSERT INTO vault_changes
+         (seq, kind, rel_path, previous_rel_path, object_id, revision_id, cause, created_ms)
+     SELECT (SELECT CAST(value AS INTEGER) FROM meta WHERE key = 'vault_change_seq')
+                + ROW_NUMBER() OVER (ORDER BY rel_path),
+            'imported', rel_path, NULL, NULL, NULL, 'reconcile',
+            CAST(strftime('%s', 'now') AS INTEGER) * 1000
+       FROM imports
+      WHERE NOT EXISTS (SELECT 1 FROM vault_changes c WHERE c.rel_path = imports.rel_path);
+     UPDATE meta SET value = (SELECT IFNULL(MAX(seq), 0) FROM vault_changes)
+      WHERE key = 'vault_change_seq';",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {
