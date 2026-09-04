@@ -24,6 +24,7 @@ technologies can be rejected without weakening the product principles.
 | [0017](0017-mobile-app.md) | The mobile app: capture is the first frame, live-preview editing under a no-reflow law with always-rendered checkboxes, a formatting row that expands to a panel, and widget-started recording | Accepted |
 | [0018](0018-realtime-transcription-and-the-second-provider.md) | Realtime transcription: a display-only live caption during recording, Moonshine as a second provider with one active transcriber at a time, and an FFI processor route so a non-Rust engine writes the committed transcript | Accepted |
 | [0019](0019-lan-pairing-and-transport.md) | LAN sync: DNS-SD discovery, one SPAKE2-then-Noise pairing protocol carrying both a 6-digit code and a QR, vault-external device identity, and a kernel/sync split behind a `Transport` trait | Proposed (build ratified 2026-09-02) |
+| [0020](0020-vault-change-feed-and-incremental-indexes.md) | A dense, resumable vault change feed read from the durable record at the kernel boundary; plugin-owned incremental indexes replace vault rescans; reconcile stats before it reads | Proposed (drafted 2026-09-04) |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

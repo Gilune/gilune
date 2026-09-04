@@ -1292,6 +1292,30 @@ gates promises) are ratified. **Next: application-level engineering — see
      `isFailure`). Title field gained testTag "note-title". Four
      NoteEditorUiTest rows (unchanged name, renamed name + file follows,
      reading mode switches to editing, Escape stays put); desktop 536/0.
+   - **CPU review (2026-09-04, owner ask)**: idle desktop = 203 ms CPU per
+     60 s (0.34% of one core), 4 of 85 threads active (a native render
+     thread 94 ms, VM Periodic Task 62, another native 31, D3D Screen
+     Updater 16); no polling at idle — Panes.kt's 16 ms loop runs only
+     during an edge drag, SyncSettings' 1 s loop only while a pairing
+     window counts down, GiluneState has no timers. Active-path cost is
+     the design gap: `searchVault` walks+reads every .md per query from 4
+     callers (agenda per tick, filter blocks per settle, both search
+     panels per keystroke); reconcile reads+hashes every projected file
+     per pass; the shell's `vaultTick` carries no identity and cannot see
+     a second process. Owner: "rescanning the vault, when we know where
+     the change happened is a bit ludicrous… plugins need to be able to
+     be smarter than that." → **ADR 0020 DRAFTED (Proposed)**: dense
+     resumable `changes_since(cursor, limit)` feed read from the durable
+     record (events + the four projection mutations that raise no event
+     today: rename-by-id, withdrawal, import, quarantine), path-centric
+     VaultChange {seq, kind, rel_path, previous_rel_path, object_id,
+     revision_id, cause}, CursorUnknown ⇒ the only sanctioned full scan;
+     consumer-owned incremental indexes (tasks plugin index; search
+     per-note cache by sha; editor updates its own entry on write);
+     reconcile stats size+mtime before reading (git's index rule, full
+     hash pass on open); no file watcher. Staged K1/K2/P1/P2/S with a
+     7-item gate. AWAITS OWNER RATIFICATION; build after the memory
+     round lands (both touch the kernel + FFI).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

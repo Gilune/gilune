@@ -55,7 +55,13 @@ These require an external security review before production deployment.
 ## Can remain open through the first vertical slice
 
 - Server framework, database, deployment platform, and billing model.
-- Vector index implementation and embedding model.
+- ~~How do plugins and shells learn what changed without rescanning the
+  vault?~~ Proposed answer 2026-09-04: ADR 0020 — a dense change feed read
+  from the durable record, consumer-owned incremental indexes, and a
+  stat-before-read reconcile. Closes when its gate passes.
+- Vector index implementation and embedding model (ADR 0020's per-note cache
+  is the substrate an inverted index would sit on; the index itself stays
+  open).
 - Hosted transcription and LLM providers.
 - Marketplace discovery and ranking.
 - Shared/multi-user memory semantics.
