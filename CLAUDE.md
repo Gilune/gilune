@@ -1198,6 +1198,62 @@ gates promises) are ratified. **Next: application-level engineering — see
      coincides with "a transcriber did" only while one processor
      subscribes to source-ready; the idle-timer dismissal is structural
      (same function) but no row drives a real background cycle.
+   - **Continuous builds in GitHub Actions (2026-09-04, owner ask; one
+     Opus implementer on branch ci/github-actions, Fable reviewing and
+     merging; four decisions ratified: push builds + `v*` tag Releases,
+     MSI + DEB only, debug-signed APK always + release-signed when
+     keystore secrets exist, whisper on every target).**
+     `.github/workflows/build.yml`: `version` job decides ONE version
+     (tag `v<MAJOR≥1>.<MINOR>.<PATCH>` → `-Pgilune.version` +
+     `-Pgilune.versionCode=run_number`; anything else fails fast with the
+     jpackage reason; untagged = gradle defaults) → `windows` (cargo
+     build --features whisper, cargo test, bindings, dll staged to
+     resources/windows-x64, desktopTest `-Pgilune.kernel.profile=release`,
+     `packageReleaseMsi` — the Compose plugin downloads its own WiX) ∥
+     `linux` (same + clippy -D warnings, UI tests under `xvfb-run` with
+     SKIKO_RENDER_API=SOFTWARE, `packageReleaseDeb`) ∥ `android`
+     (`.github/scripts/build-android.sh`: bash cross-compile for both
+     ABIs via the repo's `kernel/scripts/ndk/android.toolchain.cmake`
+     bridge, NDK pinned 27.2.12479018, libc++_shared copied+stripped,
+     bindings from the x86_64 .so; assembleDebug always; assembleRelease
+     only when `GILUNE_KEYSTORE_BASE64/_PASSWORD`, `GILUNE_KEY_ALIAS/
+     _PASSWORD` secrets exist — gradle `signingConfigs.release` exists
+     only when `GILUNE_KEYSTORE_PATH` names a file) → `bindings` parity
+     (three generated surfaces diffed; byte-identical) → `release` (tags
+     or `dry_run_release` dispatch; the only job with contents:write;
+     publishes MSI, DEB, `gilune-debug-signed.apk`, `gilune-release-
+     signed.apk` when present). Triggers include `ci/**` branches so a
+     pipeline change can be proven before main. `GILUNE_CI=1` is set by
+     the workflow and NOTHING else: gate_c's 5 s budget is RECORDED but
+     not JUDGED there (runner exchange 2.96 s vs 1.21 s here). CI FORCED
+     THREE CODE FIXES: Main.kt joined `jna.library.path` with a literal
+     `;` (a packaged Linux app would never have loaded the kernel — now
+     File.pathSeparator); `register_plugin_as` read-then-inserted, so the
+     20-process torture test hit `UNIQUE constraint failed:
+     plugins.plugin_id` on the runner — now an upsert with the state READ
+     BACK so a race loser never applies an opt-in provider's subscription
+     as enabled (two 20×8-thread tests); `app/gradlew` was committed
+     non-executable (+ `.gitattributes` eol=lf for `*.sh` and
+     `.github/**`). Gradle: `targetFormats(Msi, Deb)`, `linux {}` block
+     (package `gilune`, PNG icon, maintainer, Office/utils), version
+     properties additive. Green run:
+     https://github.com/Gilune/gilune/actions/runs/33892013202 — Linux
+     12m43, Windows 22m49, Android 17m46; MSI 102.8 MB, DEB 95.8 MB,
+     debug APK 114.0 MB (ABIs 6.45/6.67 MB); cargo 349/0, desktopTest
+     532/0 on BOTH OSes. Tag path proven by a refused `v0.0.0-*` tag
+     (deleted) + the collect step run locally over real artifacts; `gh
+     release create` itself has NEVER executed (first real tag proves it;
+     `gh workflow run build.yml --ref main -f dry_run_release=true`
+     rehearses everything but that call). Docs: README points at
+     Releases + Linux build lines + 57 MiB; 09-engineering-conventions
+     § Continuous builds and releases. COST NOTE: the repo is PRIVATE, so
+     runs bill Actions minutes — Windows counts 2×, so one full run ≈ 77
+     billed minutes; every push to main is a run. Gaps: no instrumented
+     Android tests in CI, no macOS, DEB only; nothing proves a package
+     INSTALLS and runs; DEB says `Maintainer: Unknown` until
+     `nativeDistributions.vendor` is set (check the MSI install path
+     first); the locally staged dll + jniLibs are stale relative to the
+     plugins.rs fix until rebuilt (dev-run gotcha).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
