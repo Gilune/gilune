@@ -16,6 +16,14 @@ pub struct Store {
     conn: rusqlite::Connection,
     vault: PathBuf,
     cache: std::cell::RefCell<Cache>,
+    /// The system index (ADR 0020 § 2.3), opened on first use. A second
+    /// database beside this one, derived and disposable: a process that
+    /// never indexes and never queries never creates the file.
+    pub(crate) index: std::cell::RefCell<Option<rusqlite::Connection>>,
+    /// The indexers this handle carries. **Per handle, per process**,
+    /// like an external processor's registration: which code exists here
+    /// is a fact about this process and is never written down.
+    pub(crate) indexers: std::cell::RefCell<Vec<crate::index::Registration>>,
 }
 
 /// Two facts the apply path asks for on **every** operation and which
@@ -67,7 +75,13 @@ impl Store {
             "INSERT OR IGNORE INTO meta (key, value) VALUES ('device_id', ?1)",
             [ids::new_id()],
         )?;
-        let store = Store { conn, vault, cache: std::cell::RefCell::default() };
+        let store = Store {
+            conn,
+            vault,
+            cache: std::cell::RefCell::default(),
+            index: std::cell::RefCell::default(),
+            indexers: std::cell::RefCell::default(),
+        };
         capture::recover(&store)?;
         // A data merge, not a schema step: it depends on object state that
         // recovery may still have been completing (ADR 0013), and it is

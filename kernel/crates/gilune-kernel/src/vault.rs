@@ -227,6 +227,10 @@ impl Store {
             }
         }
         summary.removed = self.withdraw_tombstoned()?;
+        // The index is maintained in the pass that recorded the change
+        // (ADR 0020 § 2.3), so a consumer never has to ask for it and
+        // never has to rescan to catch up.
+        self.maintain_index();
         Ok(summary)
     }
 
@@ -407,6 +411,7 @@ impl Store {
                 )?;
             }
         }
+        self.maintain_index();
         Ok(summary)
     }
 
@@ -452,6 +457,9 @@ impl Store {
                 object_id,
             )?;
         }
+        // The whole point of the one-file pass: the note somebody just
+        // saved is in the index before anything refreshes.
+        self.maintain_index();
         Ok(summary)
     }
 

@@ -11,6 +11,7 @@ pub mod crashpoints;
 pub mod external;
 pub mod fs;
 pub mod ids;
+pub mod index;
 pub mod jobs;
 pub mod limits;
 pub mod operations;

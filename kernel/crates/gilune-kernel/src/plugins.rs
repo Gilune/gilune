@@ -280,6 +280,10 @@ impl Store {
                 return Err(e);
             }
         }
+        // What a plugin said about the vault goes with the plugin
+        // (ADR 0011's removal rule, ADR 0020 § 2.3). The notes are
+        // untouched: removing a reader never removes what it read.
+        self.forget_plugin_namespaces(plugin_id)?;
         self.apply_subscription(&plugin.descriptor, PluginState::Removed)
     }
 
