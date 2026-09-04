@@ -179,8 +179,12 @@ fun main() {
     System.getProperty("compose.application.resources.dir")?.let { resources ->
         val existing = System.getProperty("jna.library.path")
         System.setProperty(
+            // File.pathSeparator, not a literal ";": a packaged build always
+            // has both properties set, so on Linux a hard-coded separator
+            // would hand JNA one unopenable path and the kernel would never
+            // load.
             "jna.library.path",
-            if (existing == null) resources else "$resources;$existing",
+            if (existing == null) resources else resources + File.pathSeparator + existing,
         )
     }
     application {
