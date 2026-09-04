@@ -1208,10 +1208,43 @@ gates promises) are ratified. **Next: application-level engineering — see
 3. ~~Spike S1~~ — closed provisionally 2026-08-30 (see its README). When
    the owner's device arrives: run the instrumented suite on hardware,
    measure the capture-commit/cold-start budgets, first ARM64 execution.
-   Machine notes: emulator AVD `gilune-s1` exists; stale `ANDROID_HOME=
-   C:\Android\android-sdk` env var must be overridden to
-   `%LOCALAPPDATA%\Android\Sdk` per process, and the old `C:\Android\
-   adb.exe` fights the SDK's adb server — kill both, start the SDK's.
+   Machine notes (REWRITTEN 2026-09-04 after the owner reinstalled
+   Android Studio): the LIVE SDK is `ANDROID_HOME=C:\Android\android-sdk`
+   (emulator 37.1.11, NDK 27.2, platform-tools 37.0.1, platforms 34/36/
+   37.0, system image `android-36;google_apis;x86_64`) — the former
+   `%LOCALAPPDATA%\Android\Sdk` NO LONGER EXISTS; `app/local.properties`
+   (gitignored) points `sdk.dir` at the live SDK. The AVD `gilune-s1`
+   was recreated by the coordinator via avdmanager on the API 36
+   `google_apis` x86_64 image (pixel_6 profile): Android Studio's Device
+   Manager had built it on the **API 37 / Android 17 16 KB-page image**
+   (`sdk_gphone16k_x86_64`), which the suite is not pinned to and whose
+   16 KB page size rejects any `.so` not 16 KB-aligned (ours are not) —
+   ALWAYS check `ro.build.version.sdk` = 36 and `ro.product.model` =
+   `sdk_gphone64_x86_64` before judging a run. Boot headless:
+   `emulator -avd gilune-s1 -no-window -gpu swiftshader_indirect
+   -no-audio -no-boot-anim` (~36 s from snapshot). The owner's
+   `scripts/move-android-to-d.ps1` / `verify-android-on-d.ps1` (untracked,
+   owner-authored) describe a planned move to `D:\Android` that has NOT
+   been run; `kernel/scripts/build-android.ps1` now reads ANDROID_HOME
+   first (owner edit). **EMULATOR UNUSABLE ON THIS HOST AS OF
+   2026-09-04 — four instrumented attempts, zero tests ran.** Diagnosis:
+   the reinstalled SDK has NO `extras;google;Android_Emulator_Hypervisor_
+   Driver` (AEHD), so emulator 37.1.11 runs on WHPX; this host is an AMD
+   Ryzen 9 3900X with Hyper-V (`vmcompute`) and WSL running. Symptoms: a
+   wiped, idle API-36 guest sits at 300–500% SYSTEM time (6 vCPUs/3 GB),
+   bytecode verification at ~5 bytecodes/s, our app ANRs at startup
+   ("failed to complete startup"), and twice `system_server` crashed the
+   instant instrumentation attached (`INSTRUMENTATION_ABORTED: System
+   has crashed`). Not our code — the same tree ran 769/0 on the previous
+   SDK. OWNER DECISION NEEDED: (a) disable Hyper-V/WSL and install AEHD
+   via SDK Manager ▸ SDK Tools (then `silent_install.bat` as admin) —
+   the fast path on AMD; or (b) keep Hyper-V and accept WHPX, in which
+   case this rig may simply not be viable. ALSO: `C:\Android\adb.exe`
+   (2016, v1.0.32) is FIRST on PATH and fights the SDK's v1.0.41 server
+   on port 5037 ("adb server version (32) doesn't match this client
+   (41); killing") — delete/rename it or drop `C:\Android` from PATH;
+   always call the SDK adb by absolute path. The surgical round's two
+   new instrumented tests remain UNEXECUTED.
 4. ~~Owner decisions~~ — all closed 2026-08-30: ADR 0009 ratified, the
    S5 threat-model workshop held
    (`spikes/s5-distribution-policy/threat-model.md`), and the Gilune
