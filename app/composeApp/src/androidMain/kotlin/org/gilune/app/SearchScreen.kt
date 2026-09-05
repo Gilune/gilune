@@ -1,7 +1,7 @@
 // The Search destination (ADR 0017 § 1, MB3): the third shell tab, over
 // the shared DSL and nothing else.
 //
-// There is no mobile query language. `queryVault` is the same engine the
+// There is no mobile query language. Kernel search is the same service the
 // desktop rail runs, `searchTypesFor` builds the same registry from the
 // same live plugin list, and what a hit *is* therefore changes with the
 // plugins here exactly as it does there (ADR 0015 § 4): switch the tasks
@@ -70,20 +70,9 @@ fun SearchScreen(
 
     // Built from the plugin list on every composition, so enabling or
     // removing a plugin changes the language on the next keystroke.
-    // `filter` is a key of its own because it changes what a task line is
-    // without changing the list's identity.
     val types = searchTypesFor(state.plugins)
-    val filter = state.plugins.tasksFilter()
-    val open = state.gilune.value
-    val hits = remember(query, state.vaultCursor.value, types.size, filter, open) {
-        if (query.isBlank() || open == null) {
-            emptyList()
-        } else {
-            // `today` is read here rather than inside the engine so the
-            // day a relative word means is the day the query ran.
-            queryVault(open, state.vaultDir, query, types = types, today = LocalDate.now())
-        }
-    }
+    val search = rememberPagedSearch(state, query, types)
+    val hits = search.listing.hits
 
     // The shell already pads for the keyboard, so this consumes nothing
     // under it; it is here for the case the screen is hosted alone — a
@@ -104,8 +93,15 @@ fun SearchScreen(
             textStyle = MaterialTheme.typography.bodyLarge,
         )
 
+        QueryNotice(search.listing.loading, search.listing.error, state::retrySearchIndex)
+        if (search.listing.next != null) {
+            androidx.compose.material3.TextButton(onClick = search.more, enabled = !search.listing.loading) {
+                Text("Load more (${hits.size} of ${search.listing.total})")
+            }
+        }
         when {
             query.isBlank() -> QueryFormList(types.any { it.key == TASK_SEARCH_TYPE })
+            hits.isEmpty() && (search.listing.loading || search.listing.error != null) -> Unit
             hits.isEmpty() -> Text(
                 "Nothing matches.",
                 style = MaterialTheme.typography.bodyMedium,

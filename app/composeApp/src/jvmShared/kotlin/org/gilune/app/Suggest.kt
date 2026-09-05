@@ -35,7 +35,7 @@ data class SuggestCandidate(val display: String, val detail: String, val insert:
 /// A field the `/` menu offers in stage one, and whose values it offers
 /// in stage two. Shaped to be **built from a contribution**: ADR 0015 § 3
 /// has a `tasks.fields` contribution declare `key`, `label` and a values
-/// provider id in its `config`, and [suggestField] turns those three
+/// provider id in its `config`, and [PluginExtensions.fields] turns those three
 /// strings into one of these. `due` is the first registration; a People
 /// plugin's `assignee` is another, arriving through the same door.
 ///
@@ -311,33 +311,6 @@ fun replaceRange(value: TextFieldValue, range: IntRange, replacement: String): T
     val written = text.substring(0, from) + replacement + text.substring(to)
     return TextFieldValue(written, TextRange(from + replacement.length))
 }
-
-/// The values provider id ADR 0015 § 3 names in a contribution's
-/// `config`. A provider id rather than a lambda because a contribution is
-/// data — strings the kernel never interprets — and the behaviour behind
-/// the id is the shell's until the wasm contract can carry it (§ 7).
-const val DATE_VALUES_PROVIDER = "org.gilune.dates"
-
-/// Stage two for a date field: what the user typed, narrowed and
-/// resolved, with `<key>:<ISO>` as the token to write.
-fun dateValues(key: String): (String, LocalDate) -> List<SuggestCandidate> = { fragment, today ->
-    dateCandidates(fragment, today).map { candidate ->
-        SuggestCandidate(
-            display = candidate.phrase,
-            detail = candidate.iso ?: "",
-            insert = candidate.iso?.let { "$key:$it" },
-        )
-    }
-}
-
-/// Builds a field from the three strings a `tasks.fields` contribution
-/// carries. An unknown provider id yields null — a contribution this host
-/// cannot serve offers nothing, rather than a row that does nothing.
-fun suggestField(key: String, label: String, values: String): SuggestField? =
-    when (values) {
-        DATE_VALUES_PROVIDER -> SuggestField(key, label, dateValues(key))
-        else -> null
-    }
 
 /// Stage one shows the field's label, with its key as the machine form
 /// beside it — the key is what the line will carry, so it is worth

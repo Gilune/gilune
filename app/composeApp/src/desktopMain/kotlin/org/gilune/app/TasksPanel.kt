@@ -79,16 +79,20 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
     // every view means — and the day every row's date is coloured against
     // — is the day the pass ran, not the day a recomposition happened.
     val open = state.gilune.value
-    val computed = remember(state.vaultCursor.value, state.vaultDir, types.size, filter, open) {
-        val today = LocalDate.now()
-        today to agenda(taskRows(agendaHits(open, state.vaultDir, types, today)), today)
-    }
-    val today = computed.first
-    val sections = computed.second
+    val today = rememberQueryDay()
+    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, open, state.plugins.toList(), today) {
+        loadAgenda(open, types, today)
+    }.value
+    val sections = computed.value?.sections.orEmpty()
+
     // Undated is folded away to begin with: it is the view least likely
     // to be about today, and the one most likely to be long.
     val collapsed = remember { mutableStateListOf(AgendaGroup.UNDATED) }
 
+    if (computed.loading || computed.error != null) {
+        Column(modifier) { QueryNotice(computed.loading, computed.error, state::retrySearchIndex) }
+        return
+    }
     Column(modifier) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 2.dp),
@@ -413,15 +417,13 @@ fun FilterBlockView(
     val types = searchTypesFor(plugins)
     val filter = plugins.tasksFilter()
     val open = state.gilune.value
-    val computed = remember(state.vaultDir, state.vaultCursor.value, block, types.size, filter, open) {
-        val today = LocalDate.now()
-        today to when (open) {
-            null -> FilterResult.Hint(FILTER_NO_MATCHES)
-            else -> evaluateFilterBlock(open, state.vaultDir, block, types, today)
-        }
-    }
-    val today = computed.first
-    val result = computed.second
+    val today = rememberQueryDay()
+    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today) {
+        if (open == null) FilterResult.Hint("Opening vault...")
+        else evaluateFilterBlock(open, state.vaultDir, block, types, today)
+    }.value
+    val result = computed.value ?: FilterResult.Hint(computed.error ?: "Searching...")
+
 
     Column(
         modifier
@@ -431,6 +433,9 @@ fun FilterBlockView(
             .padding(vertical = 5.dp),
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
+        if (computed.error != null) {
+            androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { Text("Retry search") }
+        }
         when (result) {
             is FilterResult.Hint -> FilterNoteRow(result.text)
             is FilterResult.Tasks -> {

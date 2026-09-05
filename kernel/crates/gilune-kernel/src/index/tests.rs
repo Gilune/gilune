@@ -9,10 +9,216 @@ use super::*;
 use crate::store::Store;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+#[test]
+fn a_failed_read_keeps_existing_rows_and_retries_without_another_file_edit() {
+    let (_dir, store) = store();
+    std::fs::write(store.vault().join("read.md"), "preserved words").expect("write");
+    store.reconcile().expect("index");
+    let epoch = store.change_epoch().expect("epoch");
+    let before = store
+        .with_index(|db| cursor_of(db, TEXT_NAMESPACE))
+        .expect("cursor");
+    std::fs::write(
+        store.vault().join("read.md"),
+        "preserved words and pending change",
+    )
+    .expect("edit");
+    // Publish the edit without maintenance, so the read refusal is injected
+    // after a real pending change, beyond the already indexed prefix.
+    store
+        .conn()
+        .execute_batch("BEGIN IMMEDIATE;")
+        .expect("begin");
+    crate::changes::record(
+        store.conn(),
+        crate::changes::Change {
+            kind: ChangeKind::Modified,
+            rel_path: "read.md",
+            previous_rel_path: None,
+            object_id: None,
+            revision_id: None,
+            cause: crate::changes::ChangeCause::ExternalEdit,
+        },
+    )
+    .expect("feed");
+    store.conn().execute_batch("COMMIT;").expect("commit");
+    let page = store
+        .changes_since(&Cursor { epoch, seq: before }, 100)
+        .expect("feed");
+    // A portable injected I/O refusal exercises exactly the read-failure path.
+    let mut refused = Notes::default();
+    refused
+        .0
+        .insert("read.md".into(), Err("file temporarily locked".into()));
+    let mut plan = store
+        .plan(TEXT_NAMESPACE, Source::Text, &page.changes, &mut refused)
+        .expect("plan");
+    plan.expected_cursor = store
+        .with_index(|db| cursor_of(db, TEXT_NAMESPACE))
+        .expect("cursor");
+    plan.expected_version = 0;
+    assert!(plan.stopped);
+    store
+        .commit_plan(TEXT_NAMESPACE, plan, &mut IndexPass::default())
+        .expect("record retry");
+    assert_eq!(notes(&store, &[text("preserved")]), vec!["read.md"]);
+    assert!(notes(&store, &[text("pending")]).is_empty());
+    assert_eq!(
+        store
+            .with_index(|db| cursor_of(db, TEXT_NAMESPACE))
+            .expect("cursor"),
+        before,
+        "a read refusal cannot regress or advance the acknowledged prefix"
+    );
+    assert!(store
+        .index_status()
+        .expect("status")
+        .namespaces
+        .iter()
+        .any(|n| n.last_error.is_some()));
+    store.advance_index().expect("retry");
+    assert_eq!(notes(&store, &[text("preserved")]), vec!["read.md"]);
+    assert_eq!(notes(&store, &[text("pending")]), vec!["read.md"]);
+    assert!(store
+        .index_status()
+        .expect("status")
+        .namespaces
+        .iter()
+        .all(|n| n.last_error.is_none()));
+}
+
+#[test]
+fn a_stale_maintenance_plan_cannot_replace_a_newer_handles_rows_or_cursor() {
+    let (_dir, first) = store();
+    std::fs::write(first.vault().join("race.md"), "old value").expect("write");
+    first.reconcile().expect("index");
+    let expected = first
+        .with_index(|db| cursor_of(db, TEXT_NAMESPACE))
+        .expect("cursor");
+    let stale = Plan {
+        expected_cursor: expected,
+        expected_version: 0,
+        cursor: expected,
+        failure: None,
+        stopped: false,
+        steps: vec![(
+            expected,
+            Step::Put {
+                rel_path: "race.md".into(),
+                rows: Rows::Lines(text_rows("race.md", "old value")),
+            },
+        )],
+    };
+    let second = Store::open(first.vault()).expect("second handle");
+    std::fs::write(first.vault().join("race.md"), "newer value").expect("edit");
+    second.reconcile().expect("newer pass");
+    assert!(!first
+        .commit_plan(TEXT_NAMESPACE, stale, &mut IndexPass::default())
+        .expect("reject stale"));
+    assert_eq!(notes(&first, &[text("newer")]), vec!["race.md"]);
+    assert!(
+        first
+            .with_index(|db| cursor_of(db, TEXT_NAMESPACE))
+            .expect("cursor")
+            > expected
+    );
+}
+
+#[test]
+#[cfg(windows)]
+fn a_windows_file_lock_during_rebuild_is_reported_and_retried_after_unlock() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let (_dir, store) = store();
+    std::fs::write(store.vault().join("locked.md"), "recoverable").expect("write");
+    store.reconcile().expect("index");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(store.vault().join("locked.md"))
+        .expect("lock");
+    let pass = store.rebuild_index(None).expect("rebuild");
+    assert!(!pass.failures.is_empty());
+    drop(lock);
+    store.reconcile().expect("retry without editing");
+    assert_eq!(notes(&store, &[text("recoverable")]), vec!["locked.md"]);
+}
+
 fn store() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Store::open(dir.path()).expect("open");
     (dir, store)
+}
+
+#[test]
+fn a_pass_cannot_acknowledge_an_edit_newer_than_its_cached_note() {
+    let (_dir, first) = store();
+    std::fs::write(first.vault().join("race.md"), "colour=old").expect("write");
+    first.reconcile().expect("initial index");
+    let (indexer, _) = Marks::new("test.colour", "colour=");
+    first
+        .register_indexer("test.colours", 1, &[], indexer)
+        .expect("register");
+    let registration = first.indexers.borrow()[0].clone();
+    let tip = first
+        .with_index(|db| cursor_of(db, TEXT_NAMESPACE))
+        .expect("tip");
+    let epoch = first.change_epoch().expect("epoch");
+    let mut cached = Notes::default();
+    cached.of(&first, "race.md").expect("cache old bytes");
+    let second = Store::open(first.vault()).expect("second handle");
+    std::fs::write(first.vault().join("race.md"), "colour=newer").expect("edit");
+    second.reconcile().expect("record edit during first pass");
+    first
+        .advance_namespace(
+            "test.colours",
+            Source::Plugin(&registration),
+            &epoch,
+            tip,
+            &mut cached,
+            &mut IndexPass::default(),
+        )
+        .expect("finish bounded pass");
+    assert_eq!(
+        first
+            .with_index(|db| cursor_of(db, "test.colours"))
+            .expect("cursor"),
+        tip
+    );
+    first.advance_index().expect("next pass reads new bytes");
+    assert_eq!(
+        notes(&first, &[eq("test.colour", "newer")]),
+        vec!["race.md"]
+    );
+}
+
+#[test]
+fn an_old_handles_indexer_cannot_write_under_a_new_versions_label() {
+    let (_dir, first) = store();
+    let (old, _) = Marks::new("test.colour", "old=");
+    first
+        .register_indexer("test.colours", 1, &[], old)
+        .expect("old registration");
+    std::fs::write(first.vault().join("version.md"), "old=red new=blue").expect("write");
+    first.reconcile().expect("old pass");
+    let second = Store::open(first.vault()).expect("second handle");
+    let (new, _) = Marks::new("test.colour", "new=");
+    second
+        .register_indexer("test.colours", 2, &[], new)
+        .expect("new registration");
+    second.advance_index().expect("new pass");
+    std::fs::write(first.vault().join("version.md"), "old=green new=black").expect("edit");
+    first.reconcile().expect("old handle observes edit");
+    assert!(!first
+        .advance_index()
+        .expect("refused old version")
+        .failures
+        .is_empty());
+    assert!(notes(&first, &[eq("test.colour", "green")]).is_empty());
+    second.advance_index().expect("new handle catches up");
+    assert_eq!(
+        notes(&first, &[eq("test.colour", "black")]),
+        vec!["version.md"]
+    );
 }
 
 /// A test indexer that reads `<marker><value>` out of a note's body:
@@ -259,7 +465,10 @@ fn fts5_with_the_trigram_tokenizer_is_in_the_sqlite_this_kernel_bundles() {
             |row| row.get(0),
         )
         .expect("substring match");
-    assert_eq!(found, 1, "trigram matches inside a word, which is what a substring search is");
+    assert_eq!(
+        found, 1,
+        "trigram matches inside a word, which is what a substring search is"
+    );
     let folded: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM probe WHERE probe MATCH '\"PLASTERER\"'",
@@ -267,7 +476,10 @@ fn fts5_with_the_trigram_tokenizer_is_in_the_sqlite_this_kernel_bundles() {
             |row| row.get(0),
         )
         .expect("case-folded match");
-    assert_eq!(folded, 1, "and it folds case, as every search in the app does");
+    assert_eq!(
+        folded, 1,
+        "and it folds case, as every search in the app does"
+    );
 }
 
 #[test]
@@ -290,7 +502,12 @@ fn two_indexers_that_share_nothing_join_on_one_line() {
     let (colour, colour_calls) = Marks::new("test.colour", "colour=");
     let (weight, weight_calls) = Marks::new("test.weight", "weight=");
     store
-        .register_indexer("test.colours", 1, &kinds("test.colour", ValueKind::Text), colour)
+        .register_indexer(
+            "test.colours",
+            1,
+            &kinds("test.colour", ValueKind::Text),
+            colour,
+        )
         .expect("register");
     store
         .register_indexer(
@@ -321,10 +538,18 @@ fn two_indexers_that_share_nothing_join_on_one_line() {
     // note are not a hit, because a join on the anchor is a join on the
     // anchor. `colour=blue` is line 3 and there is no weight there.
     assert!(
-        lines(&store, &[eq("test.colour", "blue"), eq("test.weight", "12")]).is_empty(),
+        lines(
+            &store,
+            &[eq("test.colour", "blue"), eq("test.weight", "12")]
+        )
+        .is_empty(),
         "a note that holds both is not a line that holds both"
     );
-    assert!(notes(&store, &[eq("test.colour", "blue"), eq("test.weight", "12")]).is_empty());
+    assert!(notes(
+        &store,
+        &[eq("test.colour", "blue"), eq("test.weight", "12")]
+    )
+    .is_empty());
 }
 
 #[test]
@@ -335,7 +560,12 @@ fn a_note_level_fact_satisfies_every_line_of_its_note() {
         .register_indexer("test.colours", 1, &[], colour)
         .expect("register");
     store
-        .register_indexer("test.statuses", 1, &[], Marks::note_level("test.status", "status="))
+        .register_indexer(
+            "test.statuses",
+            1,
+            &[],
+            Marks::note_level("test.status", "status="),
+        )
         .expect("register");
 
     let rel = note(&store, "status=draft\ncolour=red one\ncolour=red two");
@@ -384,7 +614,10 @@ fn removing_a_plugin_takes_its_namespace_and_leaves_every_other() {
         .register_indexer("test.weights", 1, &[], weight)
         .expect("register");
     let rel = note(&store, "colour=red weight=12");
-    assert_eq!(lines(&store, &[eq("test.colour", "red")]), vec![(rel.clone(), 1)]);
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "red")]),
+        vec![(rel.clone(), 1)]
+    );
 
     store.remove_plugin("test.colours").expect("remove");
 
@@ -476,7 +709,10 @@ fn a_version_change_re_derives_one_namespace_and_asks_the_other_nothing() {
         1,
         "the observer's whole point: the other indexer was not asked anything"
     );
-    assert_eq!(lines(&store, &[eq("test.colour", "red")]), vec![(rel.clone(), 1)]);
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "red")]),
+        vec![(rel.clone(), 1)]
+    );
     assert_eq!(lines(&store, &[eq("test.weight", "12")]), vec![(rel, 1)]);
 }
 
@@ -580,8 +816,14 @@ fn two_processes_each_maintain_their_own_namespace_and_neither_wipes_the_other()
     let rel = note(&one, "colour=red weight=12");
     two.reconcile().expect("the second process passes too");
 
-    assert_eq!(lines(&one, &[eq("test.colour", "red")]), vec![(rel.clone(), 1)]);
-    assert_eq!(lines(&two, &[eq("test.weight", "12")]), vec![(rel.clone(), 1)]);
+    assert_eq!(
+        lines(&one, &[eq("test.colour", "red")]),
+        vec![(rel.clone(), 1)]
+    );
+    assert_eq!(
+        lines(&two, &[eq("test.weight", "12")]),
+        vec![(rel.clone(), 1)]
+    );
     assert_eq!(
         lines(&one, &[eq("test.colour", "red"), eq("test.weight", "12")]),
         vec![(rel, 1)],
@@ -629,9 +871,20 @@ fn one_edit_costs_one_indexer_call_and_one_notes_worth_of_text_rows() {
         before + 1,
         "and only that note's lines were replaced"
     );
-    assert_eq!(lines(&store, &[eq("test.colour", "black")]), vec![(second, 1)]);
-    assert_eq!(lines(&store, &[eq("test.colour", "red")]).len(), 1, "{first} kept");
-    assert_eq!(lines(&store, &[eq("test.colour", "green")]).len(), 1, "{third} kept");
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "black")]),
+        vec![(second, 1)]
+    );
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "red")]).len(),
+        1,
+        "{first} kept"
+    );
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "green")]).len(),
+        1,
+        "{third} kept"
+    );
 }
 
 #[test]
@@ -777,7 +1030,9 @@ fn an_indexer_that_refuses_stops_its_own_namespace_and_nothing_else() {
         .register_indexer("test.weights", 1, &[], weight)
         .expect("register");
 
-    let pass = store.advance_index().expect("the pass completes rather than failing");
+    let pass = store
+        .advance_index()
+        .expect("the pass completes rather than failing");
     assert_eq!(pass.failures.len(), 1, "{:?}", pass.failures);
     assert!(pass.failures[0].starts_with("test.colours:"));
     assert!(colour_calls.load(Ordering::SeqCst) >= 2);
@@ -813,7 +1068,11 @@ fn an_indexer_that_refuses_stops_its_own_namespace_and_nothing_else() {
     assert!(pass.failures.is_empty());
     assert_eq!(lines(&store, &[eq("test.colour", "blue")]).len(), 1);
     assert_eq!(lines(&store, &[eq("test.colour", "green")]).len(), 1);
-    assert_eq!(lines(&store, &[eq("test.colour", "red")]).len(), 1, "{first} kept");
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "red")]).len(),
+        1,
+        "{first} kept"
+    );
     assert!(
         store
             .index_status()
@@ -951,13 +1210,20 @@ fn a_cursor_the_feed_refuses_wipes_that_namespace_and_rebuilds_it_alone() {
 
     let pass = store.advance_index().expect("advance");
     assert!(pass.failures.is_empty());
-    assert_eq!(colour_calls.load(Ordering::SeqCst), 2, "rebuilt from the beginning");
+    assert_eq!(
+        colour_calls.load(Ordering::SeqCst),
+        2,
+        "rebuilt from the beginning"
+    );
     assert_eq!(
         weight_calls.load(Ordering::SeqCst),
         1,
         "and only that namespace was rebuilt"
     );
-    assert_eq!(lines(&store, &[eq("test.colour", "red")]), vec![(rel.clone(), 1)]);
+    assert_eq!(
+        lines(&store, &[eq("test.colour", "red")]),
+        vec![(rel.clone(), 1)]
+    );
     assert_eq!(lines(&store, &[eq("test.weight", "12")]), vec![(rel, 1)]);
 }
 
@@ -1032,7 +1298,10 @@ fn a_value_that_will_not_take_its_declared_kind_stays_findable_and_orders_nowher
         "and it takes no part in an ordered comparison, where it would sort as nonsense"
     );
 
-    assert_eq!(lines(&store, &[eq("test.due", "tomorow")]), vec![(rel.clone(), 3)]);
+    assert_eq!(
+        lines(&store, &[eq("test.due", "tomorow")]),
+        vec![(rel.clone(), 3)]
+    );
     let this_month = Constraint::Fact {
         predicate: "test.due".to_string(),
         op: ConstraintOp::Ge,
@@ -1058,7 +1327,10 @@ fn dates_are_normalised_so_that_reading_them_in_order_reads_them_in_time() {
         "2026-09-10",
         "day granularity: a value that needs a time of day declares itself text"
     );
-    assert_eq!(lines(&store, &[eq("test.due", "2026-09-10")]), vec![(rel, 1)]);
+    assert_eq!(
+        lines(&store, &[eq("test.due", "2026-09-10")]),
+        vec![(rel, 1)]
+    );
 }
 
 // ------------------------------------------------------------- the operators
@@ -1150,7 +1422,10 @@ fn ne_asks_about_the_value_and_not_about_the_predicate() {
     store
         .register_indexer("test.colours", 1, &[], colour)
         .expect("register");
-    let rel = note(&store, "colour=red colour=blue both on one line\ncolour=green alone");
+    let rel = note(
+        &store,
+        "colour=red colour=blue both on one line\ncolour=green alone",
+    );
     let all = Constraint::Fact {
         predicate: "test.colour".to_string(),
         op: ConstraintOp::Exists,
@@ -1338,7 +1613,8 @@ fn a_notes_front_matter_is_read_into_facts_the_kernel_interprets_none_of() {
          and the value is exactly what was written: {said:?}"
     );
     assert!(
-        said.iter().any(|(predicate, _)| predicate == "frontmatter.gilune-id"),
+        said.iter()
+            .any(|(predicate, _)| predicate == "frontmatter.gilune-id"),
         "and the kernel's own keys are stored like anybody else's: {said:?}"
     );
     // Note-level, so it holds of the whole note and of every line in it.
@@ -1360,8 +1636,11 @@ fn a_notes_front_matter_is_read_into_facts_the_kernel_interprets_none_of() {
 #[test]
 fn a_note_with_no_front_matter_says_nothing_about_itself() {
     let (_dir, store) = store();
-    std::fs::write(store.vault().join("Bare.md"), "just prose, no header at all\n")
-        .expect("write");
+    std::fs::write(
+        store.vault().join("Bare.md"),
+        "just prose, no header at all\n",
+    )
+    .expect("write");
     store.reconcile().expect("reconcile");
     assert!(front_matter(&store, "Bare.md").is_empty());
     assert!(
@@ -1397,7 +1676,10 @@ fn a_list_is_one_pair_per_item_and_a_nested_mapping_is_none() {
     assert!(front_matter_of("---\nmood: calm\nnever closed\n").is_empty());
     assert_eq!(
         front_matter_of("---\n: value\nmood: calm\nempty:\n---\nbody\n"),
-        vec![("mood".to_string(), "calm".to_string())]
+        vec![
+            ("mood".to_string(), "calm".to_string()),
+            ("empty".to_string(), String::new())
+        ]
     );
 }
 
@@ -1430,9 +1712,8 @@ fn an_edit_to_the_header_replaces_what_the_note_said_about_itself() {
     let text = std::fs::read_to_string(&path).expect("read");
     std::fs::write(&path, text.replace("mood: calm", "mood: fraught")).expect("write");
     store.reconcile().expect("reconcile");
-    assert!(
-        front_matter(&store, &rel).contains(&("frontmatter.mood".to_string(), "fraught".to_string()))
-    );
+    assert!(front_matter(&store, &rel)
+        .contains(&("frontmatter.mood".to_string(), "fraught".to_string())));
     assert!(notes(&store, &[eq("frontmatter.mood", "calm")]).is_empty());
 }
 
@@ -1495,7 +1776,12 @@ fn randomised_vault(seed: u64, steps: usize) -> (tempfile::TempDir, Store) {
     let (colour, _) = Marks::new("test.colour", "colour=");
     let (weight, _) = Marks::new("test.weight", "weight=");
     store
-        .register_indexer("test.colours", 1, &kinds("test.colour", ValueKind::Text), colour)
+        .register_indexer(
+            "test.colours",
+            1,
+            &kinds("test.colour", ValueKind::Text),
+            colour,
+        )
         .expect("register");
     store
         .register_indexer(
@@ -1608,7 +1894,10 @@ fn an_index_kept_up_to_date_equals_one_rebuilt_from_the_beginning() {
             incremental, rebuilt,
             "seed {seed}: an index caught up differs from one rebuilt"
         );
-        assert!(!incremental.is_empty(), "seed {seed}: the vault indexed nothing at all");
+        assert!(
+            !incremental.is_empty(),
+            "seed {seed}: the vault indexed nothing at all"
+        );
     }
 }
 
@@ -1618,7 +1907,14 @@ fn text_queries_answer_exactly_what_reading_every_file_would_have() {
     // the same answer, under the semantics this round chose — substring,
     // case-insensitive, body lines or the note's name.
     let (_dir, store) = randomised_vault(31, 120);
-    for needle in ["colour", "second line", "edited at", "blue", "somewhere else", "note 1"] {
+    for needle in [
+        "colour",
+        "second line",
+        "edited at",
+        "blue",
+        "somewhere else",
+        "note 1",
+    ] {
         let mut scanned: Vec<String> = Vec::new();
         let mut stack = vec![store.vault().to_path_buf()];
         while let Some(dir) = stack.pop() {
@@ -1679,7 +1975,9 @@ fn a_thousand_notes_cost_one_indexer_call_and_one_note_of_work_for_one_edit() {
         for line in 0..19 {
             note.push_str(&format!("line {line} of note {n} with some words in it\n"));
         }
-        let receipt = store.capture_bytes("txt", note.as_bytes()).expect("capture");
+        let receipt = store
+            .capture_bytes("txt", note.as_bytes())
+            .expect("capture");
         if n == 0 {
             first = receipt.rel_path.replace(".txt", ".md");
         }
@@ -1699,13 +1997,21 @@ fn a_thousand_notes_cost_one_indexer_call_and_one_note_of_work_for_one_edit() {
     calls.store(0, Ordering::SeqCst);
     crate::probe::reset_file_reads();
     let edited = std::time::Instant::now();
-    rewrite(&store, &first, "colour=black the only note that changed\nand one more line");
+    rewrite(
+        &store,
+        &first,
+        "colour=black the only note that changed\nand one more line",
+    );
     let edit_ms = edited.elapsed().as_millis();
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "one edit, one indexer call");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "one edit, one indexer call"
+    );
     assert_eq!(
         store.index_status().expect("status").lines,
-        status.lines - 18,
-        "twenty lines replaced by two, and nothing else touched"
+        status.lines - 19,
+        "twenty lines plus the trailing blank replaced by two, and nothing else touched"
     );
 
     let asked = std::time::Instant::now();
@@ -1713,5 +2019,8 @@ fn a_thousand_notes_cost_one_indexer_call_and_one_note_of_work_for_one_edit() {
     let query_ms = asked.elapsed().as_micros();
     assert_eq!(hit, vec![(first, 1)]);
     println!("index: one edit reconciled and indexed in {edit_ms} ms, one query in {query_ms} us");
-    println!("index: the edit read {} file(s)", crate::probe::file_reads());
+    println!(
+        "index: the edit read {} file(s)",
+        crate::probe::file_reads()
+    );
 }

@@ -21,7 +21,7 @@ import kotlin.test.fail
 
 class SuggestTest {
     private val today = LocalDate.of(2026, 9, 1)
-    private val due = assertNotNull(suggestField("due", "Due date", DATE_VALUES_PROVIDER))
+    private val due = assertNotNull(SuggestField("due", "Due date", dateValues("due")))
     private val fields = listOf(due)
 
     /// `- [ ] milk /` with the caret just past the slash — the state § 2

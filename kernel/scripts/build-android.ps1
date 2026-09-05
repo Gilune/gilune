@@ -25,10 +25,8 @@
   Everything below is discovered automatically; the script fails with a named
   error if a piece is missing.
 
-    * Android SDK at %LOCALAPPDATA%\Android\Sdk with an NDK under ndk\<version>.
-      NOTE: this machine carries a STALE ANDROID_HOME=C:\Android\android-sdk
-      environment variable. The script overrides it per process and never
-      writes it back.
+    * Android SDK from ANDROID_HOME (then ANDROID_SDK_ROOT, with
+      %LOCALAPPDATA%\Android\Sdk as a fallback) and an NDK under ndk\<version>.
     * Rust targets: rustup target add aarch64-linux-android x86_64-linux-android
     * cmake on PATH (whisper builds only).
     * GNU make. There is no ninja and no Visual Studio on this machine, so the
@@ -76,8 +74,13 @@ param(
     # Build without local transcription. Capture never depends on it.
     [switch] $NoWhisper,
 
-    # Short build path; see note 5 above.
-    [string] $TargetDir = 'C:\gilune-android',
+    # Short build path; see note 5 above. The migration helper sets this
+    # environment variable so the cache can live off C: as well.
+    [string] $TargetDir = $(if ($env:GILUNE_ANDROID_TARGET_DIR) {
+        $env:GILUNE_ANDROID_TARGET_DIR
+    } else {
+        'C:\gilune-android'
+    }),
 
     # Android API level. Matches minSdk in app/composeApp/build.gradle.kts.
     [int] $ApiLevel = 29
@@ -92,10 +95,18 @@ $manifest = Join-Path $repo 'kernel\Cargo.toml'
 $jniRoot = Join-Path $repo 'app\composeApp\src\androidMain\jniLibs'
 $bindingsOut = Join-Path $repo 'app\composeApp\src\androidMain\generated'
 
-# The stale ANDROID_HOME on this machine points at an SDK that no longer
-# exists. Override it for this process only.
-$sdk = Join-Path $env:LOCALAPPDATA 'Android\Sdk'
-if (-not (Test-Path $sdk)) { throw "Android SDK not found at $sdk" }
+# Prefer the configured SDK while retaining the standard Windows fallback.
+$sdkCandidate = if ($env:ANDROID_HOME) {
+    $env:ANDROID_HOME
+} elseif ($env:ANDROID_SDK_ROOT) {
+    $env:ANDROID_SDK_ROOT
+} else {
+    Join-Path $env:LOCALAPPDATA 'Android\Sdk'
+}
+if (-not (Test-Path -LiteralPath $sdkCandidate)) {
+    throw "Android SDK not found at $sdkCandidate. Set ANDROID_HOME to the SDK directory."
+}
+$sdk = (Resolve-Path -LiteralPath $sdkCandidate).Path
 $env:ANDROID_HOME = $sdk
 $env:ANDROID_SDK_ROOT = $sdk
 

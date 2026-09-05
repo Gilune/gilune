@@ -32,6 +32,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextRange
@@ -46,6 +47,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class MobileAgendaTest {
+    private fun awaitText(text: String) {
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @get:Rule
     val compose = createComposeRule()
 
@@ -223,10 +228,15 @@ class MobileAgendaTest {
         showAgenda(state)
         compose.waitForIdle()
 
+        awaitText("overdue (1)")
         compose.onNodeWithText("overdue (1)").assertIsDisplayed()
+        awaitText("today (1)")
         compose.onNodeWithText("today (1)").assertIsDisplayed()
+        awaitText("next seven days (1)")
         compose.onNodeWithText("next seven days (1)").assertIsDisplayed()
+        awaitText("undated (1)")
         compose.onNodeWithText("undated (1)").assertIsDisplayed()
+        awaitText("collect the keys")
         compose.onNodeWithText("collect the keys").assertIsDisplayed()
         // Undated is folded away to begin with, so its row is not drawn
         // even though its header counts it.
@@ -243,10 +253,13 @@ class MobileAgendaTest {
         showAgenda(state)
         compose.waitForIdle()
 
+        awaitText("undated (1)")
         compose.onNodeWithText("undated (1)").performClick()
         compose.waitForIdle()
+        awaitText("someday maybe")
         compose.onNodeWithText("someday maybe").assertIsDisplayed()
 
+        awaitText("today (1)")
         compose.onNodeWithText("today (1)").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("phone the council").assertDoesNotExist()
@@ -260,6 +273,7 @@ class MobileAgendaTest {
         showAgenda(state, onOpen = { opened = it })
         compose.waitForIdle()
 
+        awaitText("phone the council")
         compose.onNodeWithText("phone the council").performClick()
         compose.waitForIdle()
 
@@ -276,6 +290,7 @@ class MobileAgendaTest {
         compose.waitForIdle()
 
         // The first row of the first view is the overdue one.
+        awaitText("collect the keys")
         compose.onAllNodesWithContentDescription("task not done")[0].performClick()
         compose.waitUntil(WAIT) { file.readText().contains("- [x] collect the keys") }
 
@@ -288,6 +303,7 @@ class MobileAgendaTest {
         // A ticked task is a record, not a claim on the day, so the row
         // leaves the agenda on the recompute its own write triggered.
         compose.waitForIdle()
+        awaitText("phone the council")
         compose.onNodeWithText("collect the keys").assertDoesNotExist()
         compose.onNodeWithText("overdue (1)").assertDoesNotExist()
     }
@@ -302,6 +318,7 @@ class MobileAgendaTest {
         showAgenda(state)
         compose.waitForIdle()
 
+        awaitText("No tasks yet")
         compose.onNodeWithText("No tasks yet").assertIsDisplayed()
         compose.onNodeWithText("- [ ]", substring = true).assertIsDisplayed()
         compose.onNodeWithTag("start-task").assertIsDisplayed()
@@ -326,6 +343,7 @@ class MobileAgendaTest {
         showAgenda(state)
         compose.waitForIdle()
 
+        awaitText("Nothing open")
         compose.onNodeWithText("Nothing open").assertIsDisplayed()
         compose.onNodeWithText("type:task", substring = true).assertIsDisplayed()
         compose.onNodeWithText("No tasks yet").assertDoesNotExist()
@@ -339,6 +357,7 @@ class MobileAgendaTest {
         compose.setContent { GiluneTheme(dark = false) { ShellWithAgenda(state) } }
         compose.waitForIdle()
 
+        awaitText("No tasks yet")
         compose.onNodeWithTag("start-task").performClick()
         compose.waitForIdle()
 
@@ -368,6 +387,7 @@ class MobileAgendaTest {
         }
         compose.waitForIdle()
 
+        awaitText("No tasks yet")
         compose.onNodeWithTag("start-task").performClick()
         compose.waitForIdle()
 
@@ -415,11 +435,15 @@ class MobileAgendaTest {
         showBar(listOf(installedTasksPlugin()))
         compose.waitForIdle()
 
+        awaitText("Capture")
         compose.onNodeWithText("Capture").assertIsDisplayed()
+        awaitText("Notes")
         compose.onNodeWithText("Notes").assertIsDisplayed()
+        awaitText("Search")
         compose.onNodeWithText("Search").assertIsDisplayed()
         // The contributed one, beside the shell's own three and not among
         // them — its label is the contribution's, not the shell's.
+        awaitText("Tasks")
         compose.onNodeWithText("Tasks").assertIsDisplayed()
     }
 
@@ -445,6 +469,7 @@ class MobileAgendaTest {
         compose.onNodeWithText("Tasks").assertDoesNotExist()
         // The shell's own three are untouched by a plugin's absence, and
         // the selection falls back to one of them rather than to nothing.
+        awaitText("Search")
         compose.onNodeWithText("Search").assertIsDisplayed()
         compose.onNodeWithText("Capture").assertIsSelected()
     }

@@ -74,6 +74,77 @@ These require an external security review before production deployment.
 - Arbitrary custom plugin views.
 - CRDT selection for particular future collaborative types.
 
+## Product idea: page templates and default vault structure
+
+Recorded 2026-09-05 from the product discussion. **Exploration, not an
+accepted contract or an implementation commitment.** The owner asked to
+retain the template idea for further design.
+
+**Context.** The initial opinionated product being discussed centres on
+notes, tasks, people, projects, and reminders. The owner wants default
+page and folder structures for People and Projects, changeable through
+plugins. Templates could provide useful starting pages without requiring
+users to design their own structure first.
+
+**Suggested shape to explore:**
+
+- Ship lightweight default templates for person and project pages, with
+  optional properties and freeform Markdown sections. Examples: a person's
+  name, handle, birthday, and notes; a project's purpose, status, and notes.
+- Separate folder/naming settings, templates for initial page content,
+  and plugin-provided fields, relationships, and behaviour. Simple
+  customisation should not require writing a plugin.
+- Apply a template when creating a page. Later template changes affect new
+  pages; they do not automatically rewrite existing user-authored content.
+- Keep collected views (mentions, assigned tasks, related notes) distinct
+  from initial template content. Explore using the existing filter-block
+  and plugin contribution mechanisms instead of copying matching content.
+- Let page identity and type survive moves and renames; default folders
+  organise pages but should not be their sole type declaration.
+- Preserve frictionless capture: choosing a template, type, or folder
+  must never be required to save an ordinary thought.
+
+**Open design questions:** where templates live and whether they sync;
+how users override plugin defaults; how template versions and plugin
+removal behave; which properties and sections ship by default; and how
+dynamic views coexist with ordinary, externally editable Markdown.
+
+Next step when this idea is taken forward: design one person template and
+one project template, then use their actual needs to define any shared
+page-creation contract. No general template language has been selected.
+
+Planning update, 2026-09-05: the
+[People and shared document-refactoring plan](plans/people-and-document-refactoring.md)
+takes the person template and shared creation contract forward first. Project
+templates remain future consumers. Template storage/round-trip choices are
+explicit P0 work; no template language or implementation is accepted yet.
+
+## People connections and plain-text refactoring
+
+Owner direction, 2026-09-05: People owns user-defined connection keywords such
+as `assign` and `owner`; Gilune does not enforce their personal meanings.
+Renames should update visible text across existing documents rather than
+preserve a hidden alternative meaning through aliases. Build a shared public
+document-refactoring capability alongside People, outside the plugin, and test
+it with People plus an unrelated consumer.
+
+The [delivery plan](plans/people-and-document-refactoring.md) records scope,
+contract gaps, milestones and acceptance gates. Remaining design choices
+include lexical rules, portable definition format, source-versioned edits,
+partial-rename configuration and guarded undo. The owner accepted whole-list-item
+connection scope (nested items separate), preserving unknown person references
+with optional explicit page creation, and renaming all vault Markdown without
+adding metadata or requiring adoption. These are requirements, not open choices;
+shared location and unmanaged-file recovery/sync mechanics remain design work.
+The planning work is recorded; implementation and validation remain outstanding.
+
+The owner also requested shared set-membership queries in this delivery, using
+`assign IN ["alice", "bob"]` with a task type as the motivating example. People
+supplies connection values; membership, negation, scope and complete pagination
+belong to the framework. The delivery plan now includes the public constraint,
+parser/filter integration and independent-plugin acceptance tests; final query
+syntax and list limits remain P0 choices.
+
 ## Decision hygiene
 
 For each resolved question:

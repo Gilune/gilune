@@ -1,18 +1,4 @@
-// The agenda's arithmetic (ADR 0015 § 6, T3): the four bounded views a
-// tasks agenda is — overdue, today, the next seven days, undated — as a
-// partition over rows and a day.
-//
-// Pure: no screen, no clock, no Compose and no state. It lived beside the
-// desktop panel that first drew it (`TasksPanel.kt`) and moved here whole
-// when the phone's agenda destination arrived (ADR 0017 § 8, MB3), so the
-// two shells share the boundaries rather than each deciding what "overdue"
-// means. Nothing about it changed in the move — same package, same names,
-// same behaviour — which is why the desktop's tests did not have to.
-//
-// What is *not* here is what a row looks like or what a tap does: the
-// desktop panel navigates and never toggles, the phone's rows carry a
-// checkbox (ADR 0017 § 8), and that difference is presentation each shell
-// owns.
+// Task plugin agenda requests and presentation. Matching and sorting run in the kernel.
 
 package org.gilune.app
 
@@ -27,44 +13,38 @@ const val AGENDA_ROW_CAP = 50
 /// today is a view of its own — see [AgendaGroup].
 const val AGENDA_HORIZON_DAYS = 7L
 
-/// How many task lines one note may contribute before the engine stops
-/// quoting them. An agenda wants every task in a note, not the five a
-/// search panel quotes, and this is well past § 4's rendering cap.
-const val AGENDA_SCAN_LINES = 200
-
-/// Every open task in the vault, as `type:task` with no other term — the
-/// query a person would type. The four views are then one partition in
-/// Kotlin rather than four passes over the vault, which is also what
-/// keeps them from overlapping.
+/// The plugin vocabulary for a task query.
 const val AGENDA_QUERY = "type:$TASK_SEARCH_TYPE"
 
-/// The agenda's one query, for both shells: every task line the vault
-/// holds, as hits carrying the lines to draw.
-///
-/// It asks for tasks rather than *open* tasks deliberately — the empty
-/// agenda has two different things to say (see [agendaEmpty]), and only
-/// the whole set can tell them apart. The index narrows it to the notes
-/// that have a task line at all, and only those are read.
-///
-/// A vault not open yet answers with nothing, which is what a screen
-/// composed before its handle should draw.
-fun agendaHits(
-    gilune: uniffi.gilune_ffi.Gilune?,
-    vaultDir: String,
-    types: List<SearchType>,
-    today: LocalDate,
-): List<SearchHit> = if (gilune == null) {
-    emptyList()
-} else {
-    queryVault(gilune, vaultDir, AGENDA_QUERY, types = types, today = today, maxLines = AGENDA_SCAN_LINES)
+internal data class AgendaResult(val sections: List<AgendaSection>, val empty: AgendaEmpty?)
+
+/** The domain plugin defines the four groups; the kernel filters, orders,
+ * counts, and limits each group before any rows cross the boundary. */
+internal fun loadAgenda(gilune: uniffi.gilune_ffi.Gilune?, types: List<SearchType>, today: LocalDate): AgendaResult {
+    if (gilune == null) return AgendaResult(emptyList(), AgendaEmpty.NO_TASKS)
+    val queries = listOf(
+        AgendaGroup.OVERDUE to "due:overdue",
+        AgendaGroup.TODAY to "due:today",
+        AgendaGroup.NEXT_SEVEN to "due:after:$today due:before:${today.plusDays(AGENDA_HORIZON_DAYS + 1)}",
+        AgendaGroup.UNDATED to "due:none",
+    )
+    val sections = queries.mapNotNull { (group, terms) ->
+        val query = compileSearch("type:task is:open $terms", types = types, today = today,
+            maxLines = 1, pageSize = AGENDA_ROW_CAP.toUInt(), groupByNote = false,
+            sortPredicate = TASK_DUE_PREDICATE) ?: return@mapNotNull null
+        val page = query.page(gilune).requireComplete()
+        if (page.totalHits == 0uL) null else {
+            val rows = kernelTaskRows(page.hits)
+            AgendaSection(group, rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())
+        }
+    }
+    if (sections.isNotEmpty()) return AgendaResult(sections, null)
+    val total = compileSearch(AGENDA_QUERY, types = types, today = today,
+        maxLines = 0, pageSize = 1u, groupByNote = false)?.page(gilune)?.requireComplete()?.totalHits ?: 0uL
+    return AgendaResult(emptyList(), if (total == 0uL) AgendaEmpty.NO_TASKS else AgendaEmpty.NONE_OPEN)
 }
 
-/// The four bounded views (§ 6, T3), in the order a panel shows them.
-/// They **partition** the tasks they cover: no task appears twice, which
-/// is why the views divide one result set by its due date rather than
-/// running the `due:` operator's own values — `week` there means today
-/// through today + 6 and so overlaps `today`, correctly, for a query
-/// somebody typed.
+/// Disjoint agenda groups in display order.
 enum class AgendaGroup(val label: String) {
     OVERDUE("overdue"),
     TODAY("today"),
@@ -79,70 +59,14 @@ data class AgendaSection(val group: AgendaGroup, val rows: List<TaskHit>, val mo
     val count: Int get() = rows.size + more
 }
 
-/// The partition, pure over the rows and the day.
-///
-/// - **checked tasks are excluded** — an agenda lists what is open, and a
-///   done task is a record, not a claim on the day. Read from the marker
-///   the line carries, so it costs no second query;
-/// - **overdue** — a due date strictly before today;
-/// - **today** — due today;
-/// - **next seven days** — tomorrow through today + [AGENDA_HORIZON_DAYS],
-///   both ends included;
-/// - **undated** — no due date at all.
-///
-/// A task due beyond the horizon is in **no** view and no panel shows it:
-/// four bounded views are what T3 is, and an unbounded "later" is the list
-/// an agenda exists to not be. Search answers that question —
-/// `type:task due:after:…` — which is where it belongs.
-///
-/// Order inside a view is [taskRows]' own, which is the one order an
-/// agenda needs (§ 4), so nothing here sorts. An empty view is dropped
-/// rather than drawn as a header with a nought beside it.
-fun agenda(rows: List<TaskHit>, today: LocalDate, cap: Int = AGENDA_ROW_CAP): List<AgendaSection> {
-    val open = rows.filterNot { isCheckedTaskLine(it.text) }
-    val horizon = today.plusDays(AGENDA_HORIZON_DAYS)
-    return AgendaGroup.entries.mapNotNull { group ->
-        val members = open.filter { group.holds(it.due, today, horizon) }
-        if (members.isEmpty()) {
-            null
-        } else {
-            AgendaSection(group, members.take(cap), (members.size - cap).coerceAtLeast(0))
-        }
-    }
-}
-
-/// Why an agenda has nothing to draw. Two different facts, and telling a
-/// person the wrong one is worse than saying nothing: somebody with no
-/// tasks at all needs to know what a task **is**, and somebody whose
-/// tasks are all done or all far off needs to know the views are bounded
-/// and where the rest are.
+/// Why no agenda group contains a task.
 enum class AgendaEmpty {
     /// The vault holds no task lines at all.
     NO_TASKS,
 
     /// Tasks exist; none of them is open inside the four views — every
-    /// one is ticked, or due beyond the horizon (see [agenda]).
+    /// one is ticked, or due beyond the horizon.
     NONE_OPEN,
-}
-
-/// Which of the two an empty agenda is, or `null` when there is something
-/// to draw. Pure over the same inputs the screen already has, so the
-/// screen chooses a sentence rather than deciding what is true.
-///
-/// Asked of the **rows**, not of the sections: a vault whose every task
-/// is ticked produces no sections at all, and rows are the only evidence
-/// that the person has ever written one.
-fun agendaEmpty(rows: List<TaskHit>, sections: List<AgendaSection>): AgendaEmpty? = when {
-    sections.isNotEmpty() -> null
-    rows.isEmpty() -> AgendaEmpty.NO_TASKS
-    else -> AgendaEmpty.NONE_OPEN
-}
-
-private fun AgendaGroup.holds(due: LocalDate?, today: LocalDate, horizon: LocalDate): Boolean = when (this) {
-    AgendaGroup.OVERDUE -> due != null && due < today
-    AgendaGroup.TODAY -> due == today
-    AgendaGroup.NEXT_SEVEN -> due != null && due > today && !due.isAfter(horizon)
-    AgendaGroup.UNDATED -> due == null
 }
 
 /// A task marker directly after a bullet, optionally indented — the same

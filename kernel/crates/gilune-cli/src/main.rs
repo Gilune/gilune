@@ -25,7 +25,9 @@ fn run() -> Result<(), String> {
                  reconcile-path <rel>|changes [--since <epoch:seq>] [--limit <n>]|status|\
                  verify|backfill|alerts|plugins [enable|disable|remove <id>]|\
                  index [status|rebuild [<namespace>]]|facts <rel>|\
-                 query <constraint>... [--scope line|note] [--limit <n>]>\n\
+                 query <constraint>... [--scope line|note] [--limit <n>]|\
+                 search [constraint]... [--scope document|line] [--limit <n>] \
+                 [--cursor <token>] [--sort <predicate>] [--namespace <namespace>]>\n\
                  a constraint is text:<words>, body:/name:/path:<words>, or one of \
                  <predicate>=<value>, !=, ~ (contains), ^ (prefix), <, <=, >, >=, \
                  <predicate>? (exists), <predicate>! (does not exist)";
@@ -141,9 +143,8 @@ fn run() -> Result<(), String> {
                 (Some("--at"), Some(ms)) => ms.parse().map_err(|_| usage.to_string())?,
                 _ => return Err(usage.to_string()),
             };
-            let delivered =
-                gilune_kernel::external::run_external_once(&store, now_ms, 30_000)
-                    .map_err(|e| e.to_string())?;
+            let delivered = gilune_kernel::external::run_external_once(&store, now_ms, 30_000)
+                .map_err(|e| e.to_string())?;
             println!(
                 "{}",
                 match delivered {
@@ -229,7 +230,9 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Some("reconcile-path") => {
-            let Some(rel) = args.next() else { return Err(usage.to_string()) };
+            let Some(rel) = args.next() else {
+                return Err(usage.to_string());
+            };
             let r = store.reconcile_path(rel).map_err(|e| e.to_string())?;
             println!(
                 "{}",
@@ -254,7 +257,8 @@ fn run() -> Result<(), String> {
                 match (args.next(), args.next()) {
                     (None, _) => break,
                     (Some("--since"), Some(value)) => {
-                        let (epoch, seq) = value.rsplit_once(':').ok_or_else(|| usage.to_string())?;
+                        let (epoch, seq) =
+                            value.rsplit_once(':').ok_or_else(|| usage.to_string())?;
                         cursor = gilune_kernel::changes::Cursor {
                             epoch: epoch.to_string(),
                             seq: seq.parse().map_err(|_| usage.to_string())?,
@@ -266,7 +270,9 @@ fn run() -> Result<(), String> {
                     _ => return Err(usage.to_string()),
                 }
             }
-            let page = store.changes_since(&cursor, limit).map_err(|e| e.to_string())?;
+            let page = store
+                .changes_since(&cursor, limit)
+                .map_err(|e| e.to_string())?;
             let listed: Vec<_> = page
                 .changes
                 .iter()
@@ -303,15 +309,13 @@ fn run() -> Result<(), String> {
         Some("plugins") => {
             match (args.next(), args.next()) {
                 (None, _) => {}
-                (Some("enable"), Some(id)) => {
-                    store.set_plugin_enabled(id, true).map_err(|e| e.to_string())?
-                }
-                (Some("disable"), Some(id)) => {
-                    store.set_plugin_enabled(id, false).map_err(|e| e.to_string())?
-                }
-                (Some("remove"), Some(id)) => {
-                    store.remove_plugin(id).map_err(|e| e.to_string())?
-                }
+                (Some("enable"), Some(id)) => store
+                    .set_plugin_enabled(id, true)
+                    .map_err(|e| e.to_string())?,
+                (Some("disable"), Some(id)) => store
+                    .set_plugin_enabled(id, false)
+                    .map_err(|e| e.to_string())?,
+                (Some("remove"), Some(id)) => store.remove_plugin(id).map_err(|e| e.to_string())?,
                 _ => return Err(usage.to_string()),
             }
             let listed: Vec<_> = store
@@ -346,9 +350,7 @@ fn run() -> Result<(), String> {
             match (args.next(), args.next()) {
                 (None, _) | (Some("status"), None) => {}
                 (Some("rebuild"), namespace) => {
-                    store
-                        .rebuild_index(namespace)
-                        .map_err(|e| e.to_string())?;
+                    store.rebuild_index(namespace).map_err(|e| e.to_string())?;
                 }
                 _ => return Err(usage.to_string()),
             }
@@ -383,7 +385,9 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Some("facts") => {
-            let Some(rel) = args.next() else { return Err(usage.to_string()) };
+            let Some(rel) = args.next() else {
+                return Err(usage.to_string());
+            };
             let listed: Vec<_> = store
                 .facts_of(rel)
                 .map_err(|e| e.to_string())?
@@ -397,7 +401,10 @@ fn run() -> Result<(), String> {
                     })
                 })
                 .collect();
-            println!("{}", serde_json::json!({ "rel_path": rel, "facts": listed }));
+            println!(
+                "{}",
+                serde_json::json!({ "rel_path": rel, "facts": listed })
+            );
             Ok(())
         }
         Some("query") => {
@@ -414,7 +421,9 @@ fn run() -> Result<(), String> {
                         }
                     }
                     "--limit" => {
-                        let Some(value) = args.next() else { return Err(usage.to_string()) };
+                        let Some(value) = args.next() else {
+                            return Err(usage.to_string());
+                        };
                         limit = value.parse().map_err(|_| usage.to_string())?;
                     }
                     _ => constraints.push(parse_constraint(token)?),
@@ -431,6 +440,92 @@ fn run() -> Result<(), String> {
                 .map(|a| serde_json::json!({ "rel_path": a.rel_path, "line": a.line }))
                 .collect();
             println!("{}", serde_json::json!({ "anchors": listed }));
+            Ok(())
+        }
+        Some("search") => {
+            use gilune_kernel::index::{Constraint, TextTarget};
+            use gilune_kernel::search::{SearchClause, SearchRequest};
+            let mut request = SearchRequest {
+                clauses: Vec::new(),
+                line_mode: false,
+                extension_candidates: false,
+                group_by_note: true,
+                body_needles: Vec::new(),
+                name_needles: Vec::new(),
+                sort_predicate: String::new(),
+                required_namespaces: Vec::new(),
+                extension_key: String::new(),
+                page_size: 50,
+                max_lines: 5,
+                cursor: None,
+            };
+            while let Some(token) = args.next() {
+                match token {
+                    "--scope" => match args.next() {
+                        Some("document") => request.line_mode = false,
+                        Some("line") => {
+                            request.line_mode = true;
+                            request.group_by_note = false;
+                        }
+                        _ => return Err("search scope must be document or line".into()),
+                    },
+                    "--limit" => {
+                        request.page_size = args
+                            .next()
+                            .ok_or("missing limit")?
+                            .parse()
+                            .map_err(|_| "invalid limit")?
+                    }
+                    "--cursor" => {
+                        request.cursor = Some(args.next().ok_or("missing cursor")?.to_string())
+                    }
+                    "--sort" => {
+                        request.sort_predicate =
+                            args.next().ok_or("missing sort predicate")?.to_string()
+                    }
+                    "--namespace" => request
+                        .required_namespaces
+                        .push(args.next().ok_or("missing namespace")?.to_string()),
+                    _ => {
+                        let (negated, token) = token
+                            .strip_prefix('-')
+                            .map_or((false, token), |t| (true, t));
+                        let constraint = parse_constraint(token)?;
+                        if !negated {
+                            if let Constraint::Text { target, query } = &constraint {
+                                if matches!(target, TextTarget::Any | TextTarget::Body) {
+                                    request.body_needles.push(query.clone());
+                                }
+                                if matches!(target, TextTarget::Any | TextTarget::Name) {
+                                    request.name_needles.push(query.clone());
+                                }
+                            }
+                        }
+                        request.clauses.push(SearchClause {
+                            constraints: vec![constraint],
+                            negated,
+                            case_sensitive: false,
+                            residual: None,
+                            never: false,
+                        });
+                    }
+                }
+            }
+            let page = store.search(&request, None).map_err(|e| e.to_string())?;
+            let hits: Vec<_> = page.hits.iter().map(|hit| {
+                let lines: Vec<_> = hit.lines.iter().map(|line| {
+                    let ranges: Vec<_> = line.ranges.iter().map(|r| serde_json::json!({"start":r.start,"end":r.end})).collect();
+                    let facts: Vec<_> = line.facts.iter().map(|f| serde_json::json!({"key":f.key,"value":f.value})).collect();
+                    serde_json::json!({"number":line.number,"text":line.text,"ranges":ranges,"facts":facts})
+                }).collect();
+                serde_json::json!({"rel_path":hit.rel_path,"name":hit.name,"name_matched":hit.name_matched,
+                    "lines":lines,"more_matches":hit.more_matches,"match_count":hit.match_count})
+            }).collect();
+            println!(
+                "{}",
+                serde_json::json!({"hits":hits,"total_hits":page.total_hits,"next_cursor":page.next_cursor,
+                "index_complete":page.index_complete,"issues":page.issues,"generation":page.generation})
+            );
             Ok(())
         }
         Some("verify") => {

@@ -40,14 +40,56 @@ fn paths(value: &serde_json::Value) -> Vec<String> {
 }
 
 #[test]
+fn complete_search_pages_documents_across_lines_and_returns_snippets() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    cli(dir.path(), &["init"]);
+    std::fs::write(dir.path().join("a.md"), "alpha\n\nbeta").expect("write");
+    std::fs::write(dir.path().join("b.md"), "alpha beta").expect("write");
+    cli(dir.path(), &["reconcile"]);
+    let page = json(&cli(
+        dir.path(),
+        &["search", "text:alpha", "text:beta", "--limit", "1"],
+    ));
+    assert_eq!(page["total_hits"], 2);
+    assert_eq!(page["index_complete"], true);
+    assert_eq!(page["hits"][0]["rel_path"], "a.md");
+    assert_eq!(page["hits"][0]["lines"][1]["number"], 3);
+    let next = json(&cli(
+        dir.path(),
+        &[
+            "search",
+            "text:alpha",
+            "text:beta",
+            "--limit",
+            "1",
+            "--cursor",
+            page["next_cursor"].as_str().expect("cursor"),
+        ],
+    ));
+    assert_eq!(next["hits"][0]["rel_path"], "b.md");
+    assert!(next["next_cursor"].is_null());
+    let lines = json(&cli(
+        dir.path(),
+        &["search", "text:alpha", "text:beta", "--scope", "line"],
+    ));
+    assert_eq!(lines["total_hits"], 1);
+}
+
+#[test]
 fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
     let dir = tempfile::tempdir().expect("tempdir");
-    cli(dir.path(), &["capture", "--text", "the plasterer arrives on tuesday"]);
-    cli(dir.path(), &["capture", "--text", "a note about paint and nothing else"]);
+    cli(
+        dir.path(),
+        &["capture", "--text", "the plasterer arrives on tuesday"],
+    );
+    cli(
+        dir.path(),
+        &["capture", "--text", "a note about paint and nothing else"],
+    );
     cli(dir.path(), &["project"]);
 
     let status = json(&cli(dir.path(), &["index", "status"]));
-    assert_eq!(status["schema_version"], 1);
+    assert_eq!(status["schema_version"], 2);
     assert_eq!(status["notes"], 2);
     assert!(status["epoch"].as_str().expect("an epoch").len() >= 8);
     let namespaces = status["namespaces"].as_array().expect("namespaces");
@@ -61,7 +103,10 @@ fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
         assert_eq!(namespace["cursor_seq"], 2, "it caught up with the feed");
     }
 
-    let found = json(&cli(dir.path(), &["query", "text:plasterer", "--scope", "note"]));
+    let found = json(&cli(
+        dir.path(),
+        &["query", "text:plasterer", "--scope", "note"],
+    ));
     assert_eq!(paths(&found).len(), 1, "{found}");
     let line = json(&cli(dir.path(), &["query", "text:paint"]));
     assert_eq!(line["anchors"][0]["line"], 1);
@@ -73,13 +118,20 @@ fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
     // kernel's own reading of the front matter it wrote.
     let facts = json(&cli(
         dir.path(),
-        &["facts", line["anchors"][0]["rel_path"].as_str().expect("a path")],
+        &[
+            "facts",
+            line["anchors"][0]["rel_path"].as_str().expect("a path"),
+        ],
     ));
     let rows = facts["facts"].as_array().expect("facts");
     assert!(!rows.is_empty(), "{facts}");
-    assert!(rows.iter().all(|f| f["namespace"] == "frontmatter"), "{facts}");
     assert!(
-        rows.iter().any(|f| f["predicate"] == "frontmatter.gilune-type"),
+        rows.iter().all(|f| f["namespace"] == "frontmatter"),
+        "{facts}"
+    );
+    assert!(
+        rows.iter()
+            .any(|f| f["predicate"] == "frontmatter.gilune-type"),
         "the kernel stores its own keys like any other: {facts}"
     );
 
@@ -87,7 +139,12 @@ fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
     // `[key:value]` in the shipped search language will compile to.
     let typed = json(&cli(
         dir.path(),
-        &["query", "frontmatter.gilune-type=org.memory.source", "--scope", "note"],
+        &[
+            "query",
+            "frontmatter.gilune-type=org.memory.source",
+            "--scope",
+            "note",
+        ],
     ));
     assert_eq!(paths(&typed).len(), 2, "{typed}");
 }
@@ -100,12 +157,21 @@ fn one_process_writes_and_another_finds_it_without_either_rescanning() {
     let dir = tempfile::tempdir().expect("tempdir");
     cli(dir.path(), &["capture", "--text", "written by one process"]);
     cli(dir.path(), &["project"]);
-    let before = json(&cli(dir.path(), &["query", "text:one process", "--scope", "note"]));
+    let before = json(&cli(
+        dir.path(),
+        &["query", "text:one process", "--scope", "note"],
+    ));
     assert_eq!(paths(&before).len(), 1);
 
-    cli(dir.path(), &["capture", "--text", "written by another process"]);
+    cli(
+        dir.path(),
+        &["capture", "--text", "written by another process"],
+    );
     cli(dir.path(), &["project"]);
-    let after = json(&cli(dir.path(), &["query", "text:another process", "--scope", "note"]));
+    let after = json(&cli(
+        dir.path(),
+        &["query", "text:another process", "--scope", "note"],
+    ));
     assert_eq!(paths(&after).len(), 1, "{after}");
     assert_eq!(
         json(&cli(dir.path(), &["index", "status"]))["notes"],
@@ -118,13 +184,22 @@ fn one_process_writes_and_another_finds_it_without_either_rescanning() {
 fn a_rebuild_lands_exactly_where_keeping_up_landed() {
     let dir = tempfile::tempdir().expect("tempdir");
     for n in 0..5 {
-        cli(dir.path(), &["capture", "--text", &format!("a thought numbered {n}")]);
+        cli(
+            dir.path(),
+            &["capture", "--text", &format!("a thought numbered {n}")],
+        );
     }
     cli(dir.path(), &["project"]);
-    let kept = json(&cli(dir.path(), &["query", "text:thought numbered", "--scope", "note"]));
+    let kept = json(&cli(
+        dir.path(),
+        &["query", "text:thought numbered", "--scope", "note"],
+    ));
 
     cli(dir.path(), &["index", "rebuild"]);
-    let rebuilt = json(&cli(dir.path(), &["query", "text:thought numbered", "--scope", "note"]));
+    let rebuilt = json(&cli(
+        dir.path(),
+        &["query", "text:thought numbered", "--scope", "note"],
+    ));
     assert_eq!(paths(&kept), paths(&rebuilt));
     assert_eq!(paths(&rebuilt).len(), 5);
 }

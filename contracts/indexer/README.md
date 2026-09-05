@@ -69,6 +69,12 @@ anchor = (rel_path, line)          // line absent = the note itself
 
 ## Querying what was contributed
 
+Application search uses [`search(request)`](../search/README.md), which
+returns complete pages. The anchor API below remains available, with its
+original same-anchor join semantics; note scope there collapses matching
+anchors and is not document-wide matching. ADR 0021 amends the former
+candidate-then-file-evaluation application path.
+
 `query(constraints, scope, limit) -> [anchor]` is a **conjunction**, and
 it is the kernel's, not any plugin's: `type:task due:week @alice` is a
 join on the anchor across three contributors and nobody wrote the join

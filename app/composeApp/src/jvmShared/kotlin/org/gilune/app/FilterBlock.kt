@@ -150,12 +150,8 @@ fun runFilterBlock(
 /// the registry for this composition. Two names rather than an overload
 /// because both lists erase to the same JVM signature.
 ///
-/// One query per block, answered from the index and reading only the
-/// notes it named (ADR 0020 § 2.4) — where § 4 of ADR 0015 said "whole
-/// vault, each file read once", which is what a note carrying several
-/// blocks used to pay several times over. The tick-not-keystroke rule and
-/// the row cap stand unchanged; what they are protecting is now much
-/// cheaper.
+/// One bounded page per block. The kernel filters, sorts, and counts before
+/// rows cross the boundary; this function adapts facts for the type's renderer.
 fun evaluateFilterBlock(
     gilune: Gilune,
     vaultDir: String,
@@ -169,27 +165,18 @@ fun evaluateFilterBlock(
         // Total by construction: only a runnable block has no hint.
         return FilterResult.Hint(filterHint(classified, types).orEmpty())
     }
-    val hits = queryVault(
-        gilune,
-        vaultDir,
-        classified.query,
-        types = types,
-        today = today,
-        maxLines = FILTER_SCAN_LINES,
-    )
-    // **What renders is the type's row** (§ 4). There are two types in v1,
-    // so the choice is a branch here rather than a renderer carried on
-    // `SearchType`; a third type is where moving it earns its keep, and
-    // `search.types` is the seam it would move through.
-    if (classified.typeKey.equals(TASK_SEARCH_TYPE, ignoreCase = true)) {
-        val rows = taskRows(hits)
-        // Lines the engine stopped quoting are rows this block would have
-        // drawn, so they are counted with the ones the cap held back.
-        val dropped = hits.sumOf { it.moreMatches }
-        return FilterResult.Tasks(rows.take(cap), (rows.size - cap).coerceAtLeast(0) + dropped)
+    val task = classified.typeKey.equals(TASK_SEARCH_TYPE, ignoreCase = true)
+    val compiled = compileSearch(classified.query, types = types, today = today,
+        maxLines = if (task) 1 else 0, pageSize = cap.coerceIn(1, 500).toUInt(),
+        groupByNote = !task, sortPredicate = if (task) TASK_DUE_PREDICATE else "")
+        ?: return FilterResult.Hint(FILTER_NO_MATCHES)
+    val page = compiled.page(gilune).requireComplete()
+    if (task) {
+        val rows = kernelTaskRows(page.hits).take(cap.coerceAtLeast(0))
+        return FilterResult.Tasks(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())
     }
-    val rows = hits.map { NoteRow(it.name, it.relPath) }
-    return FilterResult.Notes(rows.take(cap), (rows.size - cap).coerceAtLeast(0))
+    val rows = page.hits.take(cap.coerceAtLeast(0)).map { NoteRow(it.name, it.relPath) }
+    return FilterResult.Notes(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())
 }
 
 private fun registeredTypes(types: List<SearchType>): String {

@@ -15,7 +15,6 @@
 package org.gilune.app
 
 import uniffi.gilune_ffi.Fact
-import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.NoteIndexer
 import uniffi.gilune_ffi.PredicateKind
 import uniffi.gilune_ffi.ValueKind
@@ -84,36 +83,4 @@ fun taskFacts(text: String): List<Fact> {
 /// is a fact about this process and never about the vault.
 class TasksNoteIndexer : NoteIndexer {
     override fun index(relPath: String, text: String): List<Fact> = taskFacts(text)
-}
-
-/// Register every indexer this shell carries, on one handle.
-///
-/// **Registered whatever the plugin's switch says, and not at all once it
-/// has been removed.** Disabling a plugin turns its *words* off — the
-/// type and its operators leave the language, so `due:` is prose again
-/// and a `type:task` block shows its hint — and that is the whole of what
-/// a person asked for. Deriving its facts again on every toggle would be
-/// a pass over the whole feed for a switch, and keeping them costs a few
-/// rows nobody queries. Removal is the other thing entirely: the kernel
-/// drops the namespace, and re-registering it on the next launch would
-/// put back what somebody deliberately took away (ADR 0011).
-///
-/// Which is why the guard is the plugin's **presence** and not its state:
-/// `plugins()` excludes tombstones, so a plugin the user removed is not
-/// in the list at all and there is nothing here to register.
-///
-/// Idempotent, and safe on every handle a shell opens: registering the
-/// same version twice changes nothing, and a version bump re-derives that
-/// namespace alone.
-fun registerShellIndexers(gilune: Gilune) {
-    val tasks = gilune.plugins().firstOrNull { it.pluginId == TASKS_PLUGIN }
-    if (tasks == null) return
-    runCatching {
-        gilune.registerIndexer(
-            TASKS_INDEX_NAMESPACE,
-            TASKS_INDEXER_VERSION,
-            taskPredicateKinds(),
-            TasksNoteIndexer(),
-        )
-    }.onFailure { GiluneLog.warn("the tasks indexer could not be registered", it) }
 }

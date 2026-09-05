@@ -16,7 +16,6 @@ import java.time.LocalDate
 import java.util.Locale
 import uniffi.gilune_ffi.Constraint
 import uniffi.gilune_ffi.ConstraintOp
-import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.TextTarget
 
 /// The key this plugin registers. A hit is a task line, not a note.
@@ -46,23 +45,11 @@ fun taskSearchType(filter: String = ""): SearchType = SearchType(
     extract = { note -> taskLines(note, filter) },
     constraints = buildList {
         add(Constraint.Fact(TASK_STATE_PREDICATE, ConstraintOp.EXISTS, ""))
-        if (filter.isNotEmpty()) add(Constraint.Text(TextTarget.BODY, filter))
     },
+    indexed = true,
+    caseSensitiveFilter = filter,
+    indexNamespaces = listOf(TASKS_INDEX_NAMESPACE),
 )
-
-/// The types the language offers right now, from the live plugin list:
-/// `note` always, `task` only while the tasks plugin is switched on. Off
-/// or removed, `type:task` is a type nobody registered — no hits — and
-/// `due:` is prose again, changing no bytes (§ 4, Removal).
-///
-/// The gate is the declared `search.types` contribution, enabled-gated
-/// like every other slot (ADR 0015 § 5).
-fun searchTypesFor(plugins: List<PluginInfo>): List<SearchType> =
-    if (plugins.pluginContributes(TASKS_PLUGIN, Slots.SEARCH_TYPES)) {
-        listOf(NOTE_SEARCH_TYPE, taskSearchType(plugins.tasksFilter()))
-    } else {
-        listOf(NOTE_SEARCH_TYPE)
-    }
 
 // ---------------------------------------------------------------------
 // The rows behind the hits — the seam T4 consumes.
@@ -83,43 +70,16 @@ data class TaskHit(
     val done: LocalDate?,
 )
 
-/// A `type:task` result set as rows. **T4 calls this**, having run
-///
-/// ```
-/// queryVault(gilune, dir, query, types = searchTypesFor(plugins), today = …, maxLines = <its cap>)
-/// ```
-///
-/// — `maxLines` because the engine's default quotes five lines of a note
-/// and a block wants every task in it, up to § 4's rendering cap.
-///
-/// The order is the one order an agenda needs (§ 4), so there are no sort
-/// instructions to get wrong: due ascending, undated last, then path,
-/// then line number.
-///
-/// Hits from a note-level query are lines of prose, not tasks; handing
-/// them here yields rows with no dates rather than an error, because the
-/// caller that chose the type is the one that knows.
-fun taskRows(hits: List<SearchHit>): List<TaskHit> = hits
-    .flatMap { hit ->
-        hit.lines.map { line ->
-            TaskHit(
-                relPath = hit.relPath,
-                name = hit.name,
-                line = line.number,
-                text = line.text,
-                due = dateIn(line.text, DUE_TOKEN),
-                done = dateIn(line.text, DONE_TOKEN),
-            )
-        }
+/** Domain presentation over facts returned by the kernel; no task recognition
+ * or date-token parsing is required on the result path. */
+internal fun kernelTaskRows(hits: List<uniffi.gilune_ffi.SearchHit>): List<TaskHit> = hits.flatMap { hit ->
+    hit.lines.map { line ->
+        fun date(predicate: String): LocalDate? = line.facts.firstOrNull { it.key == predicate }
+            ?.value?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        TaskHit(hit.relPath, hit.name, line.number.toInt(), line.text,
+            date(TASK_DUE_PREDICATE), date(TASK_DONE_PREDICATE))
     }
-    .sortedWith(TASK_ORDER)
-
-private val TASK_ORDER = compareBy<TaskHit>(
-    { it.due == null },
-    { it.due ?: LocalDate.MAX },
-    { it.relPath },
-    { it.line },
-)
+}
 
 // ---------------------------------------------------------------------
 // The extractor: which lines are tasks.
@@ -193,13 +153,13 @@ private class DateFieldOperator(override val name: String, private val today: Lo
         val value = argument.trim().lowercase(Locale.ROOT)
         if (value == NONE_VALUE) {
             val op = if (negated) ConstraintOp.EXISTS else ConstraintOp.NOT_EXISTS
-            return Compiled.Terms(listOf(Constraint.Fact(predicate, op, "")))
+            return Compiled.Exact(listOf(Constraint.Fact(predicate, op, "")))
         }
         if (negated) return Compiled.Scan
         return when {
             value == TODAY_VALUE -> on(ConstraintOp.EQ, today)
             value == OVERDUE_VALUE -> on(ConstraintOp.LT, today)
-            value == WEEK_VALUE -> Compiled.Terms(
+            value == WEEK_VALUE -> Compiled.Exact(
                 listOf(
                     Constraint.Fact(predicate, ConstraintOp.GE, today.toString()),
                     Constraint.Fact(predicate, ConstraintOp.LE, today.plusDays(WEEK_DAYS).toString()),
@@ -214,7 +174,7 @@ private class DateFieldOperator(override val name: String, private val today: Lo
     }
 
     private fun on(op: ConstraintOp, date: LocalDate) =
-        Compiled.Terms(listOf(Constraint.Fact(predicate, op, date.toString())))
+        Compiled.Exact(listOf(Constraint.Fact(predicate, op, date.toString())))
 }
 
 /// `is:` — the checkbox itself, the one thing about a task that is not a
@@ -246,7 +206,7 @@ private val MARKER_OPERATOR = object : SearchOperator {
             else -> return if (negated) Compiled.Scan else Compiled.Never
         }
         val op = if (negated) ConstraintOp.NE else ConstraintOp.EQ
-        return Compiled.Terms(listOf(Constraint.Fact(TASK_STATE_PREDICATE, op, value)))
+        return Compiled.Exact(listOf(Constraint.Fact(TASK_STATE_PREDICATE, op, value)))
     }
 }
 
@@ -348,9 +308,6 @@ private const val WEEK_DAYS = 6L
 /// `Plugins.kt`'s `tokenPattern`, so the styler and the query recognise
 /// the same bytes.
 private fun tokenPattern(key: String) = Regex("""\s$key:\d{4}-\d{2}-\d{2}\b""")
-
-private val DUE_TOKEN = tokenPattern(DUE_FIELD)
-private val DONE_TOKEN = tokenPattern(DONE_FIELD)
 
 /// The date a line carries for one field, or null. The first token wins:
 /// a line with two due dates is the user's to sort out, and we read it

@@ -625,19 +625,18 @@ private fun OpenNote(
                     .filterNot { it == caretBody }
             }
             val open = state.gilune.value
-            val evaluated = remember(state.vaultDir, state.vaultCursor.value, wanted, plugins, filter, open) {
-                val day = LocalDate.now()
+            val blockDay = rememberQueryDay()
+            val evaluated = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, wanted, plugins, open, blockDay) {
                 val types = searchTypesFor(plugins)
-                day to wanted.associateWith { body ->
-                    if (open == null) {
-                        FilterResult.Hint(FILTER_NO_MATCHES)
-                    } else {
-                        evaluateFilterBlock(open, state.vaultDir, body, types, day, FILTER_EDIT_ROW_CAP)
-                    }
+                wanted.associateWith { body ->
+                    if (open == null) FilterResult.Hint("Opening vault...")
+                    else evaluateFilterBlock(open, state.vaultDir, body, types, blockDay, FILTER_EDIT_ROW_CAP)
                 }
+            }.value
+            if (evaluated.error != null) {
+                androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { Text("Retry search") }
             }
-            val blockDay = evaluated.first
-            val results = evaluated.second
+            val results = evaluated.value ?: wanted.associateWith { FilterResult.Hint(evaluated.error ?: "Searching...") }
             val blockDecorations = remember(results) { listOf(filterBlockDecoration(results)) }
 
             val transformation = remember(palette, line, decorations, blockDecorations) {

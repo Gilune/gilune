@@ -84,17 +84,13 @@ fun AgendaScreen(
     // Never per keystroke. `today` is read inside the pass and carried out
     // of it, so the day every view means is the day the pass ran.
     val open = state.gilune.value
-    val computed = remember(state.vaultCursor.value, state.vaultDir, types.size, filter, open) {
-        val today = LocalDate.now()
-        val rows = taskRows(agendaHits(open, state.vaultDir, types, today))
-        val sections = agenda(rows, today)
-        // The rows are kept only long enough to say *why* the agenda is
-        // empty (`agendaEmpty`); nothing draws them.
-        Triple(today, sections, agendaEmpty(rows, sections))
-    }
-    val today = computed.first
-    val sections = computed.second
-    val empty = computed.third
+    val today = rememberQueryDay()
+    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, open, plugins, today) {
+        loadAgenda(open, types, today)
+    }.value
+    val sections = computed.value?.sections.orEmpty()
+    val empty = computed.value?.empty
+
 
     // The same chain the editor folds over a line it is toggling, gated
     // the same way — so ticking from the agenda stamps `done:` exactly as
@@ -132,6 +128,10 @@ fun AgendaScreen(
     // be about today, and the one most likely to be long.
     val collapsed = remember { mutableStateListOf(AgendaGroup.UNDATED) }
 
+    if (computed.loading || computed.error != null) {
+        Column(modifier) { QueryNotice(computed.loading, computed.error, state::retrySearchIndex) }
+        return
+    }
     if (empty != null) {
         EmptyAgenda(empty, onStartTask, modifier)
         return

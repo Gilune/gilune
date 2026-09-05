@@ -95,6 +95,16 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// history it finds: a shell opening a vault has nothing to catch up
     /// on, it has everything to draw.
     val vaultCursor = mutableStateOf<Cursor?>(null)
+    val searchRefresh = mutableStateOf(0)
+
+    fun retrySearchIndex() {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            runCatching { g.advanceIndex() }
+                .onFailure { GiluneLog.warn("could not refresh the search index", it) }
+            searchRefresh.value += 1
+        }
+    }
 
     /// Bring the cursor up to the end of the feed, and say whether it
     /// moved. Cheap on a settled vault: one indexed read that finds
@@ -448,13 +458,9 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 if (fresh && registered == "enabled") {
                     g.grantCapability(VOICE_CAPTURE_PLUGIN, "platform.audio-record")
                 }
-                // Tasks is this shell's too (ADR 0015 § 7): no processor,
-                // no events and no capabilities, so there is nothing to
-                // grant — consent is the enable switch. Registered on the
-                // same idempotent path, so enable, disable, remove and
-                // tombstone all apply with no new machinery, and a plugin
-                // the user removed is never resurrected.
-                g.registerPlugin(tasksDeclaration())
+                // The composition root supplies domain declarations and their
+                // implementations through the same registry on both platforms.
+                BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(g)
                 // What this process can derive about the vault, declared
                 // straight after the plugins it belongs to and before the
                 // first pass, so the projection below brings the index up

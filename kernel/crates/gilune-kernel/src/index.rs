@@ -37,7 +37,7 @@ use std::sync::Arc;
 /// vault's: this database is derived, so a version it does not recognise
 /// is discarded rather than migrated (constitution rule 12 governs the
 /// record, and this is not the record).
-pub const SCHEMA_VERSION: i64 = 1;
+pub const SCHEMA_VERSION: i64 = 2;
 
 /// The kernel's own namespace, holding the note text every full-text
 /// query is answered from. Reserved: a plugin cannot register it, and it
@@ -149,12 +149,12 @@ pub struct PredicateKind {
 /// One namespace this handle can maintain. **Per handle, per process**,
 /// exactly as an external processor's registration is: which code exists
 /// here is a fact about this process, never about the vault.
-/// The version is not here: it lives in the index database, which is
-/// where the question "has this namespace been derived by this version"
-/// has to be answered anyway, and one fact has one home.
+/// The local version must still match the namespace before this handle
+/// may derive facts; another process may have installed a newer indexer.
 #[derive(Clone)]
 pub(crate) struct Registration {
     pub namespace: String,
+    version: i64,
     pub kinds: BTreeMap<String, ValueKind>,
     pub indexer: Arc<dyn NoteIndexer>,
 }
@@ -170,7 +170,7 @@ pub enum ConstraintOp {
     Eq,
     /// No fact with this predicate **and this value** at the anchor.
     Ne,
-    /// The value contains this text, case-insensitively for ASCII —
+    /// The value contains this text, using Unicode simple case folding —
     /// what every `keyword:argument` in the shipped DSL already means.
     Contains,
     Prefix,
@@ -322,17 +322,27 @@ CREATE TABLE lines (
     rel_path TEXT NOT NULL,
     line INTEGER,
     field TEXT NOT NULL CHECK (field IN ('body','name','path')),
-    text TEXT NOT NULL
+    text TEXT NOT NULL,
+    folded TEXT NOT NULL
 );
 CREATE INDEX lines_path ON lines(rel_path);
 CREATE VIRTUAL TABLE lines_fts USING fts5(
-    text, content='lines', content_rowid='id', tokenize='trigram'
+    folded, content='lines', content_rowid='id', tokenize='trigram case_sensitive 1'
 );
 CREATE TRIGGER lines_ai AFTER INSERT ON lines BEGIN
-    INSERT INTO lines_fts(rowid, text) VALUES (new.id, new.text);
+    INSERT INTO lines_fts(rowid, folded) VALUES (new.id, new.folded);
 END;
 CREATE TRIGGER lines_ad AFTER DELETE ON lines BEGIN
-    INSERT INTO lines_fts(lines_fts, rowid, text) VALUES ('delete', old.id, old.text);
+    INSERT INTO lines_fts(lines_fts, rowid, folded) VALUES ('delete', old.id, old.folded);
+END;
+CREATE TRIGGER namespaces_ai AFTER INSERT ON namespaces BEGIN
+    UPDATE index_meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'generation';
+END;
+CREATE TRIGGER namespaces_au AFTER UPDATE ON namespaces BEGIN
+    UPDATE index_meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'generation';
+END;
+CREATE TRIGGER namespaces_ad AFTER DELETE ON namespaces BEGIN
+    UPDATE index_meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'generation';
 END;
 ";
 
@@ -380,6 +390,7 @@ pub(crate) fn open(local_dir: &Path, epoch: &str) -> Result<rusqlite::Connection
 
 fn connect(path: &Path) -> Result<rusqlite::Connection> {
     let conn = rusqlite::Connection::open(path)?;
+    crate::search_text::register(&conn)?;
     conn.pragma_update(None, "journal_mode", "wal")?;
     // Several processes share one vault by design, and each maintains
     // this index. Longer than the kernel database's five seconds because
@@ -397,15 +408,19 @@ fn usable(conn: &rusqlite::Connection, epoch: &str) -> Result<bool> {
     if present == 0 {
         return Ok(false);
     }
-    Ok(meta(conn, "index_schema_version")? == Some(SCHEMA_VERSION.to_string())
-        && meta(conn, "feed_epoch")?.as_deref() == Some(epoch))
+    Ok(
+        meta(conn, "index_schema_version")? == Some(SCHEMA_VERSION.to_string())
+            && meta(conn, "feed_epoch")?.as_deref() == Some(epoch),
+    )
 }
 
 fn meta(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>> {
     Ok(conn
-        .query_row("SELECT value FROM index_meta WHERE key = ?1", [key], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT value FROM index_meta WHERE key = ?1",
+            [key],
+            |row| row.get(0),
+        )
         .map(Some)
         .or_else(no_rows_none)?)
 }
@@ -425,6 +440,14 @@ fn create(conn: &rusqlite::Connection, epoch: &str) -> Result<()> {
         conn.execute(
             "INSERT INTO index_meta (key, value) VALUES ('feed_epoch', ?1)",
             [epoch],
+        )?;
+        conn.execute(
+            "INSERT INTO index_meta (key, value) VALUES ('instance', ?1)",
+            [ids::new_id()],
+        )?;
+        conn.execute(
+            "INSERT INTO index_meta (key, value) VALUES ('generation', 0)",
+            [],
         )?;
         Ok(())
     })();
@@ -475,6 +498,8 @@ struct FactRow {
 /// One batch, planned: what to write, how far that takes the cursor, and
 /// the refusal that stopped it if one did.
 struct Plan {
+    expected_cursor: i64,
+    expected_version: i64,
     steps: Vec<(i64, Step)>,
     cursor: i64,
     failure: Option<String>,
@@ -504,21 +529,31 @@ struct NoteText {
 /// namespaces is read once (ADR 0020 § 2.3: the indexers run in the pass
 /// that recorded the change, over that note only).
 #[derive(Default)]
-struct Notes(BTreeMap<String, Option<NoteText>>);
+struct Notes(BTreeMap<String, std::result::Result<Option<NoteText>, String>>);
 
 impl Notes {
-    fn of(&mut self, store: &Store, rel_path: &str) -> Option<&NoteText> {
+    fn of(
+        &mut self,
+        store: &Store,
+        rel_path: &str,
+    ) -> std::result::Result<Option<&NoteText>, String> {
         if !self.0.contains_key(rel_path) {
             probe::file_read();
-            let read = std::fs::read_to_string(store.vault().join(rel_path))
-                .ok()
-                .map(|text| NoteText {
+            let read = match std::fs::read_to_string(store.vault().join(rel_path)) {
+                Ok(text) => Ok(Some(NoteText {
                     body: body_of(&text),
                     front_matter: front_matter_of(&text),
-                });
+                })),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(format!("cannot index {rel_path}: {error}")),
+            };
             self.0.insert(rel_path.to_string(), read);
         }
-        self.0.get(rel_path).and_then(|note| note.as_ref())
+        match self.0.get(rel_path) {
+            Some(Ok(note)) => Ok(note.as_ref()),
+            Some(Err(error)) => Err(error.clone()),
+            None => Ok(None),
+        }
     }
 }
 
@@ -572,20 +607,31 @@ pub(crate) fn front_matter_of(text: &str) -> Vec<(String, String)> {
     };
     let mut pairs = Vec::new();
     let mut list_key: Option<String> = None;
+    let mut empty_key: Option<String> = None;
     for line in &lines[1..close + 1] {
         let indented = line.starts_with(' ') || line.starts_with('\t');
         if indented {
+            empty_key = None;
             let trimmed = line.trim();
-            let Some(key) = list_key.as_ref() else { continue };
-            let Some(item) = trimmed.strip_prefix('-') else { continue };
+            let Some(key) = list_key.as_ref() else {
+                continue;
+            };
+            let Some(item) = trimmed.strip_prefix('-') else {
+                continue;
+            };
             let item = item.trim();
             if !item.is_empty() {
                 pairs.push((key.clone(), item.to_string()));
             }
             continue;
         }
+        if let Some(key) = empty_key.take() {
+            pairs.push((key, String::new()));
+        }
         list_key = None;
-        let Some((key, value)) = line.split_once(':') else { continue };
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
         let key = key.trim();
         if key.is_empty() {
             continue;
@@ -593,9 +639,13 @@ pub(crate) fn front_matter_of(text: &str) -> Vec<(String, String)> {
         let value = value.trim();
         if value.is_empty() {
             list_key = Some(key.to_string());
+            empty_key = Some(key.to_string());
         } else {
             pairs.push((key.to_string(), value.to_string()));
         }
+    }
+    if let Some(key) = empty_key {
+        pairs.push((key, String::new()));
     }
     pairs
 }
@@ -705,6 +755,7 @@ impl Store {
         registered.retain(|r| r.namespace != namespace);
         registered.push(Registration {
             namespace: namespace.to_string(),
+            version,
             kinds: kinds
                 .iter()
                 .map(|k| (k.predicate.clone(), k.kind))
@@ -724,11 +775,26 @@ impl Store {
         let epoch = self.change_epoch()?;
         let mut pass = IndexPass::default();
         let mut notes = Notes::default();
-        self.advance_namespace(TEXT_NAMESPACE, Source::Text, &epoch, &mut notes, &mut pass)?;
+        // One feed boundary per pass keeps cached note bytes from being reused
+        // for changes that arrive after those bytes were read.
+        let tip: i64 = self.conn().query_row(
+            "SELECT COALESCE(MAX(seq),0) FROM vault_changes",
+            [],
+            |row| row.get(0),
+        )?;
+        self.advance_namespace(
+            TEXT_NAMESPACE,
+            Source::Text,
+            &epoch,
+            tip,
+            &mut notes,
+            &mut pass,
+        )?;
         self.advance_namespace(
             FRONT_MATTER_NAMESPACE,
             Source::FrontMatter,
             &epoch,
+            tip,
             &mut notes,
             &mut pass,
         )?;
@@ -738,6 +804,7 @@ impl Store {
                 &registration.namespace,
                 Source::Plugin(registration),
                 &epoch,
+                tip,
                 &mut notes,
                 &mut pass,
             )?;
@@ -901,10 +968,11 @@ impl Store {
                 })?;
                 rows.collect::<std::result::Result<_, _>>()?
             };
-            let lines: i64 =
-                db.query_row("SELECT COUNT(*) FROM lines WHERE field = 'body'", [], |row| {
-                    row.get(0)
-                })?;
+            let lines: i64 = db.query_row(
+                "SELECT COUNT(*) FROM lines WHERE field = 'body'",
+                [],
+                |row| row.get(0),
+            )?;
             let notes: i64 = db.query_row(
                 "SELECT COUNT(*) FROM lines WHERE field = 'path'",
                 [],
@@ -928,13 +996,33 @@ impl Store {
         namespace: &str,
         source: Source<'_>,
         epoch: &str,
+        tip: i64,
         notes: &mut Notes,
         pass: &mut IndexPass,
     ) -> Result<()> {
         let mut rebuilt = false;
         loop {
-            let seq = self.with_index(|db| cursor_of(db, namespace))?;
-            let page = match self.changes_since(
+            let (seq, version) = self.with_index(|db| {
+                let seq = cursor_of(db, namespace)?;
+                let version = db.query_row(
+                    "SELECT version FROM namespaces WHERE namespace = ?1",
+                    [namespace],
+                    |row| row.get(0),
+                )?;
+                Ok((seq, version))
+            })?;
+            if let Source::Plugin(registration) = source {
+                if registration.version != version {
+                    pass.failures.push(format!(
+                        "{namespace}: this handle's indexer version is no longer current"
+                    ));
+                    return Ok(());
+                }
+            }
+            if seq == tip {
+                return Ok(());
+            }
+            let mut page = match self.changes_since(
                 &Cursor {
                     epoch: epoch.to_string(),
                     seq,
@@ -956,15 +1044,21 @@ impl Store {
                 }
                 Err(e) => return Err(e),
             };
+            page.changes.retain(|change| change.seq <= tip);
             if page.changes.is_empty() {
                 return Ok(());
             }
-            let plan = self.plan(namespace, source, &page.changes, notes)?;
+            let mut plan = self.plan(namespace, source, &page.changes, notes)?;
+            plan.expected_cursor = seq;
+            plan.expected_version = version;
             let stopped = plan.stopped;
             if let Some(message) = &plan.failure {
                 pass.failures.push(format!("{namespace}: {message}"));
             }
-            self.commit_plan(namespace, plan, pass)?;
+            if !self.commit_plan(namespace, plan, pass)? {
+                notes.0.clear();
+                continue;
+            }
             if stopped || page.complete {
                 return Ok(());
             }
@@ -1052,6 +1146,8 @@ impl Store {
             }
         }
         Ok(Plan {
+            expected_cursor: 0,
+            expected_version: 0,
             steps,
             cursor,
             failure,
@@ -1095,16 +1191,14 @@ impl Store {
                 to: change.rel_path.clone(),
             }]));
         }
-        Ok(self
-            .derive(source, &change.rel_path, notes)
-            .map(|step| {
-                vec![
-                    Step::Forget {
-                        rel_path: from.to_string(),
-                    },
-                    step,
-                ]
-            }))
+        Ok(self.derive(source, &change.rel_path, notes).map(|step| {
+            vec![
+                Step::Forget {
+                    rel_path: from.to_string(),
+                },
+                step,
+            ]
+        }))
     }
 
     /// One note's rows for one namespace, or the indexer's refusal. The
@@ -1115,7 +1209,7 @@ impl Store {
         rel_path: &str,
         notes: &mut Notes,
     ) -> std::result::Result<Step, String> {
-        let Some(note) = notes.of(self, rel_path) else {
+        let Some(note) = notes.of(self, rel_path)? else {
             // A file the feed named and the vault does not hold: the
             // honest reading of the index is that it is not there.
             return Ok(Step::Forget {
@@ -1154,9 +1248,21 @@ impl Store {
 
     /// Write a planned batch and move the namespace's cursor, in one
     /// transaction. Nothing here reads a file or calls a plugin.
-    fn commit_plan(&self, namespace: &str, plan: Plan, pass: &mut IndexPass) -> Result<()> {
+    fn commit_plan(&self, namespace: &str, plan: Plan, pass: &mut IndexPass) -> Result<bool> {
         self.with_index(|db| {
             db.execute_batch("BEGIN IMMEDIATE;")?;
+            let current = db.query_row(
+                "SELECT cursor_seq, version FROM namespaces WHERE namespace = ?1",
+                [namespace],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+            );
+            if current.as_ref().ok() != Some(&(plan.expected_cursor, plan.expected_version)) {
+                db.execute_batch("ROLLBACK;")?;
+                return match current {
+                    Ok(_) => Ok(false),
+                    Err(error) => Err(error.into()),
+                };
+            }
             let done: Result<()> = (|| {
                 for (_, step) in &plan.steps {
                     match step {
@@ -1183,7 +1289,7 @@ impl Store {
                         }
                     }
                 }
-                set_cursor(db, namespace, plan.cursor)?;
+                set_cursor(db, namespace, plan.cursor.max(plan.expected_cursor))?;
                 match &plan.failure {
                     Some(message) => db.execute(
                         "UPDATE namespaces SET last_error = ?2, last_error_ms = ?3
@@ -1205,7 +1311,7 @@ impl Store {
                     return Err(e);
                 }
             }
-            Ok(())
+            Ok(true)
         })
     }
 
@@ -1309,19 +1415,20 @@ fn forget_path(db: &rusqlite::Connection, namespace: &str, rel_path: &str) -> Re
     Ok(())
 }
 
-fn put(
-    db: &rusqlite::Connection,
-    namespace: &str,
-    rel_path: &str,
-    rows: &Rows,
-) -> Result<()> {
+fn put(db: &rusqlite::Connection, namespace: &str, rel_path: &str, rows: &Rows) -> Result<()> {
     match rows {
         Rows::Lines(lines) => {
             let mut stmt = db.prepare_cached(
-                "INSERT INTO lines (rel_path, line, field, text) VALUES (?1, ?2, ?3, ?4)",
+                "INSERT INTO lines (rel_path, line, field, text, folded) VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
             for row in lines {
-                stmt.execute(rusqlite::params![rel_path, row.line, row.field, row.text])?;
+                stmt.execute(rusqlite::params![
+                    rel_path,
+                    row.line,
+                    row.field,
+                    row.text,
+                    crate::search_text::fold(&row.text)
+                ])?;
             }
         }
         Rows::Facts(facts) => {
@@ -1359,13 +1466,13 @@ fn text_rows(rel_path: &str, body: &str) -> Vec<LineRow> {
     let mut rows: Vec<LineRow> = body
         .split('\n')
         .enumerate()
-        .filter_map(|(index, line)| {
+        .map(|(index, line)| {
             let text = line.strip_suffix('\r').unwrap_or(line);
-            (!text.trim().is_empty()).then(|| LineRow {
+            LineRow {
                 line: Some(index as i64 + 1),
                 field: "body",
                 text: text.to_string(),
-            })
+            }
         })
         .collect();
     rows.push(LineRow {
@@ -1463,10 +1570,10 @@ type Value = rusqlite::types::Value;
 
 /// One constraint as a relation of anchors. `line` NULL is the note
 /// itself, which satisfies every line of that note.
-struct Piece {
-    sql: String,
-    params: Vec<Value>,
-    generates: bool,
+pub(crate) struct Piece {
+    pub(crate) sql: String,
+    pub(crate) params: Vec<Value>,
+    pub(crate) generates: bool,
 }
 
 /// The whole query as one statement.
@@ -1586,7 +1693,7 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
     (sql, params)
 }
 
-fn piece(constraint: &Constraint) -> Piece {
+pub(crate) fn piece(constraint: &Constraint) -> Piece {
     match constraint {
         Constraint::Fact {
             predicate,
@@ -1606,12 +1713,12 @@ fn fact_piece(predicate: &str, op: ConstraintOp, value: &str) -> Piece {
             " AND value = ?".to_string()
         }
         ConstraintOp::Contains => {
-            params.push(Value::Text(format!("%{}%", like_escape(value))));
-            " AND value LIKE ? ESCAPE '\\'".to_string()
+            params.push(Value::Text(crate::search_text::fold(value)));
+            " AND instr(gilune_fold(value), ?) > 0".to_string()
         }
         ConstraintOp::Prefix => {
-            params.push(Value::Text(format!("{}%", like_escape(value))));
-            " AND value LIKE ? ESCAPE '\\'".to_string()
+            params.push(Value::Text(crate::search_text::fold(value)));
+            " AND instr(gilune_fold(value), ?) = 1".to_string()
         }
         ConstraintOp::Lt | ConstraintOp::Le | ConstraintOp::Gt | ConstraintOp::Ge => {
             let symbol = match op {
@@ -1659,12 +1766,12 @@ fn text_piece(target: TextTarget, query: &str) -> Piece {
     let (condition, param) = if query.chars().count() >= TRIGRAM_MIN {
         (
             "l.id IN (SELECT rowid FROM lines_fts WHERE lines_fts MATCH ?)".to_string(),
-            Value::Text(fts_phrase(query)),
+            Value::Text(fts_phrase(&crate::search_text::fold(query))),
         )
     } else {
         (
-            "l.text LIKE ? ESCAPE '\\'".to_string(),
-            Value::Text(format!("%{}%", like_escape(query))),
+            "instr(l.folded, ?) > 0".to_string(),
+            Value::Text(crate::search_text::fold(query)),
         )
     };
     Piece {
@@ -1678,13 +1785,6 @@ fn text_piece(target: TextTarget, query: &str) -> Piece {
 /// or a hyphen ordinary text rather than query syntax.
 fn fts_phrase(query: &str) -> String {
     format!("\"{}\"", query.replace('"', "\"\""))
-}
-
-fn like_escape(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_")
 }
 
 #[cfg(test)]

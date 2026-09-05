@@ -1,22 +1,5 @@
-// The query language: what a term means, and how it narrows the system
-// index before any file is opened.
-//
-// The operator set is an open registry rather than a fixed grammar,
-// because the language is a plugin surface (ADR 0010, ADR 0011): a plugin
-// adds a keyword, it does not patch this file. `type:` (ADR 0015 § 4) is
-// the same idea one level up — a plugin adds what a *hit* is, and its
-// keywords arrive through that type rather than loose. ADR 0020 § 2.4
-// makes both of those registries the **compilation** route as well: an
-// operator says what it means *and* how that reads as a constraint on the
-// kernel's index, and the kernel joins the constraints nobody wrote a
-// join for.
-//
-// Everything here is pure over strings, so it is testable without a
-// screen. `VaultQuery.kt` is what runs it against a vault: it asks the
-// index which notes could possibly match, reads only those, and decides
-// each one with the very predicates below — so a constraint that narrows
-// too little costs a read and a constraint that would narrow too much is
-// simply not compiled.
+// Plugin-extensible query language and display records.
+// Parsing compiles a kernel request; result evaluation lives in Rust.
 
 package org.gilune.app
 
@@ -62,22 +45,11 @@ interface SearchOperator {
 
     fun nameNeedle(argument: String): String? = null
 
-    /// How this operator narrows the system index (ADR 0020 § 2.4), or
-    /// [Compiled.Scan] when it cannot say.
-    ///
-    /// **[matches] stays the decision.** Whatever is returned here is a
-    /// pre-filter over anchors: the notes it names are read and judged by
-    /// [matches] exactly as they always were. So the contract is
-    /// one-sided and easy to honour — a compilation may name **more**
-    /// anchors than the operator would keep, and must never name fewer.
-    /// The default says nothing, so an operator written before this
-    /// existed, or one whose meaning no constraint can express, still
-    /// works and merely costs the reads it always cost.
-    ///
-    /// `negated` is the DSL's leading `-`. An operator that cannot state
-    /// the exact complement of itself must answer [Compiled.Scan] for it:
-    /// a constraint that narrowed a negation too far would drop a hit,
-    /// which is the one failure this seam cannot recover from.
+    /// Compile the positive meaning to generic constraints. Exact means the
+    /// kernel can decide it completely; Terms is a conservative prefilter;
+    /// Scan delegates only the pure predicate over an indexed snapshot.
+    /// The host applies whole-term negation, so it calls this with false.
+    /// The parameter remains for source compatibility with existing plugins.
     fun compile(argument: String, negated: Boolean): Compiled = Compiled.Scan
 }
 
@@ -88,8 +60,10 @@ sealed interface Compiled {
     /// plugins a join nobody wrote.
     data class Terms(val constraints: List<Constraint>) : Compiled
 
-    /// Nothing the index can be asked. The term is decided when the note
-    /// is read, and costs whatever the other terms left to read.
+    /** Complete declarative meaning; no residual predicate is required. */
+    data class Exact(val constraints: List<Constraint>) : Compiled
+
+    /// A pure residual predicate over indexed content; no vault reads.
     data object Scan : Compiled
 
     /// The term can hold of nothing at all — a date operator handed a
@@ -148,14 +122,17 @@ data class CandidateLine(val number: Int, val text: String)
 /// not a date that rots.
 /// [constraints] is what the type itself asks of the index — for a
 /// line-level type, whatever makes a line one of its candidates. It is
-/// the same one-sided contract [SearchOperator.compile] takes: [extract]
-/// stays the decision, so these may name more lines than the type would
-/// claim and must never name fewer.
+/// a conservative prefilter unless [indexed] is true. An indexed type
+/// declares its full membership with constraints and required namespaces;
+/// other types supply candidate line numbers over the indexed document.
 class SearchType(
     val key: String,
     val operators: (today: LocalDate) -> List<SearchOperator> = { emptyList() },
     val extract: ((SearchedNote) -> List<CandidateLine>)? = null,
     val constraints: List<Constraint> = emptyList(),
+    val indexed: Boolean = false,
+    val caseSensitiveFilter: String = "",
+    val indexNamespaces: List<String> = emptyList(),
 )
 
 /// The shell's own type, always registered beside whatever a plugin
@@ -174,7 +151,7 @@ private fun textOperator(
     override val name = keyword
     override fun matches(note: SearchedNote, argument: String) = holds(note, argument)
     override fun compile(argument: String, negated: Boolean): Compiled =
-        if (negated) Compiled.Scan else Compiled.Terms(listOf(Constraint.Text(target, argument)))
+        if (negated) Compiled.Scan else Compiled.Exact(listOf(Constraint.Text(target, argument)))
 
     override fun bodyNeedle(argument: String) = argument.takeIf { target == TextTarget.BODY }
 
@@ -268,20 +245,6 @@ internal fun parseQuery(
     return ParsedQuery(type, terms)
 }
 
-/// A note as the language sees it, read off the disk. The name is the
-/// file's stem and the path is `/`-separated and relative to the vault,
-/// which is what every operator and every anchor already means by them.
-internal fun searchedNote(vaultDir: String, relPath: String): SearchedNote? {
-    val text = runCatching { java.io.File(vaultDir, relPath).readText() }.getOrNull() ?: return null
-    val note = splitNote(text)
-    return SearchedNote(
-        relPath = relPath,
-        name = relPath.substringAfterLast('/').removeSuffix(".md"),
-        body = note.body,
-        frontMatter = note.frontMatter,
-    )
-}
-
 /// `note` is answerable whether or not the caller listed it — the
 /// built-in the registry always carries — while any other key must have
 /// been registered. A caller's own `note` type wins over the built-in.
@@ -315,94 +278,6 @@ private fun splitType(tokens: List<String>): TypedQuery {
     return TypedQuery(key, rest)
 }
 
-/// Name matches first, then more matches ahead of fewer, then path order
-/// so results are stable.
-internal val RANK = compareByDescending<SearchHit> { it.nameMatched }
-    .thenByDescending { it.matchCount }
-    .thenBy { it.relPath }
-
-internal fun hitFor(note: SearchedNote, terms: List<ParsedTerm>, maxLines: Int): SearchHit? {
-    if (!keeps(note, terms)) return null
-    val bodyNeedles = bodyNeedles(terms)
-
-    val lines = mutableListOf<MatchedLine>()
-    var matchCount = 0
-    var moreMatches = 0
-    note.lines.forEachIndexed { index, text ->
-        val ranges = rangesIn(text, bodyNeedles)
-        if (ranges.isEmpty()) return@forEachIndexed
-        matchCount += ranges.size
-        if (lines.size < maxLines) lines.add(MatchedLine(index + 1, text, ranges)) else moreMatches++
-    }
-    return SearchHit(note.relPath, note.name, nameMatched(note, terms), lines, moreMatches, matchCount)
-}
-
-/// The line-level path (ADR 0015 § 4): the type says which lines are
-/// candidates, and each is judged on its own as a narrowed note. Every
-/// line that survives **is** a hit line, highlighted or not — a task kept
-/// by `due:today` alone has nothing to emphasise and must still show.
-internal fun lineHitFor(
-    note: SearchedNote,
-    terms: List<ParsedTerm>,
-    extract: (SearchedNote) -> List<CandidateLine>,
-    maxLines: Int,
-): SearchHit? {
-    val kept = extract(note).filter { keeps(note.narrowedTo(it.text), terms) }
-    if (kept.isEmpty()) return null
-    val bodyNeedles = bodyNeedles(terms)
-
-    val lines = mutableListOf<MatchedLine>()
-    var matchCount = 0
-    var moreMatches = 0
-    for (candidate in kept) {
-        val ranges = rangesIn(candidate.text, bodyNeedles)
-        matchCount += ranges.size
-        if (lines.size < maxLines) lines.add(MatchedLine(candidate.number, candidate.text, ranges)) else moreMatches++
-    }
-    return SearchHit(note.relPath, note.name, nameMatched(note, terms), lines, moreMatches, matchCount)
-}
-
-private fun keeps(note: SearchedNote, terms: List<ParsedTerm>): Boolean {
-    for (term in terms) {
-        if (term.term.matches(note) == term.negated) return false
-    }
-    return true
-}
-
-// Only terms the note had to satisfy describe why it is here: a negated
-// term is a reason it was not excluded, never a highlight.
-private fun bodyNeedles(terms: List<ParsedTerm>): List<String> =
-    terms.filterNot { it.negated }.mapNotNull { it.term.bodyNeedle }.filter { it.isNotEmpty() }
-
-private fun nameMatched(note: SearchedNote, terms: List<ParsedTerm>): Boolean =
-    terms.filterNot { it.negated }.any { parsed ->
-        parsed.term.nameNeedle?.let { note.name.contains(it, ignoreCase = true) } == true
-    }
-
-/// Every occurrence of every needle in one line, merged where they
-/// overlap so the ranges stay disjoint and ordered.
-private fun rangesIn(line: String, needles: List<String>): List<IntRange> {
-    val found = mutableListOf<IntRange>()
-    for (needle in needles) {
-        var at = line.indexOf(needle, 0, ignoreCase = true)
-        while (at >= 0) {
-            found.add(at..at + needle.length - 1)
-            at = line.indexOf(needle, at + 1, ignoreCase = true)
-        }
-    }
-    if (found.size < 2) return found
-    val merged = mutableListOf<IntRange>()
-    for (range in found.sortedBy { it.first }) {
-        val last = merged.lastOrNull()
-        if (last != null && range.first <= last.last) {
-            if (range.last > last.last) merged[merged.size - 1] = last.first..range.last
-        } else {
-            merged.add(range)
-        }
-    }
-    return merged
-}
-
 internal sealed interface Term {
     fun matches(note: SearchedNote): Boolean
     val bodyNeedle: String? get() = null
@@ -424,7 +299,7 @@ private class TextTerm(private val text: String) : Term {
     /// `Any` is body **or** name in one constraint, because a conjunction
     /// cannot express that `or` (ADR 0020 § 10, K3).
     override fun compile(negated: Boolean): Compiled =
-        if (negated) Compiled.Scan else Compiled.Terms(listOf(Constraint.Text(TextTarget.ANY, text)))
+        if (negated) Compiled.Scan else Compiled.Exact(listOf(Constraint.Text(TextTarget.ANY, text)))
 }
 
 private class OperatorTerm(private val operator: SearchOperator, private val argument: String) : Term {
@@ -452,13 +327,13 @@ private class MetaTerm(private val key: String, private val value: String?) : Te
         val predicate = frontMatterPredicate(key)
         if (value == null) {
             val op = if (negated) ConstraintOp.NOT_EXISTS else ConstraintOp.EXISTS
-            return Compiled.Terms(listOf(Constraint.Fact(predicate, op, "")))
+            return Compiled.Exact(listOf(Constraint.Fact(predicate, op, "")))
         }
         // `contains` is not `equals`, so its negation is not `Ne`.
         return if (negated) {
             Compiled.Scan
         } else {
-            Compiled.Terms(listOf(Constraint.Fact(predicate, ConstraintOp.CONTAINS, value)))
+            Compiled.Exact(listOf(Constraint.Fact(predicate, ConstraintOp.CONTAINS, value)))
         }
     }
 }

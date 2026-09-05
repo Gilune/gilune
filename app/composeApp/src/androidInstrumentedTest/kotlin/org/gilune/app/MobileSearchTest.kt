@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
@@ -23,6 +24,10 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class MobileSearchTest {
+    private fun awaitText(text: String) {
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @get:Rule
     val compose = createComposeRule()
 
@@ -124,7 +129,9 @@ class MobileSearchTest {
         compose.onNodeWithTag("search-field").performTextInput("drips")
         compose.waitForIdle()
 
+        awaitText("kitchen")
         compose.onNodeWithText("kitchen").assertIsDisplayed()
+        awaitText("the tap drips into the sink")
         compose.onNodeWithText("the tap drips into the sink").assertIsDisplayed()
         // One note matched, so the other is not on screen.
         compose.onNodeWithText("garden").assertDoesNotExist()
@@ -139,6 +146,7 @@ class MobileSearchTest {
 
         compose.onNodeWithTag("search-field").performTextInput("hedge")
         compose.waitForIdle()
+        awaitText("garden")
         compose.onNodeWithText("garden").performClick()
         compose.waitForIdle()
 
@@ -158,6 +166,7 @@ class MobileSearchTest {
 
         // The task line is quoted; the prose line mentioning the same word
         // is not, because `type:task` changed what a hit is.
+        awaitText("- [ ] mend the fence")
         compose.onNodeWithText("- [ ] mend the fence").assertIsDisplayed()
         compose.onNodeWithText("prose about fences").assertDoesNotExist()
     }

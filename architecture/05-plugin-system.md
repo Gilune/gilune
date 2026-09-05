@@ -61,6 +61,12 @@ allowed for data that is not a fact — an embedding index — under the same
 feed-and-cursor pattern; facts are the rule and a private index is the
 exception.
 
+Search vocabulary is also plugin-owned. Plugins compile it to generic
+clauses; the kernel owns execution and result construction. Bundled plugins
+may supply pure residual predicates over indexed snapshots, while the shell
+only requests and renders pages. No query fallback enumerates or rereads
+vault files. See [the search contract](../contracts/search/README.md).
+
 ## Manifest
 
 Every plugin has a signed, immutable manifest. The following is illustrative;
@@ -194,6 +200,16 @@ Mobile and desktop builds may expose different installation choices. That is a
 distribution fact, not a difference in the logical plugin API.
 
 ## UI extensions
+
+The bundled search and suggestion execution route is implemented in
+[ADR 0022](decisions/0022-bundled-extension-registration.md) and the
+[bundled extension contract](../contracts/bundled-extensions/README.md).
+Typed registrations pair local implementations with their declaring owners;
+the host no longer selects Tasks search or date-provider behavior by name.
+`suggest.values` explicitly declares values providers, and plugin-owned field
+slots can compose with a separately enabled provider. Other UI slots retain
+their existing implementation maturity; this is not the complete SDK or
+sandboxed runtime described below.
 
 Third-party v0 plugins contribute declarative UI rather than arbitrary executable
 widgets. Supported contribution types are expected to include:

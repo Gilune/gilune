@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -33,6 +34,10 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class FilterBlockUiTest {
+    private fun awaitText(text: String) {
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @get:Rule
     val compose = createComposeRule()
 
@@ -82,10 +87,13 @@ class FilterBlockUiTest {
         compose.waitForIdle()
 
         // The query ran and its row is on screen.
+        awaitText("buy milk")
         compose.onNodeWithText("buy milk").assertIsDisplayed()
+        awaitText("Home/kitchen.md")
         compose.onNodeWithText("Home/kitchen.md").assertIsDisplayed()
         // T4 is not done until an unregistered fence still renders as an
         // ordinary code block: `sql` is drawn as the bytes it holds…
+        awaitText("select 1")
         compose.onNodeWithText("select 1").assertIsDisplayed()
         // …and the filter fence is not, because it drew a list instead.
         compose.onNodeWithText("type:task", substring = true).assertDoesNotExist()
@@ -98,6 +106,7 @@ class FilterBlockUiTest {
         show(state, editor)
         compose.waitForIdle()
 
+        awaitText("a filter names its type: — try type:note or type:task")
         compose.onNodeWithText("a filter names its type: — try type:note or type:task").assertIsDisplayed()
         compose.onNodeWithText("buy milk").assertDoesNotExist()
     }
@@ -109,6 +118,7 @@ class FilterBlockUiTest {
         show(state, editor)
         compose.waitForIdle()
 
+        awaitText("an empty filter matches nothing")
         compose.onNodeWithText("an empty filter matches nothing").assertIsDisplayed()
         compose.onNodeWithText("buy milk").assertDoesNotExist()
     }
@@ -125,6 +135,7 @@ class FilterBlockUiTest {
         show(state, editor)
         compose.waitForIdle()
 
+        awaitText("no type called task is registered — is its plugin on?")
         compose.onNodeWithText("no type called task is registered — is its plugin on?").assertIsDisplayed()
         compose.onNodeWithText("buy milk").assertDoesNotExist()
     }
@@ -186,6 +197,7 @@ class FilterBlockUiTest {
 
         // The caret is outside the block — there is not one yet — so the
         // query ran and its row is drawn over the lines the fence gave up.
+        awaitText("buy milk")
         compose.onNodeWithText("buy milk").assertIsDisplayed()
 
         // Onto each line of the block in turn, the two delimiters
@@ -200,6 +212,7 @@ class FilterBlockUiTest {
 
         // And out again.
         caretAt(editor, 0)
+        awaitText("buy milk")
         compose.onNodeWithText("buy milk").assertIsDisplayed()
 
         assertEquals(before, editor.text.text, "the buffer is the document: rendering it moved no byte")
@@ -267,6 +280,7 @@ class FilterBlockUiTest {
             }
         }
         compose.waitForIdle()
+        awaitText("buy milk")
         return Triple(state, tabs, tab)
     }
 

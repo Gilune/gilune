@@ -43,7 +43,7 @@ class SuggestPopupTest {
         CaretPositionProvider(caret).calculatePosition(ignored, windowSize, LayoutDirection.Ltr, contentSize)
 
     private fun valuesSession(): SuggestSession {
-        val fields = listOfNotNull(suggestField("due", "Due date", DATE_VALUES_PROVIDER))
+        val fields = listOfNotNull(SuggestField("due", "Due date", dateValues("due")))
         val session = assertNotNull(SuggestSession.open("- [ ] milk /", 12, fields, "", today))
         return (session.accept() as? SuggestOutcome.Open)?.session ?: fail("stage one passes through")
     }

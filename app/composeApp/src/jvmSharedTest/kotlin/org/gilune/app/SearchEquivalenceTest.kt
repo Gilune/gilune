@@ -1,14 +1,3 @@
-// The proof that the index answers the question the scan answered
-// (ADR 0020 § 8.4): one corpus, every operator the shipped language has,
-// and both engines asked the same thing.
-//
-// `searchVault` — the walk, in `SearchScan.kt` — is the oracle. It reads
-// every file and decides each one, which is what the app did through T1
-// to MB3. `queryVault` narrows with the system index first. Where they
-// differ, the walk is right, and the differences this round found are
-// listed in `KNOWN_DELTAS` with a test of their own rather than left for
-// somebody to trip over.
-
 package org.gilune.app
 
 import java.time.LocalDate
@@ -215,29 +204,14 @@ class SearchEquivalenceTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun aTermShorterThanATrigramIsAnsweredByAScanAndFoldsCaseOnlyForAscii() {
-        // ADR 0020 § 10, K3: the full-text index holds no token shorter
-        // than three characters, so a one- or two-character term is
-        // answered by a `LIKE` over the indexed lines instead. The
-        // meaning is identical for ASCII — which the two-character
-        // queries in the table above assert — and `LIKE` folds case only
-        // for ASCII, so a two-character non-ASCII term is
-        // case-sensitive where a three-character one is not.
+    fun shortAndLongUnicodeTermsHaveTheSameCaseFolding() {
         val accented = IndexedVault("gilune-short-terms")
         accented.write("Cafe.md", "a note about a CAFÉ and its éclairs\n")
-        // Three characters: the trigram index, and case-insensitive.
-        assertEquals(
-            searchVault(accented.dir, "café").map { it.relPath },
-            queryVault(accented.gilune, accented.dir, "café").map { it.relPath },
-        )
-        // Two: the scan finds it case-insensitively and the index's
-        // `LIKE` does not. Asserted, so the day it changes is a day
-        // somebody reads this.
-        assertTrue(searchVault(accented.dir, "éc").isNotEmpty())
-        assertTrue(
-            queryVault(accented.gilune, accented.dir, "ÉC").isEmpty(),
-            "a two-character non-ASCII term folds case in the scan and not in the index",
-        )
+        for (query in listOf("café", "ÉC", "é")) {
+            val scanned = searchVault(accented.dir, query)
+            assertTrue(scanned.isNotEmpty())
+            assertEquals(scanned, queryVault(accented.gilune, accented.dir, query))
+        }
     }
 
     @Test

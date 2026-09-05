@@ -20,10 +20,7 @@ import android.content.Context
 import android.content.Intent
 import android.widget.RemoteViews
 import java.io.File
-import uniffi.gilune_ffi.Constraint
 import uniffi.gilune_ffi.Gilune
-import uniffi.gilune_ffi.QueryScope
-import uniffi.gilune_ffi.TextTarget
 
 /// Asks every placed widget to redraw. Explicit component, never an
 /// implicit broadcast: this is the app talking to its own receiver.
@@ -73,13 +70,9 @@ fun requestWidgetRefresh(context: Context) {
 /// It is approximate in exactly one way, honestly: a capture committed
 /// but not yet projected is not counted until the next projection, which
 /// in practice is the same moment.
-fun inboxCount(gilune: Gilune): Int = gilune
-    .query(
-        listOf(Constraint.Text(TextTarget.PATH, "$CAPTURES_FOLDER/")),
-        QueryScope.NOTE,
-        MAX_QUERY_NOTES,
-    )
-    .size
+fun inboxCount(gilune: Gilune): Int = compileSearch(
+    "path:$CAPTURES_FOLDER/", pageSize = 1u, maxLines = 0,
+)!!.page(gilune).requireComplete().totalHits.coerceAtMost(Int.MAX_VALUE.toULong()).toInt()
 
 private const val CAPTURES_FOLDER = "Captures"
 
@@ -98,8 +91,8 @@ fun widgetViews(context: Context, gilune: Gilune? = null): RemoteViews {
 
     val count = runCatching {
         gilune?.let(::inboxCount) ?: inboxCountAt(vaultDir(context))
-    }.getOrDefault(0)
-    views.setTextViewText(R.id.widget_inbox_count, count.toString())
+    }.getOrNull()
+    views.setTextViewText(R.id.widget_inbox_count, count?.toString() ?: "—")
     views.setTextViewText(R.id.widget_inbox_label, if (count == 1) "capture in inbox" else "captures in inbox")
 
     // While a recording runs the cell offers the way out of it, so the

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,10 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class TasksPanelTest {
+    private fun awaitText(text: String) {
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @get:Rule
     val compose = createComposeRule()
 
@@ -261,6 +266,7 @@ class TasksPanelTest {
         showPanel(state)
         compose.waitForIdle()
 
+        awaitText("overdue (1)")
         compose.onNodeWithText("overdue (1)").assertIsDisplayed()
         compose.onNodeWithText("today (1)").assertIsDisplayed()
         compose.onNodeWithText("next seven days (1)").assertIsDisplayed()
@@ -282,6 +288,7 @@ class TasksPanelTest {
         showPanel(state) { opened = it }
         compose.waitForIdle()
 
+        awaitText("phone the council")
         compose.onNodeWithText("phone the council").performClick()
         compose.waitForIdle()
 
@@ -298,6 +305,7 @@ class TasksPanelTest {
         showPanel(state)
         compose.waitForIdle()
 
+        awaitText("nothing open")
         compose.onNodeWithText("nothing open").assertIsDisplayed()
         compose.onNodeWithText("overdue (0)").assertDoesNotExist()
     }

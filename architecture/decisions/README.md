@@ -25,6 +25,8 @@ technologies can be rejected without weakening the product principles.
 | [0018](0018-realtime-transcription-and-the-second-provider.md) | Realtime transcription: a display-only live caption during recording, Moonshine as a second provider with one active transcriber at a time, and an FFI processor route so a non-Rust engine writes the committed transcript | Accepted |
 | [0019](0019-lan-pairing-and-transport.md) | LAN sync: DNS-SD discovery, one SPAKE2-then-Noise pairing protocol carrying both a 6-digit code and a QR, vault-external device identity, and a kernel/sync split behind a `Transport` trait | Proposed (build ratified 2026-09-02) |
 | [0020](0020-vault-change-feed-and-incremental-indexes.md) | A dense, resumable vault change feed at the kernel boundary; a kernel-hosted system index of plugin-contributed facts plus FTS5, joined on anchors so plugins extend the search DSL without knowing each other; reconcile stats before it reads | Accepted (gate evidenced 2026-09-05) |
+| [0021](0021-kernel-search-results.md) | Complete kernel search pages; retryable index maintenance; plugins compile vocabulary and shells render asynchronous results | Implemented and validated (2026-09-05) |
+| [0022](0022-bundled-extension-registration.md) | Owned executable registrations for bundled search types, suggestion providers and indexers | Implemented and validated (2026-09-05) |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

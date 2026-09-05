@@ -89,7 +89,11 @@ fn a_foreign_indexer_is_asked_about_a_note_and_its_facts_come_back_as_anchors() 
         .capture_text("colour=red the first line\ncolour=blue the second".to_string())
         .expect("capture");
     gilune.project().expect("project");
-    assert_eq!(calls.load(Ordering::SeqCst), 1, "the pass that wrote the note read it");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the pass that wrote the note read it"
+    );
 
     let hits = anchors(&gilune, vec![colour("blue")], QueryScope::Line);
     assert_eq!(hits.len(), 1);
@@ -108,7 +112,13 @@ fn a_foreign_indexer_is_asked_about_a_note_and_its_facts_come_back_as_anchors() 
         ],
         QueryScope::Line,
     );
-    assert_eq!(both, vec![Anchor { rel_path: hits[0].rel_path.clone(), line: Some(1) }]);
+    assert_eq!(
+        both,
+        vec![Anchor {
+            rel_path: hits[0].rel_path.clone(),
+            line: Some(1)
+        }]
+    );
     assert_eq!(
         anchors(&gilune, vec![colour("red")], QueryScope::Note)[0].line,
         None,
@@ -127,7 +137,7 @@ fn a_foreign_indexer_is_asked_about_a_note_and_its_facts_come_back_as_anchors() 
     );
 
     let status = gilune.index_status().expect("status");
-    assert_eq!(status.schema_version, 1);
+    assert_eq!(status.schema_version, 2);
     assert!(status
         .namespaces
         .iter()
@@ -165,7 +175,10 @@ fn an_indexer_registered_after_the_vault_was_open_catches_up_when_it_is_told_to(
     assert_eq!(pass.indexed, 1);
     assert!(pass.failures.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
-    assert_eq!(anchors(&gilune, vec![colour("green")], QueryScope::Note).len(), 1);
+    assert_eq!(
+        anchors(&gilune, vec![colour("green")], QueryScope::Note).len(),
+        1
+    );
 }
 
 #[test]
@@ -190,8 +203,13 @@ fn a_foreign_indexer_that_throws_is_a_recorded_refusal_and_not_a_crash() {
         .capture_text("colour=red nobody will read this".to_string())
         .expect("capture");
 
-    let summary = gilune.project().expect("the projection is not stopped by the index");
-    assert_eq!(summary.written, 1, "the note was written whatever the index did");
+    let summary = gilune
+        .project()
+        .expect("the projection is not stopped by the index");
+    assert_eq!(
+        summary.written, 1,
+        "the note was written whatever the index did"
+    );
     let pass = gilune.advance_index().expect("the pass completes");
     assert_eq!(pass.failures.len(), 1, "{:?}", pass.failures);
     assert!(pass.failures[0].contains("will not read"));
@@ -202,10 +220,16 @@ fn a_foreign_indexer_that_throws_is_a_recorded_refusal_and_not_a_crash() {
         .iter()
         .find(|n| n.namespace == "test.colours")
         .expect("the namespace");
-    assert_eq!(stuck.cursor_seq, 0, "it stopped short of the note it refused");
+    assert_eq!(
+        stuck.cursor_seq, 0,
+        "it stopped short of the note it refused"
+    );
     assert!(stuck.last_error.is_some());
     assert!(
-        status.namespaces.iter().any(|n| n.namespace == "text" && n.cursor_seq > 0),
+        status
+            .namespaces
+            .iter()
+            .any(|n| n.namespace == "text" && n.cursor_seq > 0),
         "and the kernel's own text index carried on"
     );
 }
@@ -265,7 +289,9 @@ fn removing_a_plugin_takes_the_facts_it_contributed_and_leaves_the_notes() {
         .rel_path
         .clone();
 
-    gilune.remove_plugin("test.colours".to_string()).expect("remove");
+    gilune
+        .remove_plugin("test.colours".to_string())
+        .expect("remove");
     assert!(anchors(&gilune, vec![colour("red")], QueryScope::Note).is_empty());
     assert_eq!(
         anchors(

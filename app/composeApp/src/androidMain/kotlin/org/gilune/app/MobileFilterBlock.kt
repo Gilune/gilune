@@ -71,15 +71,13 @@ fun MobileFilterBlock(
     val types = searchTypesFor(plugins)
     val filter = plugins.tasksFilter()
     val open = state.gilune.value
-    val computed = remember(state.vaultDir, state.vaultCursor.value, block, types.size, filter, open) {
-        val today = LocalDate.now()
-        today to when (open) {
-            null -> FilterResult.Hint(FILTER_NO_MATCHES)
-            else -> runFilterBlock(open, state.vaultDir, block, plugins, today)
-        }
-    }
-    val today = computed.first
-    val result = computed.second
+    val today = rememberQueryDay()
+    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today) {
+        if (open == null) FilterResult.Hint("Opening vault...")
+        else evaluateFilterBlock(open, state.vaultDir, block, types, today)
+    }.value
+    val result = computed.value ?: FilterResult.Hint(computed.error ?: "Searching...")
+
 
     Column(
         modifier
@@ -90,6 +88,9 @@ fun MobileFilterBlock(
             .testTag("filter-block"),
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        if (computed.error != null) {
+            androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { Text("Retry search") }
+        }
         when (result) {
             is FilterResult.Hint -> HintRow(result.text)
             is FilterResult.Tasks -> {

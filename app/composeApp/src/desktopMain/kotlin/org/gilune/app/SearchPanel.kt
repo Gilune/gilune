@@ -1,8 +1,8 @@
 // The rail's search panel: a query over the vault's contents, answered
 // as the lines that matched, grouped under the note they came from.
 //
-// The language lives in `Search.kt` and `queryVault` answers it from the
-// system index (ADR 0020); this panel only shows the result, and hints at
+// Plugins compile the language in `Search.kt`; the kernel returns pages
+// from its index (ADR 0021). This panel displays them and hints at
 // the language's forms while the box is empty. An edit made by another
 // tool is still found the moment it lands (constitution rule 13) —
 // reconciliation looks, and the feed carries what it found.
@@ -78,21 +78,11 @@ fun SearchPanel(
     val focusManager = LocalFocusManager.current
     // Built from the plugin list on every composition, so enabling or
     // removing a plugin changes the language on the next keystroke — no
-    // registry to re-seed, nothing to restart. `filter` is a key of its
-    // own because it changes what a task line is without changing the
-    // list's identity.
+    // registry to re-seed, nothing to restart. Plugin configuration also
+    // refreshes the result.
     val types = searchTypesFor(state.plugins)
-    val filter = state.tasksFilter()
-    val open = state.gilune.value
-    val hits = remember(query, state.vaultCursor.value, types.size, filter, open) {
-        if (query.isBlank() || open == null) {
-            emptyList()
-        } else {
-            // `today` is read here rather than inside the engine so the
-            // day a relative word means is the day the query ran.
-            queryVault(open, state.vaultDir, query, types = types, today = LocalDate.now())
-        }
-    }
+    val search = rememberPagedSearch(state, query, types)
+    val hits = search.listing.hits
 
     Column(modifier) {
         Row(
@@ -145,8 +135,15 @@ fun SearchPanel(
             )
         }
 
+        QueryNotice(search.listing.loading, search.listing.error, state::retrySearchIndex)
+        if (search.listing.next != null) {
+            androidx.compose.material3.TextButton(onClick = search.more, enabled = !search.listing.loading) {
+                Text("Load more (${hits.size} of ${search.listing.total})")
+            }
+        }
         when {
             query.isBlank() -> QueryForms(types.any { it.key == TASK_SEARCH_TYPE })
+            hits.isEmpty() && (search.listing.loading || search.listing.error != null) -> Unit
             hits.isEmpty() -> Text(
                 "nothing matches",
                 fontSize = 11.sp,

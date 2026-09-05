@@ -404,7 +404,7 @@ class MobileEditorTest {
         private val MOBILE = mobileEditorDecorations(builtInDecorations())
         private val MOBILE_WITH_TASKS =
             mobileEditorDecorations(builtInDecorations() + tasksDecorations("", TODAY))
-        private val FIELDS = listOf(assertNotNull(suggestField("due", "Due date", DATE_VALUES_PROVIDER)))
+        private val FIELDS = listOf(assertNotNull(SuggestField("due", "Due date", dateValues("due"))))
 
         private val PALETTE = MarkdownPalette(
             muted = Color(0xFF808080),

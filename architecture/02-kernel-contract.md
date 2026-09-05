@@ -37,6 +37,8 @@ versioned interfaces; they do not share kernel internals.
 - plugin lifecycle and compatibility checks;
 - capability grants and enforcement;
 - query and mutation APIs that apply type and provenance rules;
+- complete indexed search: document/line matching, ranking, snippets,
+  highlight coordinates, pagination, and freshness (ADR 0021);
 - opaque secret handles backed by platform secure storage;
 - configuration validation and plugin namespaces.
 
@@ -121,6 +123,8 @@ modules:
 - `memory:index` — register an indexer for a namespace, advance or
   rebuild the index, and answer a conjunction of constraints with
   anchors;
+- `memory:search` — execute plugin-compiled clauses against an index snapshot
+  and return complete, ranked pages, counts, snippets, and freshness;
 - `memory:sync` — enumerate, transmit, validate, and apply operations;
 - `memory:export` — enumerate stable envelopes and stream standard-format blobs;
 - `memory:diagnostics` — health and failure information with redaction.

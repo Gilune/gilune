@@ -76,11 +76,12 @@ class TasksPluginTest {
     }
 
     @Test
-    fun theDeclarationCoversTheFiveSlotsTheShippedStagesNeed() {
+    fun theDeclarationCoversTheExecutableProviderAndItsConsumers() {
         val slots = tasksDeclaration().contributions.associate { it.slot to it.id }
         assertEquals(
             mapOf(
-                Slots.TASKS_FIELDS to TASKS_DUE_FIELD,
+                Slots.SUGGEST_VALUES to DATE_VALUES_PROVIDER,
+                TASK_FIELDS_SLOT to TASKS_DUE_FIELD,
                 Slots.EDITOR_DECORATIONS to TASKS_DECORATIONS_CONTRIBUTION,
                 Slots.EDITOR_SUGGEST to TASKS_SUGGEST_CONTRIBUTION,
                 Slots.SEARCH_TYPES to "task",
@@ -224,7 +225,7 @@ class TasksPluginTest {
             "org.example.people",
             contributions = listOf(
                 PluginContribution(
-                    slot = Slots.TASKS_FIELDS,
+                    slot = TASK_FIELDS_SLOT,
                     id = "assignee",
                     label = "Assignee",
                     config = """{"key":"assignee","label":"Assignee","values":"org.people.contacts"}""",
@@ -251,7 +252,7 @@ class TasksPluginTest {
         for (config in broken) {
             val plugin = installedPlugin(
                 "org.example.broken",
-                contributions = listOf(PluginContribution(Slots.TASKS_FIELDS, "x", "X", config)),
+                contributions = listOf(PluginContribution(TASK_FIELDS_SLOT, "x", "X", config)),
             )
             assertEquals(
                 listOf("due"),
@@ -531,7 +532,7 @@ class TasksPluginTest {
         state = state,
         contributions = listOf(
             PluginContribution(
-                slot = Slots.TASKS_FIELDS,
+                slot = TASK_FIELDS_SLOT,
                 id = "assignee",
                 label = "Assignee",
                 config = """{"key":"assignee","label":"Assignee","values":"$DATE_VALUES_PROVIDER"}""",

@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +25,10 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class MobileFilterBlockTest {
+    private fun awaitText(text: String) {
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+    }
+
     @get:Rule
     val compose = createComposeRule()
 
@@ -61,6 +66,7 @@ class MobileFilterBlockTest {
         compose.waitForIdle()
 
         compose.onNodeWithTag("filter-block").assertIsDisplayed()
+        awaitText("mend the gate")
         compose.onNodeWithText("mend the gate").assertIsDisplayed()
         // The fence's own text is not on screen: the block rendered, it
         // did not fall through to the monospace box.
@@ -75,6 +81,7 @@ class MobileFilterBlockTest {
         showRead(state) { opened = it }
         compose.waitForIdle()
 
+        awaitText("mend the gate")
         compose.onNodeWithText("mend the gate").performClick()
         compose.waitForIdle()
 
@@ -88,6 +95,7 @@ class MobileFilterBlockTest {
         showRead(state)
         compose.waitForIdle()
 
+        awaitText("a filter names its type: — try type:note or type:task")
         compose.onNodeWithTag("filter-hint").assertIsDisplayed()
         compose.onNodeWithText("mend the gate").assertDoesNotExist()
     }
@@ -102,6 +110,7 @@ class MobileFilterBlockTest {
         showRead(state)
         compose.waitForIdle()
 
+        awaitText("no type called task is registered — is its plugin on?")
         compose.onNodeWithText("no type called task is registered — is its plugin on?").assertIsDisplayed()
     }
 
@@ -112,6 +121,7 @@ class MobileFilterBlockTest {
         showRead(state)
         compose.waitForIdle()
 
+        awaitText(FILTER_NO_MATCHES)
         compose.onNodeWithText(FILTER_NO_MATCHES).assertIsDisplayed()
     }
 }

@@ -20,6 +20,8 @@ mod probe;
 pub mod processor;
 pub mod query;
 pub mod revisions;
+pub mod search;
+mod search_text;
 pub mod store;
 mod transcript_merge;
 pub mod vault;
@@ -28,6 +30,10 @@ pub mod vault;
 /// enough context to act on; panics are bugs, not error handling.
 #[derive(Debug, thiserror::Error)]
 pub enum KernelError {
+    #[error("invalid search: {detail}")]
+    SearchInvalid { detail: String },
+    #[error("search results changed; restart the query")]
+    SearchCursorExpired,
     #[error("storage: {0}")]
     Storage(#[from] rusqlite::Error),
     #[error("encoding: {0}")]
@@ -48,7 +54,10 @@ pub enum KernelError {
     #[error("{plugin_id} is required and cannot be removed")]
     PluginRequired { plugin_id: String },
     #[error("{plugin_id} does not declare the capability {capability}")]
-    UndeclaredCapability { plugin_id: String, capability: String },
+    UndeclaredCapability {
+        plugin_id: String,
+        capability: String,
+    },
     #[error("no enabled plugin claims work for the processor {processor_id}")]
     ProcessorNotClaimable { processor_id: String },
     /// A revise-subject output named the head it was written over, and

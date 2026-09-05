@@ -13,10 +13,15 @@ use std::sync::{Arc, Mutex};
 
 uniffi::setup_scaffolding!();
 
+mod search;
+pub use search::*;
+
 /// Errors as the shells see them. A deliberately flat, stable surface
 /// over `gilune_kernel::KernelError`; variants are added, not reshaped.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum GiluneError {
+    #[error("search results changed; restart the query")]
+    SearchCursorExpired,
     #[error("storage: {detail}")]
     Storage { detail: String },
     #[error("vault unusable: {detail}")]
@@ -47,22 +52,36 @@ impl From<gilune_kernel::KernelError> for GiluneError {
     fn from(e: gilune_kernel::KernelError) -> Self {
         use gilune_kernel::KernelError as K;
         match e {
-            K::VaultUnusable { .. } => GiluneError::VaultUnusable { detail: e.to_string() },
-            K::SchemaTooNew { .. } => GiluneError::Incompatible { detail: e.to_string() },
+            K::SearchCursorExpired => GiluneError::SearchCursorExpired,
+            K::SearchInvalid { .. } => GiluneError::Invalid {
+                detail: e.to_string(),
+            },
+            K::VaultUnusable { .. } => GiluneError::VaultUnusable {
+                detail: e.to_string(),
+            },
+            K::SchemaTooNew { .. } => GiluneError::Incompatible {
+                detail: e.to_string(),
+            },
             // A halted sync stream is refused input, like any other
             // invalid argument: M5a adds no boundary variant, and the
             // shells learn about halts from the integrity alerts (M5c),
             // not from an error code.
-            K::CursorUnknown { .. } => GiluneError::CursorUnknown { detail: e.to_string() },
+            K::CursorUnknown { .. } => GiluneError::CursorUnknown {
+                detail: e.to_string(),
+            },
             K::NoSuchJob { .. }
             | K::NoSuchPlugin { .. }
             | K::PluginRequired { .. }
             | K::UndeclaredCapability { .. }
             | K::ProcessorNotClaimable { .. }
             | K::SubjectMoved { .. }
-            | K::SyncHalted { .. } => GiluneError::Invalid { detail: e.to_string() },
+            | K::SyncHalted { .. } => GiluneError::Invalid {
+                detail: e.to_string(),
+            },
             K::Storage(_) | K::Io { .. } | K::Encoding(_) | K::Corrupt { .. } => {
-                GiluneError::Storage { detail: e.to_string() }
+                GiluneError::Storage {
+                    detail: e.to_string(),
+                }
             }
         }
     }
@@ -78,18 +97,22 @@ impl From<gilune_sync::SyncError> for GiluneError {
             // `Invalid` already means at this boundary. The boundary
             // gains variants, never reshaped ones (ADR 0019 § 6).
             S::Protocol { .. } | S::OversizeFrame { .. } | S::Refused { .. } => {
-                GiluneError::Invalid { detail: e.to_string() }
+                GiluneError::Invalid {
+                    detail: e.to_string(),
+                }
             }
             // A sealed identity this machine cannot open is neither a
             // peer's fault nor a storage fault: it is a decision a person
             // has to be shown, so it keeps its own variant all the way to
             // the shell rather than becoming one more "storage" string.
-            S::IdentityUnreadable { .. } => {
-                GiluneError::IdentityUnreadable { detail: e.to_string() }
-            }
+            S::IdentityUnreadable { .. } => GiluneError::IdentityUnreadable {
+                detail: e.to_string(),
+            },
             // This device could not do its part — a socket that would not
             // open, an identity file that would not read.
-            S::Io(_) | S::Identity { .. } => GiluneError::Storage { detail: e.to_string() },
+            S::Io(_) | S::Identity { .. } => GiluneError::Storage {
+                detail: e.to_string(),
+            },
         }
     }
 }
@@ -121,7 +144,9 @@ impl gilune_sync::KeyWrap for WrapAdapter {
         self.0.wrap(plaintext.to_vec()).map_err(|e| e.to_string())
     }
     fn unwrap(&self, ciphertext: &[u8]) -> Result<Vec<u8>, String> {
-        self.0.unwrap(ciphertext.to_vec()).map_err(|e| e.to_string())
+        self.0
+            .unwrap(ciphertext.to_vec())
+            .map_err(|e| e.to_string())
     }
 }
 
@@ -415,16 +440,22 @@ impl gilune_sync::PeerDiscovery for DiscoveryAdapter {
     fn advertise(&self, ad: &gilune_sync::Advertisement) -> gilune_sync::Result<()> {
         self.0
             .advertise(ad.fingerprint.clone(), ad.port)
-            .map_err(|e| gilune_sync::SyncError::Refused { detail: e.to_string() })
+            .map_err(|e| gilune_sync::SyncError::Refused {
+                detail: e.to_string(),
+            })
     }
     fn withdraw(&self) {
         self.0.withdraw();
     }
-    fn browse(&self, timeout: std::time::Duration) -> gilune_sync::Result<Vec<gilune_sync::Discovered>> {
-        let seen = self
-            .0
-            .browse(timeout.as_millis() as u64)
-            .map_err(|e| gilune_sync::SyncError::Refused { detail: e.to_string() })?;
+    fn browse(
+        &self,
+        timeout: std::time::Duration,
+    ) -> gilune_sync::Result<Vec<gilune_sync::Discovered>> {
+        let seen = self.0.browse(timeout.as_millis() as u64).map_err(|e| {
+            gilune_sync::SyncError::Refused {
+                detail: e.to_string(),
+            }
+        })?;
         Ok(seen
             .into_iter()
             .map(|d| gilune_sync::Discovered {
@@ -630,7 +661,10 @@ impl From<gilune_kernel::changes::ChangeCause> for ChangeCause {
 
 impl From<gilune_kernel::changes::Cursor> for Cursor {
     fn from(c: gilune_kernel::changes::Cursor) -> Self {
-        Cursor { epoch: c.epoch, seq: c.seq.max(0) as u64 }
+        Cursor {
+            epoch: c.epoch,
+            seq: c.seq.max(0) as u64,
+        }
     }
 }
 
@@ -1299,8 +1333,12 @@ impl Gilune {
     /// external registration, so a disabled provider cannot keep claiming
     /// through a handle that already said yes.
     fn unload_processor(&self, plugin_id: &str) -> FfiResult<()> {
-        let Some(plugin) = self.store().plugin(plugin_id)? else { return Ok(()) };
-        let Some(processor_id) = plugin.descriptor.processor_id else { return Ok(()) };
+        let Some(plugin) = self.store().plugin(plugin_id)? else {
+            return Ok(());
+        };
+        let Some(processor_id) = plugin.descriptor.processor_id else {
+            return Ok(());
+        };
         self.processors
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -1410,7 +1448,11 @@ impl Gilune {
                 .store()
                 .plugin(whisper::PLUGIN_ID)?
                 .and_then(|p| serde_json::from_str::<serde_json::Value>(&p.settings).ok())
-                .and_then(|s| s.get("language").and_then(|v| v.as_str()).map(str::to_string))
+                .and_then(|s| {
+                    s.get("language")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string)
+                })
                 .unwrap_or_else(|| "auto".to_string());
             let transcriber = whisper::WhisperTranscriber::new(&model_path, &language)
                 .map_err(|detail| GiluneError::Invalid { detail })?;
@@ -1438,7 +1480,11 @@ impl Gilune {
         let processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
         let refs: Vec<&dyn gilune_kernel::processor::Processor> =
             processors.iter().map(|p| p.as_ref()).collect();
-        let external = self.external.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let external = self
+            .external
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         let s = self.store().run_pending_jobs_excluding(
             &refs,
             &external,
@@ -1471,9 +1517,12 @@ impl Gilune {
         processor_id: String,
     ) -> FfiResult<()> {
         use gilune_kernel::plugins::PluginState;
-        let plugin = self.store().plugin(&plugin_id)?.ok_or(GiluneError::Invalid {
-            detail: format!("{plugin_id} is removed"),
-        })?;
+        let plugin = self
+            .store()
+            .plugin(&plugin_id)?
+            .ok_or(GiluneError::Invalid {
+                detail: format!("{plugin_id} is removed"),
+            })?;
         if plugin.state != PluginState::Enabled {
             return Err(GiluneError::Invalid {
                 detail: format!("{plugin_id} is {}", plugin.state.as_str()),
@@ -1613,7 +1662,11 @@ impl Gilune {
 
     pub fn project(&self) -> FfiResult<ProjectSummary> {
         let s = self.store().project()?;
-        Ok(ProjectSummary { written: s.written, unchanged: s.unchanged, held_back: s.held_back })
+        Ok(ProjectSummary {
+            written: s.written,
+            unchanged: s.unchanged,
+            held_back: s.held_back,
+        })
     }
 
     pub fn reconcile(&self) -> FfiResult<ReconcileSummary> {
@@ -1812,7 +1865,10 @@ impl Gilune {
             .store()
             .open_proposals()?
             .into_iter()
-            .map(|(proposal_id, object_id)| TombstoneProposal { proposal_id, object_id })
+            .map(|(proposal_id, object_id)| TombstoneProposal {
+                proposal_id,
+                object_id,
+            })
             .collect())
     }
 
@@ -1826,7 +1882,11 @@ impl Gilune {
     /// user removed it, so a caller knows not to initialise it.
     pub fn register_plugin(&self, declaration: PluginDeclaration) -> FfiResult<String> {
         let descriptor = gilune_kernel::plugins::PluginDescriptor::try_from(declaration)?;
-        Ok(self.store().register_plugin(&descriptor)?.as_str().to_string())
+        Ok(self
+            .store()
+            .register_plugin(&descriptor)?
+            .as_str()
+            .to_string())
     }
 
     /// Declare an implementation this host carries, but leave it **off**
@@ -1850,7 +1910,12 @@ impl Gilune {
     }
 
     pub fn plugins(&self) -> FfiResult<Vec<PluginInfo>> {
-        Ok(self.store().installed_plugins()?.into_iter().map(Into::into).collect())
+        Ok(self
+            .store()
+            .installed_plugins()?
+            .into_iter()
+            .map(Into::into)
+            .collect())
     }
 
     /// Turn a plugin off or on. Waiting work is parked, not destroyed.
@@ -1925,9 +1990,7 @@ impl Gilune {
         device_name: String,
         key_wrap: Option<Arc<dyn KeyWrap>>,
     ) -> FfiResult<SyncStatus> {
-        let wrap = key_wrap.map(|w| {
-            Arc::new(WrapAdapter(w)) as Arc<dyn gilune_sync::KeyWrap>
-        });
+        let wrap = key_wrap.map(|w| Arc::new(WrapAdapter(w)) as Arc<dyn gilune_sync::KeyWrap>);
         let service = gilune_sync::SyncService::configure(
             &self.store(),
             identity_dir,
@@ -1961,13 +2024,17 @@ impl Gilune {
     /// guesses. Asking again replaces the window, which is how a person
     /// gets a new code after theirs was used up.
     pub fn start_pairing(&self) -> FfiResult<PairingOffer> {
-        self.with_sync(|service| service.start_pairing()).map(Into::into)
+        self.with_sync(|service| service.start_pairing())
+            .map(Into::into)
     }
 
     /// The QR for the open window, as a module matrix.
     pub fn pairing_qr(&self) -> FfiResult<QrMatrix> {
         let matrix = self.with_sync(|service| service.pairing_qr())?;
-        Ok(QrMatrix { width: matrix.width, modules: matrix.modules })
+        Ok(QrMatrix {
+            width: matrix.width,
+            modules: matrix.modules,
+        })
     }
 
     /// Join a device that is showing a code. `address` is `host:port`,
@@ -2152,9 +2219,9 @@ pub struct CaptureWriter {
 impl CaptureWriter {
     pub fn write_chunk(&self, chunk: Vec<u8>) -> FfiResult<()> {
         let mut guard = self.stage.lock().unwrap_or_else(|e| e.into_inner());
-        let stage = guard
-            .as_mut()
-            .ok_or(GiluneError::Invalid { detail: "capture already finished".into() })?;
+        let stage = guard.as_mut().ok_or(GiluneError::Invalid {
+            detail: "capture already finished".into(),
+        })?;
         stage.write_chunk(&chunk)?;
         Ok(())
     }
@@ -2165,7 +2232,9 @@ impl CaptureWriter {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .take()
-            .ok_or(GiluneError::Invalid { detail: "capture already finished".into() })?;
+            .ok_or(GiluneError::Invalid {
+                detail: "capture already finished".into(),
+            })?;
         Ok(stage.finish(&self.gilune.store())?.into())
     }
 }

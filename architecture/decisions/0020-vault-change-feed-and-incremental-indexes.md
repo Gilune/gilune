@@ -7,6 +7,10 @@ last § 10 entry)
 Validation: the acceptance gate in § 8, run against the production kernel.
 Staged K1–K3 (kernel), P1–P2 (plugins), S (shells) in § 9.
 
+Amended by [ADR 0021](0021-kernel-search-results.md): application search now
+returns complete indexed pages. The candidate-then-file-evaluation path and
+its short Unicode-term limitation below describe the earlier implementation.
+
 This ADR adds a read contract to the durable record ADR 0004 keeps, amends
 the reconciliation rule of ADR 0007, and gives ADR 0015's search seams the
 storage and the join they were built without. It changes no other ADR's
