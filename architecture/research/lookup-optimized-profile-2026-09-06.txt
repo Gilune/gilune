@@ -1,0 +1,156 @@
+Direct Store::lookup total median 156.4088ms
+SQL composition/parameters: 39.6µs
+SQLite execute/30 result rows: 136.8891ms
+SQLite prepare: 393.2µs
+generation/cursor/feed tip: 75.4µs
+index access/transaction begin: 1.3µs
+namespace/source freshness SQL: 19.4524ms
+request validation/canonicalisation/fingerprint: 13.5µs
+result/cursor assembly/transaction end: 26µs
+selected-root fact hydration: 157µs
+SQLite 3.45.0
+temp_store=0
+cache_size=-2000
+page_size=4096
+page_count=2949
+automatic_index=1
+INDEXES
+facts_namespace_path: CREATE INDEX facts_namespace_path ON facts(namespace, rel_path)
+facts_path: CREATE INDEX facts_path ON facts(rel_path)
+facts_predicate_folded: CREATE INDEX facts_predicate_folded ON facts(predicate, gilune_fold(value))
+facts_predicate_num: CREATE INDEX facts_predicate_num ON facts(predicate, num)
+facts_predicate_value: CREATE INDEX facts_predicate_value ON facts(predicate, value)
+lines_path: CREATE INDEX lines_path ON lines(rel_path)
+sqlite_autoindex_fact_sources_1: primary/unique autoindex
+sqlite_autoindex_index_meta_1: primary/unique autoindex
+sqlite_autoindex_namespaces_1: primary/unique autoindex
+sqlite_autoindex_predicate_kinds_1: primary/unique autoindex
+sqlite_autoindex_source_maps_1: primary/unique autoindex
+BASELINE main statement 132.1154ms; vm_steps=3462548 fullscan_steps=20010 sorts=3 autoindex_rows=0 statement_bytes=36016
+PLAN
+3 | 0 | CO-ROUTINE (subquery-26)
+5 | 3 | CO-ROUTINE ranked
+8 | 5 | MATERIALIZE matched
+11 | 8 | MATERIALIZE candidates
+13 | 11 | CO-ROUTINE alternatives
+14 | 13 | COMPOUND QUERY
+15 | 14 | LEFT-MOST SUBQUERY
+18 | 15 | SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+34 | 15 | LIST SUBQUERY 2
+36 | 34 | SCAN json_each VIRTUAL TABLE INDEX 1:
+59 | 14 | UNION ALL
+62 | 59 | SEARCH facts USING INDEX facts_predicate_folded (predicate=? AND <expr>>? AND <expr><?)
+80 | 59 | LIST SUBQUERY 6
+82 | 80 | SCAN json_each VIRTUAL TABLE INDEX 1:
+105 | 14 | UNION ALL
+108 | 105 | SEARCH facts USING INDEX facts_predicate_folded (predicate=? AND <expr>>? AND <expr><?)
+126 | 105 | LIST SUBQUERY 10
+128 | 126 | SCAN json_each VIRTUAL TABLE INDEX 1:
+157 | 11 | SCAN alternatives
+160 | 11 | USE TEMP B-TREE FOR GROUP BY
+209 | 8 | SCAN b
+211 | 8 | SEARCH u USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+221 | 8 | CORRELATED SCALAR SUBQUERY 19
+226 | 221 | SEARCH facts USING INDEX facts_path (rel_path=?)
+246 | 221 | LIST SUBQUERY 18
+248 | 246 | SCAN json_each VIRTUAL TABLE INDEX 1:
+268 | 8 | CORRELATED SCALAR SUBQUERY 20
+273 | 268 | SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+306 | 5 | SCAN m
+310 | 5 | SEARCH f USING INDEX facts_namespace_path (namespace=? AND rel_path=?) LEFT-JOIN
+315 | 5 | LIST SUBQUERY 22
+317 | 315 | SCAN json_each VIRTUAL TABLE INDEX 1:
+346 | 5 | LIST SUBQUERY 23
+348 | 346 | SCAN json_each VIRTUAL TABLE INDEX 1:
+364 | 5 | USE TEMP B-TREE FOR GROUP BY
+427 | 3 | SCAN ranked
+452 | 0 | SCAN (subquery-26)
+516 | 0 | USE TEMP B-TREE FOR ORDER BY
+ABLATION no alternatives: 90.1142ms; vm_steps=2712049 fullscan_steps=20010 sorts=3 autoindex_rows=0 statement_bytes=30088
+ABLATION no sort fields: 73.8071ms; vm_steps=1921578 fullscan_steps=20010 sorts=2 autoindex_rows=0 statement_bytes=31048
+EXPERIMENT not materialized: 137.582ms; vm_steps=3352459 fullscan_steps=0 sorts=3 autoindex_rows=0 statement_bytes=34088
+3 | 0 | CO-ROUTINE (subquery-26)
+5 | 3 | CO-ROUTINE ranked
+7 | 5 | CO-ROUTINE candidates
+9 | 7 | CO-ROUTINE alternatives
+10 | 9 | COMPOUND QUERY
+11 | 10 | LEFT-MOST SUBQUERY
+14 | 11 | SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+27 | 11 | LIST SUBQUERY 2
+29 | 27 | SCAN json_each VIRTUAL TABLE INDEX 1:
+52 | 10 | UNION ALL
+55 | 52 | SEARCH facts USING INDEX facts_predicate_folded (predicate=? AND <expr>>? AND <expr><?)
+69 | 52 | LIST SUBQUERY 6
+71 | 69 | SCAN json_each VIRTUAL TABLE INDEX 1:
+94 | 10 | UNION ALL
+97 | 94 | SEARCH facts USING INDEX facts_predicate_folded (predicate=? AND <expr>>? AND <expr><?)
+111 | 94 | LIST SUBQUERY 10
+113 | 111 | SCAN json_each VIRTUAL TABLE INDEX 1:
+141 | 7 | SCAN alternatives
+144 | 7 | USE TEMP B-TREE FOR GROUP BY
+193 | 5 | SCAN b
+198 | 5 | SEARCH u USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+208 | 5 | CORRELATED SCALAR SUBQUERY 19
+213 | 208 | SEARCH facts USING INDEX facts_path (rel_path=?)
+233 | 208 | LIST SUBQUERY 18
+235 | 233 | SCAN json_each VIRTUAL TABLE INDEX 1:
+255 | 5 | CORRELATED SCALAR SUBQUERY 20
+260 | 255 | SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+274 | 5 | SEARCH f USING INDEX facts_namespace_path (namespace=? AND rel_path=?) LEFT-JOIN
+279 | 5 | LIST SUBQUERY 22
+281 | 279 | SCAN json_each VIRTUAL TABLE INDEX 1:
+310 | 5 | LIST SUBQUERY 23
+312 | 310 | SCAN json_each VIRTUAL TABLE INDEX 1:
+328 | 5 | USE TEMP B-TREE FOR GROUP BY
+392 | 3 | SCAN ranked
+415 | 0 | SCAN (subquery-26)
+479 | 0 | USE TEMP B-TREE FOR ORDER BY
+EXPERIMENT temp_store MEMORY: 141.5722ms; vm_steps=3462548 fullscan_steps=20010 sorts=3 autoindex_rows=0 statement_bytes=36000
+EXPERIMENT root covering index: 157.775ms; added_pages=860; vm_steps=3302452 fullscan_steps=20010 sorts=3 autoindex_rows=0 statement_bytes=35992
+3 | 0 | CO-ROUTINE (subquery-26)
+5 | 3 | CO-ROUTINE ranked
+8 | 5 | MATERIALIZE matched
+11 | 8 | MATERIALIZE candidates
+13 | 11 | CO-ROUTINE alternatives
+14 | 13 | COMPOUND QUERY
+15 | 14 | LEFT-MOST SUBQUERY
+18 | 15 | SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+34 | 15 | LIST SUBQUERY 2
+36 | 34 | SCAN json_each VIRTUAL TABLE INDEX 1:
+59 | 14 | UNION ALL
+62 | 59 | SEARCH facts USING INDEX facts_predicate_folded (predicate=? AND <expr>>? AND <expr><?)
+80 | 59 | LIST SUBQUERY 6
+82 | 80 | SCAN json_each VIRTUAL TABLE INDEX 1:
+105 | 14 | UNION ALL
+108 | 105 | SEARCH facts USING INDEX facts_predicate_folded (predicate=? AND <expr>>? AND <expr><?)
+126 | 105 | LIST SUBQUERY 10
+128 | 126 | SCAN json_each VIRTUAL TABLE INDEX 1:
+157 | 11 | SCAN alternatives
+160 | 11 | USE TEMP B-TREE FOR GROUP BY
+209 | 8 | SCAN b
+211 | 8 | SEARCH u USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+221 | 8 | CORRELATED SCALAR SUBQUERY 19
+226 | 221 | SEARCH facts USING INDEX facts_path (rel_path=?)
+246 | 221 | LIST SUBQUERY 18
+248 | 246 | SCAN json_each VIRTUAL TABLE INDEX 1:
+268 | 8 | CORRELATED SCALAR SUBQUERY 20
+273 | 268 | SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+306 | 5 | SCAN m
+310 | 5 | SEARCH f USING INDEX profile_root_cover (namespace=? AND rel_path=? AND source_version=? AND predicate=?) LEFT-JOIN
+315 | 5 | LIST SUBQUERY 22
+317 | 315 | SCAN json_each VIRTUAL TABLE INDEX 1:
+338 | 5 | LIST SUBQUERY 23
+340 | 338 | SCAN json_each VIRTUAL TABLE INDEX 1:
+364 | 5 | USE TEMP B-TREE FOR GROUP BY
+430 | 3 | SCAN ranked
+455 | 0 | SCAN (subquery-26)
+519 | 0 | USE TEMP B-TREE FOR ORDER BY
+EXPERIMENT current query without folded index: 140.5274ms; vm_steps=3582614 fullscan_steps=20010 sorts=3 autoindex_rows=0 statement_bytes=36448
+FOLDED INDEX pages=209
+FOLDED INDEX rebuild 43.6875ms
+DISTRIBUTION fragment="entry.00000": 61µs; total=1; vm_steps=481 fullscan_steps=0 sorts=3 autoindex_rows=0 statement_bytes=36000
+DISTRIBUTION fragment="does-not-exist": 23µs; total=0; vm_steps=104 fullscan_steps=0 sorts=3 autoindex_rows=0 statement_bytes=35544
+DISTRIBUTION fragment="": 95.0241ms; total=10006; vm_steps=2712049 fullscan_steps=20010 sorts=3 autoindex_rows=0 statement_bytes=30088
+DIRECT fragment="entry.00000": 20.5025ms
+DIRECT fragment="does-not-exist": 22.5909ms
+DIRECT fragment="": 104.5626ms

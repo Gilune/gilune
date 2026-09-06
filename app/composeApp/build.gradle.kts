@@ -1,10 +1,10 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
 
 plugins {
-    kotlin("multiplatform") version "2.1.20"
-    id("org.jetbrains.kotlin.plugin.compose") version "2.1.20"
-    id("org.jetbrains.compose") version "1.7.3"
-    id("com.android.application") version "8.10.1"
+    kotlin("multiplatform")
+    id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.compose")
+    id("com.android.application")
 }
 
 // A released build stamps one version across all three packages; a local
@@ -25,12 +25,14 @@ kotlin {
         // from that target's own binary (07-compatibility):
         //   cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
         //     --library <dll|so> --language kotlin \
-        //     --out-dir app/composeApp/src/<target>Main/generated
+        //     --out-dir app/kernelBindings/src/<target>Main/generated
         val desktopMain by getting {
             kotlin.srcDir("src/jvmShared/kotlin")
-            kotlin.srcDir("src/desktopMain/generated")
             dependencies {
                 implementation(compose.desktop.currentOs)
+                implementation(project(":pluginSdk"))
+                implementation(project(":plugins:tasks"))
+                implementation(project(":plugins:people"))
                 implementation(compose.material3)
                 implementation(compose.materialIconsExtended)
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
@@ -43,13 +45,16 @@ kotlin {
             kotlin.srcDir("src/jvmSharedTest/kotlin")
             dependencies {
                 implementation(kotlin("test"))
+                implementation(project(":plugins:contractFixture"))
                 implementation(compose.desktop.uiTestJUnit4)
             }
         }
         val androidMain by getting {
             kotlin.srcDir("src/jvmShared/kotlin")
-            kotlin.srcDir("src/androidMain/generated")
             dependencies {
+                implementation(project(":pluginSdk"))
+                implementation(project(":plugins:tasks"))
+                implementation(project(":plugins:people"))
                 implementation(compose.material3)
                 implementation(compose.materialIconsExtended)
                 implementation("androidx.activity:activity-compose:1.9.3")
@@ -162,6 +167,7 @@ kotlin {
             kotlin.srcDir("src/jvmSharedTest/kotlin")
             dependencies {
                 implementation(kotlin("test"))
+                implementation(project(":plugins:contractFixture"))
                 implementation("androidx.test:runner:1.6.2")
                 implementation("androidx.test:core:1.6.1")
                 // Compose UI tests on device, the counterpart of the desktop
@@ -353,10 +359,16 @@ tasks.matching { it.name == "run" }.configureEach {
 
 tasks.withType<Test>().configureEach {
     val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
+    val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
     systemProperty(
         "jna.library.path",
-        rootProject.projectDir.resolve("../kernel/target/$profile").normalize().toString(),
+        kernelDir.toString(),
     )
+    // The native implementation can change without changing generated Kotlin.
+    // Such a rebuild must invalidate the JVM test result cache.
+    inputs.file(kernelDir.resolve(System.mapLibraryName("gilune_ffi")))
+        .withPropertyName("giluneKernel")
+        .withPathSensitivity(PathSensitivity.NONE)
     testLogging {
         showStandardStreams = true
         events("passed", "failed")

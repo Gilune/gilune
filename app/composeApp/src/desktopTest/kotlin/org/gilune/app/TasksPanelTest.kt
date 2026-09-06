@@ -5,6 +5,10 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.tasksSettingsDocument
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier

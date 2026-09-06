@@ -94,8 +94,14 @@ should be read as Gilune.
 The next domain delivery is planned in
 [`People and shared document refactoring`](plans/people-and-document-refactoring.md).
 It records the agreed plain-text direction, proposed public contracts, ordered
-milestones and acceptance scenarios. It is a plan, not an implemented feature
-or an accepted replacement for the existing contracts.
+milestones and acceptance scenarios. Implementation has begun with generic
+scoped membership queries and independent filter registrations; the updated
+search and bundled-extension contracts record that delivered foundation. The
+[document contract](../contracts/documents/README.md) now also supplies exact
+source snapshots, shared Markdown locations and validated edit preparation.
+The [Kotlin SDK](../app/pluginSdk/README.md) and Tasks now compile separately,
+with a guard against app/cross-domain dependencies. People and document
+refactoring remain under implementation in the plan.
 
 The following choices are kept outside the foundation because they are intended
 to be replaceable:

@@ -1,0 +1,56 @@
+[
+  {
+    "items_per_document": 100.0,
+    "sample": 0.0,
+    "reconcile_ms": 103.2999,
+    "settled_advance_ms": 0.4165
+  },
+  {
+    "items_per_document": 100.0,
+    "sample": 1.0,
+    "reconcile_ms": 67.6703,
+    "settled_advance_ms": 0.2915
+  },
+  {
+    "items_per_document": 100.0,
+    "sample": 2.0,
+    "reconcile_ms": 48.002,
+    "settled_advance_ms": 0.2757
+  },
+  {
+    "items_per_document": 1000.0,
+    "sample": 0.0,
+    "reconcile_ms": 321.5557,
+    "settled_advance_ms": 0.2412
+  },
+  {
+    "items_per_document": 1000.0,
+    "sample": 1.0,
+    "reconcile_ms": 288.6066,
+    "settled_advance_ms": 0.2289
+  },
+  {
+    "items_per_document": 1000.0,
+    "sample": 2.0,
+    "reconcile_ms": 286.9455,
+    "settled_advance_ms": 0.2813
+  },
+  {
+    "items_per_document": 10000.0,
+    "sample": 0.0,
+    "reconcile_ms": 2748.3494,
+    "settled_advance_ms": 0.4401
+  },
+  {
+    "items_per_document": 10000.0,
+    "sample": 1.0,
+    "reconcile_ms": 2724.3139,
+    "settled_advance_ms": 0.2685
+  },
+  {
+    "items_per_document": 10000.0,
+    "sample": 2.0,
+    "reconcile_ms": 2710.8822,
+    "settled_advance_ms": 0.2349
+  }
+]

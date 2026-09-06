@@ -8,13 +8,17 @@ pub mod blobs;
 pub mod capture;
 pub mod changes;
 pub mod crashpoints;
+pub mod documents;
 pub mod external;
 pub mod fs;
 pub mod ids;
 pub mod index;
+#[doc(hidden)]
+pub mod update_profile;
 pub mod jobs;
 pub mod limits;
 pub mod operations;
+pub mod pages;
 pub mod plugins;
 mod probe;
 pub mod processor;
@@ -30,6 +34,12 @@ pub mod vault;
 /// enough context to act on; panics are bugs, not error handling.
 #[derive(Debug, thiserror::Error)]
 pub enum KernelError {
+    #[error("document changed since preview; prepare a new proposal")]
+    DocumentChanged,
+    #[error("invalid document or text change: {detail}")]
+    DocumentInvalid { detail: String },
+    #[error("document cannot currently be changed: {detail}")]
+    DocumentUnavailable { detail: String },
     #[error("invalid search: {detail}")]
     SearchInvalid { detail: String },
     #[error("search results changed; restart the query")]

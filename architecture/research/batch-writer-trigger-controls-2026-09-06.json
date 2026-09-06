@@ -1,0 +1,514 @@
+[
+  {
+    "mode": "current_triggers",
+    "phases": [
+      {
+        "commit_ms": 113.7719,
+        "delete_ms": 204.1574,
+        "insert_ms": 807.7992,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.9439,
+        "delete_ms": 0.2251,
+        "insert_ms": 0.21000000000000002,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 51.171099999999996,
+        "delete_ms": 96.9743,
+        "insert_ms": 1170.136,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 127.43430000000001,
+        "delete_ms": 233.4022,
+        "insert_ms": 3239.409,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 0,
+    "total_ms": 6047.380300000001,
+    "warmup": true
+  },
+  {
+    "mode": "current_triggers",
+    "phases": [
+      {
+        "commit_ms": 122.2627,
+        "delete_ms": 193.8629,
+        "insert_ms": 843.4896,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.0730000000000004,
+        "delete_ms": 0.1885,
+        "insert_ms": 0.11689999999999999,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 56.4886,
+        "delete_ms": 88.3357,
+        "insert_ms": 1214.6321,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 133.1412,
+        "delete_ms": 224.3876,
+        "insert_ms": 2984.8724,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 1,
+    "total_ms": 5863.9336,
+    "warmup": false
+  },
+  {
+    "mode": "current_triggers",
+    "phases": [
+      {
+        "commit_ms": 138.6854,
+        "delete_ms": 187.6027,
+        "insert_ms": 886.3996,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.1016,
+        "delete_ms": 0.21230000000000002,
+        "insert_ms": 0.1028,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 64.72930000000001,
+        "delete_ms": 89.8293,
+        "insert_ms": 1201.0251,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 146.1406,
+        "delete_ms": 221.0018,
+        "insert_ms": 3245.7837,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 2,
+    "total_ms": 6183.7105,
+    "warmup": false
+  },
+  {
+    "mode": "current_triggers",
+    "phases": [
+      {
+        "commit_ms": 139.133,
+        "delete_ms": 186.9312,
+        "insert_ms": 825.7274,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.9856,
+        "delete_ms": 0.21430000000000002,
+        "insert_ms": 0.0948,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 70.8464,
+        "delete_ms": 90.2007,
+        "insert_ms": 1191.751,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 166.1802,
+        "delete_ms": 230.9837,
+        "insert_ms": 2942.7605,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 3,
+    "total_ms": 5846.8972,
+    "warmup": false
+  },
+  {
+    "mode": "batch_ids",
+    "phases": [
+      {
+        "commit_ms": 115.84089999999999,
+        "delete_ms": 223.93009999999998,
+        "insert_ms": 831.7468,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.907,
+        "delete_ms": 0.2226,
+        "insert_ms": 3.8757,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 51.5311,
+        "delete_ms": 99.2164,
+        "insert_ms": 159.8504,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 128.38459999999998,
+        "delete_ms": 235.3748,
+        "insert_ms": 406.3897,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 0,
+    "total_ms": 2258.3448000000003,
+    "warmup": true
+  },
+  {
+    "mode": "batch_ids",
+    "phases": [
+      {
+        "commit_ms": 129.163,
+        "delete_ms": 188.1345,
+        "insert_ms": 837.3729,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.1052000000000004,
+        "delete_ms": 0.1749,
+        "insert_ms": 3.9031000000000002,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 59.3161,
+        "delete_ms": 89.34530000000001,
+        "insert_ms": 159.173,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 138.2746,
+        "delete_ms": 220.1962,
+        "insert_ms": 403.4753,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 1,
+    "total_ms": 2230.7206,
+    "warmup": false
+  },
+  {
+    "mode": "batch_ids",
+    "phases": [
+      {
+        "commit_ms": 137.375,
+        "delete_ms": 208.8017,
+        "insert_ms": 878.1043,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.0121,
+        "delete_ms": 0.1975,
+        "insert_ms": 4.3952,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 67.16510000000001,
+        "delete_ms": 89.1251,
+        "insert_ms": 165.2174,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 147.2888,
+        "delete_ms": 267.9691,
+        "insert_ms": 424.5136,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 2,
+    "total_ms": 2392.2613,
+    "warmup": false
+  },
+  {
+    "mode": "batch_ids",
+    "phases": [
+      {
+        "commit_ms": 141.9017,
+        "delete_ms": 188.0403,
+        "insert_ms": 846.7044000000001,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.1146,
+        "delete_ms": 0.1804,
+        "insert_ms": 3.827,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 71.0127,
+        "delete_ms": 89.702,
+        "insert_ms": 155.5511,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 151.9581,
+        "delete_ms": 220.5112,
+        "insert_ms": 400.8538,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 3,
+    "total_ms": 2272.4491000000003,
+    "warmup": false
+  },
+  {
+    "mode": "production_guarded",
+    "phases": [
+      {
+        "commit_ms": 113.51809999999999,
+        "delete_ms": 205.8441,
+        "insert_ms": 833.7514,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.9892,
+        "delete_ms": 0.20570000000000002,
+        "insert_ms": 0.28009999999999996,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 51.3244,
+        "delete_ms": 96.7538,
+        "insert_ms": 1358.0749999999998,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 128.3674,
+        "delete_ms": 236.111,
+        "insert_ms": 2698.4667,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 0,
+    "total_ms": 5725.4534,
+    "warmup": true
+  },
+  {
+    "mode": "production_guarded",
+    "phases": [
+      {
+        "commit_ms": 121.57610000000001,
+        "delete_ms": 185.7036,
+        "insert_ms": 819.6727000000001,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.0614000000000003,
+        "delete_ms": 0.1718,
+        "insert_ms": 0.15860000000000002,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 58.1569,
+        "delete_ms": 89.00280000000001,
+        "insert_ms": 1074.6173999999999,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 143.4273,
+        "delete_ms": 221.6803,
+        "insert_ms": 2719.1342,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 1,
+    "total_ms": 5435.4481000000005,
+    "warmup": false
+  },
+  {
+    "mode": "production_guarded",
+    "phases": [
+      {
+        "commit_ms": 138.7908,
+        "delete_ms": 262.3548,
+        "insert_ms": 916.6913,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.0753999999999997,
+        "delete_ms": 0.1761,
+        "insert_ms": 0.1103,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 66.2889,
+        "delete_ms": 89.3703,
+        "insert_ms": 1068.7086,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 147.63580000000002,
+        "delete_ms": 218.28310000000002,
+        "insert_ms": 2677.7677999999996,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 2,
+    "total_ms": 5588.3441,
+    "warmup": false
+  },
+  {
+    "mode": "production_guarded",
+    "phases": [
+      {
+        "commit_ms": 141.3562,
+        "delete_ms": 187.48139999999998,
+        "insert_ms": 818.2258999999999,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.9802000000000002,
+        "delete_ms": 0.16620000000000001,
+        "insert_ms": 0.11170000000000001,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 72.4194,
+        "delete_ms": 92.1873,
+        "insert_ms": 1069.6753,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 157.5772,
+        "delete_ms": 220.6256,
+        "insert_ms": 2649.7806,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 3,
+    "total_ms": 5411.6727,
+    "warmup": false
+  },
+  {
+    "mode": "production_without_insert_trigger",
+    "phases": [
+      {
+        "commit_ms": 117.4511,
+        "delete_ms": 198.6214,
+        "insert_ms": 992.7589,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.0663,
+        "delete_ms": 0.22460000000000002,
+        "insert_ms": 0.1445,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 61.6791,
+        "delete_ms": 103.80449999999999,
+        "insert_ms": 177.3226,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 129.53500000000003,
+        "delete_ms": 532.555,
+        "insert_ms": 408.3366,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 0,
+    "total_ms": 2724.5813000000003,
+    "warmup": true
+  },
+  {
+    "mode": "production_without_insert_trigger",
+    "phases": [
+      {
+        "commit_ms": 125.4855,
+        "delete_ms": 208.63789999999997,
+        "insert_ms": 827.014,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 2.0615,
+        "delete_ms": 0.18100000000000002,
+        "insert_ms": 0.1152,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 57.8614,
+        "delete_ms": 86.4144,
+        "insert_ms": 156.49769999999998,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 151.1672,
+        "delete_ms": 218.7956,
+        "insert_ms": 414.8233,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 1,
+    "total_ms": 2249.1375,
+    "warmup": false
+  },
+  {
+    "mode": "production_without_insert_trigger",
+    "phases": [
+      {
+        "commit_ms": 134.3519,
+        "delete_ms": 187.527,
+        "insert_ms": 893.2092,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.9519,
+        "delete_ms": 0.1691,
+        "insert_ms": 0.088,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 64.98429999999999,
+        "delete_ms": 93.1868,
+        "insert_ms": 160.09109999999998,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 158.4537,
+        "delete_ms": 221.4635,
+        "insert_ms": 413.21439999999996,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 2,
+    "total_ms": 2328.7738999999997,
+    "warmup": false
+  },
+  {
+    "mode": "production_without_insert_trigger",
+    "phases": [
+      {
+        "commit_ms": 145.4354,
+        "delete_ms": 196.59099999999998,
+        "insert_ms": 832.086,
+        "namespace": "text"
+      },
+      {
+        "commit_ms": 1.9292999999999998,
+        "delete_ms": 0.1708,
+        "insert_ms": 0.0877,
+        "namespace": "frontmatter"
+      },
+      {
+        "commit_ms": 71.2834,
+        "delete_ms": 94.5488,
+        "insert_ms": 157.2696,
+        "namespace": "org.memory.tasks"
+      },
+      {
+        "commit_ms": 155.7697,
+        "delete_ms": 229.04360000000003,
+        "insert_ms": 402.6691,
+        "namespace": "org.memory.people"
+      }
+    ],
+    "sample": 3,
+    "total_ms": 2286.9722,
+    "warmup": false
+  }
+]

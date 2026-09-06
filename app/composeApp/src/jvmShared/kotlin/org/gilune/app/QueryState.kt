@@ -2,8 +2,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SearchType
+
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -31,6 +34,7 @@ internal suspend fun <T> executeQuery(load: () -> T): QueryWork<T> = try {
 }
 
 private fun queryFailure(error: Exception): String = when (error) {
+    is InvalidSearchQuery -> error.message ?: "Invalid search filter."
     is SearchIndexPending -> "Search is waiting for indexing. Retry to update it."
     is GiluneException.SearchCursorExpired -> "Search results changed. Retry to refresh them."
     else -> "Search could not finish. Please retry."
@@ -68,7 +72,9 @@ internal fun QueryNotice(loading: Boolean, error: String?, retry: () -> Unit) {
 
 internal data class SearchListing(
     val hits: List<SearchHit> = emptyList(),
-    val total: ULong = 0u,
+    val total: ULong? = null,
+    val generation: String? = null,
+    val countError: String? = null,
     val next: String? = null,
     val loading: Boolean = false,
     val error: String? = null,
@@ -80,29 +86,58 @@ internal class PagedSearch(val listing: SearchListing, val more: () -> Unit)
 internal fun rememberPagedSearch(state: GiluneState, query: String, types: List<SearchType>): PagedSearch {
     val open = state.gilune.value
     val day = rememberQueryDay()
+    val plugins = state.plugins.toList()
     val keys = arrayOf(query, open, state.vaultCursor.value, state.searchRefresh.value,
-        state.plugins.toList(), day)
+        plugins, day)
     var listing by remember(*keys) { mutableStateOf(SearchListing(loading = query.isNotBlank() && open != null)) }
+    var reader by remember(*keys) { mutableStateOf<uniffi.gilune_ffi.SearchQuery?>(null) }
+    DisposableEffect(reader) {
+        val current = reader
+        onDispose { current?.cancel() }
+    }
     var wanted by remember(*keys) { mutableStateOf(0) }
     LaunchedEffect(*keys, wanted) {
         if (query.isBlank() || open == null) { listing = SearchListing(); return@LaunchedEffect }
         val previous = listing
         listing = previous.copy(loading = true, error = null)
         if (wanted == 0) delay(180)
+        if (reader == null) {
+            val prepared = executeQuery {
+                compileSearch(query, operators = searchOperatorsFor(plugins, day), types = types, today = day)?.prepare(open)
+            }
+            reader = prepared.value
+            if (prepared.error != null) { listing = previous.copy(loading = false, error = prepared.error); return@LaunchedEffect }
+        }
+        val current = reader
         val result = executeQuery {
-            val compiled = compileSearch(query, types = types, today = day)
-            if (compiled == null) SearchListing() else {
+            if (current == null) SearchListing() else {
                 var append = wanted > 0 && previous.next != null
-                val page = try { compiled.page(open, if (append) previous.next else null) }
+                val page = try { current.page(if (append) previous.next else null) }
                 catch (_: GiluneException.SearchCursorExpired) {
                     append = false
-                    compiled.page(open)
-                }.requireComplete()
+                    current.page(null)
+                }
+                if (!page.indexComplete) throw SearchIndexPending(page.issues)
                 SearchListing(hits = (if (append) previous.hits else emptyList()) + page.hits.map { it.displayHit() },
-                    total = page.totalHits, next = page.nextCursor)
+                    total = page.totalHits ?: previous.total.takeIf { previous.generation == page.generation },
+                    generation = page.generation, next = page.nextCursor)
             }
         }
-        listing = result.value ?: previous.copy(loading = false, error = result.error)
+        listing = result.value?.let { page ->
+            if (page.generation == listing.generation && page.total == null) page.copy(total = listing.total, countError = listing.countError)
+            else page
+        } ?: previous.copy(loading = false, error = result.error)
+    }
+    LaunchedEffect(reader, listing.generation) {
+        val current = reader ?: return@LaunchedEffect
+        val generation = listing.generation ?: return@LaunchedEffect
+        if (listing.total != null) return@LaunchedEffect
+        val counted = executeQuery {
+            current.count(generation).also { if (!it.indexComplete) throw SearchIndexPending(it.issues) }
+        }
+        if (listing.generation == generation) {
+            listing = listing.copy(total = counted.value?.totalHits, countError = counted.error)
+        }
     }
     return PagedSearch(listing) { if (!listing.loading && listing.next != null) wanted += 1 }
 }

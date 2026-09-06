@@ -1,0 +1,116 @@
+   Compiling gilune-kernel v0.1.0 (D:\CuttingCode\SneddoBuilds\gilune\kernel\crates\gilune-kernel)
+    Finished `release` profile [optimized] target(s) in 20.69s
+     Running unittests src\lib.rs (target\release\deps\gilune_kernel-ce86377558dc2b4c.exe)
+
+running 1 test
+SQL "all"_automatic: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?))
+PARAMS [Integer(0)]
+PLAN "all"_automatic: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+PLAN "all"_automatic: CORRELATED SCALAR SUBQUERY 1
+PLAN "all"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+WORK "all"_automatic: rows=1 vm_steps=803511 fullscan_steps=0 sorts=0
+SQL "all"_target_table_scan: SELECT count(*) FROM targets t NOT INDEXED WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?))
+PARAMS [Integer(0)]
+PLAN "all"_target_table_scan: SCAN t
+PLAN "all"_target_table_scan: CORRELATED SCALAR SUBQUERY 1
+PLAN "all"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+WORK "all"_target_table_scan: rows=1 vm_steps=851511 fullscan_steps=50499 sorts=0
+COUNT_CONTROL {"automatic":21.256500000000003,"complete_count_ms":21.5686,"name":"all","probe_ms":0.0296,"target_table_scan":20.714199999999998}
+SQL "open"_automatic: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?))
+PARAMS [Integer(0), Integer(0), Text("open")]
+PLAN "open"_automatic: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+PLAN "open"_automatic: CORRELATED SCALAR SUBQUERY 1
+PLAN "open"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "open"_automatic: CORRELATED SCALAR SUBQUERY 2
+PLAN "open"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK "open"_automatic: rows=1 vm_steps=1531011 fullscan_steps=0 sorts=0
+SQL "open"_target_table_scan: SELECT count(*) FROM targets t NOT INDEXED WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?))
+PARAMS [Integer(0), Integer(0), Text("open")]
+PLAN "open"_target_table_scan: SCAN t
+PLAN "open"_target_table_scan: CORRELATED SCALAR SUBQUERY 1
+PLAN "open"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "open"_target_table_scan: CORRELATED SCALAR SUBQUERY 2
+PLAN "open"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK "open"_target_table_scan: rows=1 vm_steps=1579011 fullscan_steps=50499 sorts=0
+COUNT_CONTROL {"automatic":35.099199999999996,"complete_count_ms":35.0447,"name":"open","probe_ms":0.0474,"target_table_scan":34.189499999999995}
+SQL "two_assignees"_automatic: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?))
+PARAMS [Integer(0), Integer(2), Text("[\"assign\",\"alice\"]"), Integer(2), Text("[\"assign\",\"bob\"]")]
+PLAN "two_assignees"_automatic: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+PLAN "two_assignees"_automatic: CORRELATED SCALAR SUBQUERY 1
+PLAN "two_assignees"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "two_assignees"_automatic: CORRELATED SCALAR SUBQUERY 2
+PLAN "two_assignees"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN "two_assignees"_automatic: CORRELATED SCALAR SUBQUERY 3
+PLAN "two_assignees"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK "two_assignees"_automatic: rows=1 vm_steps=1853511 fullscan_steps=0 sorts=0
+SQL "two_assignees"_target_table_scan: SELECT count(*) FROM targets t NOT INDEXED WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?))
+PARAMS [Integer(0), Integer(2), Text("[\"assign\",\"alice\"]"), Integer(2), Text("[\"assign\",\"bob\"]")]
+PLAN "two_assignees"_target_table_scan: SCAN t
+PLAN "two_assignees"_target_table_scan: CORRELATED SCALAR SUBQUERY 1
+PLAN "two_assignees"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "two_assignees"_target_table_scan: CORRELATED SCALAR SUBQUERY 2
+PLAN "two_assignees"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN "two_assignees"_target_table_scan: CORRELATED SCALAR SUBQUERY 3
+PLAN "two_assignees"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK "two_assignees"_target_table_scan: rows=1 vm_steps=1901511 fullscan_steps=50499 sorts=0
+COUNT_CONTROL {"automatic":44.0974,"complete_count_ms":44.3312,"name":"two_assignees","probe_ms":0.0706,"target_table_scan":43.5983}
+SQL "not_week"_automatic: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND NOT (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>=?) AND EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<=?))
+PARAMS [Integer(0), Integer(1), Text("2026-09-06"), Integer(1), Text("2026-09-12")]
+PLAN "not_week"_automatic: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+PLAN "not_week"_automatic: CORRELATED SCALAR SUBQUERY 1
+PLAN "not_week"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "not_week"_automatic: CORRELATED SCALAR SUBQUERY 2
+PLAN "not_week"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+PLAN "not_week"_automatic: CORRELATED SCALAR SUBQUERY 3
+PLAN "not_week"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+WORK "not_week"_automatic: rows=1 vm_steps=2108511 fullscan_steps=0 sorts=0
+SQL "not_week"_target_table_scan: SELECT count(*) FROM targets t NOT INDEXED WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND NOT (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>=?) AND EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<=?))
+PARAMS [Integer(0), Integer(1), Text("2026-09-06"), Integer(1), Text("2026-09-12")]
+PLAN "not_week"_target_table_scan: SCAN t
+PLAN "not_week"_target_table_scan: CORRELATED SCALAR SUBQUERY 1
+PLAN "not_week"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "not_week"_target_table_scan: CORRELATED SCALAR SUBQUERY 2
+PLAN "not_week"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+PLAN "not_week"_target_table_scan: CORRELATED SCALAR SUBQUERY 3
+PLAN "not_week"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+WORK "not_week"_target_table_scan: rows=1 vm_steps=2156511 fullscan_steps=50499 sorts=0
+COUNT_CONTROL {"automatic":48.3198,"complete_count_ms":48.9018,"name":"not_week","probe_ms":0.024,"target_table_scan":47.8142}
+SQL "alice_month_due"_automatic: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<?))
+PARAMS [Integer(0), Integer(0), Text("open"), Integer(2), Text("[\"assign\",\"alice\"]"), Integer(1), Text("2026-08-31"), Integer(1), Text("2026-10-01")]
+PLAN "alice_month_due"_automatic: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+PLAN "alice_month_due"_automatic: CORRELATED SCALAR SUBQUERY 1
+PLAN "alice_month_due"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "alice_month_due"_automatic: CORRELATED SCALAR SUBQUERY 2
+PLAN "alice_month_due"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN "alice_month_due"_automatic: CORRELATED SCALAR SUBQUERY 3
+PLAN "alice_month_due"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN "alice_month_due"_automatic: CORRELATED SCALAR SUBQUERY 4
+PLAN "alice_month_due"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+PLAN "alice_month_due"_automatic: CORRELATED SCALAR SUBQUERY 5
+PLAN "alice_month_due"_automatic: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+WORK "alice_month_due"_automatic: rows=1 vm_steps=2833511 fullscan_steps=0 sorts=0
+SQL "alice_month_due"_target_table_scan: SELECT count(*) FROM targets t NOT INDEXED WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<?))
+PARAMS [Integer(0), Integer(0), Text("open"), Integer(2), Text("[\"assign\",\"alice\"]"), Integer(1), Text("2026-08-31"), Integer(1), Text("2026-10-01")]
+PLAN "alice_month_due"_target_table_scan: SCAN t
+PLAN "alice_month_due"_target_table_scan: CORRELATED SCALAR SUBQUERY 1
+PLAN "alice_month_due"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+PLAN "alice_month_due"_target_table_scan: CORRELATED SCALAR SUBQUERY 2
+PLAN "alice_month_due"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN "alice_month_due"_target_table_scan: CORRELATED SCALAR SUBQUERY 3
+PLAN "alice_month_due"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN "alice_month_due"_target_table_scan: CORRELATED SCALAR SUBQUERY 4
+PLAN "alice_month_due"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+PLAN "alice_month_due"_target_table_scan: CORRELATED SCALAR SUBQUERY 5
+PLAN "alice_month_due"_target_table_scan: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+WORK "alice_month_due"_target_table_scan: rows=1 vm_steps=2881511 fullscan_steps=50499 sorts=0
+COUNT_CONTROL {"automatic":64.44160000000001,"complete_count_ms":63.7607,"name":"alice_month_due","probe_ms":0.126,"target_table_scan":64.38090000000001}
+test search::items::records_prototype::benchmark::matrix::profile_dsl_matrix_count_access_paths ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 300 filtered out; finished in 3.64s
+
+     Running tests\operation_vectors.rs (target\release\deps\operation_vectors-5605a5349a760b74.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

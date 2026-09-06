@@ -89,7 +89,7 @@ fn a_person_can_ask_the_index_what_the_vault_says_and_where() {
     cli(dir.path(), &["project"]);
 
     let status = json(&cli(dir.path(), &["index", "status"]));
-    assert_eq!(status["schema_version"], 2);
+    assert_eq!(status["schema_version"], gilune_kernel::index::SCHEMA_VERSION);
     assert_eq!(status["notes"], 2);
     assert!(status["epoch"].as_str().expect("an epoch").len() >= 8);
     let namespaces = status["namespaces"].as_array().expect("namespaces");

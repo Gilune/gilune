@@ -6,6 +6,23 @@ pub(crate) fn fold(text: &str) -> String {
     text.chars().map(fold_char).collect()
 }
 
+/// Exclusive upper bound for a literal prefix in SQLite's BINARY UTF-8 order.
+/// UTF-8 preserves scalar ordering. Carry past trailing maximum scalars and
+/// skip the surrogate gap; an empty/all-maximum prefix has no upper bound.
+pub(crate) fn prefix_end(prefix: &str) -> Option<String> {
+    for (offset, c) in prefix.char_indices().rev() {
+        let next = match c as u32 {
+            0x10ffff => continue,
+            0xd7ff => 0xe000,
+            n => n + 1,
+        };
+        let mut end = prefix[..offset].to_string();
+        end.push(char::from_u32(next).expect("next Unicode scalar"));
+        return Some(end);
+    }
+    None
+}
+
 fn fold_char(c: char) -> char {
     let mut upper = c.to_uppercase();
     let first = upper.next().unwrap_or(c);

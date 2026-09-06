@@ -1,0 +1,2337 @@
+{
+  "note": "43 compact SQL cases from the complete matrix; 10 text cases rerun after bounded-window integration. Every returned page equals the old executor on identical facts. Timings vary in mixed legacy/new runs; separate controls and application measurements are also recorded.",
+  "cases": [
+    {
+      "dsl": "type:task",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 490.0367,
+      "name": "all",
+      "samples": [
+        {
+          "compile_ms": 0.1536,
+          "count_ms": 32.2742,
+          "page_only_ms": 4.928100000000001,
+          "project_ms": 3.1296999999999997,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.2956000000000003,
+          "total_ms": 38.383
+        },
+        {
+          "compile_ms": 0.0481,
+          "count_ms": 30.389699999999998,
+          "page_only_ms": 5.2034,
+          "project_ms": 2.6737,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.37349999999999994,
+          "total_ms": 34.6104
+        },
+        {
+          "compile_ms": 0.0758,
+          "count_ms": 32.7106,
+          "page_only_ms": 6.5839,
+          "project_ms": 3.335400000000007,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.3650999999999982,
+          "total_ms": 38.0664
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task is:open",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 969.7069,
+      "name": "open",
+      "samples": [
+        {
+          "compile_ms": 0.1682,
+          "count_ms": 807.6287000000001,
+          "page_only_ms": 26.1631,
+          "project_ms": 13.591099999999983,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 1.8169000000000324,
+          "total_ms": 832.1078
+        },
+        {
+          "compile_ms": 0.2236,
+          "count_ms": 796.0988,
+          "page_only_ms": 19.0906,
+          "project_ms": 10.41980000000001,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 1.1102999999999383,
+          "total_ms": 819.1703
+        },
+        {
+          "compile_ms": 0.1744,
+          "count_ms": 659.937,
+          "page_only_ms": 16.020699999999998,
+          "project_ms": 7.588899999999967,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.939200000000028,
+          "total_ms": 679.0587
+        }
+      ],
+      "sort": "",
+      "total_hits": 42500
+    },
+    {
+      "dsl": "type:task is:done",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 411.57460000000003,
+      "name": "done",
+      "samples": [
+        {
+          "compile_ms": 0.3273,
+          "count_ms": 667.9022,
+          "page_only_ms": 21.701600000000003,
+          "project_ms": 9.065899999999942,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 4.750700000000052,
+          "total_ms": 689.4304
+        },
+        {
+          "compile_ms": 0.1118,
+          "count_ms": 646.2361,
+          "page_only_ms": 20.3599,
+          "project_ms": 8.256200000000035,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 4.420799999999986,
+          "total_ms": 667.295
+        },
+        {
+          "compile_ms": 0.1025,
+          "count_ms": 624.365,
+          "page_only_ms": 19.3628,
+          "project_ms": 7.826399999999921,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 4.304900000000089,
+          "total_ms": 644.2238
+        }
+      ],
+      "sort": "",
+      "total_hits": 7500
+    },
+    {
+      "dsl": "type:task -is:done",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 18629.163900000003,
+      "name": "not_done",
+      "samples": [
+        {
+          "compile_ms": 0.09469999999999999,
+          "count_ms": 626.2546,
+          "page_only_ms": 16.8943,
+          "project_ms": 8.021299999999997,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.9732999999999947,
+          "total_ms": 642.6129999999999
+        },
+        {
+          "compile_ms": 0.08,
+          "count_ms": 627.5443999999999,
+          "page_only_ms": 15.862000000000002,
+          "project_ms": 7.45920000000001,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.9755000000000109,
+          "total_ms": 643.8089
+        },
+        {
+          "compile_ms": 0.07150000000000001,
+          "count_ms": 649.6816,
+          "page_only_ms": 15.8459,
+          "project_ms": 7.544700000000034,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.9578000000000202,
+          "total_ms": 665.5421
+        }
+      ],
+      "sort": "",
+      "total_hits": 42500
+    },
+    {
+      "dsl": "type:task people.connection:assign:@alice",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 533.4024000000001,
+      "name": "alice",
+      "samples": [
+        {
+          "compile_ms": 0.16019999999999998,
+          "count_ms": 669.5346999999999,
+          "page_only_ms": 20.303600000000003,
+          "project_ms": 8.430700000000115,
+          "projected_items": 50,
+          "projected_lines": 54,
+          "sample": 0,
+          "select_ms": 1.2794000000000096,
+          "total_ms": 690.3212
+        },
+        {
+          "compile_ms": 0.1408,
+          "count_ms": 669.6918999999999,
+          "page_only_ms": 20.005200000000002,
+          "project_ms": 7.723400000000083,
+          "projected_items": 50,
+          "projected_lines": 54,
+          "sample": 1,
+          "select_ms": 1.2661000000000513,
+          "total_ms": 690.0469999999999
+        },
+        {
+          "compile_ms": 0.1218,
+          "count_ms": 671.7103000000001,
+          "page_only_ms": 19.5612,
+          "project_ms": 7.63009999999997,
+          "projected_items": 50,
+          "projected_lines": 54,
+          "sample": 2,
+          "select_ms": 1.2428999999998496,
+          "total_ms": 691.7394999999999
+        }
+      ],
+      "sort": "",
+      "total_hits": 30000
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign:@alice",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 669.4911999999999,
+      "name": "alice_open",
+      "samples": [
+        {
+          "compile_ms": 0.16349999999999998,
+          "count_ms": 927.3662999999999,
+          "page_only_ms": 21.361,
+          "project_ms": 7.689700000000016,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 0,
+          "select_ms": 2.4190000000000964,
+          "total_ms": 948.6782999999999
+        },
+        {
+          "compile_ms": 0.1545,
+          "count_ms": 849.0724,
+          "page_only_ms": 21.0845,
+          "project_ms": 7.513300000000072,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 1,
+          "select_ms": 2.3278000000000247,
+          "total_ms": 869.9847000000001
+        },
+        {
+          "compile_ms": 0.1536,
+          "count_ms": 887.7034,
+          "page_only_ms": 20.788899999999998,
+          "project_ms": 7.582699999999932,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 2,
+          "select_ms": 2.462500000000091,
+          "total_ms": 908.7043
+        }
+      ],
+      "sort": "",
+      "total_hits": 25000
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 889.4088999999999,
+      "name": "alice_month",
+      "samples": [
+        {
+          "compile_ms": 0.1642,
+          "count_ms": 508.1678,
+          "page_only_ms": 22.986800000000002,
+          "project_ms": 8.449200000000076,
+          "projected_items": 50,
+          "projected_lines": 57,
+          "sample": 0,
+          "select_ms": 2.8612999999999715,
+          "total_ms": 530.7129
+        },
+        {
+          "compile_ms": 0.19799999999999998,
+          "count_ms": 518.2481,
+          "page_only_ms": 21.2286,
+          "project_ms": 7.606099999999969,
+          "projected_items": 50,
+          "projected_lines": 57,
+          "sample": 1,
+          "select_ms": 2.6798,
+          "total_ms": 540.8317999999999
+        },
+        {
+          "compile_ms": 0.1711,
+          "count_ms": 535.5033,
+          "page_only_ms": 20.9369,
+          "project_ms": 8.461799999999926,
+          "projected_items": 50,
+          "projected_lines": 57,
+          "sample": 2,
+          "select_ms": 2.614400000000046,
+          "total_ms": 557.8104999999999
+        }
+      ],
+      "sort": "",
+      "total_hits": 17500
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign IN [\"alice\", \"bob\"] due:after:2026-08-31 due:before:2026-10-01",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 968.9445,
+      "name": "either_month",
+      "samples": [
+        {
+          "compile_ms": 0.2378,
+          "count_ms": 139.48770000000002,
+          "page_only_ms": 5.4466,
+          "project_ms": 2.530300000000011,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 0,
+          "select_ms": 0.7015999999999849,
+          "total_ms": 154.9076
+        },
+        {
+          "compile_ms": 0.1197,
+          "count_ms": 136.3502,
+          "page_only_ms": 5.1944,
+          "project_ms": 2.428800000000024,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 1,
+          "select_ms": 0.6504999999999939,
+          "total_ms": 141.1425
+        },
+        {
+          "compile_ms": 0.1105,
+          "count_ms": 132.0341,
+          "page_only_ms": 5.1776,
+          "project_ms": 2.3891000000000133,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 2,
+          "select_ms": 0.6343999999999994,
+          "total_ms": 136.6593
+        }
+      ],
+      "sort": "",
+      "total_hits": 25000
+    },
+    {
+      "dsl": "type:task is:open -people.connection:assign:@bob due:after:2026-08-31 due:before:2026-10-01",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 21806.9398,
+      "name": "not_bob_month",
+      "samples": [
+        {
+          "compile_ms": 0.14980000000000002,
+          "count_ms": 585.3158999999999,
+          "page_only_ms": 24.5088,
+          "project_ms": 9.351200000000063,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 0,
+          "select_ms": 1.7531000000000176,
+          "total_ms": 610.2396
+        },
+        {
+          "compile_ms": 0.1227,
+          "count_ms": 567.5212,
+          "page_only_ms": 21.1859,
+          "project_ms": 7.955300000000079,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 1,
+          "select_ms": 1.6155999999999722,
+          "total_ms": 590.0999999999999
+        },
+        {
+          "compile_ms": 0.1328,
+          "count_ms": 508.23190000000005,
+          "page_only_ms": 19.545900000000003,
+          "project_ms": 7.4068000000000325,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 2,
+          "select_ms": 1.2735999999999876,
+          "total_ms": 528.7127
+        }
+      ],
+      "sort": "",
+      "total_hits": 25000
+    },
+    {
+      "dsl": "type:task people.connection:assign NOT IN [\"alice\", \"bob\"]",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 18244.0362,
+      "name": "not_either",
+      "samples": [
+        {
+          "compile_ms": 0.1065,
+          "count_ms": 80.29950000000001,
+          "page_only_ms": 5.3101,
+          "project_ms": 2.484400000000008,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 0.8585999999999956,
+          "total_ms": 94.40350000000001
+        },
+        {
+          "compile_ms": 0.0518,
+          "count_ms": 80.43530000000001,
+          "page_only_ms": 5.1773,
+          "project_ms": 2.4609999999999843,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 0.8280999999999921,
+          "total_ms": 85.3615
+        },
+        {
+          "compile_ms": 0.0482,
+          "count_ms": 80.49440000000001,
+          "page_only_ms": 5.3133,
+          "project_ms": 2.549899999999994,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 0.8353999999999928,
+          "total_ms": 85.44200000000001
+        }
+      ],
+      "sort": "",
+      "total_hits": 7500
+    },
+    {
+      "dsl": "type:task people.connection:assign IN []",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 76.1627,
+      "name": "empty_membership",
+      "samples": [
+        {
+          "compile_ms": 0.1298,
+          "count_ms": 0.035,
+          "page_only_ms": 10.799299999999999,
+          "project_ms": 0.0005000000000000004,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 0.09450000000000003,
+          "total_ms": 11.051200000000001
+        },
+        {
+          "compile_ms": 0.13620000000000002,
+          "count_ms": 0.04299999999999998,
+          "page_only_ms": 10.949800000000002,
+          "project_ms": 0.0010000000000000564,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 0.09259999999999999,
+          "total_ms": 10.9876
+        },
+        {
+          "compile_ms": 0.0991,
+          "count_ms": 0.031,
+          "page_only_ms": 10.9307,
+          "project_ms": 0.0006999999999999784,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 0.08760000000000001,
+          "total_ms": 10.774600000000001
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task people.connection:assign NOT IN []",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 487.1478,
+      "name": "empty_negative_membership",
+      "samples": [
+        {
+          "compile_ms": 0.10490000000000001,
+          "count_ms": 32.7377,
+          "page_only_ms": 4.7949,
+          "project_ms": 2.362099999999998,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.3282000000000025,
+          "total_ms": 46.2283
+        },
+        {
+          "compile_ms": 0.0457,
+          "count_ms": 31.7079,
+          "page_only_ms": 4.7659,
+          "project_ms": 2.2989000000000104,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.3089999999999975,
+          "total_ms": 35.8746
+        },
+        {
+          "compile_ms": 0.0479,
+          "count_ms": 31.754099999999998,
+          "page_only_ms": 4.7228,
+          "project_ms": 2.3245999999999967,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.3076000000000043,
+          "total_ms": 35.9904
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task people.connection:assign IN [\"alice\", \"alice\", \"bob\"]",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 598.0178999999999,
+      "name": "duplicate_membership",
+      "samples": [
+        {
+          "compile_ms": 0.18100000000000002,
+          "count_ms": 81.5126,
+          "page_only_ms": 4.9502,
+          "project_ms": 2.3799999999999955,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.3924999999999983,
+          "total_ms": 95.3985
+        },
+        {
+          "compile_ms": 0.0931,
+          "count_ms": 80.25489999999999,
+          "page_only_ms": 4.8824000000000005,
+          "project_ms": 2.3525999999999954,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.4040000000000106,
+          "total_ms": 84.6703
+        },
+        {
+          "compile_ms": 0.0846,
+          "count_ms": 81.5296,
+          "page_only_ms": 5.0463000000000005,
+          "project_ms": 2.404900000000012,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.38929999999999154,
+          "total_ms": 85.9451
+        }
+      ],
+      "sort": "",
+      "total_hits": 42500
+    },
+    {
+      "dsl": "type:task people.connection:assign:@absent",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 79.4966,
+      "name": "absent_person",
+      "samples": [
+        {
+          "compile_ms": 0.1202,
+          "count_ms": 0.0325,
+          "page_only_ms": 11.2281,
+          "project_ms": 0.0007000000000000339,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 0.09259999999999999,
+          "total_ms": 10.963799999999999
+        },
+        {
+          "compile_ms": 0.11359999999999999,
+          "count_ms": 0.03199999999999999,
+          "page_only_ms": 10.7872,
+          "project_ms": 0.0005999999999999894,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 0.09190000000000001,
+          "total_ms": 11.091800000000001
+        },
+        {
+          "compile_ms": 0.0903,
+          "count_ms": 0.03109999999999999,
+          "page_only_ms": 10.8772,
+          "project_ms": 0.0005000000000000282,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 0.0894,
+          "total_ms": 10.8518
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task people.connection:assign:@\u00e9lise",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 66.40010000000001,
+      "name": "unicode_absent",
+      "samples": [
+        {
+          "compile_ms": 0.15259999999999999,
+          "count_ms": 0.034900000000000014,
+          "page_only_ms": 11.3148,
+          "project_ms": 0.0007000000000000339,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 0.0928,
+          "total_ms": 11.3613
+        },
+        {
+          "compile_ms": 0.10880000000000001,
+          "count_ms": 0.03509999999999999,
+          "page_only_ms": 11.032200000000001,
+          "project_ms": 0.0006999999999999784,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 0.0925,
+          "total_ms": 11.3241
+        },
+        {
+          "compile_ms": 0.1115,
+          "count_ms": 0.0344,
+          "page_only_ms": 11.194,
+          "project_ms": 0.0007000000000000062,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 0.0945,
+          "total_ms": 11.306999999999999
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task people.connection:owner:@alice",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 379.2061,
+      "name": "owner_alice",
+      "samples": [
+        {
+          "compile_ms": 0.3859,
+          "count_ms": 719.1922999999999,
+          "page_only_ms": 30.775,
+          "project_ms": 7.772799999999961,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 12.098100000000045,
+          "total_ms": 750.9546
+        },
+        {
+          "compile_ms": 0.1264,
+          "count_ms": 675.825,
+          "page_only_ms": 30.2897,
+          "project_ms": 7.576800000000048,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 11.986299999999915,
+          "total_ms": 706.1596999999999
+        },
+        {
+          "compile_ms": 0.1351,
+          "count_ms": 675.2300000000001,
+          "page_only_ms": 31.374100000000002,
+          "project_ms": 7.816000000000031,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 12.250499999999874,
+          "total_ms": 706.1867
+        }
+      ],
+      "sort": "",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task people.connection:reviewer:@alice",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 356.8582,
+      "name": "reviewer_alice",
+      "samples": [
+        {
+          "compile_ms": 0.1453,
+          "count_ms": 592.9519,
+          "page_only_ms": 32.688,
+          "project_ms": 7.830799999999954,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 12.116499999999974,
+          "total_ms": 623.8339000000001
+        },
+        {
+          "compile_ms": 0.1406,
+          "count_ms": 582.1405000000001,
+          "page_only_ms": 30.395599999999998,
+          "project_ms": 7.570800000000077,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 11.901799999999866,
+          "total_ms": 613.0119000000001
+        },
+        {
+          "compile_ms": 0.1064,
+          "count_ms": 602.1715,
+          "page_only_ms": 30.6037,
+          "project_ms": 7.66190000000006,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 12.108099999999922,
+          "total_ms": 632.7747999999999
+        }
+      ],
+      "sort": "",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task people.connection:assign:@alice people.connection:reviewer:@bob",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 520.0989999999999,
+      "name": "paired_roles",
+      "samples": [
+        {
+          "compile_ms": 0.1607,
+          "count_ms": 751.3919999999999,
+          "page_only_ms": 31.496499999999997,
+          "project_ms": 7.948000000000093,
+          "projected_items": 50,
+          "projected_lines": 100,
+          "sample": 0,
+          "select_ms": 12.980199999999968,
+          "total_ms": 785.0711
+        },
+        {
+          "compile_ms": 0.14750000000000002,
+          "count_ms": 740.9841999999999,
+          "page_only_ms": 31.4667,
+          "project_ms": 8.382199999999898,
+          "projected_items": 50,
+          "projected_lines": 100,
+          "sample": 1,
+          "select_ms": 12.933800000000133,
+          "total_ms": 773.2912
+        },
+        {
+          "compile_ms": 0.1464,
+          "count_ms": 745.9909,
+          "page_only_ms": 34.1852,
+          "project_ms": 8.655899999999974,
+          "projected_items": 50,
+          "projected_lines": 100,
+          "sample": 2,
+          "select_ms": 14.14020000000005,
+          "total_ms": 779.5797
+        }
+      ],
+      "sort": "",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task people.connection:owner:@bob people.connection:reviewer:@alice",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 333.9062,
+      "name": "wrong_role_pair",
+      "samples": [
+        {
+          "compile_ms": 0.2872,
+          "count_ms": 0.04019999999999996,
+          "page_only_ms": 2.6391999999999998,
+          "project_ms": 0.0010000000000000009,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 0.10950000000000004,
+          "total_ms": 3.3414
+        },
+        {
+          "compile_ms": 0.0745,
+          "count_ms": 0.0296,
+          "page_only_ms": 2.7678,
+          "project_ms": 9.999999999998899e-05,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 0.0872,
+          "total_ms": 2.666
+        },
+        {
+          "compile_ms": 0.0684,
+          "count_ms": 0.030899999999999997,
+          "page_only_ms": 2.2411000000000003,
+          "project_ms": 0.0003999999999999837,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 0.0884,
+          "total_ms": 2.8803
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task people.connection:assign:@alice people.connection:assign:@bob",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 414.1354,
+      "name": "two_assignees",
+      "samples": [
+        {
+          "compile_ms": 0.1615,
+          "count_ms": 81.6544,
+          "page_only_ms": 92.335,
+          "project_ms": 0.001299999999986312,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 83.11350000000002,
+          "total_ms": 167.4556
+        },
+        {
+          "compile_ms": 0.14129999999999998,
+          "count_ms": 89.18050000000001,
+          "page_only_ms": 87.0172,
+          "project_ms": 0.0010999999999796728,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 89.26190000000001,
+          "total_ms": 180.9309
+        },
+        {
+          "compile_ms": 0.12999999999999998,
+          "count_ms": 81.2413,
+          "page_only_ms": 83.9854,
+          "project_ms": 0.0014999999999929514,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 81.8708,
+          "total_ms": 165.4728
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task due:none",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 7295.2387,
+      "name": "missing_due",
+      "samples": [
+        {
+          "compile_ms": 0.0797,
+          "count_ms": 45.117,
+          "page_only_ms": 5.8078,
+          "project_ms": 2.8470000000000013,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 1.0780999999999992,
+          "total_ms": 51.558
+        },
+        {
+          "compile_ms": 0.0422,
+          "count_ms": 43.409099999999995,
+          "page_only_ms": 5.4253,
+          "project_ms": 3.2249999999999943,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 1.3804000000000087,
+          "total_ms": 49.0536
+        },
+        {
+          "compile_ms": 0.0575,
+          "count_ms": 44.7104,
+          "page_only_ms": 5.5683,
+          "project_ms": 3.3813999999999993,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 1.0080000000000027,
+          "total_ms": 50.343199999999996
+        }
+      ],
+      "sort": "",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task -due:none",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 619.9698999999999,
+      "name": "present_due",
+      "samples": [
+        {
+          "compile_ms": 0.0699,
+          "count_ms": 42.10600000000001,
+          "page_only_ms": 4.3288,
+          "project_ms": 2.492999999999995,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.2844999999999942,
+          "total_ms": 47.392700000000005
+        },
+        {
+          "compile_ms": 0.040299999999999996,
+          "count_ms": 38.8842,
+          "page_only_ms": 4.1557,
+          "project_ms": 2.346100000000007,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.29239999999999355,
+          "total_ms": 42.5576
+        },
+        {
+          "compile_ms": 0.0491,
+          "count_ms": 38.853899999999996,
+          "page_only_ms": 4.2382,
+          "project_ms": 2.3789000000000087,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.4240999999999957,
+          "total_ms": 42.7423
+        }
+      ],
+      "sort": "",
+      "total_hits": 47500
+    },
+    {
+      "dsl": "type:task done:none",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 443.55670000000003,
+      "name": "missing_done",
+      "samples": [
+        {
+          "compile_ms": 0.07959999999999999,
+          "count_ms": 285.48789999999997,
+          "page_only_ms": 15.362,
+          "project_ms": 7.443100000000015,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.5883000000000038,
+          "total_ms": 300.814
+        },
+        {
+          "compile_ms": 0.0748,
+          "count_ms": 291.8673,
+          "page_only_ms": 15.396,
+          "project_ms": 7.373300000000029,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.5480000000000018,
+          "total_ms": 307.2404
+        },
+        {
+          "compile_ms": 0.0925,
+          "count_ms": 286.17940000000004,
+          "page_only_ms": 15.669099999999998,
+          "project_ms": 7.469800000000021,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.9174999999999613,
+          "total_ms": 302.3698
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task due:today",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 354.6216,
+      "name": "today",
+      "samples": [
+        {
+          "compile_ms": 0.13779999999999998,
+          "count_ms": 683.6889,
+          "page_only_ms": 27.41,
+          "project_ms": 7.721299999999928,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 12.402400000000057,
+          "total_ms": 711.1297
+        },
+        {
+          "compile_ms": 0.1643,
+          "count_ms": 671.8404999999999,
+          "page_only_ms": 27.6678,
+          "project_ms": 7.528099999999881,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 12.200700000000097,
+          "total_ms": 699.1061
+        },
+        {
+          "compile_ms": 0.1237,
+          "count_ms": 680.8229,
+          "page_only_ms": 28.6796,
+          "project_ms": 8.203400000000101,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 13.0782999999999,
+          "total_ms": 709.4559
+        }
+      ],
+      "sort": "",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task due:week",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 557.1388000000001,
+      "name": "week",
+      "samples": [
+        {
+          "compile_ms": 0.08600000000000001,
+          "count_ms": 61.289,
+          "page_only_ms": 15.3035,
+          "project_ms": 7.387199999999993,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 0.587299999999999,
+          "total_ms": 76.59649999999999
+        },
+        {
+          "compile_ms": 0.0897,
+          "count_ms": 63.5883,
+          "page_only_ms": 18.5495,
+          "project_ms": 8.903400000000005,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 0.6379000000000019,
+          "total_ms": 80.4623
+        },
+        {
+          "compile_ms": 0.10679999999999999,
+          "count_ms": 74.02969999999999,
+          "page_only_ms": 18.063,
+          "project_ms": 9.140200000000007,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 0.6039999999999992,
+          "total_ms": 92.7812
+        }
+      ],
+      "sort": "",
+      "total_hits": 10000
+    },
+    {
+      "dsl": "type:task -due:week",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 66381.02709999999,
+      "name": "not_week",
+      "samples": [
+        {
+          "compile_ms": 0.1306,
+          "count_ms": 62.275400000000005,
+          "page_only_ms": 15.0412,
+          "project_ms": 7.394800000000011,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.3655999999999935,
+          "total_ms": 77.50269999999999
+        },
+        {
+          "compile_ms": 0.0862,
+          "count_ms": 73.5431,
+          "page_only_ms": 18.261699999999998,
+          "project_ms": 9.282499999999999,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.3580000000000041,
+          "total_ms": 90.5459
+        },
+        {
+          "compile_ms": 0.0944,
+          "count_ms": 74.23,
+          "page_only_ms": 16.7323,
+          "project_ms": 9.159500000000008,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.370199999999997,
+          "total_ms": 92.4658
+        }
+      ],
+      "sort": "",
+      "total_hits": 40000
+    },
+    {
+      "dsl": "type:task due:overdue",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 401.3497,
+      "name": "overdue",
+      "samples": [
+        {
+          "compile_ms": 0.1819,
+          "count_ms": 56.0903,
+          "page_only_ms": 18.494300000000003,
+          "project_ms": 8.903800000000011,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 0.8564000000000007,
+          "total_ms": 74.41019999999999
+        },
+        {
+          "compile_ms": 0.0968,
+          "count_ms": 57.003699999999995,
+          "page_only_ms": 18.627000000000002,
+          "project_ms": 9.001000000000005,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 0.491100000000003,
+          "total_ms": 74.64129999999999
+        },
+        {
+          "compile_ms": 0.085,
+          "count_ms": 56.6046,
+          "page_only_ms": 17.8979,
+          "project_ms": 8.746100000000006,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 0.4836000000000027,
+          "total_ms": 74.5321
+        }
+      ],
+      "sort": "",
+      "total_hits": 12500
+    },
+    {
+      "dsl": "type:task due:2026-09-01",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 425.69370000000004,
+      "name": "boundary_start",
+      "samples": [
+        {
+          "compile_ms": 0.1347,
+          "count_ms": 683.5275,
+          "page_only_ms": 21.1085,
+          "project_ms": 7.405099999999948,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 6.064600000000041,
+          "total_ms": 704.4764
+        },
+        {
+          "compile_ms": 0.10189999999999999,
+          "count_ms": 676.1726,
+          "page_only_ms": 20.4874,
+          "project_ms": 7.481199999999944,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 6.059400000000096,
+          "total_ms": 697.1134
+        },
+        {
+          "compile_ms": 0.097,
+          "count_ms": 669.9565,
+          "page_only_ms": 20.6763,
+          "project_ms": 7.3583999999999605,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 5.979100000000017,
+          "total_ms": 690.5862000000001
+        }
+      ],
+      "sort": "",
+      "total_hits": 5000
+    },
+    {
+      "dsl": "type:task due:2026-09-30",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 342.8933,
+      "name": "boundary_end",
+      "samples": [
+        {
+          "compile_ms": 0.14650000000000002,
+          "count_ms": 570.0348,
+          "page_only_ms": 26.6974,
+          "project_ms": 7.509499999999889,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 11.793700000000058,
+          "total_ms": 597.1835
+        },
+        {
+          "compile_ms": 0.1189,
+          "count_ms": 574.6916,
+          "page_only_ms": 30.193,
+          "project_ms": 8.417500000000018,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 12.148799999999937,
+          "total_ms": 602.5133000000001
+        },
+        {
+          "compile_ms": 0.1295,
+          "count_ms": 586.9271,
+          "page_only_ms": 26.679000000000002,
+          "project_ms": 7.52940000000001,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 11.786600000000021,
+          "total_ms": 614.7861999999999
+        }
+      ],
+      "sort": "",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task due:after:2026-10-01 due:before:2026-09-01",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 321.4809,
+      "name": "contradictory_dates",
+      "samples": [
+        {
+          "compile_ms": 0.0892,
+          "count_ms": 42.8776,
+          "page_only_ms": 50.9896,
+          "project_ms": 0.0014999999999929514,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 44.4339,
+          "total_ms": 89.40339999999999
+        },
+        {
+          "compile_ms": 0.08990000000000001,
+          "count_ms": 43.674,
+          "page_only_ms": 50.9556,
+          "project_ms": 0.0015000000000071623,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 43.35529999999999,
+          "total_ms": 94.19539999999999
+        },
+        {
+          "compile_ms": 0.075,
+          "count_ms": 44.23,
+          "page_only_ms": 52.0882,
+          "project_ms": 0.0015000000000071623,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 45.0293,
+          "total_ms": 95.6838
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task is:open is:done",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 431.998,
+      "name": "contradictory_state",
+      "samples": [
+        {
+          "compile_ms": 0.16090000000000002,
+          "count_ms": 83.40230000000001,
+          "page_only_ms": 85.0843,
+          "project_ms": 0.0012000000000114142,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 82.89789999999998,
+          "total_ms": 168.5276
+        },
+        {
+          "compile_ms": 0.12029999999999999,
+          "count_ms": 82.5884,
+          "page_only_ms": 84.5479,
+          "project_ms": 0.001299999999986312,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 83.6072,
+          "total_ms": 168.05419999999998
+        },
+        {
+          "compile_ms": 0.0995,
+          "count_ms": 83.0158,
+          "page_only_ms": 84.40559999999999,
+          "project_ms": 0.0011000000000080945,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 82.9695,
+          "total_ms": 167.8238
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task due:after:2026-08-31 due:before:2026-10-01 due:after:2026-09-05 due:before:2026-09-26",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 898.3870000000001,
+      "name": "redundant_ranges",
+      "samples": [
+        {
+          "compile_ms": 0.12439999999999998,
+          "count_ms": 93.5545,
+          "page_only_ms": 15.2563,
+          "project_ms": 7.502099999999999,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 0,
+          "select_ms": 0.46930000000000405,
+          "total_ms": 108.84630000000001
+        },
+        {
+          "compile_ms": 0.0937,
+          "count_ms": 93.65650000000001,
+          "page_only_ms": 15.463,
+          "project_ms": 7.466499999999996,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 1,
+          "select_ms": 0.4864000000000033,
+          "total_ms": 108.8913
+        },
+        {
+          "compile_ms": 0.1168,
+          "count_ms": 94.48270000000001,
+          "page_only_ms": 15.398800000000001,
+          "project_ms": 7.592399999999998,
+          "projected_items": 50,
+          "projected_lines": 55,
+          "sample": 2,
+          "select_ms": 0.48460000000000036,
+          "total_ms": 109.8538
+        }
+      ],
+      "sort": "",
+      "total_hits": 27500
+    },
+    {
+      "dsl": "type:task due:soonish",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 1.9434,
+      "name": "invalid_date",
+      "samples": [
+        {
+          "compile_ms": 0.09079999999999999,
+          "count_ms": 0.0262,
+          "page_only_ms": 7.2471000000000005,
+          "project_ms": 0.0005000000000000004,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 0.08760000000000001,
+          "total_ms": 7.7545
+        },
+        {
+          "compile_ms": 0.0739,
+          "count_ms": 0.022700000000000012,
+          "page_only_ms": 7.1381,
+          "project_ms": 0.0005000000000000282,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 0.08389999999999999,
+          "total_ms": 7.32
+        },
+        {
+          "compile_ms": 0.0871,
+          "count_ms": 0.0257,
+          "page_only_ms": 7.3214,
+          "project_ms": 0.0007000000000000062,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 0.084,
+          "total_ms": 7.357
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task -due:soonish",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 404.0589,
+      "name": "negated_invalid_date",
+      "samples": [
+        {
+          "compile_ms": 0.0665,
+          "count_ms": 26.016299999999998,
+          "page_only_ms": 4.1398,
+          "project_ms": 2.2798000000000016,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.2575000000000003,
+          "total_ms": 30.5444
+        },
+        {
+          "compile_ms": 0.061,
+          "count_ms": 26.026699999999998,
+          "page_only_ms": 4.3064,
+          "project_ms": 2.3246,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.24990000000000023,
+          "total_ms": 29.6953
+        },
+        {
+          "compile_ms": 0.0406,
+          "count_ms": 25.8609,
+          "page_only_ms": 4.1770000000000005,
+          "project_ms": 2.3887,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.2494999999999976,
+          "total_ms": 29.5627
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task content:Work",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 418.97830000000005,
+      "name": "body_broad",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 294.22920000000005,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 299.9667
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 296.86089999999996,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 293.3383
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 300.033,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 291.5716
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task content:or",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 446.1713,
+      "name": "body_short",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 283.7153,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 291.1926
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 284.54659999999996,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 281.2419
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 283.3005,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 283.0749
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task content:\"Work 49999\"",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 336.18559999999997,
+      "name": "body_sparse",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 2.0157,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 3.7327
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 2.0796,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 2.0225999999999997
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 1.9878,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 2.0206999999999997
+        }
+      ],
+      "sort": "",
+      "total_hits": 1
+    },
+    {
+      "dsl": "type:task content:quartz",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 327.1407,
+      "name": "body_absent",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 1.1280000000000001,
+          "project_ms": null,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 2.2499
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 1.1163,
+          "project_ms": null,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 1.1054000000000002
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 1.1907,
+          "project_ms": null,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 1.1467999999999998
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task -content:alice",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 345.2543,
+      "name": "body_negative",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 701.3888000000001,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 703.7844
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 786.8859,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 710.326
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 716.7017,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 747.6479
+        }
+      ],
+      "sort": "",
+      "total_hits": 15000
+    },
+    {
+      "dsl": "type:task alice",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 388.8292,
+      "name": "bare_ranked",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 275.5045,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 278.7865
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 280.29920000000004,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 274.42040000000003
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 277.3358,
+          "project_ms": null,
+          "projected_items": 50000,
+          "projected_lines": 53000,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 275.3119
+        }
+      ],
+      "sort": "",
+      "total_hits": 35000
+    },
+    {
+      "dsl": "type:task path:work-0499",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 352.358,
+      "name": "path_one",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 3.2154000000000003,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 4.7938
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 3.2671,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 3.23
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 3.2558000000000002,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 3.2644
+        }
+      ],
+      "sort": "",
+      "total_hits": 100
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 path:work-0499",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 836.8045,
+      "name": "path_and_facts",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 12.7402,
+          "project_ms": null,
+          "projected_items": 35,
+          "projected_lines": 106,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 13.8188
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 12.6883,
+          "project_ms": null,
+          "projected_items": 35,
+          "projected_lines": 106,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 12.4164
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 12.4681,
+          "project_ms": null,
+          "projected_items": 35,
+          "projected_lines": 106,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 12.5579
+        }
+      ],
+      "sort": "",
+      "total_hits": 35
+    },
+    {
+      "dsl": "type:task file:work-0001",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 336.36339999999996,
+      "name": "file_match",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 3.1188000000000002,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 4.6699
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 2.9845,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 3.0221
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 3.0086000000000004,
+          "project_ms": null,
+          "projected_items": 100,
+          "projected_lines": 106,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 3.3345
+        }
+      ],
+      "sort": "",
+      "total_hits": 100
+    },
+    {
+      "dsl": "type:task [connections]",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 464.2055,
+      "name": "root_property",
+      "samples": [
+        {
+          "compile_ms": 0.1004,
+          "count_ms": 416.3415,
+          "page_only_ms": 15.2367,
+          "project_ms": 7.577799999999968,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.39540000000005193,
+          "total_ms": 431.8185
+        },
+        {
+          "compile_ms": 0.0963,
+          "count_ms": 414.5082,
+          "page_only_ms": 16.19,
+          "project_ms": 7.510299999999972,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.4104000000000383,
+          "total_ms": 429.7571
+        },
+        {
+          "compile_ms": 0.0925,
+          "count_ms": 422.5119,
+          "page_only_ms": 15.3835,
+          "project_ms": 7.610000000000014,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.4041000000000281,
+          "total_ms": 438.5498
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task -[title]",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 472.0105,
+      "name": "missing_root_property",
+      "samples": [
+        {
+          "compile_ms": 0.1315,
+          "count_ms": 601.9447,
+          "page_only_ms": 15.960599999999998,
+          "project_ms": 7.355200000000082,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 0,
+          "select_ms": 0.6023000000000138,
+          "total_ms": 617.9017
+        },
+        {
+          "compile_ms": 0.08940000000000001,
+          "count_ms": 575.5284,
+          "page_only_ms": 18.9889,
+          "project_ms": 8.526100000000042,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 1,
+          "select_ms": 0.7444000000000415,
+          "total_ms": 592.0790999999999
+        },
+        {
+          "compile_ms": 0.1958,
+          "count_ms": 672.933,
+          "page_only_ms": 15.153099999999998,
+          "project_ms": 7.3537000000000035,
+          "projected_items": 50,
+          "projected_lines": 53,
+          "sample": 2,
+          "select_ms": 0.6031000000000404,
+          "total_ms": 689.7475
+        }
+      ],
+      "sort": "",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task nonsense:value",
+      "executor": "target_text",
+      "grouped": false,
+      "legacy_ms": 347.8091,
+      "name": "unknown_keyword",
+      "samples": [
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 7.4,
+          "project_ms": null,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": null,
+          "total_ms": 7.516100000000001
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 7.2181,
+          "project_ms": null,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": null,
+          "total_ms": 7.2762
+        },
+        {
+          "compile_ms": null,
+          "count_ms": null,
+          "page_only_ms": 7.3167,
+          "project_ms": null,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": null,
+          "total_ms": 7.2966999999999995
+        }
+      ],
+      "sort": "",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 1099.8076999999998,
+      "name": "alice_month_due",
+      "samples": [
+        {
+          "compile_ms": 0.1607,
+          "count_ms": 498.27369999999996,
+          "page_only_ms": 78.719,
+          "project_ms": 3.043999999999869,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 73.31360000000006,
+          "total_ms": 585.4962
+        },
+        {
+          "compile_ms": 0.125,
+          "count_ms": 108.0625,
+          "page_only_ms": 77.6426,
+          "project_ms": 2.93780000000001,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 73.4195,
+          "total_ms": 186.88379999999998
+        },
+        {
+          "compile_ms": 0.12439999999999998,
+          "count_ms": 110.3438,
+          "page_only_ms": 80.7722,
+          "project_ms": 2.975400000000036,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 72.42159999999998,
+          "total_ms": 188.1981
+        }
+      ],
+      "sort": "org.memory.tasks.due",
+      "total_hits": 17500
+    },
+    {
+      "dsl": "type:task",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 696.9655,
+      "name": "all_due_nullable",
+      "samples": [
+        {
+          "compile_ms": 0.0924,
+          "count_ms": 28.5462,
+          "page_only_ms": 31.278399999999998,
+          "project_ms": 2.7154000000000025,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 28.7854,
+          "total_ms": 62.1718
+        },
+        {
+          "compile_ms": 0.07289999999999999,
+          "count_ms": 27.7229,
+          "page_only_ms": 33.1443,
+          "project_ms": 2.9814000000000007,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 28.2654,
+          "total_ms": 60.943200000000004
+        },
+        {
+          "compile_ms": 0.0675,
+          "count_ms": 27.4825,
+          "page_only_ms": 32.9847,
+          "project_ms": 2.907600000000002,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 28.709,
+          "total_ms": 61.152
+        }
+      ],
+      "sort": "org.memory.tasks.due",
+      "total_hits": 50000
+    },
+    {
+      "dsl": "type:task is:open",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 789.0418,
+      "name": "open_due_nullable",
+      "samples": [
+        {
+          "compile_ms": 0.1451,
+          "count_ms": 577.7916,
+          "page_only_ms": 35.0773,
+          "project_ms": 2.696900000000028,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 31.173999999999978,
+          "total_ms": 619.0384
+        },
+        {
+          "compile_ms": 0.0805,
+          "count_ms": 61.268100000000004,
+          "page_only_ms": 35.110299999999995,
+          "project_ms": 2.698599999999999,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 30.966499999999996,
+          "total_ms": 96.6979
+        },
+        {
+          "compile_ms": 0.07550000000000001,
+          "count_ms": 61.425399999999996,
+          "page_only_ms": 35.002900000000004,
+          "project_ms": 2.6633999999999958,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 31.039099999999998,
+          "total_ms": 96.8754
+        }
+      ],
+      "sort": "org.memory.tasks.due",
+      "total_hits": 42500
+    },
+    {
+      "dsl": "type:task due:none",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 7709.1851,
+      "name": "missing_due_sorted",
+      "samples": [
+        {
+          "compile_ms": 0.0818,
+          "count_ms": 38.536699999999996,
+          "page_only_ms": 161.6526,
+          "project_ms": 2.8571000000000026,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 162.84589999999997,
+          "total_ms": 206.5614
+        },
+        {
+          "compile_ms": 0.07150000000000001,
+          "count_ms": 38.042300000000004,
+          "page_only_ms": 168.6123,
+          "project_ms": 2.5813999999999737,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 160.8967,
+          "total_ms": 203.38600000000002
+        },
+        {
+          "compile_ms": 0.08610000000000001,
+          "count_ms": 39.67849999999999,
+          "page_only_ms": 170.4949,
+          "project_ms": 2.849899999999991,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 171.2955,
+          "total_ms": 215.8511
+        }
+      ],
+      "sort": "org.memory.tasks.due",
+      "total_hits": 2500
+    },
+    {
+      "dsl": "type:task people.connection:assign:@absent",
+      "executor": "sql_targets",
+      "grouped": false,
+      "legacy_ms": 79.82939999999999,
+      "name": "sparse_due_sorted",
+      "samples": [
+        {
+          "compile_ms": 0.1493,
+          "count_ms": 0.03420000000000001,
+          "page_only_ms": 11.5315,
+          "project_ms": 0.0007000000000000339,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 0,
+          "select_ms": 0.11349999999999999,
+          "total_ms": 11.7121
+        },
+        {
+          "compile_ms": 0.1121,
+          "count_ms": 0.03320000000000001,
+          "page_only_ms": 11.4941,
+          "project_ms": 0.0005000000000000004,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 1,
+          "select_ms": 0.11029999999999998,
+          "total_ms": 11.7281
+        },
+        {
+          "compile_ms": 0.0973,
+          "count_ms": 0.032899999999999985,
+          "page_only_ms": 11.6352,
+          "project_ms": 0.0007999999999999952,
+          "projected_items": 0,
+          "projected_lines": 0,
+          "sample": 2,
+          "select_ms": 0.11010000000000003,
+          "total_ms": 11.4206
+        }
+      ],
+      "sort": "org.memory.tasks.due",
+      "total_hits": 0
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+      "executor": "sql_targets",
+      "grouped": true,
+      "legacy_ms": 937.8991,
+      "name": "alice_grouped",
+      "samples": [
+        {
+          "compile_ms": 0.2386,
+          "count_ms": 509.7578,
+          "page_only_ms": 123.9148,
+          "project_ms": 9.290299999999888,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 113.99700000000007,
+          "total_ms": 644.9481000000001
+        },
+        {
+          "compile_ms": 0.10490000000000001,
+          "count_ms": 108.2986,
+          "page_only_ms": 124.6004,
+          "project_ms": 9.038399999999996,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 114.4542,
+          "total_ms": 234.12060000000002
+        },
+        {
+          "compile_ms": 0.1067,
+          "count_ms": 108.5112,
+          "page_only_ms": 125.10499999999999,
+          "project_ms": 9.107699999999994,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 113.6273,
+          "total_ms": 233.6833
+        }
+      ],
+      "sort": "",
+      "total_hits": 500
+    },
+    {
+      "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+      "executor": "sql_targets",
+      "grouped": true,
+      "legacy_ms": 1162.8216,
+      "name": "alice_grouped_due",
+      "samples": [
+        {
+          "compile_ms": 0.1729,
+          "count_ms": 493.2313,
+          "page_only_ms": 139.8886,
+          "project_ms": 9.047800000000052,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 0,
+          "select_ms": 129.67450000000002,
+          "total_ms": 642.9564
+        },
+        {
+          "compile_ms": 0.1087,
+          "count_ms": 107.4251,
+          "page_only_ms": 140.7551,
+          "project_ms": 8.981099999999998,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 1,
+          "select_ms": 129.18040000000002,
+          "total_ms": 247.9247
+        },
+        {
+          "compile_ms": 0.11349999999999999,
+          "count_ms": 111.68390000000001,
+          "page_only_ms": 140.65030000000002,
+          "project_ms": 8.864900000000006,
+          "projected_items": 50,
+          "projected_lines": 50,
+          "sample": 2,
+          "select_ms": 128.499,
+          "total_ms": 251.45810000000003
+        }
+      ],
+      "sort": "org.memory.tasks.due",
+      "total_hits": 500
+    }
+  ]
+}

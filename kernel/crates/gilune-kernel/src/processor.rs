@@ -64,9 +64,7 @@ impl<'a> ProcessorCtx<'a> {
     /// and the gap is exactly the race the compare-and-set exists to
     /// close: see that method for what the gap does.
     pub fn subject_head(&self) -> Result<Option<String>> {
-        Ok(crate::revisions::heads(self.store.conn(), &self.subject_id)?
-            .into_iter()
-            .next())
+        Ok(crate::revisions::heads(self.store.conn(), &self.subject_id)?.into_iter().next())
     }
 
     /// The head **and** the document it holds, from one row.
@@ -140,8 +138,7 @@ impl<'a> ProcessorCtx<'a> {
             detail: format!("{} has no blob", self.subject_id),
         })?;
         let path = self.store.vault().join(&facts.rel_path);
-        let bytes =
-            std::fs::read(&path).map_err(|e| KernelError::Io { path, source: e })?;
+        let bytes = std::fs::read(&path).map_err(|e| KernelError::Io { path, source: e })?;
         if ids::sha256_hex(&bytes) != facts.sha256 {
             return Err(KernelError::VaultUnusable {
                 reason: format!("blob for {} fails its digest", self.subject_id),
@@ -190,7 +187,11 @@ pub trait Processor: Send + Sync {
     fn id(&self) -> &str;
     /// Deterministic handlers make recovery failures distinguishable from
     /// provider variation; report honestly either way.
-    fn process(&self, ctx: &ProcessorCtx<'_>, job: &Job) -> std::result::Result<Vec<ProposedOutput>, String>;
+    fn process(
+        &self,
+        ctx: &ProcessorCtx<'_>,
+        job: &Job,
+    ) -> std::result::Result<Vec<ProposedOutput>, String>;
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -263,8 +264,7 @@ impl Store {
             .filter(|id| !external.iter().any(|e| e == id))
             .collect();
         while let Some(job) = self.claim_next_job_among(&runnable, now_ms, lease_ms)? {
-            let Some(processor) = processors.iter().find(|p| p.id() == job.subscription_id)
-            else {
+            let Some(processor) = processors.iter().find(|p| p.id() == job.subscription_id) else {
                 // Unreachable while the claim is filtered to these ids;
                 // kept because releasing a claim by letting its lease
                 // expire is the safe answer if it ever is reached.
@@ -396,7 +396,13 @@ impl Store {
                 "INSERT INTO processing_runs
                  (run_id, processor_id, idempotency_key, event_id, created_ms)
                  VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![ids::new_id(), processor_id, idempotency_key, job.event_id, created_ms],
+                rusqlite::params![
+                    ids::new_id(),
+                    processor_id,
+                    idempotency_key,
+                    job.event_id,
+                    created_ms
+                ],
             )?;
             let origin = format!("{ORIGIN_PREFIX}{processor_id}");
             let mut committed = 0i64;
@@ -420,11 +426,15 @@ impl Store {
                             });
                         }
                     }
+                    let current = crate::revisions::head_payload(conn, &job.subject_id)?
+                        .unwrap_or_else(|| "{}".into());
+                    let payload =
+                        crate::vault::preserve_projection_metadata(&current, &output.payload)?;
                     add_revision(
                         conn,
                         &job.subject_id,
                         &revision_id,
-                        &output.payload,
+                        &payload,
                         &origin,
                         created_ms,
                         Announce::Event,
@@ -452,8 +462,7 @@ impl Store {
                      VALUES (?1, ?2, 'derived-from', ?3)",
                     rusqlite::params![object_id, job.subject_id, processor_id],
                 )?;
-                let short_type =
-                    output.type_id.rsplit('.').next().unwrap_or("object").to_string();
+                let short_type = output.type_id.rsplit('.').next().unwrap_or("object").to_string();
                 let event_type = format!("{OBJECT_CREATED_EVENT_PREFIX}{short_type}-ready");
                 crate::operations::record(
                     conn,
@@ -609,9 +618,7 @@ mod tests {
     #[test]
     fn a_wav_capture_becomes_the_text_of_its_own_note() {
         let (_dir, store) = wav_captured();
-        let summary = store
-            .run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000)
-            .expect("run");
+        let summary = store.run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000).expect("run");
         assert_eq!(summary.completed, 1);
         assert_eq!(summary.outputs, 1);
 
@@ -668,9 +675,8 @@ mod tests {
             .conn()
             .execute("UPDATE jobs SET state = 'pending', not_before_ms = 0", [])
             .expect("redeliver");
-        let second = store
-            .run_pending_jobs(&[&FakeTranscriber], 60_000, 30_000)
-            .expect("second run");
+        let second =
+            store.run_pending_jobs(&[&FakeTranscriber], 60_000, 30_000).expect("second run");
         assert_eq!(second.skipped_duplicate, 1);
         assert_eq!(second.outputs, 0);
         assert_eq!(revisions_on(&store, &subject_id(&store)), 2, "one revision, not two");
@@ -720,10 +726,7 @@ mod tests {
         // with belongs to one revision and cannot straddle a write.
         let (head, payload) = ctx.subject_head_and_payload().expect("both at once");
         assert_eq!(head.as_deref(), Some("landed-while-it-ran"));
-        assert_ne!(
-            payload, payload_first,
-            "the document must be the one that head actually holds"
-        );
+        assert_ne!(payload, payload_first, "the document must be the one that head actually holds");
         assert!(payload.contains("what somebody else wrote"));
 
         // And the pair the interleaved reads produced is refused at commit
@@ -810,11 +813,9 @@ mod tests {
         assert_eq!(summary.failed, 0, "declining to overwrite is not a failure");
         assert_eq!(summary.outputs, 0, "and nothing was written");
         assert_eq!(
-            store.conn().query_row(
-                "SELECT COUNT(*) FROM jobs WHERE state = 'done'",
-                [],
-                |r| r.get::<_, i64>(0)
-            ),
+            store.conn().query_row("SELECT COUNT(*) FROM jobs WHERE state = 'done'", [], |r| {
+                r.get::<_, i64>(0)
+            }),
             Ok(2),
             "a job nothing is left to write for is done, not leased until it retries"
         );
@@ -849,10 +850,7 @@ mod tests {
         }
         let (_dir, store) = wav_captured();
         let source_id = subject_id(&store);
-        assert_eq!(
-            store.run_pending_jobs(&[&Interpreter], 1_000, 30_000).expect("run").outputs,
-            1
-        );
+        assert_eq!(store.run_pending_jobs(&[&Interpreter], 1_000, 30_000).expect("run").outputs, 1);
         let provenance: i64 = store
             .conn()
             .query_row(
@@ -864,10 +862,8 @@ mod tests {
         assert_eq!(provenance, 1);
         assert_eq!(revisions_on(&store, &source_id), 1, "the subject is untouched");
         let kinds: Vec<String> = {
-            let mut stmt = store
-                .conn()
-                .prepare("SELECT kind FROM operations ORDER BY op_seq")
-                .expect("stmt");
+            let mut stmt =
+                store.conn().prepare("SELECT kind FROM operations ORDER BY op_seq").expect("stmt");
             stmt.query_map([], |row| row.get(0))
                 .expect("query")
                 .collect::<std::result::Result<_, _>>()
@@ -912,9 +908,7 @@ mod tests {
         let store = Store::open(dir.path()).expect("open");
         store.subscribe("transcribe", crate::capture::SOURCE_READY_EVENT).expect("subscribe");
         store.capture_bytes("txt", b"just text").expect("capture");
-        let summary = store
-            .run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000)
-            .expect("run");
+        let summary = store.run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000).expect("run");
         assert_eq!(summary.completed, 1);
         assert_eq!(summary.outputs, 0);
         assert_eq!(revisions_on(&store, &subject_id(&store)), 1);

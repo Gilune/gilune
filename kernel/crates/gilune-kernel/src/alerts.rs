@@ -37,6 +37,8 @@ pub const SYNC_AWAITING_REFERENT: &str = "sync-awaiting-referent";
 /// candidate and the deletion is not carried out against it
 /// (constitution rule 1). Not a fault — a decision waiting to be seen.
 pub const VAULT_DELETED_NOTE_EDITED: &str = "vault-deleted-note-edited";
+/// A first projection cannot be published because its destination is occupied.
+pub const VAULT_PROJECTION_PATH_OCCUPIED: &str = "vault-projection-path-occupied";
 /// An operation originated on a device this one has revoked. Refused
 /// whoever delivered it (ADR 0019 § 9) — in a full-replica mesh a third
 /// paired device holds a revoked device's history and would otherwise

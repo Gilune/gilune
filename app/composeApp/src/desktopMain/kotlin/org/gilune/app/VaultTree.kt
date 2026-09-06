@@ -19,6 +19,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
+
 import androidx.compose.foundation.ContextMenuArea
 import androidx.compose.foundation.ContextMenuItem
 import androidx.compose.foundation.background
@@ -265,7 +267,10 @@ fun RailPanels(
             // FILES, and — defensively — a key some contribution named
             // that this host has no panel for. A rail always shows
             // something, and the tree is what it shows.
-            else -> VaultTree(
+            else -> {
+                val collection = BUNDLED_PLUGIN_EXTENSIONS.pageCollections(state.plugins).singleOrNull { it.collection.id == active.key }
+                if (collection != null) PageCollectionPanel(collection, state, onOpen, Modifier.weight(1f))
+                else VaultTree(
                 state,
                 tree,
                 onOpen,
@@ -275,6 +280,7 @@ fun RailPanels(
                 onRenamed = onRenamed,
                 onDeleted = onDeleted,
             )
+            }
         }
     }
 }

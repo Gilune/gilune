@@ -1,0 +1,311 @@
+{
+  "plans": [
+    {
+      "name": "all",
+      "params": [
+        "Text(\"frontmatter\")",
+        "Text(\"org.memory.tasks\")"
+      ],
+      "plan": [
+        "SCAN s",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "SEARCH t USING COVERING INDEX index_targets_source_start (source_id=? AND kind=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=?)"
+      ],
+      "samples": [
+        {
+          "ms": 33.2014,
+          "steps": 720009,
+          "total": 50000
+        },
+        {
+          "ms": 30.6995,
+          "steps": 720009,
+          "total": 50000
+        },
+        {
+          "ms": 29.6577,
+          "steps": 720009,
+          "total": 50000
+        },
+        {
+          "ms": 29.7926,
+          "steps": 720009,
+          "total": 50000
+        },
+        {
+          "ms": 31.535899999999998,
+          "steps": 720009,
+          "total": 50000
+        }
+      ],
+      "sql": "SELECT COUNT(*) FROM source_maps s CROSS JOIN index_targets t ON t.source_id=s.id WHERE t.kind=2 AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2)))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?1 AND r.rel_path=s.rel_path AND r.source_version=s.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?2 AND r.rel_path=s.rel_path AND r.source_version=s.source_version)"
+    },
+    {
+      "name": "open",
+      "params": [
+        "Text(\"open\")",
+        "Text(\"frontmatter\")",
+        "Text(\"org.memory.tasks\")"
+      ],
+      "plan": [
+        "SCAN s",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "SEARCH t USING COVERING INDEX index_targets_source_start (source_id=? AND kind=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_predicate_value (predicate_id=? AND value=? AND target_id=?)"
+      ],
+      "samples": [
+        {
+          "ms": 87.88600000000001,
+          "steps": 1397509,
+          "total": 42500
+        },
+        {
+          "ms": 75.5251,
+          "steps": 1397509,
+          "total": 42500
+        },
+        {
+          "ms": 80.9772,
+          "steps": 1397509,
+          "total": 42500
+        },
+        {
+          "ms": 75.31259999999999,
+          "steps": 1397509,
+          "total": 42500
+        },
+        {
+          "ms": 69.552,
+          "steps": 1397509,
+          "total": 42500
+        }
+      ],
+      "sql": "SELECT COUNT(*) FROM source_maps s CROSS JOIN index_targets t ON t.source_id=s.id WHERE t.kind=2 AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2)))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2) AND value = ?1))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?2 AND r.rel_path=s.rel_path AND r.source_version=s.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?3 AND r.rel_path=s.rel_path AND r.source_version=s.source_version)"
+    },
+    {
+      "name": "alice_month",
+      "params": [
+        "Text(\"open\")",
+        "Text(\"[\\\"assign\\\",\\\"alice\\\"]\")",
+        "Text(\"2026-08-31\")",
+        "Text(\"2026-10-01\")",
+        "Text(\"frontmatter\")",
+        "Text(\"org.memory.people\")",
+        "Text(\"org.memory.tasks\")"
+      ],
+      "plan": [
+        "SCAN s",
+        "CORRELATED SCALAR SUBQUERY 6",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "CORRELATED SCALAR SUBQUERY 7",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "CORRELATED SCALAR SUBQUERY 8",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "SEARCH t USING COVERING INDEX index_targets_source_start (source_id=? AND kind=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_predicate_value (predicate_id=? AND value=? AND target_id=?)",
+        "CORRELATED SCALAR SUBQUERY 3",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_predicate_value (predicate_id=? AND value=? AND target_id=?)",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=? AND value>?)",
+        "CORRELATED SCALAR SUBQUERY 5",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=? AND value<?)"
+      ],
+      "samples": [
+        {
+          "ms": 133.3887,
+          "steps": 2789010,
+          "total": 17500
+        },
+        {
+          "ms": 131.048,
+          "steps": 2789010,
+          "total": 17500
+        },
+        {
+          "ms": 139.5512,
+          "steps": 2789010,
+          "total": 17500
+        },
+        {
+          "ms": 137.8039,
+          "steps": 2789010,
+          "total": 17500
+        },
+        {
+          "ms": 142.7278,
+          "steps": 2789010,
+          "total": 17500
+        }
+      ],
+      "sql": "SELECT COUNT(*) FROM source_maps s CROSS JOIN index_targets t ON t.source_id=s.id WHERE t.kind=2 AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2)))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2) AND value = ?1))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (5) AND value = ?2))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (3) AND num IS NULL AND typed = 1 AND value > ?3))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (3) AND num IS NULL AND typed = 1 AND value < ?4))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?5 AND r.rel_path=s.rel_path AND r.source_version=s.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?6 AND r.rel_path=s.rel_path AND r.source_version=s.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?7 AND r.rel_path=s.rel_path AND r.source_version=s.source_version)"
+    },
+    {
+      "name": "either_month",
+      "params": [
+        "Text(\"open\")",
+        "Text(\"[\\\"[\\\\\\\"assign\\\\\\\",\\\\\\\"alice\\\\\\\"]\\\",\\\"[\\\\\\\"assign\\\\\\\",\\\\\\\"bob\\\\\\\"]\\\"]\")",
+        "Text(\"2026-08-31\")",
+        "Text(\"2026-10-01\")",
+        "Text(\"frontmatter\")",
+        "Text(\"org.memory.people\")",
+        "Text(\"org.memory.tasks\")"
+      ],
+      "plan": [
+        "SCAN s",
+        "CORRELATED SCALAR SUBQUERY 7",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "CORRELATED SCALAR SUBQUERY 8",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "CORRELATED SCALAR SUBQUERY 9",
+        "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)",
+        "SEARCH t USING COVERING INDEX index_targets_source_start (source_id=? AND kind=?)",
+        "CORRELATED SCALAR SUBQUERY 1",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=?)",
+        "CORRELATED SCALAR SUBQUERY 2",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_predicate_value (predicate_id=? AND value=? AND target_id=?)",
+        "CORRELATED SCALAR SUBQUERY 4",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_predicate_value (predicate_id=? AND value=? AND target_id=?)",
+        "LIST SUBQUERY 3",
+        "SCAN json_each VIRTUAL TABLE INDEX 1:",
+        "CORRELATED SCALAR SUBQUERY 5",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=? AND value>?)",
+        "CORRELATED SCALAR SUBQUERY 6",
+        "SEARCH fact_values USING COVERING INDEX facts_compact_target_value (target_id=? AND predicate_id=? AND value<?)"
+      ],
+      "samples": [
+        {
+          "ms": 183.25,
+          "steps": 3491525,
+          "total": 25000
+        },
+        {
+          "ms": 157.8496,
+          "steps": 3491525,
+          "total": 25000
+        },
+        {
+          "ms": 171.0931,
+          "steps": 3491525,
+          "total": 25000
+        },
+        {
+          "ms": 178.68210000000002,
+          "steps": 3491525,
+          "total": 25000
+        },
+        {
+          "ms": 144.8219,
+          "steps": 3491525,
+          "total": 25000
+        }
+      ],
+      "sql": "SELECT COUNT(*) FROM source_maps s CROSS JOIN index_targets t ON t.source_id=s.id WHERE t.kind=2 AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2)))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (2) AND value = ?1))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (5) AND value IN (SELECT value FROM json_each(?2))))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (3) AND num IS NULL AND typed = 1 AND value > ?3))) AND ((EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND predicate_id IN (3) AND num IS NULL AND typed = 1 AND value < ?4))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?5 AND r.rel_path=s.rel_path AND r.source_version=s.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?6 AND r.rel_path=s.rel_path AND r.source_version=s.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=?7 AND r.rel_path=s.rel_path AND r.source_version=s.source_version)"
+    }
+  ],
+  "complete": [
+    {
+      "ms": 37.252599999999994,
+      "name": "all",
+      "phases": [
+        0.1771,
+        31.521100000000004,
+        0.29119999999999635,
+        2.8291999999999966
+      ]
+    },
+    {
+      "ms": 75.0682,
+      "name": "open",
+      "phases": [
+        0.1395,
+        69.2127,
+        0.48750000000001137,
+        3.094399999999993
+      ]
+    },
+    {
+      "ms": 135.6845,
+      "name": "alice_month",
+      "phases": [
+        0.2086,
+        128.54270000000002,
+        0.7072000000000003,
+        2.7840999999999667
+      ]
+    },
+    {
+      "ms": 152.3716,
+      "name": "either_month",
+      "phases": [
+        0.3006,
+        146.0456,
+        0.6551000000000045,
+        2.445999999999998
+      ]
+    }
+  ],
+  "cache_controls": [
+    {
+      "ms": 32.5038,
+      "name": "all",
+      "phase": "after_page",
+      "steps": 720009
+    },
+    {
+      "ms": 34.6736,
+      "name": "all",
+      "phase": "after_cache_clear",
+      "steps": 720009
+    },
+    {
+      "ms": 79.1872,
+      "name": "open",
+      "phase": "after_page",
+      "steps": 1397509
+    },
+    {
+      "ms": 87.5615,
+      "name": "open",
+      "phase": "after_cache_clear",
+      "steps": 1397509
+    },
+    {
+      "ms": 124.1639,
+      "name": "alice_month",
+      "phase": "after_page",
+      "steps": 2789010
+    },
+    {
+      "ms": 140.6553,
+      "name": "alice_month",
+      "phase": "after_cache_clear",
+      "steps": 2789010
+    },
+    {
+      "ms": 133.8422,
+      "name": "either_month",
+      "phase": "after_page",
+      "steps": 3491525
+    },
+    {
+      "ms": 132.7836,
+      "name": "either_month",
+      "phase": "after_cache_clear",
+      "steps": 3491525
+    }
+  ]
+}

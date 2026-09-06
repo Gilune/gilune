@@ -1,0 +1,120 @@
+{
+  "facts": 320000,
+  "limits": "Storage-only. Includes all facts, duplicate row identity, typed/folded indexes, targets, maps and FTS. Maintenance triggers and production query APIs are not implemented. No stale/legacy rows existed in this fixture.",
+  "roundtrip_differences": 0,
+  "storage": {
+    "allocated_bytes": 187211776,
+    "objects": [
+      {
+        "bytes": 7884800,
+        "name": "compact_facts"
+      },
+      {
+        "bytes": 7208960,
+        "name": "compact_predicate_value"
+      },
+      {
+        "bytes": 7208960,
+        "name": "compact_predicate_folded"
+      },
+      {
+        "bytes": 7204864,
+        "name": "compact_target_value"
+      },
+      {
+        "bytes": 6922240,
+        "name": "lines_fts_data"
+      },
+      {
+        "bytes": 6459392,
+        "name": "lines"
+      },
+      {
+        "bytes": 4698112,
+        "name": "compact_predicate_number"
+      },
+      {
+        "bytes": 3682304,
+        "name": "index_targets"
+      },
+      {
+        "bytes": 3076096,
+        "name": "source_maps"
+      },
+      {
+        "bytes": 1716224,
+        "name": "sqlite_autoindex_index_targets_1"
+      },
+      {
+        "bytes": 1277952,
+        "name": "lines_path"
+      },
+      {
+        "bytes": 536576,
+        "name": "lines_fts_docsize"
+      },
+      {
+        "bytes": 167936,
+        "name": "fact_sources"
+      },
+      {
+        "bytes": 61440,
+        "name": "sqlite_autoindex_fact_sources_1"
+      },
+      {
+        "bytes": 16384,
+        "name": "sqlite_autoindex_source_maps_1"
+      },
+      {
+        "bytes": 12288,
+        "name": "sqlite_schema"
+      },
+      {
+        "bytes": 12288,
+        "name": "lines_fts_idx"
+      },
+      {
+        "bytes": 4096,
+        "name": "sqlite_sequence"
+      },
+      {
+        "bytes": 4096,
+        "name": "sqlite_autoindex_predicate_kinds_1"
+      },
+      {
+        "bytes": 4096,
+        "name": "sqlite_autoindex_namespaces_1"
+      },
+      {
+        "bytes": 4096,
+        "name": "sqlite_autoindex_index_predicates_1"
+      },
+      {
+        "bytes": 4096,
+        "name": "sqlite_autoindex_index_meta_1"
+      },
+      {
+        "bytes": 4096,
+        "name": "predicate_kinds"
+      },
+      {
+        "bytes": 4096,
+        "name": "namespaces"
+      },
+      {
+        "bytes": 4096,
+        "name": "lines_fts_config"
+      },
+      {
+        "bytes": 4096,
+        "name": "index_predicates"
+      },
+      {
+        "bytes": 4096,
+        "name": "index_meta"
+      }
+    ],
+    "vacuum_bytes": 57831424
+  },
+  "unbound": 0
+}

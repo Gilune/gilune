@@ -11,6 +11,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+
 import uniffi.gilune_ffi.PluginInfo
 import kotlin.test.Test
 import kotlin.test.assertEquals

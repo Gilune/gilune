@@ -1,0 +1,23 @@
+    BENCH fixture=C:\Users\David\AppData\Local\Temp\gilune-cross-plugin-bench-9149222948002186008
+    BENCH DSL=type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01
+    BENCH REQUEST=SearchRequest(clauses=[SearchClause(constraints=[FactAt(predicate=org.memory.tasks.state, op=EXISTS, value=, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.tasks.state, op=EQ, value=open, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.people.connection, op=EQ, value=["assign","alice"], locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.tasks.due, op=GT, value=2026-08-31, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.tasks.due, op=LT, value=2026-10-01, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false)], lineMode=true, extensionCandidates=false, groupByNote=false, bodyNeedles=[], nameNeedles=[], sortPredicate=, requiredNamespaces=[org.memory.people, org.memory.tasks], extensionKey=|2026-09-06|[content, file, path, people.connected, people.connection, people.mention, people.page-connection, people.ref]|task|, pageSize=50, maxLines=1, cursor=null)
+    BENCH DATA tasks=10000 documents=100 setup_ms=4278.0524
+    BENCH DSL_COMPILE median_ms=0.11726900000000001
+    BENCH QUERY=type DSL=type:task matches=10000 first50_cold_ms=103.06 warm_median_ms=73.5994 warm_min_ms=72.6524 warm_max_ms=74.7122
+    BENCH QUERY=open DSL=type:task is:open matches=8500 first50_cold_ms=84.6099 warm_median_ms=83.7367 warm_min_ms=83.0609 warm_max_ms=83.8329
+    BENCH QUERY=assigned DSL=type:task is:open people.connection:assign:@alice matches=5000 first50_cold_ms=90.1777 warm_median_ms=89.8422 warm_min_ms=89.6291 warm_max_ms=90.6669
+    BENCH QUERY=alice_month DSL=type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 matches=3500 first50_cold_ms=136.8036 warm_median_ms=138.0809 warm_min_ms=135.258 warm_max_ms=142.4956
+    BENCH QUERY=alice_bob_month DSL=type:task is:open people.connection:assign IN ["alice", "bob"] due:after:2026-08-31 due:before:2026-10-01 matches=5000 first50_cold_ms=154.1594 warm_median_ms=152.5526 warm_min_ms=152.236 warm_max_ms=155.1936
+    BENCH ENUM sort=default first500_warm_median_ms=140.3711 all_ms=991.4872 pages=7
+    BENCH ENUM sort=org.memory.tasks.due first500_warm_median_ms=262.6577 all_ms=1563.8703 pages=7
+    BENCH DATA tasks=50000 documents=500 setup_ms=13211.3075
+    BENCH DSL_COMPILE median_ms=0.09672
+    BENCH QUERY=type DSL=type:task matches=50000 first50_cold_ms=400.5413 warm_median_ms=371.1221 warm_min_ms=370.9089 warm_max_ms=379.5967
+    BENCH QUERY=open DSL=type:task is:open matches=42500 first50_cold_ms=440.9238 warm_median_ms=442.9411 warm_min_ms=438.4299 warm_max_ms=447.0187
+    BENCH QUERY=assigned DSL=type:task is:open people.connection:assign:@alice matches=25000 first50_cold_ms=503.6473 warm_median_ms=502.0882 warm_min_ms=499.2091 warm_max_ms=506.1346
+    BENCH QUERY=alice_month DSL=type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 matches=17500 first50_cold_ms=1349.393 warm_median_ms=1355.1247 warm_min_ms=1348.4428 warm_max_ms=1360.5416
+    BENCH QUERY=alice_bob_month DSL=type:task is:open people.connection:assign IN ["alice", "bob"] due:after:2026-08-31 due:before:2026-10-01 matches=25000 first50_cold_ms=996.4627 warm_median_ms=1040.4794 warm_min_ms=978.9309 warm_max_ms=1118.0025
+    BENCH ENUM sort=default first500_warm_median_ms=1376.4522 all_ms=47443.6632 pages=35
+    BENCH ENUM sort=org.memory.tasks.due first500_warm_median_ms=1670.3899 all_ms=56181.2619 pages=35
+CrossPluginSearchBenchmarkTest[desktop] > measureRealTaskAndPeopleQueries[desktop] PASSED
+BUILD SUCCESSFUL in 3m 8s

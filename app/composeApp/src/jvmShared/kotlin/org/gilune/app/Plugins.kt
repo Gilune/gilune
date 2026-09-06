@@ -5,44 +5,19 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugin.sdk.escapeJsonString
+import org.gilune.plugin.sdk.jsonBoolean
+import org.gilune.plugin.sdk.jsonString
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.tasksFilter
+import org.gilune.plugins.tasks.tasksPanelEnabled
+
 import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.PluginContribution
 import uniffi.gilune_ffi.PluginDeclaration
 import uniffi.gilune_ffi.PluginInfo
 import uniffi.gilune_ffi.SourceSummary
-
-object Slots {
-    const val CAPTURE_ACTIONS = "capture.actions"
-    const val NOTE_ACTIONS = "note.actions"
-    const val NAVIGATION = "navigation"
-    const val COMMAND_PALETTE = "command.palette"
-    const val SETTINGS_FORM = "settings.form"
-
-    /// The editor seams ADR 0015 § 5 adds. Shell-published: anyone may
-    /// contribute, and the shell renders what they declare.
-    const val EDITOR_DECORATIONS = "editor.decorations"
-    const val EDITOR_SUGGEST = "editor.suggest"
-    const val SEARCH_TYPES = "search.types"
-    const val SUGGEST_VALUES = "suggest.values"
-
-    /// A fence info string plus a renderer (§ 5), on the same shell-owned
-    /// terms as [EDITOR_DECORATIONS]: rendering may never change a byte,
-    /// and an info string nobody registered stays an ordinary code block.
-    ///
-    /// **Its first and only producer in v1 is the shell itself** — the
-    /// `filter` fence belongs to the search machinery, not to the tasks
-    /// plugin (§ 4), which is what makes a block go on rendering when
-    /// every removable plugin is gone. The tasks plugin contributes
-    /// nothing here; what it contributes is a *type* ([SEARCH_TYPES]),
-    /// and a block that asked for a type nobody registered says so.
-    ///
-    /// Honestly, one producer is the shape that let `settings.form` rot:
-    /// the registry is real ([BlockRenderers]) and takes a contribution as
-    /// an entry, but the second producer is still notional.
-    const val EDITOR_BLOCKS = "editor.blocks"
-
-
-}
 
 const val VOICE_CAPTURE_PLUGIN = "org.memory.voice-capture"
 const val RECORD_VOICE_ACTION = "record-voice"
@@ -673,48 +648,3 @@ fun List<PluginInfo>.moonshineModel(): MoonshineModel = moonshineModel(moonshine
 /// model or silently re-enable a mobile-data download.
 fun moonshineSettingsDocument(model: String, caption: Boolean, wifiOnly: Boolean): String =
     """{"$MODEL_KEY":"${escapeJsonString(model)}","$CAPTION_KEY":$caption,"$WIFI_ONLY_KEY":$wifiOnly}"""
-
-/// One string value out of a flat JSON document, escapes handled. Plugin
-/// settings and contribution configs are opaque strings with no schema
-/// (a debt ADR 0015 names), and the shell reads a handful of known keys
-/// out of them; a targeted extraction avoids growing a JSON dependency
-/// for that. `\uXXXX` is not decoded — no key the shell reads uses one.
-internal fun jsonString(document: String, key: String): String? =
-    Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
-        .find(document)?.groupValues?.get(1)?.let(::unescapeJsonString)
-
-/// The same targeted extraction for a boolean. Absent — or anything that
-/// is not `true`/`false` — is null, so every caller states its own default
-/// rather than inheriting one from a parse failure.
-internal fun jsonBoolean(document: String, key: String): Boolean? =
-    Regex("\"" + Regex.escape(key) + "\"\\s*:\\s*(true|false)\\b")
-        .find(document)?.groupValues?.get(1)?.toBooleanStrictOrNull()
-
-private fun unescapeJsonString(raw: String): String = buildString(raw.length) {
-    var index = 0
-    while (index < raw.length) {
-        val char = raw[index]
-        if (char == '\\' && index + 1 < raw.length) {
-            append(
-                when (val escaped = raw[index + 1]) {
-                    'n' -> '\n'
-                    't' -> '\t'
-                    'r' -> '\r'
-                    'b' -> '\b'
-                    else -> escaped
-                },
-            )
-            index += 2
-        } else {
-            append(char)
-            index++
-        }
-    }
-}
-
-internal fun escapeJsonString(value: String): String =
-    value.replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")

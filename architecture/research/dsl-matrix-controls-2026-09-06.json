@@ -1,0 +1,70 @@
+[
+  {
+    "analyzed_ms": 438.3675,
+    "analyzed_warm_ms": 400.7754,
+    "matches": 50000,
+    "name": "all",
+    "timeout_or_error": null,
+    "vacuum_only_ms": null
+  },
+  {
+    "analyzed_ms": 15895.7903,
+    "matches": 42500,
+    "name": "not_done",
+    "timeout_or_error": null,
+    "vacuum_only_ms": 16165.7638
+  },
+  {
+    "analyzed_ms": 21625.9473,
+    "matches": 25000,
+    "name": "not_bob_month",
+    "timeout_or_error": null,
+    "vacuum_only_ms": null
+  },
+  {
+    "analyzed_ms": 16844.5402,
+    "matches": 7500,
+    "name": "not_either",
+    "timeout_or_error": null,
+    "vacuum_only_ms": null
+  },
+  {
+    "analyzed_ms": 30020.9953,
+    "matches": null,
+    "name": "not_week",
+    "timeout_or_error": "storage: interrupted",
+    "vacuum_only_ms": null
+  },
+  {
+    "analyzed_ms": 345.6524,
+    "analyzed_warm_ms": 340.9884,
+    "matches": 1,
+    "name": "body_sparse",
+    "timeout_or_error": null,
+    "vacuum_only_ms": null
+  },
+  {
+    "analyzed_ms": 405.3604,
+    "analyzed_warm_ms": 399.1499,
+    "matches": 50000,
+    "name": "root_property",
+    "timeout_or_error": null,
+    "vacuum_only_ms": null
+  },
+  {
+    "analyzed_ms": 1198.2250999999999,
+    "analyzed_warm_ms": 1148.5375,
+    "matches": 17500,
+    "name": "alice_month_due",
+    "timeout_or_error": null,
+    "vacuum_only_ms": 1558.7296
+  },
+  {
+    "analyzed_ms": 623.0402,
+    "analyzed_warm_ms": 611.5849,
+    "matches": 50000,
+    "name": "all_due_nullable",
+    "timeout_or_error": null,
+    "vacuum_only_ms": null
+  }
+]

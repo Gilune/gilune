@@ -2,6 +2,12 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugins.tasks.TASK_DUE_PREDICATE
+import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.kernelTaskRows
+
 import java.time.LocalDate
 
 /// § 4's cap, and it is not optional: matching is cheap and *rendering*

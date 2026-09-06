@@ -104,12 +104,27 @@ pub struct SearchLine {
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SearchHit {
+    pub facts: Vec<SearchProperty>,
     pub rel_path: String,
     pub name: String,
     pub name_matched: bool,
     pub lines: Vec<SearchLine>,
+    pub items: Vec<SearchItem>,
     pub more_matches: u64,
     pub match_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SearchItem {
+    pub key: u64,
+    pub source_version: String,
+    pub map_version: u32,
+    pub range: crate::SourceSpan,
+    pub own_ranges: Vec<crate::SourceSpan>,
+    pub first_line: u32,
+    pub text: String,
+    pub ranges: Vec<SearchRange>,
+    pub facts: Vec<SearchProperty>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -120,6 +135,51 @@ pub struct SearchPage {
     pub index_complete: bool,
     pub issues: Vec<String>,
     pub generation: String,
+}
+
+/// A page can arrive before its exact, generation-bound count.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchSlice {
+    pub hits: Vec<SearchHit>,
+    pub total_hits: Option<u64>,
+    pub next_cursor: Option<String>,
+    pub index_complete: bool,
+    pub issues: Vec<String>,
+    pub generation: String,
+}
+
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SearchCount {
+    pub total_hits: u64,
+    pub index_complete: bool,
+    pub issues: Vec<String>,
+    pub generation: String,
+}
+
+#[derive(uniffi::Object)]
+pub struct SearchQuery {
+    query: core::SearchQuery,
+    extension: Option<ExtensionAdapter>,
+}
+
+#[uniffi::export]
+impl SearchQuery {
+    pub fn cancel(&self) { self.query.cancel(); }
+
+    pub fn page(&self, cursor: Option<String>) -> FfiResult<SearchSlice> {
+        let slice = self.query.page(cursor, self.extension.as_ref().map(|e| e as &dyn core::SearchExtension))?;
+        let page: SearchPage = core::SearchPage { hits: slice.hits, total_hits: 0,
+            next_cursor: slice.next_cursor, index_complete: slice.index_complete,
+            issues: slice.issues, generation: slice.generation }.into();
+        Ok(SearchSlice { hits: page.hits, total_hits: slice.total_hits, next_cursor: page.next_cursor,
+            index_complete: page.index_complete, issues: page.issues, generation: page.generation })
+    }
+
+    pub fn count(&self, generation: String) -> FfiResult<SearchCount> {
+        let count = self.query.count(&generation, self.extension.as_ref().map(|e| e as &dyn core::SearchExtension))?;
+        Ok(SearchCount { total_hits: count.total_hits, index_complete: count.index_complete,
+            issues: count.issues, generation: count.generation })
+    }
 }
 
 impl From<SearchRequest> for core::SearchRequest {
@@ -165,11 +225,18 @@ impl From<core::SearchPage> for SearchPage {
                 .hits
                 .into_iter()
                 .map(|h| SearchHit {
+                    facts: h.facts.into_iter().map(Into::into).collect(),
                     rel_path: h.rel_path,
                     name: h.name,
                     name_matched: h.name_matched,
                     more_matches: h.more_matches,
                     match_count: h.match_count,
+                    items: h.items.into_iter().map(|i| SearchItem {
+                        key:i.key,source_version:i.source_version,map_version:i.map_version,
+                        range:i.range.into(),own_ranges:i.own_ranges.into_iter().map(Into::into).collect(),
+                        first_line:i.first_line,text:i.text,ranges:i.ranges.into_iter().map(|r| SearchRange { start:r.start,end:r.end }).collect(),
+                        facts:i.facts.into_iter().map(Into::into).collect(),
+                    }).collect(),
                     lines: h
                         .lines
                         .into_iter()
@@ -200,6 +267,13 @@ impl From<core::SearchPage> for SearchPage {
 
 #[uniffi::export]
 impl Gilune {
+    pub fn prepare_search(&self, request: SearchRequest, item_mode: bool, extension: Option<Arc<dyn SearchExtension>>) -> FfiResult<Arc<SearchQuery>> {
+        Ok(Arc::new(SearchQuery { query: self.store().prepare_search(request.into(), item_mode)?, extension: extension.map(ExtensionAdapter) }))
+    }
+    pub fn search_items(&self, request: SearchRequest, extension: Option<Arc<dyn SearchExtension>>) -> FfiResult<SearchPage> {
+        let adapter=extension.map(ExtensionAdapter);
+        Ok(self.store().search_items(&request.into(),adapter.as_ref().map(|e| e as &dyn core::SearchExtension))?.into())
+    }
     /// One bounded page from an index snapshot. Errors propagate; an index
     /// behind its feed returns explicit issues alongside any available results.
     pub fn search(
@@ -256,5 +330,69 @@ mod tests {
         assert!(page.index_complete);
         assert_eq!(page.hits[0].lines[0].number, 2);
         assert_eq!(page.hits[0].lines[0].ranges[0].end, 4);
+    }
+    #[test]
+    fn scoped_membership_survives_the_public_boundary_and_clause_negation() {
+        let dir = tempfile::tempdir().expect("temp");
+        let g = Gilune::open(dir.path().to_string_lossy().into_owned()).expect("open");
+        std::fs::write(
+            dir.path().join("fixture.md"),
+            "---\ngilune-id: fixture\ncolour: red\n---\nfirst\nsecond",
+        )
+        .expect("write");
+        g.reconcile().expect("reconcile");
+        let mut request = SearchRequest {
+            clauses: vec![SearchClause {
+                constraints: vec![Constraint::FactIn {
+                    predicate: "frontmatter.colour".into(),
+                    values: vec!["red".into(), "blue".into()],
+                    locality: crate::FactLocality::Exact,
+                }],
+                negated: false,
+                case_sensitive: false,
+                residual: None,
+                never: false,
+            }],
+            line_mode: true,
+            extension_candidates: false,
+            group_by_note: false,
+            body_needles: vec![],
+            name_needles: vec![],
+            sort_predicate: String::new(),
+            required_namespaces: vec![],
+            extension_key: String::new(),
+            page_size: 10,
+            max_lines: 5,
+            cursor: None,
+        };
+        assert_eq!(
+            g.search(request.clone(), None)
+                .expect("exact location")
+                .total_hits,
+            0
+        );
+        request.clauses[0].constraints = vec![Constraint::FactIn {
+            predicate: "frontmatter.colour".into(),
+            values: vec!["red".into()],
+            locality: crate::FactLocality::DocumentRoot,
+        }];
+        assert_eq!(
+            g.search(request.clone(), None)
+                .expect("root filter")
+                .total_hits,
+            2
+        );
+        request.clauses[0].negated = true;
+        assert_eq!(
+            g.search(request.clone(), None).expect("NOT IN").total_hits,
+            0
+        );
+        request.clauses[0].constraints = vec![Constraint::FactAt {
+            predicate: "frontmatter.colour".into(),
+            op: crate::ConstraintOp::Eq,
+            value: "blue".into(),
+            locality: crate::FactLocality::DocumentRoot,
+        }];
+        assert_eq!(g.search(request, None).expect("NOT equality").total_hits, 2);
     }
 }

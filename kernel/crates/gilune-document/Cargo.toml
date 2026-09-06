@@ -1,0 +1,16 @@
+[package]
+name = "gilune-document"
+description = "Pure source snapshots, Markdown locations and validated text changes for plugins and the kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hex.workspace = true
+pulldown-cmark = { version = "=0.13.4", default-features = false }
+serde_yaml_ng = "=0.10.0"
+sha2.workspace = true
+thiserror.workspace = true
+unicode-normalization = "=0.1.24"
+unicode-casefold = "=0.2.0"

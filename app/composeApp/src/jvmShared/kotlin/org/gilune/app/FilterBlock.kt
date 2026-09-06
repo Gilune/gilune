@@ -15,6 +15,12 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugins.tasks.TASK_DUE_PREDICATE
+import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.kernelTaskRows
+
 import java.time.LocalDate
 import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.PluginInfo
@@ -143,7 +149,7 @@ fun runFilterBlock(
     plugins: List<PluginInfo>,
     today: LocalDate,
     cap: Int = FILTER_ROW_CAP,
-): FilterResult = evaluateFilterBlock(gilune, vaultDir, block, searchTypesFor(plugins), today, cap)
+): FilterResult = evaluateFilterBlock(gilune, vaultDir, block, searchTypesFor(plugins), today, cap, searchOperatorsFor(plugins, today))
 
 /// The same against a type registry directly — what [runFilterBlock] calls
 /// once it has one, and the form a renderer uses when it has already built
@@ -159,6 +165,7 @@ fun evaluateFilterBlock(
     types: List<SearchType>,
     today: LocalDate,
     cap: Int = FILTER_ROW_CAP,
+    operators: SearchOperators = SearchOperators(),
 ): FilterResult {
     val classified = classifyFilterBlock(block, types)
     if (classified !is FilterBlock.Runnable) {
@@ -166,7 +173,7 @@ fun evaluateFilterBlock(
         return FilterResult.Hint(filterHint(classified, types).orEmpty())
     }
     val task = classified.typeKey.equals(TASK_SEARCH_TYPE, ignoreCase = true)
-    val compiled = compileSearch(classified.query, types = types, today = today,
+    val compiled = compileSearch(classified.query, operators = operators, types = types, today = today,
         maxLines = if (task) 1 else 0, pageSize = cap.coerceIn(1, 500).toUInt(),
         groupByNote = !task, sortPredicate = if (task) TASK_DUE_PREDICATE else "")
         ?: return FilterResult.Hint(FILTER_NO_MATCHES)

@@ -1,0 +1,37 @@
+SQL=WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c3 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value > ?),c4 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value < ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1,1,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c3 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c4 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS=[Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("open"), Text("org.memory.people.connection"), Text("[\"assign\",\"alice\"]"), Text("org.memory.tasks.due"), Text("2026-08-31"), Text("org.memory.tasks.due"), Text("2026-10-01"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+PLAN (2, 0, "CO-ROUTINE items")
+PLAN (5, 2, "MATERIALIZE c0")
+PLAN (9, 5, "SEARCH facts USING INDEX facts_predicate_num (predicate=?)")
+PLAN (29, 2, "SCAN c0")
+PLAN (41, 2, "USE TEMP B-TREE FOR DISTINCT")
+PLAN (46, 0, "SCAN u")
+PLAN (52, 0, "LIST SUBQUERY 7")
+PLAN (55, 52, "MATERIALIZE c1")
+PLAN (59, 55, "SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)")
+PLAN (80, 52, "SCAN c1")
+PLAN (103, 0, "LIST SUBQUERY 8")
+PLAN (106, 103, "MATERIALIZE c2")
+PLAN (110, 106, "SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)")
+PLAN (131, 103, "SCAN c2")
+PLAN (154, 0, "LIST SUBQUERY 9")
+PLAN (157, 154, "MATERIALIZE c3")
+PLAN (161, 157, "SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)")
+PLAN (187, 154, "SCAN c3")
+PLAN (210, 0, "LIST SUBQUERY 10")
+PLAN (213, 210, "MATERIALIZE c4")
+PLAN (217, 213, "SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)")
+PLAN (244, 210, "SCAN c4")
+PLAN (265, 0, "CORRELATED SCALAR SUBQUERY 11")
+PLAN (270, 265, "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)")
+PLAN (287, 0, "CORRELATED SCALAR SUBQUERY 12")
+PLAN (292, 287, "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)")
+PLAN (309, 0, "CORRELATED SCALAR SUBQUERY 13")
+PLAN (314, 309, "SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)")
+PLAN (330, 0, "SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)")
+PLAN (350, 0, "USE TEMP B-TREE FOR ORDER BY")
+SQL rows=17500 vm_steps=7574562 fullscan_steps=207995 sorts=1
+NATIVE SQL_COMPOSITION median=16.1µs
+NATIVE SQL_SELECTION median=755.7248ms
+NATIVE ITEM_SERVICE median=867.6771ms source_reads=0 (excludes Store entry and FFI)
+test search::items::profile::profile_real_cross_plugin_item_query ... ok

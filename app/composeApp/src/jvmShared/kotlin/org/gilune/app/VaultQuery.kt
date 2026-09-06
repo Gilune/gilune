@@ -3,6 +3,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Compiled
+import org.gilune.plugin.sdk.FrontMatterEntry
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.SearchedNote
+
 import java.time.LocalDate
 import uniffi.gilune_ffi.Constraint
 import uniffi.gilune_ffi.Gilune
@@ -16,9 +21,12 @@ import uniffi.gilune_ffi.TextTarget
 
 const val SEARCH_PAGE_SIZE = 50u
 
-internal class KernelSearch(val request: SearchRequest, val extension: SearchExtension?) {
+internal class KernelSearch(val request: SearchRequest, val extension: SearchExtension?, val itemScoped: Boolean = false) {
+    fun prepare(gilune: Gilune): uniffi.gilune_ffi.SearchQuery = gilune.prepareSearch(request, itemScoped, extension)
+
     fun page(gilune: Gilune, cursor: String? = null): SearchPage =
-        gilune.search(request.copy(cursor = cursor), extension)
+        if (itemScoped) gilune.searchItems(request.copy(cursor = cursor), extension)
+        else gilune.search(request.copy(cursor = cursor), extension)
 }
 
 internal fun compileSearch(
@@ -32,6 +40,7 @@ internal fun compileSearch(
     sortPredicate: String = "",
 ): KernelSearch? {
     val parsed = parseQuery(query, operators, types, today) ?: return null
+    require(!parsed.type.itemScoped || parsed.type.indexed) { "Item-scoped types must declare indexed membership" }
     val predicates = mutableListOf<(SearchedNote) -> Boolean>()
     val clauses = mutableListOf<SearchClause>()
     fun clause(constraints: List<Constraint>, negated: Boolean = false, sensitive: Boolean = false,
@@ -66,18 +75,18 @@ internal fun compileSearch(
     return KernelSearch(
         SearchRequest(
             clauses = clauses,
-            lineMode = parsed.type.extract != null,
+            lineMode = parsed.type.itemScoped || parsed.type.extract != null,
             extensionCandidates = extractor != null,
             groupByNote = groupByNote,
             bodyNeedles = positive.mapNotNull { it.term.bodyNeedle }.filter { it.isNotEmpty() },
             nameNeedles = positive.mapNotNull { it.term.nameNeedle }.filter { it.isNotEmpty() },
             sortPredicate = sortPredicate,
-            requiredNamespaces = parsed.type.indexNamespaces,
-            extensionKey = "$query|$today|${operators.names.sorted()}|${parsed.type.key}|${parsed.type.caseSensitiveFilter}",
+            requiredNamespaces = (parsed.type.indexNamespaces + parsed.terms.flatMap { it.term.indexNamespaces }).distinct().sorted(),
+            extensionKey = "${if (extension == null) "" else query}|$today|${operators.names.sorted()}|${parsed.type.key}|${parsed.type.caseSensitiveFilter}",
             pageSize = pageSize.coerceIn(1u, 500u),
             maxLines = maxLines.coerceIn(0, 200).toUInt(),
             cursor = null,
-        ), extension,
+        ), extension, parsed.type.itemScoped,
     )
 }
 
@@ -94,7 +103,9 @@ private fun SearchDocument.asPluginNote() = SearchedNote(
 internal fun uniffi.gilune_ffi.SearchHit.displayHit() = SearchHit(
     relPath, name, nameMatched,
     lines.map { line -> MatchedLine(line.number.toInt(), line.text,
-        line.ranges.map { it.start.toInt() until it.end.toInt() }) },
+        line.ranges.map { it.start.toInt() until it.end.toInt() }) } +
+        items.map { item -> MatchedLine(item.firstLine.toInt(), item.text,
+            item.ranges.map { it.start.toInt() until it.end.toInt() }) },
     moreMatches.toInt(), matchCount.toInt(),
 )
 
@@ -120,11 +131,14 @@ fun queryVault(
 ): List<SearchHit> {
     val search = compileSearch(query, operators, types, today, maxLines, pageSize = 500u) ?: return emptyList()
     val hits = mutableListOf<SearchHit>()
-    var cursor: String? = null
-    do {
-        val page = search.page(gilune, cursor).requireComplete()
-        hits += page.hits.map { it.displayHit() }
-        cursor = page.nextCursor
-    } while (cursor != null)
+    search.prepare(gilune).use { reader ->
+        var cursor: String? = null
+        do {
+            val page = reader.page(cursor)
+            if (!page.indexComplete) throw SearchIndexPending(page.issues)
+            hits += page.hits.map { it.displayHit() }
+            cursor = page.nextCursor
+        } while (cursor != null)
+    }
     return hits
 }

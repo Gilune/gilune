@@ -1,0 +1,49 @@
+ONE ROOT UPDATE baseline median=1.3939ms
+PROJECTION build=630.3321ms added_bytes=8564736
+ORDERED first page size=1 median=412.9µs
+ORDERED first page size=30 median=616.6µs
+ORDERED first page size=500 median=4.2442ms
+ORDERED page 19 median=4.2912ms
+EXACT COUNT first=324.1909ms
+EXACT COUNT cached median=40.2µs
+FOREGROUND 30 rows during separate-connection count median=665.5µs; count_elapsed=325.7035ms
+ALL 50000 at 500/page elapsed=735.7089ms; zero source reads
+ONE ROOT UPDATE plus refresh median=1.3837ms
+EXACT "missing" page rows=0 elapsed=117.7µs
+EXACT "alpha" page rows=30 elapsed=634.3µs
+SELECTIVE one matching root median=375.3µs
+NEGATIVE ONLY no matches median=111.5462ms
+FIRST PAGE PLAN
+priority=1 vm_steps=56151 sorts=0
+SELECT o.rel_path,o.source_version,o.k0,o.k1,o.k2,o.k3 FROM prototype_order o INDEXED BY prototype_order_key JOIN source_maps s ON s.rel_path=o.rel_path AND s.source_version=o.source_version WHERE o.layout=1 AND EXISTS(SELECT 1 FROM (SELECT rel_path, line, item_key, source_version, namespace FROM facts INDEXED BY facts_path WHERE predicate = 'fixture.kind' AND value = 'entry' AND line IS NULL AND item_key IS NULL) f WHERE f.rel_path=o.rel_path AND f.source_version=o.source_version AND f.namespace IN (SELECT value FROM json_each('["fixture"]'))) AND ((EXISTS(SELECT 1 FROM (SELECT rel_path, line, item_key, source_version, namespace FROM facts INDEXED BY facts_path WHERE predicate = 'fixture.key' AND gilune_fold(value) >= 'al' AND gilune_fold(value) < 'am' AND line IS NULL AND item_key IS NULL) f WHERE f.rel_path=o.rel_path AND f.source_version=o.source_version AND f.namespace IN (SELECT value FROM json_each('["fixture"]'))))) AND NOT ((EXISTS(SELECT 1 FROM (SELECT rel_path, line, item_key, source_version, namespace FROM facts INDEXED BY facts_path WHERE predicate = 'fixture.key' AND value = 'al' AND line IS NULL AND item_key IS NULL) f WHERE f.rel_path=o.rel_path AND f.source_version=o.source_version AND f.namespace IN (SELECT value FROM json_each('["fixture"]'))))) ORDER BY o.k0,o.k1,o.k2,o.k3,o.rel_path LIMIT 501
+9 | 0 | SEARCH o USING INDEX prototype_order_key (layout=?)
+15 | 0 | CORRELATED SCALAR SUBQUERY 3
+20 | 15 | SEARCH facts USING INDEX facts_path (rel_path=?)
+39 | 15 | LIST SUBQUERY 2
+41 | 39 | SCAN json_each VIRTUAL TABLE INDEX 1:
+61 | 0 | CORRELATED SCALAR SUBQUERY 6
+66 | 61 | SEARCH facts USING INDEX facts_path (rel_path=?)
+89 | 61 | LIST SUBQUERY 5
+91 | 89 | SCAN json_each VIRTUAL TABLE INDEX 1:
+111 | 0 | CORRELATED SCALAR SUBQUERY 9
+116 | 111 | SEARCH facts USING INDEX facts_path (rel_path=?)
+135 | 111 | LIST SUBQUERY 8
+137 | 135 | SCAN json_each VIRTUAL TABLE INDEX 1:
+156 | 0 | SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+PAGE 19 PLAN
+priority=1 vm_steps=64200 sorts=0
+SELECT o.rel_path,o.source_version,o.k0,o.k1,o.k2,o.k3 FROM prototype_order o INDEXED BY prototype_order_key JOIN source_maps s ON s.rel_path=o.rel_path AND s.source_version=o.source_version WHERE o.layout=1 AND (o.k0,o.k1,o.k2,o.k3,o.rel_path)>(x'00416c706861',x'00616c706861',x'01',x'01','08999.md') AND EXISTS(SELECT 1 FROM (SELECT rel_path, line, item_key, source_version, namespace FROM facts INDEXED BY facts_path WHERE predicate = 'fixture.kind' AND value = 'entry' AND line IS NULL AND item_key IS NULL) f WHERE f.rel_path=o.rel_path AND f.source_version=o.source_version AND f.namespace IN (SELECT value FROM json_each('["fixture"]'))) AND ((EXISTS(SELECT 1 FROM (SELECT rel_path, line, item_key, source_version, namespace FROM facts INDEXED BY facts_path WHERE predicate = 'fixture.key' AND gilune_fold(value) >= 'al' AND gilune_fold(value) < 'am' AND line IS NULL AND item_key IS NULL) f WHERE f.rel_path=o.rel_path AND f.source_version=o.source_version AND f.namespace IN (SELECT value FROM json_each('["fixture"]'))))) AND NOT ((EXISTS(SELECT 1 FROM (SELECT rel_path, line, item_key, source_version, namespace FROM facts INDEXED BY facts_path WHERE predicate = 'fixture.key' AND value = 'al' AND line IS NULL AND item_key IS NULL) f WHERE f.rel_path=o.rel_path AND f.source_version=o.source_version AND f.namespace IN (SELECT value FROM json_each('["fixture"]'))))) ORDER BY o.k0,o.k1,o.k2,o.k3,o.rel_path LIMIT 501
+9 | 0 | SEARCH o USING INDEX prototype_order_key (layout=? AND (k0,k1,k2,k3,rel_path)>(?,?,?,?,?))
+47 | 0 | CORRELATED SCALAR SUBQUERY 3
+52 | 47 | SEARCH facts USING INDEX facts_path (rel_path=?)
+71 | 47 | LIST SUBQUERY 2
+73 | 71 | SCAN json_each VIRTUAL TABLE INDEX 1:
+93 | 0 | CORRELATED SCALAR SUBQUERY 6
+98 | 93 | SEARCH facts USING INDEX facts_path (rel_path=?)
+121 | 93 | LIST SUBQUERY 5
+123 | 121 | SCAN json_each VIRTUAL TABLE INDEX 1:
+143 | 0 | CORRELATED SCALAR SUBQUERY 9
+148 | 143 | SEARCH facts USING INDEX facts_path (rel_path=?)
+167 | 143 | LIST SUBQUERY 8
+169 | 167 | SCAN json_each VIRTUAL TABLE INDEX 1:
+188 | 0 | SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)

@@ -12,6 +12,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SuggestCandidate
+
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable

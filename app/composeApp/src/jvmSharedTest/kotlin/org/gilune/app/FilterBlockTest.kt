@@ -9,6 +9,12 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
+import org.gilune.plugins.tasks.tasksDeclaration
+import org.gilune.plugins.tasks.tasksSettingsDocument
+
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals

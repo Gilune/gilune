@@ -18,35 +18,13 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SuggestCandidate
+import org.gilune.plugin.sdk.SuggestField
+
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import java.time.LocalDate
 import java.util.Locale
-
-/// One offerable row. `display` is the words, `detail` the machine form
-/// shown alongside — the resolved ISO date in stage two, the field key in
-/// stage one — and `insert` the exact token to write.
-///
-/// `insert` is null for a row that cannot be accepted yet: a date still
-/// being typed keeps the menu alive without being insertable (see
-/// [DateCandidate]). Enter on such a row writes nothing.
-data class SuggestCandidate(val display: String, val detail: String, val insert: String?)
-
-/// A field the `/` menu offers in stage one, and whose values it offers
-/// in stage two. Shaped to be **built from a contribution**: ADR 0015 § 3
-/// has a `tasks.fields` contribution declare `key`, `label` and a values
-/// provider id in its `config`, and [PluginExtensions.fields] turns those three
-/// strings into one of these. `due` is the first registration; a People
-/// plugin's `assignee` is another, arriving through the same door.
-///
-/// `values` is honestly Kotlin in v1 — the wasm route needs a
-/// `suggest(line, fragment) -> candidates` export the WIT contract has no
-/// shape for (§ 7). The signature is the shape that export would take.
-class SuggestField(
-    val key: String,
-    val label: String,
-    val values: (fragment: String, today: LocalDate) -> List<SuggestCandidate>,
-)
 
 /// What Enter decided: replace exactly `replaceRange` (inclusive of both
 /// ends, as `String.replaceRange(IntRange, …)` is) with exactly `text`.

@@ -21,7 +21,9 @@ anchor = (rel_path, line)          // line absent = the note itself
   `line` is **1-based within that body** — the same line number the
   shells' search surfaces already carry, so an anchor addresses the
   buffer a person sees. `None` anchors a fact to the note, and a fact
-  about a note satisfies every line of it.
+  about a note satisfies every line only under the legacy/inherited constraint
+  scope. The [search contract](../search/README.md) adds explicit `Exact` and
+  `DocumentRoot` constraints without changing stored facts or indexer inputs.
 - **Called once per changed note per pass**, in the pass that recorded
   the change, from the kernel's change feed (ADR 0020 § 2.1). Never on a
   note the feed did not name; never on the whole vault except a rebuild.
@@ -92,3 +94,141 @@ one namespace alone, removal taking a namespace and nothing else, and a
 property test over randomised edit sequences holding
 `incremental == rebuilt`. `gilune-ffi`'s `index_surface` holds the
 boundary's half, a throwing implementation included.
+
+## Opt-in full-source callbacks
+
+`SourceIndexer` / `register_source_indexer` and the SDK
+`SourceIndexerRegistration` opt into exact full Markdown source, including front
+matter and CRLF. Existing `NoteIndexer` registrations still receive the legacy
+body text with its existing newline normalization. Core `index_source` defaults
+to invoking that body callback; the FFI source adapter explicitly overrides it.
+Facts retain the same root/body-line coordinate contract for both callback types.
+Neither callback receives a kernel handle or filesystem authority.
+
+The source is retained from the same maintenance read used to derive text and
+front-matter facts. All registered namespaces share it within the existing bounded
+maintenance batch; no per-plugin file read is introduced. The tradeoff is retaining
+the raw source alongside the legacy normalized body for that batch. Search never
+calls either callback. A regression registers both forms on a CRLF document and
+checks exact source input, unchanged body-line matching, and one file read for the
+whole rebuild pass.
+
+The same namespace ownership, enabled/removal behaviour, failure handling and
+version rules apply. Switching callback input form or normalization rules requires
+a version bump and re-derivation. The SDK rejects registering both forms for one
+bundled namespace. People used source indexer version 2 for page properties and
+now uses scoped indexer version 3.
+
+## Source-qualified locations and facts
+
+`ScopedIndexer` / `register_scoped_indexer` and `ScopedIndexerRegistration` opt
+into a supplied `SourceTextSnapshot`: exact source, content fingerprint, shared
+Markdown locations and a generic parsed YAML value tree. The kernel parses the
+snapshot once per changed source in a maintenance batch. Callbacks remain pure;
+the SDK's `SourceView` navigates supplied byte offsets, locations and values
+without accessing a kernel handle. One bundled namespace chooses exactly one of
+the body, full-source or scoped callback forms.
+
+`ScopedFact { location, predicate, value }` uses `DocumentRoot`,
+`BodyLine { number }` or `MarkdownItem { key }`. The kernel validates that every
+location exists in that snapshot. A list item's key is its full-source start byte,
+valid only with that source fingerprint; it is not a durable object ID. Shared
+Markdown parsing determines item boundaries and own ranges excluding nested
+items. Domain producers independently select locations and interpret their own
+syntax. No plugin-specific syntax is interpreted by the kernel.
+
+Derived index schema 8 keeps these rows in the existing facts table. A compact
+source map holds ranges, not another copy of the prose. Every scoped namespace
+records which source it processed, including successful outputs containing no
+facts. That evidence is necessary for negative filters. All data follows ordinary
+maintenance, rebuild, move, deletion and plugin-removal rules. Invalid snapshots
+named by the change feed record an indexer refusal; ordinary text indexing remains
+available. A file refused by reconciliation before a feed event is still outside
+that maintained snapshot; discovery must reconcile and report such files separately.
+
+Schema 5 adds a compact expression index on `(predicate, gilune_fold(value))`.
+The kernel's existing simple case fold is computed into that index on fact writes;
+literal `Prefix` constraints use lower/exclusive-upper BINARY bounds over the
+folded key. Empty prefixes and prefixes ending in maximum Unicode scalars use
+the appropriate open upper bound. Wildcards remain literal; equality, contains,
+domain normalization and plugin fact contracts are unchanged. Schema 4 derived
+databases rebuild normally without rewriting source documents or plugin data.
+
+`query_locations(LocationQuery) -> LocationPage` is a paged **fact conjunction**
+over these locations. Callers declare the contributing scoped namespaces and
+use explicit `FactAt`/`FactIn` locality. Only facts from those namespaces and the
+same source version participate. All required producers must have processed that
+version, even when a negative tests absence. `Exact` joins only the same location;
+root inheritance requires `DocumentRoot` or `Inherited` explicitly. Results carry
+path, fingerprint, map version, location, full range and own ranges. Multiple
+matching values deduplicate to one location.
+
+The request selects all/root/line/item locations, limits each page to 1–500, and
+uses a query/generation-bound cursor. Ordering is path, location kind (root, line,
+item), then line number/item key. There is no total-result cap. Changed indexes
+expire cursors; incomplete namespaces or differing source versions are visible.
+Queries use only the derived database. Returned fingerprints identify indexed
+bytes, not current filesystem freshness or verified managed object identity.
+
+This discovery API requires a positive fact generator. Complete application
+search uses `search_items` for text/residual clauses, negative-only search,
+ranking, grouped snippets and type/operator composition over these same locations.
+Document-mode search can find contained item facts. Legacy line query/fact inspection APIs
+exclude item facts instead of misreporting them as root facts. Legacy indexers
+are never silently promoted from lines to items.
+
+Schema 6 adds private source, target and namespace-qualified predicate IDs with
+covering fact indexes. A target binding requires the current source version and
+exact location; stale producer facts remain available as previous evidence but
+cannot bind to a replacement revision. Legacy unversioned facts have no target
+binding. Public callbacks and result identities are unchanged. `query_locations`
+projects ranges from target metadata; schema 8 below extends target execution to
+fact-only item search. Wide fact columns and source maps remain during integration,
+so this stage adds temporary storage/write overhead. Older derived indexes rebuild
+without changing authored documents. See [ADR 0025](../../architecture/decisions/0025-compact-index-targets.md).
+
+Schema 7 resolves private predicate/target IDs in batches inside the existing
+producer write transaction and inserts them with each fact. This removes repeated
+per-fact trigger updates without changing callbacks, ownership, source-version
+checks, receipts or query semantics. Unversioned/stale facts remain unbound;
+source replacement still invalidates old target IDs. Older disposable indexes
+rebuild normally. The shared writer contains no plugin-domain interpretation.
+
+Schema 8 adds line-coordinate and source-byte indexes for bounded item projection.
+Fact-only `search_items` queries select/order/page current target IDs in SQL and
+load only returned ranges and facts. Grouping, explicit scope, negative filters,
+typed value comparisons, duplicate facts and multi-valued sort predicates retain
+their existing semantics. Text/highlight/residual requests keep the previous
+execution route. The current exact total remains synchronous in the page's read
+snapshot; no asynchronous-count contract is implied. Wide compatibility storage
+remains, and no callback or public result shape changes.
+
+Schema 4 also records whether a namespace uses scoped input. Changing that mode
+without increasing the producer version is rejected. Front-matter facts and
+successful outputs are source-qualified by the kernel so explicit page-property
+filters can join current item facts. This is a disposable index rebuild; stored
+Markdown and domain objects are not migrated.
+
+Conformance in `index::scoped` joins independent colour/shape producers, exercises
+continuations, nested items, explicit root scope, membership, negative absence,
+empty-output source versions, cursor expiry, lifecycle and more than 10,000
+matches with zero query-time file reads. People exercises the same API across FFI.
+
+## Current storage: schema 9
+
+`fact_values` stores location/predicate/target IDs and opaque value/typed data.
+`fact_locations` stores each path, optional source version and anchor once;
+`index_predicates` owns each namespace/predicate pair. The `facts` SQL view is a
+relational compatibility projection, not a second table. Wide fact indexes and
+per-fact repeated paths, source hashes, namespaces and predicates are removed.
+Value, numeric, folded-prefix, target and location access have compact indexes.
+
+Stale, unversioned and invalid/unavailable targets retain distinct location
+records and unbound facts. Source replacement detaches bindings; only facts for
+exactly the new source version can rebind. Successful producer replacement and
+namespace removal collect unused locations, without discarding failed producer
+evidence. Batches intern locations and predicates inside their existing write
+transaction. Source-map JSON remains parser/rebuild evidence; result projection
+uses target ranges and indexed text. All public fact/search/lookup/location APIs
+read this same store. An older disposable schema rebuilds from sources; it does
+not migrate domain objects or add cross-plugin dependencies.

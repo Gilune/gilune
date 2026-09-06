@@ -12,6 +12,10 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SuggestField
+import org.gilune.plugins.tasks.dateValues
+import org.gilune.plugins.tasks.tasksDecorations
+
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.graphics.Color
@@ -28,6 +32,28 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalFoundationApi::class)
 class MobileEditorTest {
+
+    @Test
+    fun propertyEditsParticipateInDirtinessAndGuardedSaving() {
+        val root = java.nio.file.Files.createTempDirectory("mobile-properties").toFile()
+        val file = java.io.File(root, "person.md")
+        val raw = "---\nname: Alice\n---\nbody"
+        file.writeText(raw)
+        val editor = MobileEditorState()
+        editor.open(root.absolutePath, "person.md")
+        val before = editor.frontMatterRaw
+        editor.applyProperties(before, before.replace("Alice", "Bob"))
+        assertTrue(editor.dirty)
+        assertTrue(editor.write(root.absolutePath, "person.md"))
+        assertFalse(editor.dirty)
+        assertTrue(file.readText().contains("Bob"))
+        editor.applyProperties(editor.frontMatterRaw, editor.frontMatterRaw.replace("Bob", "Carol"))
+        file.writeText(raw.replace("Alice", "External"))
+        assertFalse(editor.write(root.absolutePath, "person.md"))
+        assertTrue(editor.dirty)
+        assertTrue(editor.stale)
+        assertTrue(file.readText().contains("External"))
+    }
 
     // ------------------------------------------------- what the field shows
 

@@ -9,6 +9,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.tasksDecorations
+import org.gilune.plugins.tasks.tasksFilter
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box

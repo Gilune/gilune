@@ -18,6 +18,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.EditorDecoration
+
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.text.TextRange
 

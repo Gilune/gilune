@@ -23,6 +23,12 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.tasksDecorations
+import org.gilune.plugins.tasks.tasksFilter
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -109,7 +115,7 @@ fun AgendaScreen(
         val current = runCatching { file.readText() }.getOrNull()
         // `TaskHit.line` is body-relative and 1-based; the writer's is
         // 0-based.
-        val updated = current?.let { toggleTaskLine(it, hit.line - 1, hit.text, decorations) }
+        val updated = current?.let { toggleTaskLine(it, hit.line - 1, hit.checkboxLine, decorations) }
         if (updated == null) {
             // The line moved, changed, went, or nothing claimed it. All of
             // those mean leave the document alone; the tick simply does

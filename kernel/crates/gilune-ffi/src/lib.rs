@@ -15,11 +15,25 @@ uniffi::setup_scaffolding!();
 
 mod search;
 pub use search::*;
+mod pages;
+pub use pages::*;
+mod documents;
+pub use documents::*;
+mod scoped_index;
+pub use scoped_index::*;
+mod lookup;
+pub use lookup::*;
 
 /// Errors as the shells see them. A deliberately flat, stable surface
 /// over `gilune_kernel::KernelError`; variants are added, not reshaped.
 #[derive(Debug, thiserror::Error, uniffi::Error)]
 pub enum GiluneError {
+    #[error("document changed since preview; prepare a new proposal")]
+    DocumentChanged,
+    #[error("invalid document or text change: {detail}")]
+    DocumentInvalid { detail: String },
+    #[error("document cannot currently be changed: {detail}")]
+    DocumentUnavailable { detail: String },
     #[error("search results changed; restart the query")]
     SearchCursorExpired,
     #[error("storage: {detail}")]
@@ -52,6 +66,9 @@ impl From<gilune_kernel::KernelError> for GiluneError {
     fn from(e: gilune_kernel::KernelError) -> Self {
         use gilune_kernel::KernelError as K;
         match e {
+            K::DocumentChanged => GiluneError::DocumentChanged,
+            K::DocumentInvalid { detail } => GiluneError::DocumentInvalid { detail },
+            K::DocumentUnavailable { detail } => GiluneError::DocumentUnavailable { detail },
             K::SearchCursorExpired => GiluneError::SearchCursorExpired,
             K::SearchInvalid { .. } => GiluneError::Invalid {
                 detail: e.to_string(),
@@ -727,6 +744,26 @@ impl gilune_kernel::index::NoteIndexer for IndexerAdapter {
     }
 }
 
+/// Opt-in full-source input, including exact front matter and newlines.
+/// Pure callback with no store access; fact lines remain body-relative.
+/// Changing from body input requires an indexer-version change.
+#[uniffi::export(with_foreign)]
+pub trait SourceIndexer: Send + Sync {
+    fn index(&self, rel_path: String, source: String) -> FfiResult<Vec<Fact>>;
+}
+
+struct SourceIndexerAdapter(Arc<dyn SourceIndexer>);
+impl gilune_kernel::index::NoteIndexer for SourceIndexerAdapter {
+    fn index(&self, _: &str, _: &str) -> Result<Vec<gilune_kernel::index::Fact>, String> {
+        Err("source-aware indexer requires full source input".into())
+    }
+    fn index_source(&self, rel_path: &str, source: &str, _: &str) -> Result<Vec<gilune_kernel::index::Fact>, String> {
+        self.0.index(rel_path.into(), source.into()).map(|facts| facts.into_iter().map(|fact| gilune_kernel::index::Fact {
+            line: fact.line, predicate: fact.predicate, value: fact.value,
+        }).collect()).map_err(|e| e.to_string())
+    }
+}
+
 /// One thing a plugin says about an anchor.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct Fact {
@@ -800,6 +837,14 @@ pub enum TextTarget {
     Path,
 }
 
+/// Explicit fact scope, independent of any plugin's domain.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum FactLocality {
+    Exact,
+    DocumentRoot,
+    Inherited,
+}
+
 /// One term of a query. A query is a conjunction of these and nothing
 /// else: there is no `OR` (ADR 0020 § 2.4).
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
@@ -808,6 +853,18 @@ pub enum Constraint {
         predicate: String,
         op: ConstraintOp,
         value: String,
+    },
+    FactAt {
+        predicate: String,
+        op: ConstraintOp,
+        value: String,
+        locality: FactLocality,
+    },
+    /// Exact membership in a bounded set. Negate the whole search clause for NOT IN.
+    FactIn {
+        predicate: String,
+        values: Vec<String>,
+        locality: FactLocality,
     },
     Text {
         target: TextTarget,
@@ -933,6 +990,16 @@ impl From<TextTarget> for gilune_kernel::index::TextTarget {
     }
 }
 
+impl From<FactLocality> for gilune_kernel::index::FactLocality {
+    fn from(locality: FactLocality) -> Self {
+        match locality {
+            FactLocality::Exact => Self::Exact,
+            FactLocality::DocumentRoot => Self::DocumentRoot,
+            FactLocality::Inherited => Self::Inherited,
+        }
+    }
+}
+
 impl From<Constraint> for gilune_kernel::index::Constraint {
     fn from(constraint: Constraint) -> Self {
         match constraint {
@@ -944,6 +1011,26 @@ impl From<Constraint> for gilune_kernel::index::Constraint {
                 predicate,
                 op: op.into(),
                 value,
+            },
+            Constraint::FactAt {
+                predicate,
+                op,
+                value,
+                locality,
+            } => Self::FactAt {
+                predicate,
+                op: op.into(),
+                value,
+                locality: locality.into(),
+            },
+            Constraint::FactIn {
+                predicate,
+                values,
+                locality,
+            } => Self::FactIn {
+                predicate,
+                values,
+                locality: locality.into(),
             },
             Constraint::Text { target, query } => gilune_kernel::index::Constraint::Text {
                 target: target.into(),
@@ -1755,6 +1842,15 @@ impl Gilune {
             &kinds,
             Arc::new(IndexerAdapter(indexer)),
         )?)
+    }
+
+    /// Register an explicitly full-source callback under the same ownership,
+    /// versioning, failure and lifecycle rules as body-only indexers.
+    pub fn register_source_indexer(
+        &self, namespace: String, version: i64, predicate_kinds: Vec<PredicateKind>, indexer: Arc<dyn SourceIndexer>,
+    ) -> FfiResult<()> {
+        let kinds: Vec<gilune_kernel::index::PredicateKind> = predicate_kinds.into_iter().map(Into::into).collect();
+        Ok(self.store().register_indexer(&namespace, version, &kinds, Arc::new(SourceIndexerAdapter(indexer)))?)
     }
 
     /// Bring every namespace this process maintains up to the feed.

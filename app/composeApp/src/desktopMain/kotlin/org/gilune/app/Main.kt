@@ -13,6 +13,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme

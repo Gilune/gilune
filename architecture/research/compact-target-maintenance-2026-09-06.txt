@@ -1,0 +1,21 @@
+   Compiling gilune-kernel v0.1.0 (D:\CuttingCode\SneddoBuilds\gilune\kernel\crates\gilune-kernel)
+    Finished `release` profile [optimized] target(s) in 23.43s
+     Running unittests src\lib.rs (target\release\deps\gilune_kernel-ce86377558dc2b4c.exe)
+
+running 1 test
+target_metadata items=100 targets=false replace_median_ms=0.034 rows=0
+target_metadata items=100 targets=true replace_median_ms=1.142 rows=202
+target_metadata items=1000 targets=false replace_median_ms=0.350 rows=0
+target_metadata items=1000 targets=true replace_median_ms=9.026 rows=2002
+target_metadata items=10000 targets=false replace_median_ms=3.210 rows=0
+target_metadata items=10000 targets=true replace_median_ms=84.728 rows=20002
+test index::targets::tests::profile::target_metadata_maintenance_profile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 296 filtered out; finished in 0.40s
+
+     Running tests\operation_vectors.rs (target\release\deps\operation_vectors-5605a5349a760b74.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

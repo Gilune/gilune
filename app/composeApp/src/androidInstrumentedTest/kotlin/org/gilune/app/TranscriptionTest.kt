@@ -9,6 +9,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+
 import androidx.compose.ui.text.TextRange
 import uniffi.gilune_ffi.PluginContribution
 import uniffi.gilune_ffi.PluginInfo

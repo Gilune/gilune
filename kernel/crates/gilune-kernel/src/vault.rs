@@ -20,12 +20,62 @@ use crate::crashpoints::crashpoint;
 use crate::revisions::{add_revision, Announce};
 use crate::store::Store;
 use crate::{changes, fs, ids, probe, KernelError, Result};
-use std::collections::BTreeMap;
+mod header;
+#[cfg(test)]
+mod property_tests;
+use header::Header;
 use std::path::Path;
 
-/// The `revisions.origin` an edit made outside the app carries. One
-/// home: `ingest_external_edit` writes it, the withdrawal rule reads it,
-/// and the change feed classifies by it.
+/// Processor output owns its domain payload, not the projection envelope.
+/// Preserve the current envelope inside the revision transaction.
+pub(crate) fn preserve_projection_metadata(current: &str, proposed: &str) -> Result<String> {
+    let current: serde_json::Value = serde_json::from_str(current)?;
+    let proposed_bytes = proposed;
+    let mut proposed: serde_json::Value = serde_json::from_str(proposed)?;
+    let keys = [header::PAYLOAD_KEY, crate::pages::PAYLOAD_KEY];
+    if keys.iter().all(|key| current.get(*key).is_none() && proposed.get(*key).is_none()) {
+        return Ok(proposed_bytes.into());
+    }
+    for key in keys {
+        if let Some(envelope) = current.get(key) {
+            let Some(object) = proposed.as_object_mut() else {
+                return Err(KernelError::DocumentInvalid {
+                    detail: "a projected document revision must preserve its metadata envelope".into(),
+                });
+            };
+            object.insert(key.into(), envelope.clone());
+        } else if let Some(object) = proposed.as_object_mut() {
+            object.remove(key);
+        }
+    }
+    Ok(proposed.to_string())
+}
+
+/// Build the editable page payload without accepting any caller-supplied identity.
+pub(crate) fn new_page_payload(source: &str) -> Result<serde_json::Value> {
+    let invalid = |detail: String| KernelError::DocumentInvalid { detail };
+    let snapshot = gilune_document::TextSnapshot::new(source.into()).map_err(|e| invalid(e.to_string()))?;
+    if snapshot.has_reserved_metadata() { return Err(invalid("creation source contains kernel metadata".into())); }
+    let with_header = if snapshot.header().is_some() {
+        source.to_string()
+    } else {
+        let (bom, body) = source.strip_prefix('\u{feff}').map_or(("", source), |body| ("\u{feff}", body));
+        let newline = if source.contains("\r\n") { "\r\n" } else { "\n" };
+        format!("{bom}---{newline}---{newline}{body}")
+    };
+    let header = Header::parse(&with_header).ok_or_else(|| invalid("unsupported page front-matter structure".into()))?;
+    Ok(serde_json::json!({"text":header.snapshot.body(), header::PAYLOAD_KEY:header.payload()}))
+}
+
+/// Exact editable source retained by a page revision, without reading its file.
+pub(crate) fn preserved_page_source(payload: &serde_json::Value) -> Result<String> {
+    let invalid = || KernelError::DocumentInvalid { detail: "missing or unsupported preserved page source".into() };
+    let header = Header::from_payload(&payload[header::PAYLOAD_KEY]).ok_or_else(invalid)?;
+    let body = payload["text"].as_str().ok_or_else(invalid)?;
+    Ok(format!("{}{body}", header.raw()))
+}
+
+/// Origin recorded for reconciled external document edits.
 pub(crate) const EXTERNAL_EDIT_ORIGIN: &str = "external-edit";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -116,6 +166,9 @@ impl Store {
             .into_iter()
             .map(|a| a.subject)
             .collect();
+        let occupied: std::collections::BTreeSet<String> = self
+            .integrity_alerts_of(crate::alerts::VAULT_PROJECTION_PATH_OCCUPIED)?
+            .into_iter().map(|a| a.subject).collect();
         for head in self.live_heads()? {
             if is_attached(&head.payload) {
                 // An attached capture belongs to a note that already
@@ -124,7 +177,15 @@ impl Store {
                 // rather than pending in it, and no counter reports it.
                 continue;
             }
-            let rel_path = self.projection_path(&head)?;
+            let rel_path = match self.projection_path(&head) {
+                Err(KernelError::DocumentInvalid { detail }) => {
+                    summary.held_back += 1;
+                    crate::alerts::raise(self.conn(), crate::alerts::VAULT_CONTENT_UNREADABLE,
+                        &head.object_id, &format!("page projection held back: {detail}"))?;
+                    continue;
+                }
+                result => result?,
+            };
             if self.is_quarantined(&rel_path)? || self.has_open_tombstone(&head.object_id)? {
                 summary.held_back += 1;
                 continue;
@@ -202,7 +263,16 @@ impl Store {
                         let announce = row.is_none().then_some(ChangeKind::Created);
                         self.record_projection(&head, &rel_path, &canonical_sha, announce)?;
                     }
+                    if occupied.contains(&head.object_id) {
+                        crate::alerts::clear(self.conn(), crate::alerts::VAULT_PROJECTION_PATH_OCCUPIED, &head.object_id)?;
+                    }
                     summary.unchanged += 1;
+                }
+                (Some(_), None) => {
+                    // A path requested by a new object is not authority over
+                    // an unrelated existing file, including one received by sync.
+                    summary.held_back += 1;
+                    self.report_occupied_projection(&head.object_id, &rel_path)?;
                 }
                 (Some(d), Some(r)) if d != r => {
                     // Externally changed since we last wrote: reconcile owns it.
@@ -219,9 +289,20 @@ impl Store {
                         (false, false) => ChangeKind::Modified,
                         _ => ChangeKind::Created,
                     };
-                    write_atomic(&target, canonical.as_bytes())?;
+                    if row.is_none() {
+                        if !write_new_projection(&target, canonical.as_bytes())? {
+                            summary.held_back += 1;
+                            self.report_occupied_projection(&head.object_id, &rel_path)?;
+                            continue;
+                        }
+                    } else {
+                        write_atomic(&target, canonical.as_bytes())?;
+                    }
                     crashpoint("project.after_write");
                     self.record_projection(&head, &rel_path, &canonical_sha, Some(kind))?;
+                    if occupied.contains(&head.object_id) {
+                        crate::alerts::clear(self.conn(), crate::alerts::VAULT_PROJECTION_PATH_OCCUPIED, &head.object_id)?;
+                    }
                     summary.written += 1;
                 }
             }
@@ -232,6 +313,12 @@ impl Store {
         // never has to rescan to catch up.
         self.maintain_index();
         Ok(summary)
+    }
+
+    fn report_occupied_projection(&self, object_id: &str, path: &str) -> Result<()> {
+        crate::alerts::raise(self.conn(), crate::alerts::VAULT_PROJECTION_PATH_OCCUPIED, object_id,
+            &format!("the page is saved in revision history, but {path} is occupied; the existing file has been preserved"))?;
+        Ok(())
     }
 
     /// Withdraw the projections of objects deleted elsewhere. A tombstone
@@ -276,9 +363,8 @@ impl Store {
                  FROM projections p JOIN objects o ON o.object_id = p.object_id
                  WHERE o.deleted = 1",
             )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })?;
+            let rows =
+                stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))?;
             rows.collect::<std::result::Result<_, _>>()?
         };
         let mut removed = 0;
@@ -354,6 +440,8 @@ impl Store {
     /// Ingest external changes to the vault. Never destructive: kernel
     /// history only grows.
     pub fn reconcile(&self) -> Result<ReconcileSummary> {
+        let _profile_total = crate::update_profile::span("reconcile_total", "");
+        let profile_before = crate::update_profile::span("reconcile_before_index", "");
         let mut summary = ReconcileSummary::default();
         let mut seen_paths: Vec<String> = Vec::new();
         // Objects whose `vault-deleted-note-edited` notice is still true
@@ -373,12 +461,9 @@ impl Store {
         // Tracked projections whose file is gone become tombstone
         // proposals; the file is not resurrected while a proposal is open.
         let missing: Vec<(String, String)> = {
-            let mut stmt = self
-                .conn()
-                .prepare("SELECT object_id, rel_path FROM projections")?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })?;
+            let mut stmt = self.conn().prepare("SELECT object_id, rel_path FROM projections")?;
+            let rows =
+                stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))?;
             let mut missing = Vec::new();
             for row in rows {
                 let (object_id, rel_path) = row?;
@@ -410,9 +495,7 @@ impl Store {
         // already made. Resolution is *observed* here rather than
         // recorded in a column, so it cannot go stale: the question is
         // asked of the vault on every pass.
-        for alert in self
-            .integrity_alerts_of(crate::alerts::VAULT_DELETED_NOTE_EDITED)?
-        {
+        for alert in self.integrity_alerts_of(crate::alerts::VAULT_DELETED_NOTE_EDITED)? {
             if !kept.contains(&alert.subject) {
                 crate::alerts::clear(
                     self.conn(),
@@ -421,6 +504,7 @@ impl Store {
                 )?;
             }
         }
+        drop(profile_before);
         self.maintain_index();
         Ok(summary)
     }
@@ -466,11 +550,7 @@ impl Store {
         // one file, and clearing on that evidence would withdraw a
         // decision nobody had taken.
         for object_id in seen.difference(&kept) {
-            crate::alerts::clear(
-                self.conn(),
-                crate::alerts::VAULT_DELETED_NOTE_EDITED,
-                object_id,
-            )?;
+            crate::alerts::clear(self.conn(), crate::alerts::VAULT_DELETED_NOTE_EDITED, object_id)?;
         }
         // The whole point of the one-file pass: the note somebody just
         // saved is in the index before anything refreshes.
@@ -518,12 +598,11 @@ impl Store {
             }
         }
         probe::file_read();
-        let text = std::fs::read_to_string(self.vault().join(rel_path)).map_err(|e| {
-            KernelError::Io { path: self.vault().join(rel_path), source: e }
-        })?;
+        let text = std::fs::read_to_string(self.vault().join(rel_path))
+            .map_err(|e| KernelError::Io { path: self.vault().join(rel_path), source: e })?;
 
         match parse_front_matter(&text) {
-            FrontMatter::Absent | FrontMatter::Malformed if tracked.is_some() => {
+            FrontMatter::Absent | FrontMatter::Foreign | FrontMatter::Malformed if tracked.is_some() => {
                 // A file the kernel wrote lost or broke its identity:
                 // never guess, never overwrite — a person decides.
                 summary.quarantined +=
@@ -534,12 +613,18 @@ impl Store {
                 summary.quarantined += self.quarantine(rel_path, "unparseable front matter")?;
                 Ok(None)
             }
-            FrontMatter::Absent => {
+            FrontMatter::Absent | FrontMatter::Foreign => {
                 summary.imports += self.record_import(rel_path, &text, None)?;
                 Ok(None)
             }
-            FrontMatter::Parsed { keys, body } => {
-                let Some(object_id) = keys.get("gilune-id").cloned() else {
+            FrontMatter::Parsed(header) => {
+                let Some(object_id) =
+                    header.snapshot.metadata_string("gilune-id").map(str::to_owned)
+                else {
+                    if tracked.is_none() && !header.snapshot.has_reserved_metadata() {
+                        summary.imports += self.record_import(rel_path, &text, None)?;
+                        return Ok(None);
+                    }
                     summary.quarantined +=
                         self.quarantine(rel_path, "front matter has no gilune-id")?;
                     return Ok(None);
@@ -580,12 +665,7 @@ impl Store {
                         summary.imports +=
                             self.keep_edit_of_deleted(&object_id, rel_path, &text)?;
                     } else {
-                        self.ingest_external_edit(
-                            &object_id,
-                            rel_path,
-                            &body,
-                            text.as_bytes(),
-                        )?;
+                        self.ingest_external_edit(&object_id, rel_path, &header, text.as_bytes())?;
                         summary.edits += 1;
                     }
                 }
@@ -671,10 +751,7 @@ impl Store {
                 // them" — so it fell back to re-rendering the object and
                 // comparing hashes, which an ingested edit could match.
                 let carried = crate::operations::tombstone_payload(conn, &object_id)?;
-                conn.execute(
-                    "UPDATE objects SET deleted = 1 WHERE object_id = ?1",
-                    [&object_id],
-                )?;
+                conn.execute("UPDATE objects SET deleted = 1 WHERE object_id = ?1", [&object_id])?;
                 conn.execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
                 crate::operations::record(
                     conn,
@@ -800,7 +877,9 @@ impl Store {
             return Ok(true);
         }
         probe::file_read();
-        let Ok(bytes) = std::fs::read(target) else { return Ok(false) };
+        let Ok(bytes) = std::fs::read(target) else {
+            return Ok(false);
+        };
         if ids::sha256_hex(&bytes) != record.sha {
             return Ok(false);
         }
@@ -829,9 +908,8 @@ impl Store {
                         size, mtime_ns, recorded_ns
                  FROM projections",
             )?;
-            let rows = stmt.query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, read_recorded_from(row, 1)?))
-            })?;
+            let rows = stmt
+                .query_map([], |row| Ok((row.get::<_, String>(0)?, read_recorded_from(row, 1)?)))?;
             rows.collect::<std::result::Result<_, _>>()?
         };
         let mut problems = Vec::new();
@@ -907,21 +985,17 @@ impl Store {
     /// direction rule 1 asks for — the cost of keeping a file is an import
     /// candidate and a notice, the cost of deleting one is somebody's
     /// words.
-    fn deleter_saw_everything(
-        &self,
-        object_id: &str,
-        projected_revision: &str,
-    ) -> Result<bool> {
+    fn deleter_saw_everything(&self, object_id: &str, projected_revision: &str) -> Result<bool> {
         let mut named: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
         let mut any_key = false;
         {
-            let mut stmt = self.conn().prepare(
-                "SELECT payload FROM operations WHERE kind = ?1 AND target_id = ?2",
-            )?;
-            let rows = stmt.query_map(
-                rusqlite::params![crate::operations::TOMBSTONE, object_id],
-                |row| row.get::<_, String>(0),
-            )?;
+            let mut stmt = self
+                .conn()
+                .prepare("SELECT payload FROM operations WHERE kind = ?1 AND target_id = ?2")?;
+            let rows = stmt
+                .query_map(rusqlite::params![crate::operations::TOMBSTONE, object_id], |row| {
+                    row.get::<_, String>(0)
+                })?;
             for row in rows {
                 let payload: serde_json::Value =
                     serde_json::from_str(&row?).unwrap_or(serde_json::Value::Null);
@@ -966,11 +1040,9 @@ impl Store {
     fn is_deleted(&self, object_id: &str) -> Result<bool> {
         let deleted: Option<i64> = self
             .conn()
-            .query_row(
-                "SELECT deleted FROM objects WHERE object_id = ?1",
-                [object_id],
-                |row| row.get(0),
-            )
+            .query_row("SELECT deleted FROM objects WHERE object_id = ?1", [object_id], |row| {
+                row.get(0)
+            })
             .map(Some)
             .or_else(no_rows_none)?;
         Ok(deleted == Some(1))
@@ -981,8 +1053,7 @@ impl Store {
     /// raise the notice that says what happened. Nothing on disk is
     /// touched — the whole point is that these are the person's words.
     fn keep_edit_of_deleted(&self, object_id: &str, rel_path: &str, text: &str) -> Result<i64> {
-        self.conn()
-            .execute("DELETE FROM projections WHERE object_id = ?1", [object_id])?;
+        self.conn().execute("DELETE FROM projections WHERE object_id = ?1", [object_id])?;
         crate::alerts::raise(
             self.conn(),
             crate::alerts::VAULT_DELETED_NOTE_EDITED,
@@ -1005,10 +1076,17 @@ impl Store {
             )
             .map(Some)
             .or_else(no_rows_none)?;
+        let payload: serde_json::Value = serde_json::from_str(&head.payload)?;
         if let Some(path) = recorded {
+            if payload.get(crate::pages::PAYLOAD_KEY).is_some() {
+                crate::pages::checked_path(self.vault(), &path)?;
+            }
             return Ok(path);
         }
-        let payload: serde_json::Value = serde_json::from_str(&head.payload)?;
+        if let Some(path) = crate::pages::projection_path(&payload)? {
+            crate::pages::checked_path(self.vault(), &path)?;
+            return Ok(path);
+        }
         if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
             if let Some(stem) = blob_rel.rsplit_once('.').map(|(stem, _)| stem) {
                 return Ok(format!("{stem}.md"));
@@ -1045,6 +1123,16 @@ impl Store {
             front.push_str("gilune-conflicted: true\n");
         }
         front.push_str("---\n");
+        if let Some(saved) = payload.get(header::PAYLOAD_KEY) {
+            let Some(rendered) =
+                Header::from_payload(saved).and_then(|header| header.render(&front))
+            else {
+                // An unknown or invalid envelope must never trigger a lossy
+                // fallback to the legacy renderer.
+                return Ok(None);
+            };
+            front = rendered;
+        }
 
         let body = if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
             text.to_string()
@@ -1085,11 +1173,9 @@ impl Store {
         let row: Option<(String, String)> = match payload.get("blob_id").and_then(|v| v.as_str()) {
             Some(blob_id) => self
                 .conn()
-                .query_row(
-                    "SELECT state, origin FROM blobs WHERE blob_id = ?1",
-                    [blob_id],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
+                .query_row("SELECT state, origin FROM blobs WHERE blob_id = ?1", [blob_id], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })
                 .map(Some)
                 .or_else(no_rows_none)?,
             None => self
@@ -1109,7 +1195,7 @@ impl Store {
         &self,
         object_id: &str,
         rel_path: &str,
-        body: &str,
+        header: &Header,
         disk: &[u8],
     ) -> Result<()> {
         let revision_id = ids::new_id();
@@ -1122,7 +1208,8 @@ impl Store {
         let mut document = crate::revisions::head_payload(self.conn(), object_id)?
             .and_then(|payload| serde_json::from_str::<serde_json::Value>(&payload).ok())
             .unwrap_or_else(|| serde_json::json!({}));
-        document["text"] = serde_json::Value::String(body.to_string());
+        document["text"] = serde_json::Value::String(header.snapshot.body().to_string());
+        document[header::PAYLOAD_KEY] = header.payload();
         let payload = document.to_string();
         let conn = self.conn();
         conn.execute_batch("BEGIN IMMEDIATE;")?;
@@ -1304,9 +1391,7 @@ impl Store {
     fn projected_path(&self, rel_path: &str) -> Result<String> {
         let rel = std::path::PathBuf::from(rel_path.replace('\\', "/"));
         let usable = rel.is_relative()
-            && rel
-                .components()
-                .all(|c| matches!(c, std::path::Component::Normal(_)))
+            && rel.components().all(|c| matches!(c, std::path::Component::Normal(_)))
             && rel_path.ends_with(".md")
             && !rel.starts_with(".gilune");
         if !usable {
@@ -1320,9 +1405,7 @@ impl Store {
     fn is_quarantined(&self, rel_path: &str) -> Result<bool> {
         let hit: Option<i64> = self
             .conn()
-            .query_row("SELECT 1 FROM quarantine WHERE rel_path = ?1", [rel_path], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT 1 FROM quarantine WHERE rel_path = ?1", [rel_path], |row| row.get(0))
             .map(Some)
             .or_else(no_rows_none)?;
         Ok(hit.is_some())
@@ -1479,15 +1562,7 @@ impl Store {
                 "SELECT content_sha256, size, mtime_ns, recorded_ns, object_id FROM imports
                   WHERE rel_path = ?1",
                 [rel_path],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
             )
             .map(Some)
             .or_else(no_rows_none)?;
@@ -1530,9 +1605,7 @@ impl Store {
     fn forget_missing_import(&self, rel_path: &str) -> Result<()> {
         let held: Option<i64> = self
             .conn()
-            .query_row("SELECT 1 FROM imports WHERE rel_path = ?1", [rel_path], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT 1 FROM imports WHERE rel_path = ?1", [rel_path], |row| row.get(0))
             .map(Some)
             .or_else(no_rows_none)?;
         if held.is_none() {
@@ -1542,8 +1615,7 @@ impl Store {
         }
         let announce = !self.already_removed(rel_path)?;
         self.write_txn(|| {
-            self.conn()
-                .execute("DELETE FROM imports WHERE rel_path = ?1", [rel_path])?;
+            self.conn().execute("DELETE FROM imports WHERE rel_path = ?1", [rel_path])?;
             if announce {
                 changes::record(
                     self.conn(),
@@ -1563,9 +1635,7 @@ impl Store {
 
     /// Every import candidate this vault is holding, in path order.
     fn recorded_imports(&self) -> Result<Vec<String>> {
-        let mut stmt = self
-            .conn()
-            .prepare("SELECT rel_path FROM imports ORDER BY rel_path")?;
+        let mut stmt = self.conn().prepare("SELECT rel_path FROM imports ORDER BY rel_path")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
@@ -1587,10 +1657,7 @@ impl Store {
                         stack.push(path);
                     }
                 } else if name.ends_with(".md") && !name.starts_with(".tmp-") {
-                    let rel = path
-                        .strip_prefix(self.vault())
-                        .unwrap_or(&path)
-                        .to_path_buf();
+                    let rel = path.strip_prefix(self.vault()).unwrap_or(&path).to_path_buf();
                     found.push(fs::portable_rel(&rel));
                 }
             }
@@ -1655,12 +1722,8 @@ fn read_recorded_from(row: &rusqlite::Row<'_>, first: usize) -> rusqlite::Result
 /// stat'd — which is answered as "read it", never as "unchanged".
 fn stat_of(path: &Path) -> Option<Stat> {
     let metadata = std::fs::metadata(path).ok()?;
-    let mtime_ns = metadata
-        .modified()
-        .ok()?
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()?
-        .as_nanos() as i64;
+    let mtime_ns =
+        metadata.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos() as i64;
     Some(Stat { size: metadata.len() as i64, mtime_ns })
 }
 
@@ -1676,26 +1739,40 @@ fn now_ns() -> i64 {
 
 enum FrontMatter {
     Absent,
+    Foreign,
     Malformed,
-    Parsed { keys: BTreeMap<String, String>, body: String },
+    Parsed(Box<Header>),
 }
 
 fn parse_front_matter(text: &str) -> FrontMatter {
-    let Some(rest) = text.strip_prefix("---\n") else {
-        return FrontMatter::Absent;
-    };
-    let Some(end) = rest.find("\n---\n") else {
-        return FrontMatter::Malformed;
-    };
-    let mut keys = BTreeMap::new();
-    for line in rest[..end].lines() {
-        let Some((key, value)) = line.split_once(':') else {
-            return FrontMatter::Malformed;
-        };
-        keys.insert(key.trim().to_string(), value.trim().to_string());
+    match gilune_document::TextSnapshot::new(text.to_string()) {
+        Ok(snapshot) if snapshot.header().is_none() => FrontMatter::Absent,
+        Ok(snapshot) if !snapshot.has_reserved_metadata() => FrontMatter::Foreign,
+        Ok(_) => Header::parse(text).map(Box::new).map_or(FrontMatter::Malformed, FrontMatter::Parsed),
+        Err(_) => FrontMatter::Malformed,
     }
-    let body = rest[end + "\n---\n".len()..].to_string();
-    FrontMatter::Parsed { keys, body }
+}
+
+/// Publish a fully written first projection atomically without replacing a file
+/// that appeared after discovery. The committed revision is recovery evidence.
+fn write_new_projection(target: &Path, content: &[u8]) -> Result<bool> {
+    use std::io::Write;
+    let parent = target.parent().ok_or_else(|| KernelError::DocumentInvalid { detail: "page has no parent".into() })?;
+    std::fs::create_dir_all(parent).map_err(|source| KernelError::Io { path:parent.into(),source })?;
+    let temporary = parent.join(format!(".tmp-{}", ids::new_id()));
+    let mut file = std::fs::OpenOptions::new().create_new(true).write(true).open(&temporary)
+        .map_err(|source| KernelError::Io {path:temporary.clone(),source})?;
+    file.write_all(content).map_err(|source| KernelError::Io {path:temporary.clone(),source})?;
+    file.sync_all().map_err(|source| KernelError::Io {path:temporary.clone(),source})?;
+    drop(file);
+    let published = match std::fs::hard_link(&temporary, target) {
+        Ok(()) => true,
+        Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists => false,
+        Err(source) => return Err(KernelError::Io {path:target.into(),source}),
+    };
+    fs::fsync_dir(parent)?;
+    std::fs::remove_file(&temporary).map_err(|source| KernelError::Io {path:temporary,source})?;
+    Ok(published)
 }
 
 fn write_atomic(target: &std::path::Path, content: &[u8]) -> Result<()> {
@@ -1789,13 +1866,7 @@ mod tests {
     /// A tombstone written before tombstones named the heads they saw —
     /// which is every tombstone in every vault that already exists.
     fn tombstone_from_elsewhere(store: &Store, object_id: &str) {
-        from_elsewhere(
-            store,
-            1,
-            crate::operations::TOMBSTONE,
-            object_id,
-            serde_json::json!({}),
-        );
+        from_elsewhere(store, 1, crate::operations::TOMBSTONE, object_id, serde_json::json!({}));
     }
 
     /// A tombstone that names what the deleter could see.
@@ -1818,12 +1889,7 @@ mod tests {
     }
 
     fn alert_kinds(store: &Store) -> Vec<String> {
-        store
-            .integrity_alerts()
-            .expect("alerts")
-            .into_iter()
-            .map(|a| a.kind)
-            .collect()
+        store.integrity_alerts().expect("alerts").into_iter().map(|a| a.kind).collect()
     }
 
     /// Every change this vault has recorded, as (kind, path, cause).
@@ -1831,7 +1897,10 @@ mod tests {
         page(store, &store.change_origin().expect("origin"))
     }
 
-    fn page(store: &Store, cursor: &crate::changes::Cursor) -> Vec<(ChangeKind, String, ChangeCause)> {
+    fn page(
+        store: &Store,
+        cursor: &crate::changes::Cursor,
+    ) -> Vec<(ChangeKind, String, ChangeCause)> {
         store
             .changes_since(cursor, 1000)
             .expect("changes")
@@ -1912,7 +1981,8 @@ mod tests {
         // the change is in the feed before any full pass runs.
         let (_dir, store, rel) = captured("what was typed");
         let after_capture = cursor_now(&store);
-        let edited = read_rel(&store, &rel).replace("what was typed", "what was typed and then some");
+        let edited =
+            read_rel(&store, &rel).replace("what was typed", "what was typed and then some");
         std::fs::write(store.vault().join(&rel), &edited).expect("the editor's own save");
 
         let summary = store.reconcile_path(&rel).expect("reconcile one file");
@@ -1965,10 +2035,7 @@ mod tests {
         std::fs::rename(store.vault().join(&rel), store.vault().join(moved)).expect("rename");
 
         assert_eq!(store.reconcile().expect("reconcile").renames, 1);
-        let changes = store
-            .changes_since(&after_capture, 100)
-            .expect("changes")
-            .changes;
+        let changes = store.changes_since(&after_capture, 100).expect("changes").changes;
         assert_eq!(changes.len(), 1, "a rename is one change, not a delete and a create");
         assert_eq!(changes[0].kind, ChangeKind::Moved);
         assert_eq!(changes[0].rel_path, moved);
@@ -2337,9 +2404,8 @@ mod tests {
         std::fs::remove_file(store.vault().join("Moved/voice.md")).expect("delete");
         store.reconcile().expect("reconcile");
 
-        let page = store
-            .changes_since(&store.change_origin().expect("origin"), 1000)
-            .expect("changes");
+        let page =
+            store.changes_since(&store.change_origin().expect("origin"), 1000).expect("changes");
         assert!(page.complete);
         assert!(page.changes.len() >= 8, "{:?}", page.changes);
         let seqs: Vec<i64> = page.changes.iter().map(|c| c.seq).collect();
@@ -2499,13 +2565,7 @@ mod tests {
         );
         // A deleter running an older build: it names nothing at all, so
         // there is no way to know what it had in front of it.
-        from_elsewhere(
-            &store,
-            3,
-            crate::operations::TOMBSTONE,
-            &object_id,
-            serde_json::json!({}),
-        );
+        from_elsewhere(&store, 3, crate::operations::TOMBSTONE, &object_id, serde_json::json!({}));
 
         assert_eq!(
             store.project().expect("project").removed,
@@ -2617,10 +2677,7 @@ mod tests {
         std::fs::write(store.vault().join(&rel), "still worth keeping\n").expect("adopt");
         store.reconcile().expect("reconcile");
         assert!(alert_kinds(&store).is_empty());
-        assert!(
-            store.vault().join(&rel).exists(),
-            "and nothing on disk was touched to achieve it"
-        );
+        assert!(store.vault().join(&rel).exists(), "and nothing on disk was touched to achieve it");
     }
 
     #[test]
@@ -2769,9 +2826,7 @@ mod tests {
                 },
             }),
         });
-        store
-            .apply_operation("test", &bytes, crate::limits::Limits::DEFAULT)
-            .expect("apply");
+        store.apply_operation("test", &bytes, crate::limits::Limits::DEFAULT).expect("apply");
 
         assert_eq!(store.project().expect("project").written, 1);
         let rel: String = store
@@ -2895,9 +2950,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let store = Store::open(dir.path()).expect("open");
         for n in 0..1000 {
-            store
-                .capture_bytes("txt", format!("note number {n}").as_bytes())
-                .expect("capture");
+            store.capture_bytes("txt", format!("note number {n}").as_bytes()).expect("capture");
         }
         store.project().expect("project");
         // One settling pass: a file written and recorded inside the same
@@ -2932,10 +2985,7 @@ mod tests {
         // both the record and the file at that instant.
         store
             .conn()
-            .execute(
-                "UPDATE projections SET mtime_ns = recorded_ns WHERE rel_path = ?1",
-                [&rel],
-            )
+            .execute("UPDATE projections SET mtime_ns = recorded_ns WHERE rel_path = ?1", [&rel])
             .expect("stage the race");
         let edited = read_rel(&store, &rel).replace("the same length here", "a different sentence");
         assert_eq!(edited.len() as i64, size, "the rewrite must be the same length");
@@ -3218,10 +3268,7 @@ mod tests {
             "an attachment has no note of its own"
         );
         // Preserved all the same: the bytes are in the vault and verify.
-        assert_eq!(
-            std::fs::read(dir.path().join(&receipt.rel_path)).expect("blob"),
-            vec![5u8; 32]
-        );
+        assert_eq!(std::fs::read(dir.path().join(&receipt.rel_path)).expect("blob"), vec![5u8; 32]);
         assert!(store.verify().expect("verify").is_empty());
         assert_eq!(store.reconcile().expect("reconcile").tombstone_proposals, 0);
     }
@@ -3233,10 +3280,8 @@ mod tests {
         std::fs::write(store.vault().join(&rel), &edited).expect("edit");
         store.reconcile().expect("reconcile");
         let kinds: Vec<String> = {
-            let mut stmt = store
-                .conn()
-                .prepare("SELECT kind FROM operations ORDER BY op_seq")
-                .expect("stmt");
+            let mut stmt =
+                store.conn().prepare("SELECT kind FROM operations ORDER BY op_seq").expect("stmt");
             stmt.query_map([], |row| row.get(0))
                 .expect("query")
                 .collect::<std::result::Result<_, _>>()

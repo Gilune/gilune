@@ -27,6 +27,10 @@ technologies can be rejected without weakening the product principles.
 | [0020](0020-vault-change-feed-and-incremental-indexes.md) | A dense, resumable vault change feed at the kernel boundary; a kernel-hosted system index of plugin-contributed facts plus FTS5, joined on anchors so plugins extend the search DSL without knowing each other; reconcile stats before it reads | Accepted (gate evidenced 2026-09-05) |
 | [0021](0021-kernel-search-results.md) | Complete kernel search pages; retryable index maintenance; plugins compile vocabulary and shells render asynchronous results | Implemented and validated (2026-09-05) |
 | [0022](0022-bundled-extension-registration.md) | Owned executable registrations for bundled search types, suggestion providers and indexers | Implemented and validated (2026-09-05) |
+| [0023](0023-source-document-snapshots.md) | Exact source snapshots, shared Markdown locations and protected edit preparation | Foundation implemented; apply/recovery deferred |
+
+| [0024](0024-typed-page-creation.md) | Scoped typed-page declarations, durable creation and first publication without replacement | Creation foundation implemented; page UI/editing deferred |
+| [0025](0025-compact-index-targets.md) | Private source-qualified target/predicate IDs shared by independent fact producers | Target foundation implemented; shared executor and page/count API pending |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

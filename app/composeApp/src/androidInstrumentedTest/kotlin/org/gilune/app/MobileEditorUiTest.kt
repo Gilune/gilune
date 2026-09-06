@@ -11,6 +11,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.compose.foundation.ExperimentalFoundationApi

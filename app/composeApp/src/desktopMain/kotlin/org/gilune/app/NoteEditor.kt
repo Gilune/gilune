@@ -9,6 +9,12 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.FrontMatterEntry
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.tasksDecorations
+import org.gilune.plugins.tasks.tasksFilter
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -207,11 +213,10 @@ class EditorState {
         staleBuffer = false
     }
 
-    /// A property edit is an edit like any other: the block is rewritten
-    /// and the buffer goes dirty, so the same idle autosave persists it.
-    fun applyProperties(entries: List<Pair<String, String>>) {
-        frontMatterRaw = applyFrontMatterEdits(frontMatterRaw, entries)
-        dirty = true
+    /// Apply a document-service proposal to the same header the form reviewed.
+    fun applyProperties(expectedHeader: String, updatedHeader: String) {
+        require(frontMatterRaw == expectedHeader) { "The properties changed while this form was open. Reopen it to review the current values." }
+        if (updatedHeader != frontMatterRaw) { frontMatterRaw = updatedHeader; dirty = true }
     }
 
     fun close() {
@@ -630,7 +635,7 @@ private fun OpenNote(
                 val types = searchTypesFor(plugins)
                 wanted.associateWith { body ->
                     if (open == null) FilterResult.Hint("Opening vault...")
-                    else evaluateFilterBlock(open, state.vaultDir, body, types, blockDay, FILTER_EDIT_ROW_CAP)
+                    else evaluateFilterBlock(open, state.vaultDir, body, types, blockDay, FILTER_EDIT_ROW_CAP, searchOperatorsFor(plugins, blockDay))
                 }
             }.value
             if (evaluated.error != null) {
@@ -913,13 +918,10 @@ private fun OpenNote(
     }
 
     if (propertiesOpen) {
-        PropertiesDialog(
-            entries = header.frontMatter,
+        SourcePropertiesDialog(
+            source = editor.document(),
             onDismiss = { propertiesOpen = false },
-            onApply = { entries ->
-                propertiesOpen = false
-                editor.applyProperties(entries)
-            },
+            onApply = editor::applyProperties,
         )
     }
 }
@@ -1146,254 +1148,6 @@ private fun PropertiesStrip(note: Note, editor: EditorState) {
                 )
             }
         }
-    }
-}
-
-/// Properties open over the window, as settings do, so the scrim starts
-/// at the window's corner rather than the pane's and nothing behind it
-/// can be clicked while they are open.
-private val WindowOverlay = object : PopupPositionProvider {
-    override fun calculatePosition(
-        anchorBounds: IntRect,
-        windowSize: IntSize,
-        layoutDirection: LayoutDirection,
-        popupContentSize: IntSize,
-    ): IntOffset = IntOffset.Zero
-}
-
-/// One row per front-matter pair. System keys are shown locked because
-/// they are the note's identity; everything else is the user's to name,
-/// change or remove.
-@Composable
-private fun PropertiesDialog(
-    entries: List<FrontMatterEntry>,
-    onDismiss: () -> Unit,
-    onApply: (List<Pair<String, String>>) -> Unit,
-) {
-    val colours = MaterialTheme.colorScheme
-    val system = remember(entries) { entries.filter { it.key.startsWith(SYSTEM_KEY_PREFIX) } }
-    val custom = remember(entries) {
-        mutableStateListOf<Pair<String, String>>().apply {
-            addAll(entries.filterNot { it.key.startsWith(SYSTEM_KEY_PREFIX) }.map { it.key to it.value })
-        }
-    }
-    var newKey by remember { mutableStateOf("") }
-    var newValue by remember { mutableStateOf("") }
-
-    fun addPending() {
-        if (newKey.isBlank()) return
-        custom.add(newKey to newValue)
-        newKey = ""
-        newValue = ""
-    }
-
-    Popup(
-        popupPositionProvider = WindowOverlay,
-        onDismissRequest = onDismiss,
-        properties = PopupProperties(focusable = true),
-    ) {
-        Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color(0x66000000))
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onDismiss,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Surface(
-                Modifier
-                    .width(520.dp)
-                    // Consume clicks so a click inside the card never
-                    // reaches the scrim and closes it under the user.
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) {},
-                shape = RoundedCornerShape(10.dp),
-                color = colours.surface,
-            ) {
-                Column {
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.Tune,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp),
-                            tint = colours.onSurfaceVariant,
-                        )
-                        Text(
-                            "Properties",
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
-                        )
-                        IconButton(onClick = onDismiss, modifier = Modifier.size(28.dp)) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "close properties",
-                                modifier = Modifier.size(16.dp),
-                                tint = colours.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    HorizontalDivider(color = colours.outlineVariant)
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 380.dp)
-                            .verticalScroll(rememberScrollState())
-                            .padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        for (entry in system) {
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(colours.surfaceVariant)
-                                    .padding(horizontal = 8.dp, vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Lock,
-                                    contentDescription = "system property",
-                                    modifier = Modifier.size(13.dp),
-                                    tint = colours.onSurfaceVariant,
-                                )
-                                Text(
-                                    entry.key,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = colours.onSurface,
-                                    modifier = Modifier.width(150.dp),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    entry.value,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = colours.onSurfaceVariant,
-                                    modifier = Modifier.weight(1f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        for (index in custom.indices) {
-                            val (key, value) = custom[index]
-                            Row(
-                                Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            ) {
-                                PropertyField(
-                                    value = key,
-                                    onChange = { custom[index] = it to custom[index].second },
-                                    placeholder = "key",
-                                    // The locked rows carry a lock and an
-                                    // inset before their key; this makes
-                                    // both value columns start together.
-                                    modifier = Modifier.width(177.dp),
-                                )
-                                PropertyField(
-                                    value = value,
-                                    onChange = { custom[index] = custom[index].first to it },
-                                    placeholder = "value",
-                                    modifier = Modifier.weight(1f),
-                                )
-                                IconButton(onClick = { custom.removeAt(index) }, modifier = Modifier.size(24.dp)) {
-                                    Icon(
-                                        Icons.Default.Delete,
-                                        contentDescription = "remove ${key.ifBlank { "property" }}",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = colours.onSurfaceVariant,
-                                    )
-                                }
-                            }
-                        }
-                        HorizontalDivider(color = colours.outlineVariant)
-                        Row(
-                            Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            PropertyField(
-                                value = newKey,
-                                onChange = { newKey = it },
-                                placeholder = "new key",
-                                modifier = Modifier.width(177.dp),
-                            )
-                            PropertyField(
-                                value = newValue,
-                                onChange = { newValue = it },
-                                placeholder = "value",
-                                modifier = Modifier.weight(1f),
-                            )
-                            IconButton(onClick = ::addPending, modifier = Modifier.size(24.dp)) {
-                                Icon(
-                                    Icons.Default.Add,
-                                    contentDescription = "add property",
-                                    modifier = Modifier.size(14.dp),
-                                    tint = colours.onSurfaceVariant,
-                                )
-                            }
-                        }
-                    }
-                    Row(
-                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    ) {
-                        TextButton(onClick = onDismiss) { Text("Cancel", fontSize = 13.sp) }
-                        Button(onClick = {
-                            addPending()
-                            onApply(system.map { it.key to it.value } + custom.toList())
-                        }) { Text("Apply", fontSize = 13.sp) }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PropertyField(
-    value: String,
-    onChange: (String) -> Unit,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-) {
-    val colours = MaterialTheme.colorScheme
-    Box(
-        modifier
-            // On the dialog's plain surface the hairline variant reads as
-            // nearly invisible (owner feedback 2026-08-31): full outline.
-            .border(1.dp, colours.outline, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        contentAlignment = Alignment.CenterStart,
-    ) {
-        if (value.isEmpty()) {
-            Text(placeholder, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = colours.onSurfaceVariant)
-        }
-        BasicTextField(
-            value = value,
-            onValueChange = onChange,
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            textStyle = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontSize = 12.sp,
-                color = colours.onSurface,
-            ),
-            cursorBrush = SolidColor(colours.primary),
-        )
     }
 }
 

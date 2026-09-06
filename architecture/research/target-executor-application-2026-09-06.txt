@@ -1,0 +1,42 @@
+    BENCH fixture=C:\Users\David\AppData\Local\Temp\gilune-cross-plugin-bench-2222070614046353130
+    BENCH DSL=type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01
+    BENCH REQUEST=SearchRequest(clauses=[SearchClause(constraints=[FactAt(predicate=org.memory.tasks.state, op=EXISTS, value=, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.tasks.state, op=EQ, value=open, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.people.connection, op=EQ, value=["assign","alice"], locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.tasks.due, op=GT, value=2026-08-31, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false), SearchClause(constraints=[FactAt(predicate=org.memory.tasks.due, op=LT, value=2026-10-01, locality=EXACT)], negated=false, caseSensitive=false, residual=null, never=false)], lineMode=true, extensionCandidates=false, groupByNote=false, bodyNeedles=[], nameNeedles=[], sortPredicate=, requiredNamespaces=[org.memory.people, org.memory.tasks], extensionKey=|2026-09-06|[content, file, path, people.connected, people.connection, people.mention, people.page-connection, people.ref]|task|, pageSize=50, maxLines=1, cursor=null)
+    BENCH DATA tasks=10000 documents=100 setup_ms=2202.1854
+    BENCH DSL_COMPILE median_ms=0.2077365
+    BENCH QUERY=type DSL=type:task matches=10000 first50_cold_ms=79.1061 warm_median_ms=10.7444 warm_min_ms=9.7475 warm_max_ms=13.5198
+    BENCH QUERY=open DSL=type:task is:open matches=8500 first50_cold_ms=22.7525 warm_median_ms=17.0536 warm_min_ms=15.8897 warm_max_ms=22.7146
+    BENCH QUERY=assigned DSL=type:task is:open people.connection:assign:@alice matches=5000 first50_cold_ms=21.8702 warm_median_ms=21.8517 warm_min_ms=21.7168 warm_max_ms=22.3149
+    BENCH QUERY=alice_month DSL=type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 matches=3500 first50_cold_ms=30.8001 warm_median_ms=30.7031 warm_min_ms=30.2721 warm_max_ms=30.7947
+    BENCH QUERY=alice_bob_month DSL=type:task is:open people.connection:assign IN ["alice", "bob"] due:after:2026-08-31 due:before:2026-10-01 matches=5000 first50_cold_ms=36.7318 warm_median_ms=36.6608 warm_min_ms=35.6608 warm_max_ms=37.1725
+    BENCH ENUM sort=default first500_warm_median_ms=58.7125 all_ms=468.449 pages=7
+    BENCH ENUM sort=org.memory.tasks.due first500_warm_median_ms=89.0195 all_ms=714.4373 pages=7
+    BENCH DATA tasks=50000 documents=500 setup_ms=9024.7093
+    BENCH DSL_COMPILE median_ms=0.134168
+    BENCH QUERY=type DSL=type:task matches=50000 first50_cold_ms=49.172 warm_median_ms=50.6771 warm_min_ms=47.2914 warm_max_ms=54.2778
+    BENCH QUERY=open DSL=type:task is:open matches=42500 first50_cold_ms=99.5759 warm_median_ms=71.5823 warm_min_ms=70.5096 warm_max_ms=77.1569
+    BENCH QUERY=assigned DSL=type:task is:open people.connection:assign:@alice matches=25000 first50_cold_ms=103.6293 warm_median_ms=104.2652 warm_min_ms=102.8612 warm_max_ms=105.1673
+    BENCH QUERY=alice_month DSL=type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 matches=17500 first50_cold_ms=147.7052 warm_median_ms=148.9884 warm_min_ms=146.0315 warm_max_ms=155.7236
+    BENCH QUERY=alice_bob_month DSL=type:task is:open people.connection:assign IN ["alice", "bob"] due:after:2026-08-31 due:before:2026-10-01 matches=25000 first50_cold_ms=178.0911 warm_median_ms=175.9843 warm_min_ms=175.3809 warm_max_ms=179.7517
+    BENCH ENUM sort=default first500_warm_median_ms=178.0389 all_ms=6516.1904 pages=35
+    BENCH ENUM sort=org.memory.tasks.due first500_warm_median_ms=278.7514 all_ms=9251.2206 pages=35
+    SHAPE_EDIT items_per_document=100 sample=0 reconcile_ms=78.4646 settled_advance_ms=0.1882 callbacks_ms={org.memory.tasks=0.8623, org.memory.people=1.2409}
+    SHAPE_EDIT items_per_document=100 sample=1 reconcile_ms=88.8945 settled_advance_ms=0.2028 callbacks_ms={org.memory.tasks=0.8298, org.memory.people=0.4941}
+    SHAPE_EDIT items_per_document=100 sample=2 reconcile_ms=80.3438 settled_advance_ms=0.2198 callbacks_ms={org.memory.tasks=0.6699, org.memory.people=0.8261}
+    SHAPE_EDIT items_per_document=1000 sample=0 reconcile_ms=395.4497 settled_advance_ms=0.3257 callbacks_ms={org.memory.tasks=3.3753, org.memory.people=2.7779}
+    SHAPE_EDIT items_per_document=1000 sample=1 reconcile_ms=383.7953 settled_advance_ms=0.2206 callbacks_ms={org.memory.tasks=5.0155, org.memory.people=2.4455}
+    SHAPE_EDIT items_per_document=1000 sample=2 reconcile_ms=332.0449 settled_advance_ms=0.26 callbacks_ms={org.memory.tasks=4.5372, org.memory.people=1.5234}
+    SHAPE_EDIT items_per_document=10000 sample=0 reconcile_ms=4435.5121 settled_advance_ms=0.3074 callbacks_ms={org.memory.tasks=47.2247, org.memory.people=17.8486}
+    SHAPE_EDIT items_per_document=10000 sample=1 reconcile_ms=4347.0437 settled_advance_ms=0.375 callbacks_ms={org.memory.tasks=41.6541, org.memory.people=19.9098}
+    SHAPE_EDIT items_per_document=10000 sample=2 reconcile_ms=2673.5449 settled_advance_ms=0.2015 callbacks_ms={org.memory.tasks=26.3439, org.memory.people=14.302}
+    SHAPE_EDIT items_per_document=10000 sample=0 reconcile_ms=2939.611 settled_advance_ms=0.5794 callbacks_ms={org.memory.tasks=154.6941, org.memory.people=79.6087}
+    SHAPE_EDIT items_per_document=10000 sample=1 reconcile_ms=2748.3902 settled_advance_ms=0.4086 callbacks_ms={org.memory.tasks=32.8776, org.memory.people=18.9118}
+    SHAPE_EDIT items_per_document=10000 sample=2 reconcile_ms=2679.7566 settled_advance_ms=0.4173 callbacks_ms={org.memory.tasks=36.3303, org.memory.people=19.578}
+    SHAPE_EDIT items_per_document=100 sample=0 reconcile_ms=103.2999 settled_advance_ms=0.4165 callbacks_ms={org.memory.tasks=26.1898, org.memory.people=11.0443}
+    SHAPE_EDIT items_per_document=100 sample=1 reconcile_ms=67.6703 settled_advance_ms=0.2915 callbacks_ms={org.memory.tasks=4.5351, org.memory.people=2.9569}
+    SHAPE_EDIT items_per_document=100 sample=2 reconcile_ms=48.002 settled_advance_ms=0.2757 callbacks_ms={org.memory.tasks=2.0204, org.memory.people=1.7733}
+    SHAPE_EDIT items_per_document=1000 sample=0 reconcile_ms=321.5557 settled_advance_ms=0.2412 callbacks_ms={org.memory.tasks=13.6242, org.memory.people=7.4705}
+    SHAPE_EDIT items_per_document=1000 sample=1 reconcile_ms=288.6066 settled_advance_ms=0.2289 callbacks_ms={org.memory.tasks=5.9896, org.memory.people=4.7661}
+    SHAPE_EDIT items_per_document=1000 sample=2 reconcile_ms=286.9455 settled_advance_ms=0.2813 callbacks_ms={org.memory.tasks=4.8695, org.memory.people=3.5306}
+    SHAPE_EDIT items_per_document=10000 sample=0 reconcile_ms=2748.3494 settled_advance_ms=0.4401 callbacks_ms={org.memory.tasks=53.8801, org.memory.people=27.0373}
+    SHAPE_EDIT items_per_document=10000 sample=1 reconcile_ms=2724.3139 settled_advance_ms=0.2685 callbacks_ms={org.memory.tasks=31.7066, org.memory.people=15.1537}
+    SHAPE_EDIT items_per_document=10000 sample=2 reconcile_ms=2710.8822 settled_advance_ms=0.2349 callbacks_ms={org.memory.tasks=33.8938, org.memory.people=20.6876}

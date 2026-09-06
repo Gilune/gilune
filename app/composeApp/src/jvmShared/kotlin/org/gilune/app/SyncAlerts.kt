@@ -74,6 +74,9 @@ const val SYNC_REFERENT_REFUSED = "sync-referent-refused"
 /// is the one who can say what.
 const val VAULT_CONTENT_UNREADABLE = "vault-content-unreadable"
 
+/// A saved page could not publish its first file at an occupied path.
+const val VAULT_PROJECTION_PATH_OCCUPIED = "vault-projection-path-occupied"
+
 /// A change refers to something whose own history has not arrived yet.
 /// **Not damage and not a halt**: the two devices met in the wrong order,
 /// the stream carries on, and the condition clears itself at the next
@@ -114,6 +117,7 @@ val ALERT_KINDS: List<String> = listOf(
     VAULT_DELETED_NOTE_EDITED,
     SYNC_REFERENT_REFUSED,
     VAULT_CONTENT_UNREADABLE,
+    VAULT_PROJECTION_PATH_OCCUPIED,
     SYNC_PREVIOUS_IDENTITY_CLAIMED,
 )
 
@@ -263,6 +267,11 @@ fun alertSentence(
         // The kernel's record is intact; the bytes beside it are not
         // readable *here*. The person is the only one who can put them
         // back, so the sentence says what to look for.
+        VAULT_PROJECTION_PATH_OCCUPIED ->
+            "A page is saved, but another file occupies its requested path$about. " +
+                "The existing file has been preserved. Once that path is available, " +
+                "$RESUMES and creates the page's file."
+
         VAULT_CONTENT_UNREADABLE ->
             "A note's text file could not be read$about, so it was left as it is " +
                 "rather than rewritten with a gap where the words are. If you moved " +

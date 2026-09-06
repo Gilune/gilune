@@ -1,5 +1,16 @@
 package org.gilune.app
 
+import org.gilune.plugin.sdk.BundledPluginExtensions
+import org.gilune.plugin.sdk.IndexerRegistration
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.SearchTypeRegistration
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugin.sdk.SuggestCandidate
+import org.gilune.plugin.sdk.SuggestionProviderRegistration
+import org.gilune.plugins.tasks.TASK_FIELDS_SLOT
+import org.gilune.plugins.tasks.tasksExtensions
+import org.gilune.plugins.tasks.tasksSettingsDocument
+
 import java.io.File
 import java.time.LocalDate
 import kotlin.test.Test
@@ -84,7 +95,7 @@ class PluginExtensionsTest {
         val page = compileSearch("type:bookmark", types = types)!!.page(vault.gilune).requireComplete()
         assertEquals(listOf(">> later"), page.hits.single().lines.map { it.text })
         val tasks = compileSearch("type:task", types = types)!!.page(vault.gilune).requireComplete()
-        assertEquals(listOf("- [ ] selected #task"), tasks.hits.single().lines.map { it.text })
+        assertEquals(listOf("- [ ] selected #task"), tasks.hits.single().items.map { it.text })
     }
 
     @Test

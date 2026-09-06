@@ -11,6 +11,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.tasksDeclaration
+
 import java.io.File
 import java.nio.file.Files
 import uniffi.gilune_ffi.Gilune

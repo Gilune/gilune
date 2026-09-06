@@ -1,0 +1,11 @@
+{
+  "after_bytes": 76980224,
+  "before_bytes": 153006080,
+  "facts": 320000,
+  "locations": 50500,
+  "schema8_bytes": 156073984,
+  "saved_from_schema8_bytes": 79093760,
+  "saved_percent": 50.67709426831828,
+  "logical_fact_differences": 0,
+  "note": "Compacted identical 50k-task data, 320k facts. Schema8 size is the separately measured same-source copy with both projection indexes. Schema9 includes those indexes, FTS, source maps and all current production compact indexes; every logical row including duplicates was compared in both directions."
+}

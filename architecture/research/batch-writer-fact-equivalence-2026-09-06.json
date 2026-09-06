@@ -1,0 +1,9 @@
+{
+  "schema_version": "7",
+  "fact_count": 63505,
+  "new_only_groups": 0,
+  "old_only_groups": 0,
+  "invalid_bindings": 0,
+  "insert_trigger_count": 0,
+  "comparison_note": "All wide fact values, typed data, locations and duplicate multiplicity; old control synthetic revision tokens excluded. Current revision and target bindings checked separately."
+}

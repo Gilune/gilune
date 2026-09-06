@@ -14,6 +14,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.CandidateLine
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.SearchedNote
+import org.gilune.plugins.tasks.TaskHit
+
 import java.io.File
 import java.time.LocalDate
 
@@ -165,8 +170,8 @@ fun taskRows(hits: List<SearchHit>): List<TaskHit> = hits
                 name = hit.name,
                 line = line.number,
                 text = line.text,
-                due = taskDateIn(line.text, DUE_FIELD)?.let(LocalDate::parse),
-                done = taskDateIn(line.text, DONE_FIELD)?.let(LocalDate::parse),
+                due = referenceTaskDate(line.text, "due"),
+                done = referenceTaskDate(line.text, "done"),
             )
         }
     }
@@ -210,3 +215,7 @@ private fun AgendaGroup.holds(due: LocalDate?, today: LocalDate, horizon: LocalD
 const val AGENDA_SCAN_LINES = 200
 fun agendaHits(gilune: uniffi.gilune_ffi.Gilune?, vaultDir: String, types: List<SearchType>, today: LocalDate): List<SearchHit> =
     if (gilune == null) emptyList() else queryVault(gilune, vaultDir, AGENDA_QUERY, types = types, today = today, maxLines = AGENDA_SCAN_LINES)
+
+private fun referenceTaskDate(line: String, key: String): LocalDate? =
+    Regex("""\s$key:(\d{4}-\d{2}-\d{2})\b""").find(line)?.groupValues?.get(1)
+        ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }

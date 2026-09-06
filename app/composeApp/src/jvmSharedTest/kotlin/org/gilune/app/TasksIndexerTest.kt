@@ -8,6 +8,18 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_INDEX_NAMESPACE
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.TASK_DONE_PREDICATE
+import org.gilune.plugins.tasks.TASK_DUE_PREDICATE
+import org.gilune.plugins.tasks.TASK_STATE_DONE
+import org.gilune.plugins.tasks.TASK_STATE_OPEN
+import org.gilune.plugins.tasks.TASK_STATE_PREDICATE
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.TasksNoteIndexer
+import org.gilune.plugins.tasks.taskFacts
+import org.gilune.plugins.tasks.taskPredicateKinds
+
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

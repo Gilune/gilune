@@ -80,7 +80,7 @@ cargo build --release -p gilune-ffi --features whisper
 
 cargo run -p gilune-ffi --bin uniffi-bindgen -- generate ^
   --library target/release/gilune_ffi.dll --language kotlin ^
-  --out-dir ../app/composeApp/src/desktopMain/generated
+  --out-dir ../app/kernelBindings/src/desktopMain/generated
 
 copy target\release\gilune_ffi.dll ..\app\composeApp\resources\windows-x64\
 
@@ -97,7 +97,7 @@ cargo build --release -p gilune-ffi --features whisper
 
 cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
   --library target/release/libgilune_ffi.so --language kotlin \
-  --out-dir ../app/composeApp/src/desktopMain/generated
+  --out-dir ../app/kernelBindings/src/desktopMain/generated
 
 mkdir -p ../app/composeApp/resources/linux-x64
 cp target/release/libgilune_ffi.so ../app/composeApp/resources/linux-x64/

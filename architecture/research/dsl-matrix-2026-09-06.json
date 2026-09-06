@@ -1,0 +1,3659 @@
+{
+  "results": [
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.06907666666666666,
+        "dsl": "type:task",
+        "grouped": false,
+        "name": "all",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_projection_only_ms": 311.06640000000004,
+      "compact_all_select_ms": 279.422,
+      "compact_count_ms": 256.59349999999995,
+      "compact_first500_project_ms": 3.0608,
+      "compact_first_select_ms": 0.2637,
+      "compact_page19_project_ms": 3.1473,
+      "compact_project_ms": 0.923,
+      "compact_select_ms": 0.4264,
+      "matches": 50000,
+      "old_first500_ms": 373.3255,
+      "old_first_ms": 356.7556,
+      "old_page19_ms": 358.7217,
+      "old_warm_ms": 359.94730000000004,
+      "transitional_first_ms": 353.539
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.06283666666666667,
+        "dsl": "type:task is:open",
+        "grouped": false,
+        "name": "open",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 46.551500000000004,
+      "compact_count_ms": 34.234300000000005,
+      "compact_first_select_ms": 0.3181,
+      "compact_project_ms": 0.9053000000000001,
+      "compact_select_ms": 0.2207,
+      "matches": 42500,
+      "old_first_ms": 439.75219999999996,
+      "old_warm_ms": 427.4362
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "done"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.04657666666666667,
+        "dsl": "type:task is:done",
+        "grouped": false,
+        "name": "done",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 37.654,
+      "compact_count_ms": 35.6965,
+      "compact_first_select_ms": 0.4752,
+      "compact_project_ms": 2.463,
+      "compact_select_ms": 0.402,
+      "matches": 7500,
+      "old_first_ms": 236.5935,
+      "old_warm_ms": 225.9576
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "done"
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.036026666666666665,
+        "dsl": "type:task -is:done",
+        "grouped": false,
+        "name": "not_done",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 68.4896,
+      "compact_count_ms": 50.7038,
+      "compact_first_select_ms": 0.2812,
+      "compact_project_ms": 0.9734,
+      "compact_select_ms": 0.2907,
+      "matches": 42500,
+      "old_first_ms": 15526.1353,
+      "old_warm_ms": 15710.1368
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.16405666666666666,
+        "dsl": "type:task people.connection:assign:@alice",
+        "grouped": false,
+        "name": "alice",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 44.8245,
+      "compact_count_ms": 35.382200000000005,
+      "compact_first_select_ms": 0.3255,
+      "compact_project_ms": 0.7286,
+      "compact_select_ms": 0.2139,
+      "matches": 30000,
+      "old_first_ms": 486.24129999999997,
+      "old_warm_ms": 408.20250000000004
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.15534,
+        "dsl": "type:task is:open people.connection:assign:@alice",
+        "grouped": false,
+        "name": "alice_open",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 61.1701,
+      "compact_count_ms": 49.650600000000004,
+      "compact_first_select_ms": 0.4371,
+      "compact_project_ms": 0.8501,
+      "compact_select_ms": 0.33240000000000003,
+      "matches": 25000,
+      "old_first_ms": 532.2959999999999,
+      "old_warm_ms": 487.225
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.1748066666666667,
+        "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+        "grouped": false,
+        "name": "alice_month",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 101.3306,
+      "compact_count_ms": 79.1516,
+      "compact_first_select_ms": 0.7697999999999999,
+      "compact_project_ms": 2.1309,
+      "compact_select_ms": 0.6306,
+      "matches": 17500,
+      "old_first_ms": 1084.2147,
+      "old_warm_ms": 1182.2379999999998
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "in",
+                "locality": "EXACT",
+                "predicate": "org.memory.people.connection",
+                "values": [
+                  "[\"assign\",\"alice\"]",
+                  "[\"assign\",\"bob\"]"
+                ]
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.26825,
+        "dsl": "type:task is:open people.connection:assign IN [\"alice\", \"bob\"] due:after:2026-08-31 due:before:2026-10-01",
+        "grouped": false,
+        "name": "either_month",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 134.1878,
+      "compact_count_ms": 81.1794,
+      "compact_first_select_ms": 0.6525,
+      "compact_project_ms": 1.192,
+      "compact_select_ms": 0.616,
+      "matches": 25000,
+      "old_first_ms": 1471.1519,
+      "old_warm_ms": 1333.852
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"bob\"]"
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.13854666666666668,
+        "dsl": "type:task is:open -people.connection:assign:@bob due:after:2026-08-31 due:before:2026-10-01",
+        "grouped": false,
+        "name": "not_bob_month",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 83.4804,
+      "compact_count_ms": 68.0506,
+      "compact_first_select_ms": 0.5398000000000001,
+      "compact_project_ms": 1.1520000000000001,
+      "compact_select_ms": 0.4178,
+      "matches": 25000,
+      "old_first_ms": 23943.4583,
+      "old_warm_ms": 20199.594699999998
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "in",
+                "locality": "EXACT",
+                "predicate": "org.memory.people.connection",
+                "values": [
+                  "[\"assign\",\"alice\"]",
+                  "[\"assign\",\"bob\"]"
+                ]
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.21901333333333337,
+        "dsl": "type:task people.connection:assign NOT IN [\"alice\", \"bob\"]",
+        "grouped": false,
+        "name": "not_either",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_projection_only_ms": 362.1913,
+      "compact_all_select_ms": 41.8071,
+      "compact_count_ms": 39.116400000000006,
+      "compact_first500_project_ms": 28.7398,
+      "compact_first_select_ms": 0.5435,
+      "compact_project_ms": 2.4901,
+      "compact_select_ms": 0.40259999999999996,
+      "matches": 7500,
+      "old_first500_ms": 16159.7906,
+      "old_first_ms": 16202.265400000002,
+      "old_warm_ms": 16479.8997
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "in",
+                "locality": "EXACT",
+                "predicate": "org.memory.people.connection",
+                "values": []
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.05069666666666667,
+        "dsl": "type:task people.connection:assign IN []",
+        "grouped": false,
+        "name": "empty_membership",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 0.0297,
+      "compact_count_ms": 0.0343,
+      "compact_first_select_ms": 0.22619999999999998,
+      "compact_project_ms": 0.0292,
+      "compact_select_ms": 0.0295,
+      "matches": 0,
+      "old_first_ms": 106.3485,
+      "old_warm_ms": 89.7037
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "in",
+                "locality": "EXACT",
+                "predicate": "org.memory.people.connection",
+                "values": []
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.04603666666666666,
+        "dsl": "type:task people.connection:assign NOT IN []",
+        "grouped": false,
+        "name": "empty_negative_membership",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 307.0145,
+      "compact_count_ms": 302.52410000000003,
+      "compact_first_select_ms": 0.7094999999999999,
+      "compact_project_ms": 1.1444999999999999,
+      "compact_select_ms": 0.5818000000000001,
+      "matches": 50000,
+      "old_first_ms": 406.7268,
+      "old_warm_ms": 413.24060000000003
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "in",
+                "locality": "EXACT",
+                "predicate": "org.memory.people.connection",
+                "values": [
+                  "[\"assign\",\"alice\"]",
+                  "[\"assign\",\"bob\"]"
+                ]
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.25766,
+        "dsl": "type:task people.connection:assign IN [\"alice\", \"alice\", \"bob\"]",
+        "grouped": false,
+        "name": "duplicate_membership",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 59.6708,
+      "compact_count_ms": 44.8123,
+      "compact_first_select_ms": 0.3421,
+      "compact_project_ms": 0.8032,
+      "compact_select_ms": 0.27849999999999997,
+      "matches": 42500,
+      "old_first_ms": 553.9984,
+      "old_warm_ms": 523.3516999999999
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"absent\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.11029333333333333,
+        "dsl": "type:task people.connection:assign:@absent",
+        "grouped": false,
+        "name": "absent_person",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 0.0418,
+      "compact_count_ms": 0.0444,
+      "compact_first_select_ms": 0.2848,
+      "compact_project_ms": 0.0387,
+      "compact_select_ms": 0.0426,
+      "matches": 0,
+      "old_first_ms": 93.304,
+      "old_warm_ms": 85.1854
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"élise\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.14308,
+        "dsl": "type:task people.connection:assign:@élise",
+        "grouped": false,
+        "name": "unicode_absent",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 0.039799999999999995,
+      "compact_count_ms": 0.044199999999999996,
+      "compact_first_select_ms": 0.1828,
+      "compact_project_ms": 0.0391,
+      "compact_select_ms": 0.0393,
+      "matches": 0,
+      "old_first_ms": 86.5102,
+      "old_warm_ms": 86.7169
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"owner\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.12657333333333334,
+        "dsl": "type:task people.connection:owner:@alice",
+        "grouped": false,
+        "name": "owner_alice",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 38.0871,
+      "compact_count_ms": 35.5212,
+      "compact_first_select_ms": 0.9429,
+      "compact_project_ms": 5.8837,
+      "compact_select_ms": 0.8587999999999999,
+      "matches": 2500,
+      "old_first_ms": 204.9799,
+      "old_warm_ms": 197.7361
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"reviewer\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.10350333333333334,
+        "dsl": "type:task people.connection:reviewer:@alice",
+        "grouped": false,
+        "name": "reviewer_alice",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 34.8364,
+      "compact_count_ms": 36.1099,
+      "compact_first_select_ms": 0.9382,
+      "compact_project_ms": 5.8764,
+      "compact_select_ms": 0.8774,
+      "matches": 2500,
+      "old_first_ms": 209.1946,
+      "old_warm_ms": 199.0696
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"reviewer\",\"bob\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.17478,
+        "dsl": "type:task people.connection:assign:@alice people.connection:reviewer:@bob",
+        "grouped": false,
+        "name": "paired_roles",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 44.505,
+      "compact_count_ms": 45.4317,
+      "compact_first_select_ms": 1.2071,
+      "compact_project_ms": 6.3088,
+      "compact_select_ms": 1.1072,
+      "matches": 2500,
+      "old_first_ms": 311.1257,
+      "old_warm_ms": 307.5761
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"owner\",\"bob\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"reviewer\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.22161666666666663,
+        "dsl": "type:task people.connection:owner:@bob people.connection:reviewer:@alice",
+        "grouped": false,
+        "name": "wrong_role_pair",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 0.0409,
+      "compact_count_ms": 0.0471,
+      "compact_first_select_ms": 0.22460000000000002,
+      "compact_project_ms": 0.0412,
+      "compact_select_ms": 0.041100000000000005,
+      "matches": 0,
+      "old_first_ms": 85.0501,
+      "old_warm_ms": 85.6046
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"bob\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.22277666666666668,
+        "dsl": "type:task people.connection:assign:@alice people.connection:assign:@bob",
+        "grouped": false,
+        "name": "two_assignees",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 43.598600000000005,
+      "compact_count_ms": 43.6826,
+      "compact_first_select_ms": 48.047,
+      "compact_project_ms": 43.8556,
+      "compact_select_ms": 43.4003,
+      "matches": 0,
+      "old_first_ms": 241.20759999999999,
+      "old_warm_ms": 244.271
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "NOT_EXISTS",
+                "predicate": "org.memory.tasks.due",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.007873333333333333,
+        "dsl": "type:task due:none",
+        "grouped": false,
+        "name": "missing_due",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 30.587699999999998,
+      "compact_count_ms": 29.7788,
+      "compact_first_select_ms": 0.8772,
+      "compact_project_ms": 5.808,
+      "compact_select_ms": 0.7438,
+      "matches": 2500,
+      "old_first_ms": 6023.8496000000005,
+      "old_warm_ms": 6030.9073
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "NOT_EXISTS",
+                "predicate": "org.memory.tasks.due",
+                "value": ""
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.007686666666666666,
+        "dsl": "type:task -due:none",
+        "grouped": false,
+        "name": "present_due",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 45.1699,
+      "compact_count_ms": 32.9819,
+      "compact_first_select_ms": 0.3676,
+      "compact_project_ms": 0.6748000000000001,
+      "compact_select_ms": 0.1479,
+      "matches": 47500,
+      "old_first_ms": 481.88399999999996,
+      "old_warm_ms": 451.7205
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "NOT_EXISTS",
+                "predicate": "org.memory.tasks.done",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.0073,
+        "dsl": "type:task done:none",
+        "grouped": false,
+        "name": "missing_done",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 50000,
+      "old_first_ms": 349.7542,
+      "old_warm_ms": 347.342,
+      "unsupported": "predicate not loaded by fixture: org.memory.tasks.done"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-06"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.007066666666666666,
+        "dsl": "type:task due:today",
+        "grouped": false,
+        "name": "today",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 35.6539,
+      "compact_count_ms": 35.767100000000006,
+      "compact_first_select_ms": 0.9836,
+      "compact_project_ms": 5.9448,
+      "compact_select_ms": 0.8833,
+      "matches": 2500,
+      "old_first_ms": 196.22029999999998,
+      "old_warm_ms": 192.4109
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GE",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-06"
+              },
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LE",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-12"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009866666666666666,
+        "dsl": "type:task due:week",
+        "grouped": false,
+        "name": "week",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 51.833200000000005,
+      "compact_count_ms": 46.6805,
+      "compact_first_select_ms": 0.7136,
+      "compact_project_ms": 2.3061000000000003,
+      "compact_select_ms": 0.4637,
+      "matches": 10000,
+      "old_first_ms": 509.9661,
+      "old_warm_ms": 484.5804
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GE",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-06"
+              },
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LE",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-12"
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01018,
+        "dsl": "type:task -due:week",
+        "grouped": false,
+        "name": "not_week",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 59.8363,
+      "compact_count_ms": 47.3372,
+      "compact_first_select_ms": 0.4922,
+      "compact_project_ms": 0.9051,
+      "compact_select_ms": 0.2252,
+      "matches": 40000,
+      "old_first_ms": 56115.5726,
+      "old_warm_ms": 54694.4082,
+      "transitional_first_ms": 53956.466
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-06"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.00934,
+        "dsl": "type:task due:overdue",
+        "grouped": false,
+        "name": "overdue",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 37.6177,
+      "compact_count_ms": 32.3588,
+      "compact_first_select_ms": 0.49620000000000003,
+      "compact_project_ms": 1.3174000000000001,
+      "compact_select_ms": 0.2965,
+      "matches": 12500,
+      "old_first_ms": 281.42109999999997,
+      "old_warm_ms": 287.3159
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.011083333333333334,
+        "dsl": "type:task due:2026-09-01",
+        "grouped": false,
+        "name": "boundary_start",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 36.244,
+      "compact_count_ms": 36.0353,
+      "compact_first_select_ms": 0.6235,
+      "compact_project_ms": 3.0474,
+      "compact_select_ms": 0.5243,
+      "matches": 5000,
+      "old_first_ms": 218.22359999999998,
+      "old_warm_ms": 214.9666
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-30"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009276666666666667,
+        "dsl": "type:task due:2026-09-30",
+        "grouped": false,
+        "name": "boundary_end",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 35.5507,
+      "compact_count_ms": 36.1342,
+      "compact_first_select_ms": 0.9481999999999999,
+      "compact_project_ms": 5.9578,
+      "compact_select_ms": 0.8629,
+      "matches": 2500,
+      "old_first_ms": 199.30030000000002,
+      "old_warm_ms": 201.8742
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01219,
+        "dsl": "type:task due:after:2026-10-01 due:before:2026-09-01",
+        "grouped": false,
+        "name": "contradictory_dates",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 0.0462,
+      "compact_count_ms": 0.0521,
+      "compact_first_select_ms": 0.26380000000000003,
+      "compact_project_ms": 0.0453,
+      "compact_select_ms": 0.0461,
+      "matches": 0,
+      "old_first_ms": 89.3078,
+      "old_warm_ms": 87.7749
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "done"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009573333333333331,
+        "dsl": "type:task is:open is:done",
+        "grouped": false,
+        "name": "contradictory_state",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 44.8203,
+      "compact_count_ms": 45.137299999999996,
+      "compact_first_select_ms": 47.6311,
+      "compact_project_ms": 45.009800000000006,
+      "compact_select_ms": 45.1649,
+      "matches": 0,
+      "old_first_ms": 229.1232,
+      "old_warm_ms": 228.36509999999998
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-05"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-09-26"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01637,
+        "dsl": "type:task due:after:2026-08-31 due:before:2026-10-01 due:after:2026-09-05 due:before:2026-09-26",
+        "grouped": false,
+        "name": "redundant_ranges",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 90.5823,
+      "compact_count_ms": 73.88640000000001,
+      "compact_first_select_ms": 0.6209,
+      "compact_project_ms": 1.1011,
+      "compact_select_ms": 0.4528,
+      "matches": 27500,
+      "old_first_ms": 1427.6674,
+      "old_warm_ms": 1446.1382999999998
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [],
+            "negated": false,
+            "never": true,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01107,
+        "dsl": "type:task due:soonish",
+        "grouped": false,
+        "name": "invalid_date",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 0.027399999999999997,
+      "compact_count_ms": 0.0305,
+      "compact_first_select_ms": 0.12449999999999999,
+      "compact_project_ms": 0.0266,
+      "compact_select_ms": 0.027,
+      "matches": 0,
+      "old_first_ms": 2.5075000000000003,
+      "old_warm_ms": 1.0593
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [],
+            "negated": true,
+            "never": true,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01016,
+        "dsl": "type:task -due:soonish",
+        "grouped": false,
+        "name": "negated_invalid_date",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "compact_all_select_ms": 286.5779,
+      "compact_count_ms": 267.82289999999995,
+      "compact_first_select_ms": 0.24830000000000002,
+      "compact_project_ms": 0.9169999999999999,
+      "compact_select_ms": 0.4151,
+      "matches": 50000,
+      "old_first_ms": 346.6639,
+      "old_warm_ms": 351.5858
+    },
+    {
+      "case": {
+        "body_needles": [
+          "Work"
+        ],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "BODY",
+                "value": "Work"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.00764,
+        "dsl": "type:task content:Work",
+        "grouped": false,
+        "name": "body_broad",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 50000,
+      "old_first_ms": 405.9735,
+      "old_warm_ms": 380.8765,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [
+          "or"
+        ],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "BODY",
+                "value": "or"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.00789,
+        "dsl": "type:task content:or",
+        "grouped": false,
+        "name": "body_short",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 50000,
+      "old_first_ms": 383.2841,
+      "old_warm_ms": 383.3871,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [
+          "Work 49999"
+        ],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "BODY",
+                "value": "Work 49999"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009686666666666666,
+        "dsl": "type:task content:\"Work 49999\"",
+        "grouped": false,
+        "name": "body_sparse",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 1,
+      "old_first_ms": 306.8246,
+      "old_warm_ms": 301.9785,
+      "transitional_first_ms": 316.6624,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [
+          "quartz"
+        ],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "BODY",
+                "value": "quartz"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.006506666666666667,
+        "dsl": "type:task content:quartz",
+        "grouped": false,
+        "name": "body_absent",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 0,
+      "old_first_ms": 300.0747,
+      "old_warm_ms": 300.4033,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "BODY",
+                "value": "alice"
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.006306666666666667,
+        "dsl": "type:task -content:alice",
+        "grouped": false,
+        "name": "body_negative",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 15000,
+      "old_first_ms": 320.88030000000003,
+      "old_warm_ms": 322.9971,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [
+          "alice"
+        ],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "ANY",
+                "value": "alice"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009696666666666666,
+        "dsl": "type:task alice",
+        "grouped": false,
+        "name": "bare_ranked",
+        "name_needles": [
+          "alice"
+        ],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 35000,
+      "old_first_ms": 379.5329,
+      "old_warm_ms": 362.7018,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "PATH",
+                "value": "work-0499"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009606666666666666,
+        "dsl": "type:task path:work-0499",
+        "grouped": false,
+        "name": "path_one",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 100,
+      "old_first_ms": 300.7473,
+      "old_warm_ms": 302.7635,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "PATH",
+                "value": "work-0499"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.14611,
+        "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 path:work-0499",
+        "grouped": false,
+        "name": "path_and_facts",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 35,
+      "old_first_ms": 854.4091000000001,
+      "old_warm_ms": 837.6987,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "NAME",
+                "value": "work-0001"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009573333333333331,
+        "dsl": "type:task file:work-0001",
+        "grouped": false,
+        "name": "file_match",
+        "name_needles": [
+          "work-0001"
+        ],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 100,
+      "old_first_ms": 292.8342,
+      "old_warm_ms": 296.3976,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "fact",
+                "op": "EXISTS",
+                "predicate": "frontmatter.connections",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01147,
+        "dsl": "type:task [connections]",
+        "grouped": false,
+        "name": "root_property",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 50000,
+      "old_first_ms": 373.2866,
+      "old_warm_ms": 376.9365,
+      "transitional_first_ms": 371.2237,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "fact",
+                "op": "EXISTS",
+                "predicate": "frontmatter.title",
+                "value": ""
+              }
+            ],
+            "negated": true,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.010053333333333333,
+        "dsl": "type:task -[title]",
+        "grouped": false,
+        "name": "missing_root_property",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 50000,
+      "old_first_ms": 368.9741,
+      "old_warm_ms": 357.94169999999997,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [
+          "nonsense:value"
+        ],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "text",
+                "target": "ANY",
+                "value": "nonsense:value"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.01158,
+        "dsl": "type:task nonsense:value",
+        "grouped": false,
+        "name": "unknown_keyword",
+        "name_needles": [
+          "nonsense:value"
+        ],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 0,
+      "old_first_ms": 336.69440000000003,
+      "old_warm_ms": 311.4439,
+      "unsupported": "text or root/inherited scope is outside prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.1325666666666667,
+        "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+        "grouped": false,
+        "name": "alice_month_due",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": "org.memory.tasks.due"
+      },
+      "compact_all_projection_only_ms": 2161.3422,
+      "compact_all_select_ms": 162.393,
+      "compact_count_ms": 60.2896,
+      "compact_first500_project_ms": 66.70320000000001,
+      "compact_first_select_ms": 0.7427999999999999,
+      "compact_page19_project_ms": 62.4368,
+      "compact_project_ms": 5.7856000000000005,
+      "compact_select_ms": 0.4908,
+      "matches": 17500,
+      "old_first500_ms": 1169.5321000000001,
+      "old_first_ms": 1102.471,
+      "old_page19_ms": 1164.6668,
+      "old_warm_ms": 1201.1548,
+      "transitional_first_ms": 1093.4042
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.007363333333333334,
+        "dsl": "type:task",
+        "grouped": false,
+        "name": "all_due_nullable",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": "org.memory.tasks.due"
+      },
+      "compact_all_projection_only_ms": 3638.6057,
+      "compact_all_select_ms": 440.92490000000004,
+      "compact_count_ms": 263.4888,
+      "compact_first500_project_ms": 30.7617,
+      "compact_first_select_ms": 0.31520000000000004,
+      "compact_page19_project_ms": 32.256,
+      "compact_project_ms": 2.9491,
+      "compact_select_ms": 0.4525,
+      "matches": 50000,
+      "old_first500_ms": 649.8293000000001,
+      "old_first_ms": 587.641,
+      "old_page19_ms": 634.0446,
+      "old_warm_ms": 590.855,
+      "transitional_first_ms": 610.2610000000001
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.009,
+        "dsl": "type:task is:open",
+        "grouped": false,
+        "name": "open_due_nullable",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": "org.memory.tasks.due"
+      },
+      "compact_all_select_ms": 108.29339999999999,
+      "compact_count_ms": 33.844899999999996,
+      "compact_first_select_ms": 0.38039999999999996,
+      "compact_project_ms": 3.137,
+      "compact_select_ms": 0.2282,
+      "matches": 42500,
+      "old_first_ms": 668.4271,
+      "old_warm_ms": 668.043
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "NOT_EXISTS",
+                "predicate": "org.memory.tasks.due",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.008893333333333333,
+        "dsl": "type:task due:none",
+        "grouped": false,
+        "name": "missing_due_sorted",
+        "name_needles": [],
+        "required": [
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": "org.memory.tasks.due"
+      },
+      "compact_all_projection_only_ms": 300.5616,
+      "compact_all_select_ms": 143.7641,
+      "compact_count_ms": 33.0386,
+      "compact_first500_project_ms": 135.63330000000002,
+      "compact_first_select_ms": 112.0897,
+      "compact_project_ms": 111.7169,
+      "compact_select_ms": 108.67609999999999,
+      "matches": 2500,
+      "old_first500_ms": 6313.3102,
+      "old_first_ms": 6303.0176,
+      "old_warm_ms": 6417.3733
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"absent\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.11906666666666668,
+        "dsl": "type:task people.connection:assign:@absent",
+        "grouped": false,
+        "name": "sparse_due_sorted",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": "org.memory.tasks.due"
+      },
+      "compact_all_select_ms": 0.0462,
+      "compact_count_ms": 0.0455,
+      "compact_first_select_ms": 0.2915,
+      "compact_project_ms": 0.0461,
+      "compact_select_ms": 0.0471,
+      "matches": 0,
+      "old_first_ms": 91.2641,
+      "old_warm_ms": 89.16369999999999
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.13821,
+        "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+        "grouped": true,
+        "name": "alice_grouped",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": ""
+      },
+      "matches": 500,
+      "old_first_ms": 874.6019,
+      "old_warm_ms": 870.6292,
+      "unsupported": "grouped projection is not implemented by prototype"
+    },
+    {
+      "case": {
+        "body_needles": [],
+        "clauses": [
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EXISTS",
+                "predicate": "org.memory.tasks.state",
+                "value": ""
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.tasks.state",
+                "value": "open"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "EQ",
+                "predicate": "org.memory.people.connection",
+                "value": "[\"assign\",\"alice\"]"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "GT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-08-31"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          },
+          {
+            "constraints": [
+              {
+                "kind": "at",
+                "locality": "EXACT",
+                "op": "LT",
+                "predicate": "org.memory.tasks.due",
+                "value": "2026-10-01"
+              }
+            ],
+            "negated": false,
+            "never": false,
+            "residual": null,
+            "sensitive": false
+          }
+        ],
+        "compile_ms": 0.12991666666666668,
+        "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+        "grouped": true,
+        "name": "alice_grouped_due",
+        "name_needles": [],
+        "required": [
+          "org.memory.people",
+          "org.memory.tasks"
+        ],
+        "residual_ms": null,
+        "sort": "org.memory.tasks.due"
+      },
+      "matches": 500,
+      "old_first_ms": 1149.7644,
+      "old_warm_ms": 1232.7746,
+      "unsupported": "grouped projection is not implemented by prototype"
+    }
+  ],
+  "storage": {
+    "compact_build_ms": 541.0073,
+    "compact_query_only": {
+      "allocated_bytes": 8720384,
+      "objects": [
+        {
+          "bytes": 3588096,
+          "name": "f"
+        },
+        {
+          "bytes": 3489792,
+          "name": "f_value"
+        },
+        {
+          "bytes": 815104,
+          "name": "sqlite_autoindex_targets_1"
+        },
+        {
+          "bytes": 733184,
+          "name": "targets"
+        },
+        {
+          "bytes": 53248,
+          "name": "sources"
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_sources_1"
+        },
+        {
+          "bytes": 12288,
+          "name": "sqlite_stat4"
+        },
+        {
+          "bytes": 4096,
+          "name": "state"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_stat1"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_schema"
+        }
+      ],
+      "vacuum_bytes": 7864320
+    },
+    "old_whole": {
+      "allocated_bytes": 137596928,
+      "objects": [
+        {
+          "bytes": 51286016,
+          "name": "facts"
+        },
+        {
+          "bytes": 16592896,
+          "name": "facts_predicate_value"
+        },
+        {
+          "bytes": 16592896,
+          "name": "facts_predicate_folded"
+        },
+        {
+          "bytes": 13746176,
+          "name": "facts_predicate_num"
+        },
+        {
+          "bytes": 13357056,
+          "name": "facts_namespace_path"
+        },
+        {
+          "bytes": 7454720,
+          "name": "facts_path"
+        },
+        {
+          "bytes": 6922240,
+          "name": "lines_fts_data"
+        },
+        {
+          "bytes": 6459392,
+          "name": "lines"
+        },
+        {
+          "bytes": 3076096,
+          "name": "source_maps"
+        },
+        {
+          "bytes": 1277952,
+          "name": "lines_path"
+        },
+        {
+          "bytes": 536576,
+          "name": "lines_fts_docsize"
+        },
+        {
+          "bytes": 167936,
+          "name": "fact_sources"
+        },
+        {
+          "bytes": 65536,
+          "name": "sqlite_autoindex_fact_sources_1"
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_source_maps_1"
+        },
+        {
+          "bytes": 12288,
+          "name": "lines_fts_idx"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_schema"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_predicate_kinds_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_namespaces_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_index_meta_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "predicate_kinds"
+        },
+        {
+          "bytes": 4096,
+          "name": "namespaces"
+        },
+        {
+          "bytes": 4096,
+          "name": "lines_fts_config"
+        },
+        {
+          "bytes": 4096,
+          "name": "index_meta"
+        }
+      ],
+      "vacuum_bytes": 131080192
+    },
+    "records_query_only": {
+      "allocated_bytes": 6766592,
+      "objects": [
+        {
+          "bytes": 1314816,
+          "name": "r0"
+        },
+        {
+          "bytes": 1306624,
+          "name": "r0_i0"
+        },
+        {
+          "bytes": 1273856,
+          "name": "r1"
+        },
+        {
+          "bytes": 1245184,
+          "name": "r1_i0"
+        },
+        {
+          "bytes": 815104,
+          "name": "sqlite_autoindex_targets_1"
+        },
+        {
+          "bytes": 733184,
+          "name": "targets"
+        },
+        {
+          "bytes": 53248,
+          "name": "sources"
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_sources_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "state"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_schema"
+        }
+      ],
+      "vacuum_bytes": 6082560
+    },
+    "transitional_whole": {
+      "allocated_bytes": 160313344,
+      "objects": [
+        {
+          "bytes": 53374976,
+          "name": "facts"
+        },
+        {
+          "bytes": 16502784,
+          "name": "facts_predicate_value"
+        },
+        {
+          "bytes": 16502784,
+          "name": "facts_predicate_folded"
+        },
+        {
+          "bytes": 13414400,
+          "name": "facts_predicate_num"
+        },
+        {
+          "bytes": 13258752,
+          "name": "facts_namespace_path"
+        },
+        {
+          "bytes": 8097792,
+          "name": "facts_compact_predicate_value"
+        },
+        {
+          "bytes": 7733248,
+          "name": "facts_compact_target_value"
+        },
+        {
+          "bytes": 7438336,
+          "name": "facts_path"
+        },
+        {
+          "bytes": 6922240,
+          "name": "lines_fts_data"
+        },
+        {
+          "bytes": 6459392,
+          "name": "lines"
+        },
+        {
+          "bytes": 3682304,
+          "name": "index_targets"
+        },
+        {
+          "bytes": 3076096,
+          "name": "source_maps"
+        },
+        {
+          "bytes": 1716224,
+          "name": "sqlite_autoindex_index_targets_1"
+        },
+        {
+          "bytes": 1277952,
+          "name": "lines_path"
+        },
+        {
+          "bytes": 536576,
+          "name": "lines_fts_docsize"
+        },
+        {
+          "bytes": 167936,
+          "name": "fact_sources"
+        },
+        {
+          "bytes": 65536,
+          "name": "sqlite_autoindex_fact_sources_1"
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_schema"
+        },
+        {
+          "bytes": 16384,
+          "name": "sqlite_autoindex_source_maps_1"
+        },
+        {
+          "bytes": 12288,
+          "name": "lines_fts_idx"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_sequence"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_predicate_kinds_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_namespaces_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_index_predicates_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "sqlite_autoindex_index_meta_1"
+        },
+        {
+          "bytes": 4096,
+          "name": "predicate_kinds"
+        },
+        {
+          "bytes": 4096,
+          "name": "namespaces"
+        },
+        {
+          "bytes": 4096,
+          "name": "lines_fts_config"
+        },
+        {
+          "bytes": 4096,
+          "name": "index_predicates"
+        },
+        {
+          "bytes": 4096,
+          "name": "index_meta"
+        }
+      ],
+      "vacuum_bytes": 153006080
+    }
+  }
+}

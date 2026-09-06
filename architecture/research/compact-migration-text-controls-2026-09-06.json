@@ -1,0 +1,120 @@
+[
+  {
+    "dsl": "type:task content:Work",
+    "executor": "target_text",
+    "grouped": false,
+    "legacy_ms": 476.0062,
+    "name": "body_broad",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "page_only_ms": 364.8972,
+        "project_ms": null,
+        "projected_items": 50000,
+        "projected_lines": 53000,
+        "sample": 0,
+        "scan_ms": [
+          97.88969999994099,
+          113.56399999997403,
+          149.58670000008493
+        ],
+        "select_ms": null,
+        "total_ms": 359.7417
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "page_only_ms": 344.7143,
+        "project_ms": null,
+        "projected_items": 50000,
+        "projected_lines": 53000,
+        "sample": 1,
+        "scan_ms": [
+          92.87529999993147,
+          106.74309999997008,
+          141.36760000009843
+        ],
+        "select_ms": null,
+        "total_ms": 385.92769999999996
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "page_only_ms": 376.7693,
+        "project_ms": null,
+        "projected_items": 50000,
+        "projected_lines": 53000,
+        "sample": 2,
+        "scan_ms": [
+          103.5367999999321,
+          115.87829999997501,
+          152.95910000009286
+        ],
+        "select_ms": null,
+        "total_ms": 363.1474
+      }
+    ],
+    "sort": "",
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task -content:alice",
+    "executor": "target_text",
+    "grouped": false,
+    "legacy_ms": 399.9677,
+    "name": "body_negative",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "page_only_ms": 218.81320000000002,
+        "project_ms": null,
+        "projected_items": 50000,
+        "projected_lines": 53000,
+        "sample": 0,
+        "scan_ms": [
+          51.84830000000643,
+          94.21710000001076,
+          69.50249999998283
+        ],
+        "select_ms": null,
+        "total_ms": 218.8845
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "page_only_ms": 218.5571,
+        "project_ms": null,
+        "projected_items": 50000,
+        "projected_lines": 53000,
+        "sample": 1,
+        "scan_ms": [
+          51.9545000000078,
+          93.96350000001408,
+          69.40769999997812
+        ],
+        "select_ms": null,
+        "total_ms": 218.40609999999998
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "page_only_ms": 217.2732,
+        "project_ms": null,
+        "projected_items": 50000,
+        "projected_lines": 53000,
+        "sample": 2,
+        "scan_ms": [
+          51.74930000000522,
+          93.41130000000963,
+          68.89129999998512
+        ],
+        "select_ms": null,
+        "total_ms": 217.0541
+      }
+    ],
+    "sort": "",
+    "total_hits": 15000
+  }
+]

@@ -9,6 +9,18 @@ use rusqlite::{params_from_iter, types::Value, Connection};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BinaryHeap};
 
+mod items;
+mod target_query;
+mod target_scan;
+mod text_window;
+mod anchor_page;
+mod target_projection;
+mod reader;
+pub use reader::{SearchQuery, SearchSlice, SearchCount};
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Execution { Complete, Page, Count }
+
 pub const MAX_PAGE_SIZE: u32 = 500;
 pub const MAX_SNIPPET_LINES: u32 = 200;
 
@@ -81,12 +93,29 @@ pub struct SearchLine {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {
+    /// Document-root facts, hydrated only for returned hits (or indexed sorting).
+    pub facts: Vec<SearchProperty>,
     pub rel_path: String,
     pub name: String,
     pub name_matched: bool,
     pub lines: Vec<SearchLine>,
+    /// Item-mode results are explicit targets, not fictitious physical lines.
+    pub items: Vec<SearchItem>,
     pub more_matches: u64,
     pub match_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchItem {
+    pub key: u64,
+    pub source_version: String,
+    pub map_version: u32,
+    pub range: gilune_document::ByteSpan,
+    pub own_ranges: Vec<gilune_document::ByteSpan>,
+    pub first_line: u32,
+    pub text: String,
+    pub ranges: Vec<SearchRange>,
+    pub facts: Vec<SearchProperty>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,7 +134,7 @@ struct Rank {
     value: String,
     matches: std::cmp::Reverse<u64>,
     path: String,
-    line: u32,
+    line: u64,
 }
 
 struct Ranked {
@@ -137,22 +166,25 @@ impl Store {
         request: &SearchRequest,
         extension: Option<&dyn SearchExtension>,
     ) -> Result<SearchPage> {
-        if request.page_size == 0
-            || request.page_size > MAX_PAGE_SIZE
-            || request.max_lines > MAX_SNIPPET_LINES
-            || request.clauses.len() > 64
-            || request
-                .clauses
-                .iter()
-                .map(|c| c.constraints.len())
-                .sum::<usize>()
-                > 128
-        {
-            return Err(invalid("search request exceeds its bounds"));
+        self.search_mode(request, extension, false)
+    }
+
+    /// The same request language, ranking, paging and extension contract over
+    /// source-qualified Markdown items. Target membership is contributed facts.
+    pub fn search_items(&self, request: &SearchRequest, extension: Option<&dyn SearchExtension>) -> Result<SearchPage> {
+        if !request.line_mode || request.extension_candidates {
+            return Err(invalid("item search requires indexed item membership, without a line extractor"));
         }
+        self.search_mode(request, extension, true)
+    }
+
+    fn search_mode(&self, request: &SearchRequest, extension: Option<&dyn SearchExtension>, item_mode: bool) -> Result<SearchPage> {
+        validate(request)?;
         self.with_index(|db| {
             db.execute_batch("BEGIN;")?;
-            let result = self.search_snapshot(db, request, extension);
+            let result = search_snapshot(db, request, extension, item_mode, Execution::Complete, || {
+                Ok(self.conn().query_row("SELECT COALESCE(MAX(seq),0) FROM vault_changes", [], |r| r.get(0))?)
+            });
             let end = db.execute_batch("ROLLBACK;");
             match result {
                 Ok(page) => {
@@ -164,25 +196,28 @@ impl Store {
         })
     }
 
+}
+
     fn search_snapshot(
-        &self,
         db: &Connection,
         request: &SearchRequest,
         extension: Option<&dyn SearchExtension>,
+        item_mode: bool,
+        execution: Execution,
+        tip: impl FnOnce() -> Result<i64>,
     ) -> Result<SearchPage> {
         let generation: String = db.query_row(
             "SELECT (SELECT value FROM index_meta WHERE key='instance') || ':' || (SELECT value FROM index_meta WHERE key='generation')", [], |row| row.get(0))?;
         let mut identity = request.clone();
         identity.cursor = None;
-        let fingerprint = hex::encode(Sha256::digest(format!("{identity:?}").as_bytes()));
+        for constraint in identity.clauses.iter_mut().flat_map(|c| &mut c.constraints) {
+            constraint.canonicalize();
+        }
+        let fingerprint = hex::encode(Sha256::digest(format!("{item_mode}:{identity:?}").as_bytes()));
         let after = decode_cursor(request.cursor.as_deref(), &generation, &fingerprint)?;
         // Read the feed after establishing the index snapshot: concurrent work
         // can conservatively report lag, but cannot disguise it as current.
-        let tip: i64 = self.conn().query_row(
-            "SELECT COALESCE(MAX(seq),0) FROM vault_changes",
-            [],
-            |row| row.get(0),
-        )?;
+        let tip = tip()?;
         let mut required = request.required_namespaces.clone();
         required.extend([
             index::TEXT_NAMESPACE.to_string(),
@@ -191,6 +226,7 @@ impl Store {
         required.sort();
         required.dedup();
         let mut issues = Vec::new();
+        let mut scoped_required=Vec::new();
         for namespace in required {
             let state = db.query_row(
                 "SELECT cursor_seq, last_error FROM namespaces WHERE namespace=?1",
@@ -210,8 +246,27 @@ impl Store {
                 }
                 Err(error) => return Err(error.into()),
             }
+            let scoped: bool=db.query_row("SELECT COALESCE((SELECT scoped FROM namespaces WHERE namespace=?1),0)",[&namespace],|r| r.get(0))?;
+            if scoped {
+                let mismatch: bool=db.query_row("SELECT EXISTS (SELECT 1 FROM source_maps s LEFT JOIN fact_sources r ON r.namespace=?1 AND r.rel_path=s.rel_path WHERE r.source_version IS NOT s.source_version) OR EXISTS (SELECT 1 FROM fact_sources r LEFT JOIN source_maps s ON s.rel_path=r.rel_path WHERE r.namespace=?1 AND r.source_version IS NOT s.source_version)",[&namespace],|r| r.get(0))?;
+                if mismatch { issues.push(format!("{namespace}: source versions are not aligned")); }
+                scoped_required.push(namespace);
+            }
         }
-        let (sql, params) = build_sql(request);
+        if item_mode {
+            return items::execute(db, request, extension, generation, fingerprint, after, issues, execution);
+        }
+        let (mut sql, mut params) = build_sql(request);
+        if !scoped_required.is_empty() {
+            let checks=scoped_required.iter().map(|ns| {
+                params.push(Value::Text(ns.clone()));
+                "EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=s.rel_path AND r.source_version=s.source_version)"
+            }).collect::<Vec<_>>().join(" AND ");
+            sql=format!("SELECT selected.* FROM ({sql}) selected JOIN source_maps s ON s.rel_path=selected.rel_path WHERE {checks} ORDER BY selected.rel_path,selected.line");
+        }
+        if anchor_page::supports(request) {
+            return anchor_page::search(db, request, &sql, params, generation, fingerprint, after, issues, execution);
+        }
         let mut stmt = db.prepare(&sql)?;
         let mut rows = stmt.query(params_from_iter(params.iter()))?;
         let mut pending_path: Option<String> = None;
@@ -312,7 +367,7 @@ impl Store {
                         value: String::new(),
                         matches: std::cmp::Reverse(hit.match_count),
                         path: path.to_string(),
-                        line: anchor,
+                        line: anchor.into(),
                     }
                 } else {
                     Rank {
@@ -320,7 +375,7 @@ impl Store {
                         value: sort_value.unwrap_or_default(),
                         matches: std::cmp::Reverse(0),
                         path: path.to_string(),
-                        line: anchor,
+                        line: anchor.into(),
                     }
                 };
                 total += 1;
@@ -355,22 +410,34 @@ impl Store {
             consume(&path, &selected)?;
         }
         let mut ranked = heap.into_sorted_vec();
-        // Fetch display facts only for the page that survived ranking.
+        // Hydrate each surviving document once, even when a page contains
+        // hundreds of individually ranked lines from it. Keep at most one
+        // document's fact rows in memory; result order remains the ranking's.
         if request.sort_predicate.is_empty() {
-            for result in &mut ranked {
-                if result.hit.lines.is_empty() {
-                    continue;
+            let mut by_path: BTreeMap<String, Vec<usize>> = BTreeMap::new();
+            for (index, result) in ranked.iter().enumerate() {
+                {
+                    by_path
+                        .entry(result.hit.rel_path.clone())
+                        .or_default()
+                        .push(index);
                 }
-                let facts = facts(db, &result.hit.rel_path)?;
-                for line in &mut result.hit.lines {
-                    line.facts = facts
-                        .iter()
-                        .filter(|f| f.line.is_none() || f.line == Some(line.number))
-                        .map(|f| SearchProperty {
-                            key: f.predicate.clone(),
-                            value: f.value.clone(),
-                        })
-                        .collect();
+            }
+            for (path, indices) in by_path {
+                let facts = facts(db, &path)?;
+                for index in indices {
+                    ranked[index].hit.facts = facts.iter().filter(|f| f.line.is_none())
+                        .map(|f| SearchProperty { key: f.predicate.clone(), value: f.value.clone() }).collect();
+                    for line in &mut ranked[index].hit.lines {
+                        line.facts = facts
+                            .iter()
+                            .filter(|f| f.line.is_none() || f.line == Some(line.number))
+                            .map(|f| SearchProperty {
+                                key: f.predicate.clone(),
+                                value: f.value.clone(),
+                            })
+                            .collect();
+                    }
                 }
             }
         }
@@ -390,7 +457,6 @@ impl Store {
             generation,
         })
     }
-}
 
 fn residuals(
     request: &SearchRequest,
@@ -457,7 +523,7 @@ fn document(
 
 fn facts(db: &Connection, path: &str) -> Result<Vec<IndexedFact>> {
     let mut stmt = db.prepare_cached(
-        "SELECT namespace, line, predicate, value FROM facts WHERE rel_path=?1 ORDER BY rowid",
+        "SELECT namespace, line, predicate, value FROM facts WHERE rel_path=?1 AND item_key IS NULL ORDER BY rowid",
     )?;
     let rows = stmt.query_map([path], |row| {
         Ok(IndexedFact {
@@ -523,10 +589,12 @@ fn make_hit(
         });
     }
     SearchHit {
+        facts: facts.get(&0).cloned().unwrap_or_default(),
         rel_path: document.rel_path.clone(),
         name: document.name.clone(),
         name_matched,
         lines,
+        items: Vec::new(),
         more_matches: more,
         match_count: count,
     }
@@ -544,7 +612,7 @@ fn build_sql(request: &SearchRequest) -> (String, Vec<Value>) {
         }
         let mut parts = Vec::new();
         for constraint in &clause.constraints {
-            let mut part = index::piece(constraint);
+            let mut part = if request.line_mode { index::piece(constraint) } else { index::document_piece(constraint) };
             if let Constraint::Text { target, query } = constraint {
                 if !request.line_mode
                     && query.contains('\n')
@@ -577,7 +645,9 @@ fn build_sql(request: &SearchRequest) -> (String, Vec<Value>) {
             let cte = format!("s{}", ctes.len());
             ctes.push(format!("{cte} AS MATERIALIZED ({})", part.sql));
             params.extend(part.params);
-            let condition = if request.line_mode {
+            let condition = if request.line_mode && !part.broadcast_root {
+                format!("(u.rel_path,u.line) IN (SELECT rel_path,line FROM {cte} WHERE line IS NOT NULL)")
+            } else if request.line_mode {
                 format!("((u.rel_path,u.line) IN (SELECT rel_path,line FROM {cte} WHERE line IS NOT NULL) OR u.rel_path IN (SELECT rel_path FROM {cte} WHERE line IS NULL))")
             } else {
                 format!("u.rel_path IN (SELECT rel_path FROM {cte})")
@@ -651,7 +721,6 @@ fn decode_cursor(
             .to_string(),
         line: a[4]
             .as_u64()
-            .and_then(|v| u32::try_from(v).ok())
             .ok_or_else(|| invalid("invalid rank"))?,
     }))
 }
@@ -664,3 +733,23 @@ fn invalid(detail: &str) -> KernelError {
 
 #[cfg(test)]
 mod tests;
+
+fn validate(request: &SearchRequest) -> Result<()> {
+        if request.page_size == 0
+            || request.page_size > MAX_PAGE_SIZE
+            || request.max_lines > MAX_SNIPPET_LINES
+            || request.clauses.len() > 64
+            || request
+                .clauses
+                .iter()
+                .map(|c| c.constraints.len())
+                .sum::<usize>()
+                > 128
+        {
+            return Err(invalid("search request exceeds its bounds"));
+        }
+        for constraint in request.clauses.iter().flat_map(|c| &c.constraints) {
+            constraint.validate()?;
+        }
+    Ok(())
+}

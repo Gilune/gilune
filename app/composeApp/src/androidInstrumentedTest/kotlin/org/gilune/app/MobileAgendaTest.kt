@@ -12,6 +12,12 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.tasksDeclaration
+import org.gilune.plugins.tasks.tasksDecorations
+import org.gilune.plugins.tasks.tasksSettingsDocument
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -108,6 +114,15 @@ class MobileAgendaTest {
         assertTrue(updated != null && updated.contains("- [x] milk"), updated.orEmpty())
         assertTrue(updated!!.contains("- [ ] bread"), "only the tapped line moved")
         assertTrue(updated.startsWith("---\ngilune-id: abc\n---\n"), "front matter survived")
+    }
+
+    @Test
+    fun aWholeItemRowTogglesOnlyItsCheckboxLine() {
+        val body = "- [ ] Parent\n  owner: @alice\n  - [ ] Child\n"
+        val hit = TaskHit("work.md", "Work", 1, "- [ ] Parent\n  owner: @alice", null, null)
+        assertEquals(body.replace("[ ] Parent", "[x] Parent"),
+            toggleTaskLine(body, hit.line - 1, hit.checkboxLine))
+        assertNull(toggleTaskLine(body.replace("Parent", "Changed"), hit.line - 1, hit.checkboxLine))
     }
 
     @Test

@@ -5,6 +5,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
+
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier

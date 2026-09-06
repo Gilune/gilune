@@ -7,6 +7,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.tasksDecorations
+
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals

@@ -9,6 +9,9 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugins.tasks.taskSearchType
+
 import java.io.File
 import java.nio.file.Files
 import java.time.LocalDate

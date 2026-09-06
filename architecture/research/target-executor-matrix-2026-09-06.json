@@ -1,0 +1,2175 @@
+[
+  {
+    "dsl": "type:task",
+    "grouped": false,
+    "legacy_ms": 378.96419999999995,
+    "name": "all",
+    "samples": [
+      {
+        "compile_ms": 0.08990000000000001,
+        "count_ms": 24.9826,
+        "project_ms": 2.6754000000000033,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.26379999999999626,
+        "total_ms": 29.5908
+      },
+      {
+        "compile_ms": 0.061500000000000006,
+        "count_ms": 24.5531,
+        "project_ms": 2.5731,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.2555000000000014,
+        "total_ms": 29.1248
+      },
+      {
+        "compile_ms": 0.0598,
+        "count_ms": 24.641,
+        "project_ms": 2.543300000000002,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.26110000000000255,
+        "total_ms": 29.1997
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task is:open",
+    "grouped": false,
+    "legacy_ms": 418.1204,
+    "name": "open",
+    "samples": [
+      {
+        "compile_ms": 0.0919,
+        "count_ms": 58.667500000000004,
+        "project_ms": 3.1345000000000027,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.33209999999998985,
+        "total_ms": 63.8062
+      },
+      {
+        "compile_ms": 0.07490000000000001,
+        "count_ms": 59.3026,
+        "project_ms": 2.5241999999999933,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.3229000000000042,
+        "total_ms": 63.9555
+      },
+      {
+        "compile_ms": 0.0778,
+        "count_ms": 59.360299999999995,
+        "project_ms": 2.4853999999999985,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.31450000000000244,
+        "total_ms": 63.99720000000001
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 42500
+  },
+  {
+    "dsl": "type:task is:done",
+    "grouped": false,
+    "legacy_ms": 214.9422,
+    "name": "done",
+    "samples": [
+      {
+        "compile_ms": 0.0826,
+        "count_ms": 56.871,
+        "project_ms": 2.9528999999999996,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 0.6454999999999984,
+        "total_ms": 62.2197
+      },
+      {
+        "compile_ms": 0.0843,
+        "count_ms": 57.2751,
+        "project_ms": 2.917200000000001,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 0.6374999999999957,
+        "total_ms": 62.6343
+      },
+      {
+        "compile_ms": 0.0732,
+        "count_ms": 57.9258,
+        "project_ms": 2.8871000000000038,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 0.6306999999999974,
+        "total_ms": 63.185
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 7500
+  },
+  {
+    "dsl": "type:task -is:done",
+    "grouped": false,
+    "legacy_ms": 18876.5305,
+    "name": "not_done",
+    "samples": [
+      {
+        "compile_ms": 0.0994,
+        "count_ms": 79.7205,
+        "project_ms": 3.823100000000011,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.34919999999998197,
+        "total_ms": 86.42819999999999
+      },
+      {
+        "compile_ms": 0.0882,
+        "count_ms": 78.69449999999999,
+        "project_ms": 3.707100000000011,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.37990000000000634,
+        "total_ms": 85.42439999999999
+      },
+      {
+        "compile_ms": 0.0712,
+        "count_ms": 75.71849999999999,
+        "project_ms": 3.7309999999999945,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.47809999999999775,
+        "total_ms": 81.93939999999999
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 42500
+  },
+  {
+    "dsl": "type:task people.connection:assign:@alice",
+    "grouped": false,
+    "legacy_ms": 720.0831,
+    "name": "alice",
+    "samples": [
+      {
+        "compile_ms": 0.27240000000000003,
+        "count_ms": 107.5387,
+        "project_ms": 4.23299999999999,
+        "projected_items": 50,
+        "projected_lines": 54,
+        "sample": 0,
+        "select_ms": 0.6259999999999906,
+        "total_ms": 117.8455
+      },
+      {
+        "compile_ms": 0.2043,
+        "count_ms": 90.7422,
+        "project_ms": 4.378799999999998,
+        "projected_items": 50,
+        "projected_lines": 54,
+        "sample": 1,
+        "select_ms": 0.5797000000000025,
+        "total_ms": 100.1397
+      },
+      {
+        "compile_ms": 0.2498,
+        "count_ms": 88.85810000000001,
+        "project_ms": 3.9846000000000146,
+        "projected_items": 50,
+        "projected_lines": 54,
+        "sample": 2,
+        "select_ms": 0.8026999999999873,
+        "total_ms": 97.45439999999999
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 30000
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign:@alice",
+    "grouped": false,
+    "legacy_ms": 720.7109,
+    "name": "alice_open",
+    "samples": [
+      {
+        "compile_ms": 0.2616,
+        "count_ms": 128.607,
+        "project_ms": 3.4346999999999923,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 0,
+        "select_ms": 0.6779000000000224,
+        "total_ms": 136.933
+      },
+      {
+        "compile_ms": 0.1789,
+        "count_ms": 143.4973,
+        "project_ms": 2.9183000000000163,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 1,
+        "select_ms": 0.6600999999999999,
+        "total_ms": 150.6632
+      },
+      {
+        "compile_ms": 0.1438,
+        "count_ms": 118.0158,
+        "project_ms": 3.817600000000013,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 2,
+        "select_ms": 0.7511999999999972,
+        "total_ms": 126.1446
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 25000
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+    "grouped": false,
+    "legacy_ms": 1848.7457,
+    "name": "alice_month",
+    "samples": [
+      {
+        "compile_ms": 0.2491,
+        "count_ms": 193.63639999999998,
+        "project_ms": 3.73660000000001,
+        "projected_items": 50,
+        "projected_lines": 57,
+        "sample": 0,
+        "select_ms": 1.0774000000000115,
+        "total_ms": 202.3744
+      },
+      {
+        "compile_ms": 0.1855,
+        "count_ms": 189.47490000000002,
+        "project_ms": 3.7856999999999914,
+        "projected_items": 50,
+        "projected_lines": 57,
+        "sample": 1,
+        "select_ms": 1.0408999999999935,
+        "total_ms": 197.8508
+      },
+      {
+        "compile_ms": 0.186,
+        "count_ms": 178.7007,
+        "project_ms": 3.807499999999976,
+        "projected_items": 50,
+        "projected_lines": 57,
+        "sample": 2,
+        "select_ms": 1.037700000000001,
+        "total_ms": 187.11159999999998
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 17500
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign IN [\"alice\", \"bob\"] due:after:2026-08-31 due:before:2026-10-01",
+    "grouped": false,
+    "legacy_ms": 1324.7344,
+    "name": "either_month",
+    "samples": [
+      {
+        "compile_ms": 0.7015,
+        "count_ms": 234.22379999999998,
+        "project_ms": 3.752200000000016,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 0,
+        "select_ms": 1.1219999999999857,
+        "total_ms": 243.5983
+      },
+      {
+        "compile_ms": 0.22340000000000002,
+        "count_ms": 231.0697,
+        "project_ms": 3.666499999999985,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 1,
+        "select_ms": 1.1063000000000045,
+        "total_ms": 239.83679999999998
+      },
+      {
+        "compile_ms": 0.25329999999999997,
+        "count_ms": 229.5926,
+        "project_ms": 3.7221000000000117,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 2,
+        "select_ms": 0.9046999999999912,
+        "total_ms": 237.8768
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 25000
+  },
+  {
+    "dsl": "type:task is:open -people.connection:assign:@bob due:after:2026-08-31 due:before:2026-10-01",
+    "grouped": false,
+    "legacy_ms": 22106.929999999997,
+    "name": "not_bob_month",
+    "samples": [
+      {
+        "compile_ms": 0.09849999999999999,
+        "count_ms": 138.0746,
+        "project_ms": 2.387599999999992,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 0,
+        "select_ms": 0.6374999999999886,
+        "total_ms": 143.69029999999998
+      },
+      {
+        "compile_ms": 0.09179999999999999,
+        "count_ms": 136.4032,
+        "project_ms": 2.407800000000009,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 1,
+        "select_ms": 0.6355999999999824,
+        "total_ms": 141.8093
+      },
+      {
+        "compile_ms": 0.1598,
+        "count_ms": 140.616,
+        "project_ms": 2.8041000000000054,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 2,
+        "select_ms": 0.6562999999999874,
+        "total_ms": 146.9932
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 25000
+  },
+  {
+    "dsl": "type:task people.connection:assign NOT IN [\"alice\", \"bob\"]",
+    "grouped": false,
+    "legacy_ms": 17462.9849,
+    "name": "not_either",
+    "samples": [
+      {
+        "compile_ms": 0.1256,
+        "count_ms": 112.2186,
+        "project_ms": 4.636299999999991,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 0.9150000000000063,
+        "total_ms": 120.98870000000001
+      },
+      {
+        "compile_ms": 0.0826,
+        "count_ms": 114.2808,
+        "project_ms": 4.066699999999983,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 1.0293000000000063,
+        "total_ms": 122.0222
+      },
+      {
+        "compile_ms": 0.1177,
+        "count_ms": 110.2887,
+        "project_ms": 3.937400000000011,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 1.1763999999999868,
+        "total_ms": 119.23110000000001
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 7500
+  },
+  {
+    "dsl": "type:task people.connection:assign IN []",
+    "grouped": false,
+    "legacy_ms": 141.2515,
+    "name": "empty_membership",
+    "samples": [
+      {
+        "compile_ms": 0.1851,
+        "count_ms": 0.05780000000000002,
+        "project_ms": 0.0010000000000000564,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 0.15349999999999997,
+        "total_ms": 4.1947
+      },
+      {
+        "compile_ms": 0.0966,
+        "count_ms": 0.03649999999999999,
+        "project_ms": 0.0007999999999999674,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 0.11970000000000003,
+        "total_ms": 2.2414
+      },
+      {
+        "compile_ms": 0.12079999999999999,
+        "count_ms": 0.04930000000000001,
+        "project_ms": 0.0005000000000000004,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 0.14609999999999998,
+        "total_ms": 2.4536
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task people.connection:assign NOT IN []",
+    "grouped": false,
+    "legacy_ms": 544.6934,
+    "name": "empty_negative_membership",
+    "samples": [
+      {
+        "compile_ms": 0.1334,
+        "count_ms": 47.6152,
+        "project_ms": 3.4207000000000107,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.37579999999999103,
+        "total_ms": 54.966
+      },
+      {
+        "compile_ms": 0.0943,
+        "count_ms": 42.1788,
+        "project_ms": 4.002699999999997,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.4737000000000009,
+        "total_ms": 49.183499999999995
+      },
+      {
+        "compile_ms": 0.1118,
+        "count_ms": 40.1933,
+        "project_ms": 3.4242999999999952,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.4759999999999991,
+        "total_ms": 47.7801
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task people.connection:assign IN [\"alice\", \"alice\", \"bob\"]",
+    "grouped": false,
+    "legacy_ms": 631.0073000000001,
+    "name": "duplicate_membership",
+    "samples": [
+      {
+        "compile_ms": 0.1408,
+        "count_ms": 82.578,
+        "project_ms": 2.5264999999999844,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.3995000000000033,
+        "total_ms": 87.9461
+      },
+      {
+        "compile_ms": 0.1248,
+        "count_ms": 78.66430000000001,
+        "project_ms": 2.5934000000000026,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.49379999999999313,
+        "total_ms": 84.149
+      },
+      {
+        "compile_ms": 0.1163,
+        "count_ms": 78.11510000000001,
+        "project_ms": 2.575099999999992,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.3983999999999952,
+        "total_ms": 83.49289999999999
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 42500
+  },
+  {
+    "dsl": "type:task people.connection:assign:@absent",
+    "grouped": false,
+    "legacy_ms": 86.29530000000001,
+    "name": "absent_person",
+    "samples": [
+      {
+        "compile_ms": 0.10490000000000001,
+        "count_ms": 0.031100000000000003,
+        "project_ms": 0.0007000000000000339,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 0.10329999999999998,
+        "total_ms": 2.7624
+      },
+      {
+        "compile_ms": 0.0461,
+        "count_ms": 0.0232,
+        "project_ms": 0.00010000000000001674,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 0.08779999999999999,
+        "total_ms": 1.632
+      },
+      {
+        "compile_ms": 0.0445,
+        "count_ms": 0.022400000000000003,
+        "project_ms": 0.00010000000000001674,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 0.0768,
+        "total_ms": 1.5916000000000001
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task people.connection:assign:@\u00e9lise",
+    "grouped": false,
+    "legacy_ms": 91.8135,
+    "name": "unicode_absent",
+    "samples": [
+      {
+        "compile_ms": 0.09509999999999999,
+        "count_ms": 0.029800000000000007,
+        "project_ms": 0.0005999999999999894,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 0.09369999999999999,
+        "total_ms": 2.5859
+      },
+      {
+        "compile_ms": 0.0455,
+        "count_ms": 0.02260000000000001,
+        "project_ms": 0.00010000000000001674,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 0.0795,
+        "total_ms": 1.6173
+      },
+      {
+        "compile_ms": 0.064,
+        "count_ms": 0.026699999999999988,
+        "project_ms": 0.00010000000000001674,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 0.08,
+        "total_ms": 1.6547
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task people.connection:owner:@alice",
+    "grouped": false,
+    "legacy_ms": 189.424,
+    "name": "owner_alice",
+    "samples": [
+      {
+        "compile_ms": 0.11649999999999999,
+        "count_ms": 59.412299999999995,
+        "project_ms": 3.4189000000000007,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 1.430800000000005,
+        "total_ms": 67.0196
+      },
+      {
+        "compile_ms": 0.0897,
+        "count_ms": 58.4939,
+        "project_ms": 3.487399999999994,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 1.437500000000007,
+        "total_ms": 65.7432
+      },
+      {
+        "compile_ms": 0.0851,
+        "count_ms": 60.27680000000001,
+        "project_ms": 3.4162000000000035,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 1.4612999999999943,
+        "total_ms": 67.393
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task people.connection:reviewer:@alice",
+    "grouped": false,
+    "legacy_ms": 194.0161,
+    "name": "reviewer_alice",
+    "samples": [
+      {
+        "compile_ms": 0.10239999999999999,
+        "count_ms": 62.37049999999999,
+        "project_ms": 3.3854000000000113,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 1.450099999999999,
+        "total_ms": 69.5389
+      },
+      {
+        "compile_ms": 0.0987,
+        "count_ms": 63.8459,
+        "project_ms": 3.3299999999999983,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 1.6133000000000024,
+        "total_ms": 71.10329999999999
+      },
+      {
+        "compile_ms": 0.0893,
+        "count_ms": 61.5533,
+        "project_ms": 3.3085000000000093,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 1.4451999999999998,
+        "total_ms": 68.585
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task people.connection:assign:@alice people.connection:reviewer:@bob",
+    "grouped": false,
+    "legacy_ms": 314.7664,
+    "name": "paired_roles",
+    "samples": [
+      {
+        "compile_ms": 0.1289,
+        "count_ms": 79.09779999999999,
+        "project_ms": 4.0488,
+        "projected_items": 50,
+        "projected_lines": 100,
+        "sample": 0,
+        "select_ms": 1.8623000000000047,
+        "total_ms": 87.45559999999999
+      },
+      {
+        "compile_ms": 0.14559999999999998,
+        "count_ms": 79.5423,
+        "project_ms": 3.2475000000000023,
+        "projected_items": 50,
+        "projected_lines": 100,
+        "sample": 1,
+        "select_ms": 1.8209000000000088,
+        "total_ms": 87.0826
+      },
+      {
+        "compile_ms": 0.19890000000000002,
+        "count_ms": 82.5164,
+        "project_ms": 3.474800000000002,
+        "projected_items": 50,
+        "projected_lines": 100,
+        "sample": 2,
+        "select_ms": 1.8708000000000027,
+        "total_ms": 90.3749
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task people.connection:owner:@bob people.connection:reviewer:@alice",
+    "grouped": false,
+    "legacy_ms": 90.1293,
+    "name": "wrong_role_pair",
+    "samples": [
+      {
+        "compile_ms": 0.1101,
+        "count_ms": 0.03520000000000001,
+        "project_ms": 0.0006000000000000449,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 0.15039999999999995,
+        "total_ms": 2.7737
+      },
+      {
+        "compile_ms": 0.0567,
+        "count_ms": 0.028200000000000003,
+        "project_ms": 0.00019999999999997797,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 0.10520000000000002,
+        "total_ms": 1.6716
+      },
+      {
+        "compile_ms": 0.0507,
+        "count_ms": 0.026799999999999997,
+        "project_ms": 0.00020000000000000573,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 0.08539999999999999,
+        "total_ms": 1.6394
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task people.connection:assign:@alice people.connection:assign:@bob",
+    "grouped": false,
+    "legacy_ms": 234.26739999999998,
+    "name": "two_assignees",
+    "samples": [
+      {
+        "compile_ms": 0.155,
+        "count_ms": 80.2809,
+        "project_ms": 0.0013000000000147338,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 80.31649999999999,
+        "total_ms": 163.2285
+      },
+      {
+        "compile_ms": 0.1235,
+        "count_ms": 82.80189999999999,
+        "project_ms": 0.0010000000000047748,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 83.0746,
+        "total_ms": 168.216
+      },
+      {
+        "compile_ms": 0.1295,
+        "count_ms": 80.2223,
+        "project_ms": 0.0010999999999796728,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 83.11170000000001,
+        "total_ms": 165.88490000000002
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task due:none",
+    "grouped": false,
+    "legacy_ms": 6648.2871000000005,
+    "name": "missing_due",
+    "samples": [
+      {
+        "compile_ms": 0.0711,
+        "count_ms": 37.1139,
+        "project_ms": 3.2368000000000023,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 1.0089999999999932,
+        "total_ms": 43.282599999999995
+      },
+      {
+        "compile_ms": 0.0659,
+        "count_ms": 37.1199,
+        "project_ms": 3.0751999999999953,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 0.9853000000000023,
+        "total_ms": 43.029900000000005
+      },
+      {
+        "compile_ms": 0.0626,
+        "count_ms": 39.39869999999999,
+        "project_ms": 3.093899999999998,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 1.012200000000007,
+        "total_ms": 45.2773
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task -due:none",
+    "grouped": false,
+    "legacy_ms": 496.71500000000003,
+    "name": "present_due",
+    "samples": [
+      {
+        "compile_ms": 0.0727,
+        "count_ms": 39.208600000000004,
+        "project_ms": 2.7905000000000015,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.29829999999999757,
+        "total_ms": 43.9169
+      },
+      {
+        "compile_ms": 0.0992,
+        "count_ms": 41.3299,
+        "project_ms": 2.9007999999999967,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.28879999999999484,
+        "total_ms": 46.8296
+      },
+      {
+        "compile_ms": 0.0713,
+        "count_ms": 39.413399999999996,
+        "project_ms": 2.5239000000000047,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.30510000000000304,
+        "total_ms": 44.1202
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 47500
+  },
+  {
+    "dsl": "type:task done:none",
+    "grouped": false,
+    "legacy_ms": 387.1716,
+    "name": "missing_done",
+    "samples": [
+      {
+        "compile_ms": 0.1137,
+        "count_ms": 29.5677,
+        "project_ms": 2.4943000000000026,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.28160000000000096,
+        "total_ms": 34.1642
+      },
+      {
+        "compile_ms": 0.0706,
+        "count_ms": 28.857000000000003,
+        "project_ms": 2.504200000000001,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.26859999999999573,
+        "total_ms": 33.319
+      },
+      {
+        "compile_ms": 0.0617,
+        "count_ms": 28.961,
+        "project_ms": 2.4262000000000015,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.26920000000000144,
+        "total_ms": 33.268899999999995
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task due:today",
+    "grouped": false,
+    "legacy_ms": 189.7801,
+    "name": "today",
+    "samples": [
+      {
+        "compile_ms": 0.1073,
+        "count_ms": 65.21650000000001,
+        "project_ms": 3.1714999999999947,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 1.778499999999994,
+        "total_ms": 72.0365
+      },
+      {
+        "compile_ms": 0.09670000000000001,
+        "count_ms": 58.551700000000004,
+        "project_ms": 3.2232999999999947,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 1.4405000000000001,
+        "total_ms": 64.9931
+      },
+      {
+        "compile_ms": 0.0958,
+        "count_ms": 59.4462,
+        "project_ms": 3.159399999999998,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 1.4287000000000063,
+        "total_ms": 65.84039999999999
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task due:week",
+    "grouped": false,
+    "legacy_ms": 487.2476,
+    "name": "week",
+    "samples": [
+      {
+        "compile_ms": 0.06949999999999999,
+        "count_ms": 81.7543,
+        "project_ms": 2.5663000000000125,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 0.6850999999999914,
+        "total_ms": 86.6296
+      },
+      {
+        "compile_ms": 0.0718,
+        "count_ms": 88.4295,
+        "project_ms": 2.853899999999996,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 0.6775999999999982,
+        "total_ms": 93.92970000000001
+      },
+      {
+        "compile_ms": 0.07100000000000001,
+        "count_ms": 81.8528,
+        "project_ms": 2.705999999999989,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 0.7040000000000077,
+        "total_ms": 87.0981
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 10000
+  },
+  {
+    "dsl": "type:task -due:week",
+    "grouped": false,
+    "legacy_ms": 69905.7939,
+    "name": "not_week",
+    "samples": [
+      {
+        "compile_ms": 0.0778,
+        "count_ms": 81.6146,
+        "project_ms": 2.41279999999999,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.37470000000001846,
+        "total_ms": 86.2003
+      },
+      {
+        "compile_ms": 0.076,
+        "count_ms": 81.2906,
+        "project_ms": 2.4654999999999916,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.4636000000000138,
+        "total_ms": 86.0954
+      },
+      {
+        "compile_ms": 0.0673,
+        "count_ms": 80.4991,
+        "project_ms": 2.479699999999994,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.37480000000000757,
+        "total_ms": 85.14529999999999
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 40000
+  },
+  {
+    "dsl": "type:task due:overdue",
+    "grouped": false,
+    "legacy_ms": 274.9293,
+    "name": "overdue",
+    "samples": [
+      {
+        "compile_ms": 0.0654,
+        "count_ms": 58.95340000000001,
+        "project_ms": 2.7234999999999943,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 0.5488999999999962,
+        "total_ms": 63.716499999999996
+      },
+      {
+        "compile_ms": 0.06420000000000001,
+        "count_ms": 55.7647,
+        "project_ms": 2.8371999999999957,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 0.5032000000000068,
+        "total_ms": 60.9315
+      },
+      {
+        "compile_ms": 0.0702,
+        "count_ms": 56.084300000000006,
+        "project_ms": 2.8137000000000043,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 0.4724999999999895,
+        "total_ms": 61.1856
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 12500
+  },
+  {
+    "dsl": "type:task due:2026-09-01",
+    "grouped": false,
+    "legacy_ms": 209.38309999999998,
+    "name": "boundary_start",
+    "samples": [
+      {
+        "compile_ms": 0.098,
+        "count_ms": 59.7187,
+        "project_ms": 2.9750000000000014,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 0.8980000000000032,
+        "total_ms": 65.3607
+      },
+      {
+        "compile_ms": 0.08339999999999999,
+        "count_ms": 59.823100000000004,
+        "project_ms": 4.387799999999999,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 0.9255999999999958,
+        "total_ms": 66.9807
+      },
+      {
+        "compile_ms": 0.0949,
+        "count_ms": 62.368399999999994,
+        "project_ms": 2.846899999999998,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 0.8004000000000104,
+        "total_ms": 67.8666
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 5000
+  },
+  {
+    "dsl": "type:task due:2026-09-30",
+    "grouped": false,
+    "legacy_ms": 189.14929999999998,
+    "name": "boundary_end",
+    "samples": [
+      {
+        "compile_ms": 0.1287,
+        "count_ms": 63.1579,
+        "project_ms": 3.0786999999999978,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 1.484100000000005,
+        "total_ms": 70.13980000000001
+      },
+      {
+        "compile_ms": 0.0821,
+        "count_ms": 58.7671,
+        "project_ms": 3.2172000000000054,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 1.5191000000000017,
+        "total_ms": 65.2346
+      },
+      {
+        "compile_ms": 0.0813,
+        "count_ms": 59.2037,
+        "project_ms": 3.1086999999999847,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 1.6698000000000093,
+        "total_ms": 65.7521
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task due:after:2026-10-01 due:before:2026-09-01",
+    "grouped": false,
+    "legacy_ms": 88.51920000000001,
+    "name": "contradictory_dates",
+    "samples": [
+      {
+        "compile_ms": 0.08789999999999999,
+        "count_ms": 42.557100000000005,
+        "project_ms": 0.0011000000000080945,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 42.73499999999999,
+        "total_ms": 87.4135
+      },
+      {
+        "compile_ms": 0.07930000000000001,
+        "count_ms": 42.6038,
+        "project_ms": 0.000999999999990564,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 42.9185,
+        "total_ms": 87.57249999999999
+      },
+      {
+        "compile_ms": 0.07619999999999999,
+        "count_ms": 42.1909,
+        "project_ms": 0.0010000000000047748,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 43.3485,
+        "total_ms": 87.3142
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task is:open is:done",
+    "grouped": false,
+    "legacy_ms": 227.8075,
+    "name": "contradictory_state",
+    "samples": [
+      {
+        "compile_ms": 0.124,
+        "count_ms": 81.1525,
+        "project_ms": 0.0010000000000047748,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 82.34479999999999,
+        "total_ms": 165.6218
+      },
+      {
+        "compile_ms": 0.1054,
+        "count_ms": 82.15979999999999,
+        "project_ms": 0.0020000000000095497,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 83.15199999999999,
+        "total_ms": 167.1862
+      },
+      {
+        "compile_ms": 0.1044,
+        "count_ms": 80.6484,
+        "project_ms": 0.0011000000000080945,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 82.40589999999999,
+        "total_ms": 164.9599
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task due:after:2026-08-31 due:before:2026-10-01 due:after:2026-09-05 due:before:2026-09-26",
+    "grouped": false,
+    "legacy_ms": 1438.8285,
+    "name": "redundant_ranges",
+    "samples": [
+      {
+        "compile_ms": 0.1185,
+        "count_ms": 219.4753,
+        "project_ms": 4.420300000000026,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 0,
+        "select_ms": 0.8961999999999648,
+        "total_ms": 227.73860000000002
+      },
+      {
+        "compile_ms": 0.1261,
+        "count_ms": 195.3853,
+        "project_ms": 2.828000000000003,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 1,
+        "select_ms": 0.7780999999999949,
+        "total_ms": 201.7116
+      },
+      {
+        "compile_ms": 0.08739999999999999,
+        "count_ms": 139.7334,
+        "project_ms": 2.491600000000034,
+        "projected_items": 50,
+        "projected_lines": 55,
+        "sample": 2,
+        "select_ms": 0.5965999999999951,
+        "total_ms": 144.86669999999998
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 27500
+  },
+  {
+    "dsl": "type:task due:soonish",
+    "grouped": false,
+    "legacy_ms": 2.1222,
+    "name": "invalid_date",
+    "samples": [
+      {
+        "compile_ms": 0.1015,
+        "count_ms": 0.027999999999999997,
+        "project_ms": 0.0004999999999999727,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 0.1187,
+        "total_ms": 1.7186000000000001
+      },
+      {
+        "compile_ms": 0.052500000000000005,
+        "count_ms": 0.025099999999999997,
+        "project_ms": 0.0002999999999999947,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 0.1167,
+        "total_ms": 1.6413
+      },
+      {
+        "compile_ms": 0.0571,
+        "count_ms": 0.0257,
+        "project_ms": 0.0002999999999999947,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 0.1251,
+        "total_ms": 1.7177
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task -due:soonish",
+    "grouped": false,
+    "legacy_ms": 360.32950000000005,
+    "name": "negated_invalid_date",
+    "samples": [
+      {
+        "compile_ms": 0.0764,
+        "count_ms": 26.136,
+        "project_ms": 3.618500000000001,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.25700000000000145,
+        "total_ms": 31.8757
+      },
+      {
+        "compile_ms": 0.1216,
+        "count_ms": 26.281399999999998,
+        "project_ms": 2.6273000000000017,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.2602000000000011,
+        "total_ms": 31.1829
+      },
+      {
+        "compile_ms": 0.09770000000000001,
+        "count_ms": 25.5243,
+        "project_ms": 2.750700000000002,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.30600000000000094,
+        "total_ms": 30.4735
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task content:Work",
+    "grouped": false,
+    "legacy_ms": 389.76509999999996,
+    "name": "body_broad",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 400.5011
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 428.14590000000004
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 553.4542
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task content:or",
+    "grouped": false,
+    "legacy_ms": 547.8664,
+    "name": "body_short",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 514.9093
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 532.1524
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 622.7737
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task content:\"Work 49999\"",
+    "grouped": false,
+    "legacy_ms": 610.1245,
+    "name": "body_sparse",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 423.5426
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 597.1697
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 536.0901
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 1
+  },
+  {
+    "dsl": "type:task content:quartz",
+    "grouped": false,
+    "legacy_ms": 499.474,
+    "name": "body_absent",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 503.6288
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 440.7249
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 420.1652
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task -content:alice",
+    "grouped": false,
+    "legacy_ms": 470.76059999999995,
+    "name": "body_negative",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 551.1475
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 522.0236
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 547.4029
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 15000
+  },
+  {
+    "dsl": "type:task alice",
+    "grouped": false,
+    "legacy_ms": 671.0217,
+    "name": "bare_ranked",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 518.9795
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 539.1983
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 553.35
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 35000
+  },
+  {
+    "dsl": "type:task path:work-0499",
+    "grouped": false,
+    "legacy_ms": 448.19730000000004,
+    "name": "path_one",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 448.30940000000004
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 462.6513
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 428.27959999999996
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 100
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01 path:work-0499",
+    "grouped": false,
+    "legacy_ms": 1736.3377,
+    "name": "path_and_facts",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 1513.3938
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 1358.7887
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 1450.0466000000001
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 35
+  },
+  {
+    "dsl": "type:task file:work-0001",
+    "grouped": false,
+    "legacy_ms": 298.812,
+    "name": "file_match",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 290.555
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 293.3664
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 285.9788
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 100
+  },
+  {
+    "dsl": "type:task [connections]",
+    "grouped": false,
+    "legacy_ms": 374.73499999999996,
+    "name": "root_property",
+    "samples": [
+      {
+        "compile_ms": 0.0678,
+        "count_ms": 68.3771,
+        "project_ms": 2.4809000000000054,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.34659999999999513,
+        "total_ms": 72.9739
+      },
+      {
+        "compile_ms": 0.0766,
+        "count_ms": 69.0715,
+        "project_ms": 2.478999999999999,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.38810000000000855,
+        "total_ms": 73.7302
+      },
+      {
+        "compile_ms": 0.0679,
+        "count_ms": 68.36340000000001,
+        "project_ms": 2.571200000000019,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.3375999999999806,
+        "total_ms": 72.95110000000001
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task -[title]",
+    "grouped": false,
+    "legacy_ms": 373.70730000000003,
+    "name": "missing_root_property",
+    "samples": [
+      {
+        "compile_ms": 0.07160000000000001,
+        "count_ms": 55.31940000000001,
+        "project_ms": 2.6567000000000007,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 0,
+        "select_ms": 0.31559999999999633,
+        "total_ms": 60.128
+      },
+      {
+        "compile_ms": 0.06830000000000001,
+        "count_ms": 53.536500000000004,
+        "project_ms": 2.920199999999994,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 1,
+        "select_ms": 0.34669999999999845,
+        "total_ms": 58.494
+      },
+      {
+        "compile_ms": 0.068,
+        "count_ms": 52.4404,
+        "project_ms": 2.4472000000000023,
+        "projected_items": 50,
+        "projected_lines": 53,
+        "sample": 2,
+        "select_ms": 0.35530000000000683,
+        "total_ms": 56.9896
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task nonsense:value",
+    "grouped": false,
+    "legacy_ms": 348.4469,
+    "name": "unknown_keyword",
+    "samples": [
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": null,
+        "total_ms": 311.5797
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": null,
+        "total_ms": 341.5586
+      },
+      {
+        "compile_ms": null,
+        "count_ms": null,
+        "project_ms": null,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": null,
+        "total_ms": 311.6163
+      }
+    ],
+    "sort": "",
+    "target_route": false,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+    "grouped": false,
+    "legacy_ms": 1569.4738,
+    "name": "alice_month_due",
+    "samples": [
+      {
+        "compile_ms": 0.13870000000000002,
+        "count_ms": 130.1199,
+        "project_ms": 3.3169000000000324,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 79.80539999999999,
+        "total_ms": 215.8253
+      },
+      {
+        "compile_ms": 0.1289,
+        "count_ms": 135.10580000000002,
+        "project_ms": 3.33280000000002,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 76.2534,
+        "total_ms": 217.226
+      },
+      {
+        "compile_ms": 0.1271,
+        "count_ms": 132.9998,
+        "project_ms": 3.180499999999995,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 75.28039999999999,
+        "total_ms": 213.7788
+      }
+    ],
+    "sort": "org.memory.tasks.due",
+    "target_route": true,
+    "total_hits": 17500
+  },
+  {
+    "dsl": "type:task",
+    "grouped": false,
+    "legacy_ms": 552.7529,
+    "name": "all_due_nullable",
+    "samples": [
+      {
+        "compile_ms": 0.06219999999999999,
+        "count_ms": 24.676299999999998,
+        "project_ms": 3.423099999999998,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 25.258600000000005,
+        "total_ms": 54.9705
+      },
+      {
+        "compile_ms": 0.088,
+        "count_ms": 25.3995,
+        "project_ms": 3.1326000000000036,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 25.408599999999996,
+        "total_ms": 56.2387
+      },
+      {
+        "compile_ms": 0.055,
+        "count_ms": 24.9126,
+        "project_ms": 3.1287999999999982,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 25.8466,
+        "total_ms": 55.6222
+      }
+    ],
+    "sort": "org.memory.tasks.due",
+    "target_route": true,
+    "total_hits": 50000
+  },
+  {
+    "dsl": "type:task is:open",
+    "grouped": false,
+    "legacy_ms": 641.9726999999999,
+    "name": "open_due_nullable",
+    "samples": [
+      {
+        "compile_ms": 0.0864,
+        "count_ms": 60.060500000000005,
+        "project_ms": 3.1037999999999926,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 29.4302,
+        "total_ms": 94.3421
+      },
+      {
+        "compile_ms": 0.08009999999999999,
+        "count_ms": 71.2958,
+        "project_ms": 5.513300000000001,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 44.74539999999999,
+        "total_ms": 123.3504
+      },
+      {
+        "compile_ms": 0.1241,
+        "count_ms": 92.85810000000001,
+        "project_ms": 5.305599999999998,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 47.3201,
+        "total_ms": 148.2456
+      }
+    ],
+    "sort": "org.memory.tasks.due",
+    "target_route": true,
+    "total_hits": 42500
+  },
+  {
+    "dsl": "type:task due:none",
+    "grouped": false,
+    "legacy_ms": 6829.4984,
+    "name": "missing_due_sorted",
+    "samples": [
+      {
+        "compile_ms": 0.0836,
+        "count_ms": 37.2473,
+        "project_ms": 3.2379999999999995,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 139.41770000000002,
+        "total_ms": 181.8559
+      },
+      {
+        "compile_ms": 0.061099999999999995,
+        "count_ms": 36.7591,
+        "project_ms": 3.2264999999999873,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 141.2593,
+        "total_ms": 183.0496
+      },
+      {
+        "compile_ms": 0.0663,
+        "count_ms": 36.8072,
+        "project_ms": 2.97180000000003,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 142.62249999999997,
+        "total_ms": 184.2532
+      }
+    ],
+    "sort": "org.memory.tasks.due",
+    "target_route": true,
+    "total_hits": 2500
+  },
+  {
+    "dsl": "type:task people.connection:assign:@absent",
+    "grouped": false,
+    "legacy_ms": 88.4115,
+    "name": "sparse_due_sorted",
+    "samples": [
+      {
+        "compile_ms": 0.0998,
+        "count_ms": 0.03190000000000001,
+        "project_ms": 0.0004999999999999727,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 0,
+        "select_ms": 0.10830000000000001,
+        "total_ms": 2.6509
+      },
+      {
+        "compile_ms": 0.045599999999999995,
+        "count_ms": 0.022300000000000007,
+        "project_ms": 0.00010000000000001674,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 1,
+        "select_ms": 0.0919,
+        "total_ms": 1.6091
+      },
+      {
+        "compile_ms": 0.0451,
+        "count_ms": 0.021699999999999997,
+        "project_ms": 0.00020000000000000573,
+        "projected_items": 0,
+        "projected_lines": 0,
+        "sample": 2,
+        "select_ms": 0.08779999999999999,
+        "total_ms": 1.6054000000000002
+      }
+    ],
+    "sort": "org.memory.tasks.due",
+    "target_route": true,
+    "total_hits": 0
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+    "grouped": true,
+    "legacy_ms": 1254.083,
+    "name": "alice_grouped",
+    "samples": [
+      {
+        "compile_ms": 0.1324,
+        "count_ms": 133.80400000000003,
+        "project_ms": 10.086900000000014,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 134.465,
+        "total_ms": 280.7733
+      },
+      {
+        "compile_ms": 0.1365,
+        "count_ms": 128.7901,
+        "project_ms": 10.068300000000022,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 134.69389999999999,
+        "total_ms": 275.8941
+      },
+      {
+        "compile_ms": 0.1098,
+        "count_ms": 131.3612,
+        "project_ms": 9.567800000000034,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 136.18489999999997,
+        "total_ms": 279.41339999999997
+      }
+    ],
+    "sort": "",
+    "target_route": true,
+    "total_hits": 500
+  },
+  {
+    "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+    "grouped": true,
+    "legacy_ms": 1437.2817,
+    "name": "alice_grouped_due",
+    "samples": [
+      {
+        "compile_ms": 0.13329999999999997,
+        "count_ms": 135.19580000000002,
+        "project_ms": 9.649099999999976,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 0,
+        "select_ms": 148.4641,
+        "total_ms": 295.8102
+      },
+      {
+        "compile_ms": 0.12760000000000002,
+        "count_ms": 128.8616,
+        "project_ms": 9.498400000000004,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 1,
+        "select_ms": 148.5572,
+        "total_ms": 289.4974
+      },
+      {
+        "compile_ms": 0.1205,
+        "count_ms": 133.7201,
+        "project_ms": 10.890999999999963,
+        "projected_items": 50,
+        "projected_lines": 50,
+        "sample": 2,
+        "select_ms": 152.17340000000002,
+        "total_ms": 299.3329
+      }
+    ],
+    "sort": "org.memory.tasks.due",
+    "target_route": true,
+    "total_hits": 500
+  }
+]

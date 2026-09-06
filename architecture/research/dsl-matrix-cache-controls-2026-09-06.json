@@ -1,0 +1,18 @@
+[
+  {
+    "complete_count_ms": 270.0017,
+    "phase": "initial"
+  },
+  {
+    "complete_count_ms": 19.0167,
+    "phase": "large_cache"
+  },
+  {
+    "complete_count_ms": 21.3168,
+    "phase": "reset_small_cache"
+  },
+  {
+    "complete_count_ms": 20.927,
+    "phase": "checkpointed"
+  }
+]

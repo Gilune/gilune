@@ -217,3 +217,35 @@ fn representative_first_pages_are_bounded_and_do_not_read_vault_files() {
     }
     assert_eq!(crate::probe::file_reads(), 0);
 }
+
+mod membership;
+mod items;
+
+#[test]
+fn bounded_anchor_pages_match_relevance_route_without_highlights() {
+    let (_, s) = vault();
+    write(&s, "a.md", "---\ncolour: red\n---\nfirst\nsecond first\nthird\n");
+    write(&s, "b.md", "---\ncolour: blue\n---\nsecond\nfirst\n");
+    for line_mode in [false, true] {
+        for grouped in [false, true] {
+            for sorted in [false, true] {
+                for max_lines in [0,1,3] {
+                    let mut q = request(&["first"]);
+                    q.body_needles.clear(); q.name_needles.clear(); q.line_mode=line_mode;
+                    q.group_by_note=grouped; q.page_size=1; q.max_lines=max_lines;
+                    if sorted { q.sort_predicate="frontmatter.colour".into(); }
+                    let mut reference=q.clone(); reference.body_needles=vec![String::new()];
+                    loop {
+                        let fast=s.search(&q,None).unwrap();
+                        let slow=s.search(&reference,None).unwrap();
+                        assert_eq!(fast.hits,slow.hits,"{q:?}");
+                        assert_eq!(fast.total_hits,slow.total_hits);
+                        assert_eq!(fast.next_cursor.is_some(),slow.next_cursor.is_some());
+                        q.cursor=fast.next_cursor; reference.cursor=slow.next_cursor;
+                        if q.cursor.is_none() { break; }
+                    }
+                }
+            }
+        }
+    }
+}

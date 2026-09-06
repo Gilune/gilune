@@ -1,0 +1,20 @@
+{
+  "before": {
+    "bytes": 153006080,
+    "used_bytes": 153006080,
+    "file_bytes": 153006080,
+    "page_size": 4096,
+    "pages": 37355,
+    "free_pages": 0
+  },
+  "after": {
+    "bytes": 156073984,
+    "used_bytes": 156073984,
+    "file_bytes": 156073984,
+    "page_size": 4096,
+    "pages": 38104,
+    "free_pages": 0
+  },
+  "added_bytes": 3067904,
+  "note": "Same 50,000-task full-index data; two schema-8 projection indexes added to a disposable compacted copy. No wide storage removed."
+}

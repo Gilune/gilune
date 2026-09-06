@@ -1,0 +1,2198 @@
+[
+  {
+    "items_per_document": 100,
+    "sample": 0,
+    "kotlin_reconcile_ms": 106.5854,
+    "native_reconcile_ms": 106.3998,
+    "pairing_delta_ms": 0.18560000000000798,
+    "reconcile_before_index_ms": 12.563400000000001,
+    "source_read_split_ms": 0.1005,
+    "snapshot_parse_ms": 0.0941,
+    "plugin_adapters_ms": 28.9096,
+    "plugin_bodies_ms": {
+      "org.memory.people": 1.8634,
+      "org.memory.tasks": 23.0159
+    },
+    "validation_ms": 0.1223,
+    "storage_transactions_ms": 62.911,
+    "durable_commits_ms": 10.8971,
+    "fact_insert_ms": 37.6267,
+    "text_fts_insert_ms": 3.3066,
+    "source_map_insert_ms": 1.8374000000000001,
+    "source_map_delete_ms": 1.6575,
+    "all_events": [
+      {
+        "ms": 0.12430000000000001,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 12.563400000000001,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.1005,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 0.0941,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 0.1972,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 0.3898,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.4757,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 1.6575,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 2.2329,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 1.8374000000000001,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 3.3066,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 2.9433,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 10.617700000000001,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 11.114799999999999,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0049,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.16190000000000002,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.1646,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 1.4102,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1.9844,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.0717000000000003,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0144,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 24.5135,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0012,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 24.7011,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.0432,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 24.8704,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 2.1065,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 11.1897,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 2.7051000000000003,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 16.2879,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 41.3122,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.023799999999999998,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 3.9482,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0029000000000000002,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 4.2085,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.0791,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 4.4158,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 3.6098,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 26.2724,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 3.8385,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 34.021,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 38.612100000000005,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 93.72070000000001,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 106.3998,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 100,
+    "sample": 1,
+    "kotlin_reconcile_ms": 90.0721,
+    "native_reconcile_ms": 89.9003,
+    "pairing_delta_ms": 0.17180000000000462,
+    "reconcile_before_index_ms": 10.1233,
+    "source_read_split_ms": 0.0813,
+    "snapshot_parse_ms": 0.0988,
+    "plugin_adapters_ms": 7.056,
+    "plugin_bodies_ms": {
+      "org.memory.people": 0.9199,
+      "org.memory.tasks": 4.5767
+    },
+    "validation_ms": 0.1053,
+    "storage_transactions_ms": 70.9953,
+    "durable_commits_ms": 22.3327,
+    "fact_insert_ms": 36.1224,
+    "text_fts_insert_ms": 3.6744999999999997,
+    "source_map_insert_ms": 1.7402,
+    "source_map_delete_ms": 1.2027999999999999,
+    "all_events": [
+      {
+        "ms": 0.0902,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 10.1233,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.0813,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 0.0988,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 0.177,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 0.34299999999999997,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.3544,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 1.2027999999999999,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 1.6523,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 1.7402,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 3.6744999999999997,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 2.8055,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 10.1125,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 10.5319,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0046,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.047299999999999995,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.041999999999999996,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 1.6055,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1.8672,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1.9606,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.010499999999999999,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 5.0119,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0013,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 5.1497,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.04,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 5.3401000000000005,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 1.5647,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 10.6626,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 2.8925,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 15.3677,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 20.8533,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.013900000000000001,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 1.7336,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0029000000000000002,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 1.9063,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.0653,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 2.0874,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 2.9122000000000003,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 25.4178,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 15.0292,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 43.6479,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 45.8832,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 79.6824,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 89.9003,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 100,
+    "sample": 2,
+    "kotlin_reconcile_ms": 79.4412,
+    "native_reconcile_ms": 79.3018,
+    "pairing_delta_ms": 0.13939999999999486,
+    "reconcile_before_index_ms": 10.067599999999999,
+    "source_read_split_ms": 0.0813,
+    "snapshot_parse_ms": 0.0862,
+    "plugin_adapters_ms": 4.7475000000000005,
+    "plugin_bodies_ms": {
+      "org.memory.people": 0.6982,
+      "org.memory.tasks": 2.5118
+    },
+    "validation_ms": 0.1081,
+    "storage_transactions_ms": 62.657700000000006,
+    "durable_commits_ms": 10.881699999999999,
+    "fact_insert_ms": 37.0066,
+    "text_fts_insert_ms": 5.1907000000000005,
+    "source_map_insert_ms": 2.1242,
+    "source_map_delete_ms": 1.2043,
+    "all_events": [
+      {
+        "ms": 0.0988,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 10.067599999999999,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.0813,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 0.0862,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 0.1633,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 0.3247,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.3514,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 1.2043,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 1.6366,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 2.1242,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 5.1907000000000005,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 2.8059000000000003,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 12.078800000000001,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 12.500300000000001,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0051,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.0797,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.07930000000000001,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 1.7824,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 2.2644,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.3752,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0283,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 3.0213,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0013,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 3.1884,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.0427,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 3.3762000000000003,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 1.6541,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 11.0927,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 2.8874999999999997,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 15.9305,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 19.4235,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.019,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 1.3959000000000001,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0028,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 1.5591,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.0654,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 1.7057,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 2.883,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 25.8346,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 3.4059,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 32.384,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 34.256,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 69.1437,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 79.3018,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 1000,
+    "sample": 0,
+    "kotlin_reconcile_ms": 619.2721,
+    "native_reconcile_ms": 619.1175,
+    "pairing_delta_ms": 0.15460000000007312,
+    "reconcile_before_index_ms": 10.3293,
+    "source_read_split_ms": 0.1517,
+    "snapshot_parse_ms": 0.44499999999999995,
+    "plugin_adapters_ms": 20.4868,
+    "plugin_bodies_ms": {
+      "org.memory.people": 3.9848,
+      "org.memory.tasks": 8.4594
+    },
+    "validation_ms": 0.8973,
+    "storage_transactions_ms": 584.2909999999999,
+    "durable_commits_ms": 61.7726,
+    "fact_insert_ms": 393.68750000000006,
+    "text_fts_insert_ms": 67.9712,
+    "source_map_insert_ms": 9.6253,
+    "source_map_delete_ms": 14.3224,
+    "all_events": [
+      {
+        "ms": 0.1263,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 10.3293,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.1517,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 0.44499999999999995,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 0.7976,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 1.0816000000000001,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 3.8943,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 14.3224,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 18.3417,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 9.6253,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 67.9712,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 11.3575,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 107.7495,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 109.0038,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.005699999999999999,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.14679999999999999,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.1656,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 1.3971,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1.9023,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.036,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0969,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 10.7776,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0124,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 11.0657,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.31339999999999996,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 11.4957,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 9.149700000000001,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 113.7902,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 6.4258,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 129.6685,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 141.46269999999998,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0846,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 9.1252,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0281,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 9.4211,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.5839000000000001,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 10.1226,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 22.2786,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 279.73170000000005,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 42.5922,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 344.9707,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 355.59459999999996,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 608.6909,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 619.1175,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 1000,
+    "sample": 1,
+    "kotlin_reconcile_ms": 694.8317,
+    "native_reconcile_ms": 694.6604,
+    "pairing_delta_ms": 0.1712999999999738,
+    "reconcile_before_index_ms": 8.3123,
+    "source_read_split_ms": 0.11620000000000001,
+    "snapshot_parse_ms": 0.4214,
+    "plugin_adapters_ms": 19.4403,
+    "plugin_bodies_ms": {
+      "org.memory.people": 3.6965,
+      "org.memory.tasks": 9.3727
+    },
+    "validation_ms": 1.0032,
+    "storage_transactions_ms": 662.6351999999999,
+    "durable_commits_ms": 61.642,
+    "fact_insert_ms": 460.6686000000001,
+    "text_fts_insert_ms": 73.003,
+    "source_map_insert_ms": 13.979099999999999,
+    "source_map_delete_ms": 13.3907,
+    "all_events": [
+      {
+        "ms": 0.1357,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 8.3123,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.11620000000000001,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 0.4214,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 0.7584,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 0.9997,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 4.1143,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 13.3907,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 17.616699999999998,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 13.979099999999999,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 73.003,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 11.8891,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 117.0404,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 118.2286,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0067,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.1893,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.09459999999999999,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 1.3763,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1.9409,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.0649,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0902,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 11.5631,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.013,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 11.8689,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.35609999999999997,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 12.3456,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 10.9911,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 158.1944,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 6.1976,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 175.8422,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 188.524,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0901,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 7.2376000000000005,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0295,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 7.5714,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.6471,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 8.3422,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 22.782400000000003,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 302.37960000000004,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 42.179,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 367.81170000000003,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 376.68449999999996,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 686.2287,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 694.6604,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 1000,
+    "sample": 2,
+    "kotlin_reconcile_ms": 672.0445,
+    "native_reconcile_ms": 671.8866999999999,
+    "pairing_delta_ms": 0.15780000000006567,
+    "reconcile_before_index_ms": 8.043399999999998,
+    "source_read_split_ms": 0.12760000000000002,
+    "snapshot_parse_ms": 0.4682,
+    "plugin_adapters_ms": 18.926099999999998,
+    "plugin_bodies_ms": {
+      "org.memory.people": 3.0481,
+      "org.memory.tasks": 6.1514
+    },
+    "validation_ms": 6.3838,
+    "storage_transactions_ms": 634.6733,
+    "durable_commits_ms": 57.840500000000006,
+    "fact_insert_ms": 439.3375,
+    "text_fts_insert_ms": 66.3031,
+    "source_map_insert_ms": 10.7776,
+    "source_map_delete_ms": 13.2203,
+    "all_events": [
+      {
+        "ms": 0.1726,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 8.043399999999998,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.12760000000000002,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 0.4682,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 0.823,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 1.0882,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 3.7899000000000003,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 13.2203,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 17.139499999999998,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 10.7776,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 66.3031,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 9.7623,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 104.424,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 105.68719999999999,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.007,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.12210000000000001,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.0671,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 1.3718000000000001,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1.7689,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1.8977,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.07930000000000001,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 8.2894,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0134,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 8.5723,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 0.3101,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 9.006699999999999,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 8.9802,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 113.925,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 5.482,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 128.8046,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 138.1004,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0692,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 10.061300000000001,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.0297,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 10.3538,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 6.0737,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 16.5618,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 32.6862,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 325.3454,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 41.2244,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 399.67580000000004,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 417.3389,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 663.7226,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 671.8866999999999,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 10000,
+    "sample": 0,
+    "kotlin_reconcile_ms": 6203.0817,
+    "native_reconcile_ms": 6202.8871,
+    "pairing_delta_ms": 0.19459999999980937,
+    "reconcile_before_index_ms": 15.786600000000002,
+    "source_read_split_ms": 0.6853,
+    "snapshot_parse_ms": 5.067399999999999,
+    "plugin_adapters_ms": 172.758,
+    "plugin_bodies_ms": {
+      "org.memory.people": 21.809,
+      "org.memory.tasks": 106.6161
+    },
+    "validation_ms": 14.1076,
+    "storage_transactions_ms": 5980.9178,
+    "durable_commits_ms": 467.4579,
+    "fact_insert_ms": 4107.364,
+    "text_fts_insert_ms": 712.7977,
+    "source_map_insert_ms": 126.5357,
+    "source_map_delete_ms": 171.0254,
+    "all_events": [
+      {
+        "ms": 0.0657,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 15.786600000000002,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.6853,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 5.067399999999999,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 7.799300000000001,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 8.6281,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 42.4661,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 171.0254,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 213.63289999999998,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 126.5357,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 712.7977,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 188.8586,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1242.3203,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1251.6832,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0059,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.1272,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.1913,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 2.0514,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 2.6226000000000003,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.7444,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.8058,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 126.73219999999999,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.1402,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 127.881,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 6.6761,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 134.7707,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 116.9521,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 1179.1187,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 89.8155,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1386.3207,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1524.3786,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.79,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 43.5898,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.2966,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 44.877,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 7.4315,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 52.4412,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 234.39,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 2928.054,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 186.73239999999998,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 3349.6542,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 3406.6308,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 6186.9663,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 6202.8871,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 10000,
+    "sample": 1,
+    "kotlin_reconcile_ms": 6201.8241,
+    "native_reconcile_ms": 6201.6662,
+    "pairing_delta_ms": 0.15790000000015425,
+    "reconcile_before_index_ms": 12.8337,
+    "source_read_split_ms": 0.7213999999999999,
+    "snapshot_parse_ms": 5.0673,
+    "plugin_adapters_ms": 88.6856,
+    "plugin_bodies_ms": {
+      "org.memory.people": 18.4504,
+      "org.memory.tasks": 39.561
+    },
+    "validation_ms": 11.4104,
+    "storage_transactions_ms": 6070.634099999999,
+    "durable_commits_ms": 476.0283,
+    "fact_insert_ms": 4112.7993,
+    "text_fts_insert_ms": 798.6078,
+    "source_map_insert_ms": 129.97719999999998,
+    "source_map_delete_ms": 164.6985,
+    "all_events": [
+      {
+        "ms": 0.1512,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 12.8337,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.7213999999999999,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 5.0673,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 7.7454,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 8.591,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 48.313300000000005,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 164.6985,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 213.1618,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 129.97719999999998,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 798.6078,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 190.0087,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1332.2718,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1341.6383999999998,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.005699999999999999,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.1272,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.0973,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 2.0542999999999996,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 2.4669000000000003,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.5803000000000003,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.7847000000000001,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 50.116099999999996,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.12129999999999999,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 51.226,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 4.0739,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 55.4136,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 94.8249,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 1196.2778,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 91.8016,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1383.3178,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1441.1306,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.7697,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 36.2104,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.28650000000000003,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 37.4596,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 7.3365,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 44.9258,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 243.5745,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 2916.4242,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 192.1637,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 3352.5776,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 3402.092,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 6188.7002,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 6201.6662,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 10000,
+    "sample": 2,
+    "kotlin_reconcile_ms": 6092.2367,
+    "native_reconcile_ms": 6092.090899999999,
+    "pairing_delta_ms": 0.14580000000114524,
+    "reconcile_before_index_ms": 12.4552,
+    "source_read_split_ms": 0.6436000000000001,
+    "snapshot_parse_ms": 4.9322,
+    "plugin_adapters_ms": 91.8343,
+    "plugin_bodies_ms": {
+      "org.memory.people": 26.3788,
+      "org.memory.tasks": 34.123
+    },
+    "validation_ms": 11.494700000000002,
+    "storage_transactions_ms": 5958.7474,
+    "durable_commits_ms": 455.2824,
+    "fact_insert_ms": 4099.8894,
+    "text_fts_insert_ms": 723.05,
+    "source_map_insert_ms": 127.16369999999999,
+    "source_map_delete_ms": 161.06719999999999,
+    "all_events": [
+      {
+        "ms": 0.14679999999999999,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 12.4552,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.6436000000000001,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 4.9322,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 7.4972,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 8.267999999999999,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 39.9003,
+        "namespace": "text",
+        "phase": "delete_text_rows"
+      },
+      {
+        "ms": 161.06719999999999,
+        "namespace": "text",
+        "phase": "delete_source_map_targets"
+      },
+      {
+        "ms": 201.1059,
+        "namespace": "text",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 127.16369999999999,
+        "namespace": "text",
+        "phase": "insert_source_map_targets"
+      },
+      {
+        "ms": 723.05,
+        "namespace": "text",
+        "phase": "insert_text_rows_fts"
+      },
+      {
+        "ms": 181.3697,
+        "namespace": "text",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1233.1672,
+        "namespace": "text",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1241.9604,
+        "namespace": "text",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.0073,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.1301,
+        "namespace": "frontmatter",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 0.10890000000000001,
+        "namespace": "frontmatter",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 2.0787,
+        "namespace": "frontmatter",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 2.5660000000000003,
+        "namespace": "frontmatter",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 2.6883,
+        "namespace": "frontmatter",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.819,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 43.0786,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.1332,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 44.2562,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 4.024500000000001,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 48.390299999999996,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 94.3599,
+        "namespace": "org.memory.tasks",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 1183.4688,
+        "namespace": "org.memory.tasks",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 88.6594,
+        "namespace": "org.memory.tasks",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 1366.8973,
+        "namespace": "org.memory.tasks",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 1417.6318,
+        "namespace": "org.memory.tasks",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 0.7934,
+        "namespace": "",
+        "phase": "snapshot_to_wire"
+      },
+      {
+        "ms": 46.3122,
+        "namespace": "",
+        "phase": "ffi_callback_roundtrip"
+      },
+      {
+        "ms": 0.2813,
+        "namespace": "",
+        "phase": "wire_facts_to_native"
+      },
+      {
+        "ms": 47.5781,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 7.4702,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 55.2447,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 256.16630000000004,
+        "namespace": "org.memory.people",
+        "phase": "forget_path"
+      },
+      {
+        "ms": 2916.3117,
+        "namespace": "org.memory.people",
+        "phase": "insert_facts_receipt_indexes"
+      },
+      {
+        "ms": 183.1746,
+        "namespace": "org.memory.people",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 3356.1169,
+        "namespace": "org.memory.people",
+        "phase": "commit_plan"
+      },
+      {
+        "ms": 3415.8944,
+        "namespace": "org.memory.people",
+        "phase": "namespace_batch"
+      },
+      {
+        "ms": 6079.5056,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 6092.090899999999,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  }
+]

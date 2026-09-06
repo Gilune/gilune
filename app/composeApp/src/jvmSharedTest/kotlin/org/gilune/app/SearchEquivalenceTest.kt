@@ -51,6 +51,7 @@ class SearchEquivalenceTest {
             ---
             - [ ] chase the plasterer due:2026-09-03
             - [x] pay the invoice done:2026-09-03
+
             A line of ordinary prose mentioning a plasterer.
             """.trimIndent(),
         )
@@ -62,6 +63,7 @@ class SearchEquivalenceTest {
             mood: Calm
             ---
             - [ ] buy milk due:2026-09-05
+
             Some prose about milk and the kitchen.
             """.trimIndent(),
         )
@@ -179,7 +181,7 @@ class SearchEquivalenceTest {
             val oracle = scanned(query)
             val engine = asked(query)
             if (oracle != engine) {
-                differed += "$query: scan ${oracle.map { it.relPath }} vs query ${engine.map { it.relPath }}"
+                differed += "$query: scan $oracle vs query $engine"
             }
         }
         assertEquals(emptyList(), differed, "the index and the scan disagree")

@@ -9,6 +9,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.tasksFilter
+import org.gilune.plugins.tasks.tasksPanelEnabled
+import org.gilune.plugins.tasks.tasksSettingsDocument
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource

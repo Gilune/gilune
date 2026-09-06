@@ -1,0 +1,165 @@
+{
+  "note": "Real Kotlin DSL and People/Tasks callbacks through the final packaged release DLL. Independent pages do not include exact counts. Cold label means first after setup, not OS-cold. Enumeration verifies all ordered IDs and no duplicates.",
+  "populations": [
+    {
+      "tasks": 10000,
+      "queries": {
+        "type": {
+          "dsl": "type:task",
+          "matches": 10000.0,
+          "first50_cold_ms": 71.1964,
+          "warm_median_ms": 10.0455,
+          "warm_min_ms": 9.6639,
+          "warm_max_ms": 11.1836,
+          "independent": {
+            "first50_median_ms": 6.5616,
+            "count_median_ms": 10.0974
+          }
+        },
+        "open": {
+          "dsl": "type:task is:open",
+          "matches": 8500.0,
+          "first50_cold_ms": 19.262,
+          "warm_median_ms": 17.9973,
+          "warm_min_ms": 17.5405,
+          "warm_max_ms": 18.2796,
+          "independent": {
+            "first50_median_ms": 6.4683,
+            "count_median_ms": 15.9465
+          }
+        },
+        "assigned": {
+          "dsl": "type:task is:open people.connection:assign:@alice",
+          "matches": 5000.0,
+          "first50_cold_ms": 26.4378,
+          "warm_median_ms": 26.3262,
+          "warm_min_ms": 25.061,
+          "warm_max_ms": 26.7068,
+          "independent": {
+            "first50_median_ms": 6.5686,
+            "count_median_ms": 24.4788
+          }
+        },
+        "alice_month": {
+          "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+          "matches": 3500.0,
+          "first50_cold_ms": 30.6403,
+          "warm_median_ms": 29.6798,
+          "warm_min_ms": 29.1775,
+          "warm_max_ms": 30.3135,
+          "independent": {
+            "first50_median_ms": 7.0234,
+            "count_median_ms": 28.9191
+          }
+        },
+        "alice_bob_month": {
+          "dsl": "type:task is:open people.connection:assign IN [\"alice\", \"bob\"] due:after:2026-08-31 due:before:2026-10-01",
+          "matches": 5000.0,
+          "first50_cold_ms": 31.8971,
+          "warm_median_ms": 30.7869,
+          "warm_min_ms": 30.5864,
+          "warm_max_ms": 36.0014,
+          "independent": {
+            "first50_median_ms": 6.9849,
+            "count_median_ms": 31.7635
+          }
+        }
+      },
+      "enumeration": {
+        "default": {
+          "first500_exact_median_ms": 50.7595,
+          "first500_page_only_median_ms": 35.6631,
+          "all_uncounted_ms": 261.7243,
+          "pages": 7.0
+        },
+        "org.memory.tasks.due": {
+          "first500_exact_median_ms": 76.8958,
+          "first500_page_only_median_ms": 58.8134,
+          "all_uncounted_ms": 460.6639,
+          "pages": 7.0
+        }
+      },
+      "dsl_compile_median_ms": 0.150764
+    },
+    {
+      "tasks": 50000,
+      "queries": {
+        "type": {
+          "dsl": "type:task",
+          "matches": 50000.0,
+          "first50_cold_ms": 52.6811,
+          "warm_median_ms": 52.6782,
+          "warm_min_ms": 48.7134,
+          "warm_max_ms": 52.959,
+          "independent": {
+            "first50_median_ms": 12.4726,
+            "count_median_ms": 51.0498
+          }
+        },
+        "open": {
+          "dsl": "type:task is:open",
+          "matches": 42500.0,
+          "first50_cold_ms": 76.266,
+          "warm_median_ms": 89.5061,
+          "warm_min_ms": 84.5408,
+          "warm_max_ms": 101.2343,
+          "independent": {
+            "first50_median_ms": 10.1107,
+            "count_median_ms": 76.6613
+          }
+        },
+        "assigned": {
+          "dsl": "type:task is:open people.connection:assign:@alice",
+          "matches": 25000.0,
+          "first50_cold_ms": 112.0315,
+          "warm_median_ms": 107.5918,
+          "warm_min_ms": 105.0085,
+          "warm_max_ms": 108.4168,
+          "independent": {
+            "first50_median_ms": 9.8993,
+            "count_median_ms": 108.1793
+          }
+        },
+        "alice_month": {
+          "dsl": "type:task is:open people.connection:assign:@alice due:after:2026-08-31 due:before:2026-10-01",
+          "matches": 17500.0,
+          "first50_cold_ms": 130.3254,
+          "warm_median_ms": 127.8616,
+          "warm_min_ms": 126.3076,
+          "warm_max_ms": 130.0895,
+          "independent": {
+            "first50_median_ms": 11.3119,
+            "count_median_ms": 132.2221
+          }
+        },
+        "alice_bob_month": {
+          "dsl": "type:task is:open people.connection:assign IN [\"alice\", \"bob\"] due:after:2026-08-31 due:before:2026-10-01",
+          "matches": 25000.0,
+          "first50_cold_ms": 172.923,
+          "warm_median_ms": 204.9364,
+          "warm_min_ms": 184.4186,
+          "warm_max_ms": 208.2631,
+          "independent": {
+            "first50_median_ms": 11.4192,
+            "count_median_ms": 175.8562
+          }
+        }
+      },
+      "enumeration": {
+        "default": {
+          "first500_exact_median_ms": 176.7434,
+          "first500_page_only_median_ms": 41.8048,
+          "all_uncounted_ms": 1669.2637,
+          "pages": 35.0
+        },
+        "org.memory.tasks.due": {
+          "first500_exact_median_ms": 245.507,
+          "first500_page_only_median_ms": 126.2171,
+          "all_uncounted_ms": 3622.5571,
+          "pages": 35.0
+        }
+      },
+      "dsl_compile_median_ms": 0.1509555
+    }
+  ]
+}

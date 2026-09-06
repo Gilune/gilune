@@ -5,6 +5,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.CandidateLine
+import org.gilune.plugin.sdk.SearchOperator
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.SearchedNote
+
 import java.io.File
 import java.nio.file.Files
 import java.time.LocalDate

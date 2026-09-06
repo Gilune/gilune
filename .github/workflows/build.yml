@@ -156,7 +156,7 @@ jobs:
         run: |
           cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
             --library target/release/gilune_ffi.dll --language kotlin \
-            --out-dir ../app/composeApp/src/desktopMain/generated --no-format
+            --out-dir ../app/kernelBindings/src/desktopMain/generated --no-format
 
       - name: Stage the kernel as an app resource
         shell: bash
@@ -190,7 +190,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: bindings-desktop-windows
-          path: app/composeApp/src/desktopMain/generated
+          path: app/kernelBindings/src/desktopMain/generated
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
@@ -252,7 +252,7 @@ jobs:
         run: |
           cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
             --library target/release/libgilune_ffi.so --language kotlin \
-            --out-dir ../app/composeApp/src/desktopMain/generated --no-format
+            --out-dir ../app/kernelBindings/src/desktopMain/generated --no-format
 
       - name: Stage the kernel as an app resource
         # JNA resolves "gilune_ffi" to libgilune_ffi.so, and Compose looks
@@ -286,7 +286,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: bindings-desktop-linux
-          path: app/composeApp/src/desktopMain/generated
+          path: app/kernelBindings/src/desktopMain/generated
           if-no-files-found: error
 
   # ---------------------------------------------------------------------
@@ -389,7 +389,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: bindings-android
-          path: app/composeApp/src/androidMain/generated
+          path: app/kernelBindings/src/androidMain/generated
           if-no-files-found: error
 
   # ---------------------------------------------------------------------

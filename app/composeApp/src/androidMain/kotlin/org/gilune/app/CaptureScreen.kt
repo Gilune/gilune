@@ -8,6 +8,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+
 import android.Manifest
 import android.content.pm.PackageManager
 import android.media.MediaPlayer

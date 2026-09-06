@@ -135,8 +135,12 @@ partial-rename configuration and guarded undo. The owner accepted whole-list-ite
 connection scope (nested items separate), preserving unknown person references
 with optional explicit page creation, and renaming all vault Markdown without
 adding metadata or requiring adoption. These are requirements, not open choices;
-shared location and unmanaged-file recovery/sync mechanics remain design work.
-The planning work is recorded; implementation and validation remain outstanding.
+unmanaged-file recovery/sync mechanics remain design work. Implementation now
+includes scoped membership queries, independent filter registrations, exact
+source snapshots, shared Markdown locations, validated edit preparation and
+the separately compiled Kotlin SDK/Tasks boundary.
+Persisting item locations in the index, People and shared document refactoring
+remain open; the plan and document contract record the implemented boundary.
 
 The owner also requested shared set-membership queries in this delivery, using
 `assign IN ["alice", "bob"]` with a task type as the motivating example. People

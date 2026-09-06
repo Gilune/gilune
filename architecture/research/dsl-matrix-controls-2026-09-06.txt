@@ -1,0 +1,466 @@
+   Compiling gilune-kernel v0.1.0 (D:\CuttingCode\SneddoBuilds\gilune\kernel\crates\gilune-kernel)
+    Finished `release` profile [optimized] target(s) in 20.34s
+     Running unittests src\lib.rs (target\release\deps\gilune_kernel-ce86377558dc2b4c.exe)
+
+running 1 test
+CONTROL_SQL before_"all": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"all": CO-ROUTINE items
+CONTROL_PLAN before_"all": MATERIALIZE c0
+CONTROL_PLAN before_"all": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"all": SCAN c0
+CONTROL_PLAN before_"all": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"all": SCAN u
+CONTROL_PLAN before_"all": CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN before_"all": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"all": CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN before_"all": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"all": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"all": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"not_done": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,0 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("done"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"not_done": CO-ROUTINE items
+CONTROL_PLAN before_"not_done": MATERIALIZE c0
+CONTROL_PLAN before_"not_done": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"not_done": SCAN c0
+CONTROL_PLAN before_"not_done": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"not_done": SCAN u
+CONTROL_PLAN before_"not_done": LIST SUBQUERY 4
+CONTROL_PLAN before_"not_done": MATERIALIZE c1
+CONTROL_PLAN before_"not_done": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN before_"not_done": SCAN c1
+CONTROL_PLAN before_"not_done": CORRELATED SCALAR SUBQUERY 5
+CONTROL_PLAN before_"not_done": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_done": CORRELATED SCALAR SUBQUERY 6
+CONTROL_PLAN before_"not_done": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_done": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"not_done": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"not_bob_month": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c3 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value > ?),c4 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value < ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1,0,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c3 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c4 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("open"), Text("org.memory.people.connection"), Text("[\"assign\",\"bob\"]"), Text("org.memory.tasks.due"), Text("2026-08-31"), Text("org.memory.tasks.due"), Text("2026-10-01"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"not_bob_month": CO-ROUTINE items
+CONTROL_PLAN before_"not_bob_month": MATERIALIZE c0
+CONTROL_PLAN before_"not_bob_month": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"not_bob_month": SCAN c0
+CONTROL_PLAN before_"not_bob_month": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"not_bob_month": SCAN u
+CONTROL_PLAN before_"not_bob_month": LIST SUBQUERY 7
+CONTROL_PLAN before_"not_bob_month": MATERIALIZE c1
+CONTROL_PLAN before_"not_bob_month": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN before_"not_bob_month": SCAN c1
+CONTROL_PLAN before_"not_bob_month": LIST SUBQUERY 8
+CONTROL_PLAN before_"not_bob_month": MATERIALIZE c2
+CONTROL_PLAN before_"not_bob_month": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN before_"not_bob_month": SCAN c2
+CONTROL_PLAN before_"not_bob_month": LIST SUBQUERY 9
+CONTROL_PLAN before_"not_bob_month": MATERIALIZE c3
+CONTROL_PLAN before_"not_bob_month": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)
+CONTROL_PLAN before_"not_bob_month": SCAN c3
+CONTROL_PLAN before_"not_bob_month": LIST SUBQUERY 10
+CONTROL_PLAN before_"not_bob_month": MATERIALIZE c4
+CONTROL_PLAN before_"not_bob_month": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)
+CONTROL_PLAN before_"not_bob_month": SCAN c4
+CONTROL_PLAN before_"not_bob_month": CORRELATED SCALAR SUBQUERY 11
+CONTROL_PLAN before_"not_bob_month": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_bob_month": CORRELATED SCALAR SUBQUERY 12
+CONTROL_PLAN before_"not_bob_month": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_bob_month": CORRELATED SCALAR SUBQUERY 13
+CONTROL_PLAN before_"not_bob_month": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_bob_month": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"not_bob_month": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"not_either": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value IN (SELECT value FROM json_each(?))),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,0 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.people.connection"), Text("[\"[\\\"assign\\\",\\\"alice\\\"]\",\"[\\\"assign\\\",\\\"bob\\\"]\"]"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"not_either": CO-ROUTINE items
+CONTROL_PLAN before_"not_either": MATERIALIZE c0
+CONTROL_PLAN before_"not_either": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"not_either": SCAN c0
+CONTROL_PLAN before_"not_either": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"not_either": SCAN u
+CONTROL_PLAN before_"not_either": LIST SUBQUERY 5
+CONTROL_PLAN before_"not_either": MATERIALIZE c1
+CONTROL_PLAN before_"not_either": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN before_"not_either": LIST SUBQUERY 2
+CONTROL_PLAN before_"not_either": SCAN json_each VIRTUAL TABLE INDEX 1:
+CONTROL_PLAN before_"not_either": SCAN c1
+CONTROL_PLAN before_"not_either": CORRELATED SCALAR SUBQUERY 6
+CONTROL_PLAN before_"not_either": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_either": CORRELATED SCALAR SUBQUERY 7
+CONTROL_PLAN before_"not_either": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_either": CORRELATED SCALAR SUBQUERY 8
+CONTROL_PLAN before_"not_either": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_either": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"not_either": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"not_week": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value >= ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value <= ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,0 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL)) AND ((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.due"), Text("2026-09-06"), Text("org.memory.tasks.due"), Text("2026-09-12"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"not_week": CO-ROUTINE items
+CONTROL_PLAN before_"not_week": MATERIALIZE c0
+CONTROL_PLAN before_"not_week": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"not_week": SCAN c0
+CONTROL_PLAN before_"not_week": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"not_week": SCAN u
+CONTROL_PLAN before_"not_week": LIST SUBQUERY 5
+CONTROL_PLAN before_"not_week": MATERIALIZE c1
+CONTROL_PLAN before_"not_week": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)
+CONTROL_PLAN before_"not_week": SCAN c1
+CONTROL_PLAN before_"not_week": LIST SUBQUERY 6
+CONTROL_PLAN before_"not_week": MATERIALIZE c2
+CONTROL_PLAN before_"not_week": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)
+CONTROL_PLAN before_"not_week": SCAN c2
+CONTROL_PLAN before_"not_week": CORRELATED SCALAR SUBQUERY 7
+CONTROL_PLAN before_"not_week": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_week": CORRELATED SCALAR SUBQUERY 8
+CONTROL_PLAN before_"not_week": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"not_week": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"not_week": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"body_sparse": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (1) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"body_sparse": CO-ROUTINE items
+CONTROL_PLAN before_"body_sparse": MATERIALIZE c0
+CONTROL_PLAN before_"body_sparse": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"body_sparse": SCAN c0
+CONTROL_PLAN before_"body_sparse": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"body_sparse": SCAN u
+CONTROL_PLAN before_"body_sparse": CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN before_"body_sparse": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"body_sparse": CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN before_"body_sparse": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"body_sparse": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"body_sparse": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"root_property": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL) OR (u.rel_path,u.source_version) IN (SELECT rel_path,source_version FROM c1 WHERE item_key IS NULL AND line IS NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter.connections"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"root_property": CO-ROUTINE items
+CONTROL_PLAN before_"root_property": MATERIALIZE c0
+CONTROL_PLAN before_"root_property": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"root_property": SCAN c0
+CONTROL_PLAN before_"root_property": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"root_property": SCAN u
+CONTROL_PLAN before_"root_property": LIST SUBQUERY 4
+CONTROL_PLAN before_"root_property": MATERIALIZE c1
+CONTROL_PLAN before_"root_property": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"root_property": SCAN c1
+CONTROL_PLAN before_"root_property": LIST SUBQUERY 5
+CONTROL_PLAN before_"root_property": SCAN c1
+CONTROL_PLAN before_"root_property": CORRELATED SCALAR SUBQUERY 6
+CONTROL_PLAN before_"root_property": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"root_property": CORRELATED SCALAR SUBQUERY 7
+CONTROL_PLAN before_"root_property": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"root_property": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"root_property": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"alice_month_due": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c3 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value > ?),c4 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value < ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1,1,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c3 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c4 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("open"), Text("org.memory.people.connection"), Text("[\"assign\",\"alice\"]"), Text("org.memory.tasks.due"), Text("2026-08-31"), Text("org.memory.tasks.due"), Text("2026-10-01"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"alice_month_due": CO-ROUTINE items
+CONTROL_PLAN before_"alice_month_due": MATERIALIZE c0
+CONTROL_PLAN before_"alice_month_due": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"alice_month_due": SCAN c0
+CONTROL_PLAN before_"alice_month_due": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"alice_month_due": SCAN u
+CONTROL_PLAN before_"alice_month_due": LIST SUBQUERY 7
+CONTROL_PLAN before_"alice_month_due": MATERIALIZE c1
+CONTROL_PLAN before_"alice_month_due": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN before_"alice_month_due": SCAN c1
+CONTROL_PLAN before_"alice_month_due": LIST SUBQUERY 8
+CONTROL_PLAN before_"alice_month_due": MATERIALIZE c2
+CONTROL_PLAN before_"alice_month_due": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN before_"alice_month_due": SCAN c2
+CONTROL_PLAN before_"alice_month_due": LIST SUBQUERY 9
+CONTROL_PLAN before_"alice_month_due": MATERIALIZE c3
+CONTROL_PLAN before_"alice_month_due": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)
+CONTROL_PLAN before_"alice_month_due": SCAN c3
+CONTROL_PLAN before_"alice_month_due": LIST SUBQUERY 10
+CONTROL_PLAN before_"alice_month_due": MATERIALIZE c4
+CONTROL_PLAN before_"alice_month_due": SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)
+CONTROL_PLAN before_"alice_month_due": SCAN c4
+CONTROL_PLAN before_"alice_month_due": CORRELATED SCALAR SUBQUERY 11
+CONTROL_PLAN before_"alice_month_due": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"alice_month_due": CORRELATED SCALAR SUBQUERY 12
+CONTROL_PLAN before_"alice_month_due": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"alice_month_due": CORRELATED SCALAR SUBQUERY 13
+CONTROL_PLAN before_"alice_month_due": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"alice_month_due": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"alice_month_due": USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL before_"all_due_nullable": WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN before_"all_due_nullable": CO-ROUTINE items
+CONTROL_PLAN before_"all_due_nullable": MATERIALIZE c0
+CONTROL_PLAN before_"all_due_nullable": SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN before_"all_due_nullable": SCAN c0
+CONTROL_PLAN before_"all_due_nullable": USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN before_"all_due_nullable": SCAN u
+CONTROL_PLAN before_"all_due_nullable": CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN before_"all_due_nullable": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"all_due_nullable": CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN before_"all_due_nullable": SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN before_"all_due_nullable": SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN before_"all_due_nullable": USE TEMP B-TREE FOR ORDER BY
+CONTROL_VACUUM not_done: ms=16165.7638 matches=42500
+CONTROL_VACUUM alice_month_due: ms=1558.7296 matches=17500
+CONTROL_SQL analyzed_all: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_all: CO-ROUTINE items
+CONTROL_PLAN analyzed_all: MATERIALIZE c0
+CONTROL_PLAN analyzed_all: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_all: SCAN c0
+CONTROL_PLAN analyzed_all: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_all: SCAN s
+CONTROL_PLAN analyzed_all: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_all: CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN analyzed_all: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_all: CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN analyzed_all: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_all: USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL compact_count_all: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?))
+PARAMS [Integer(0)]
+CONTROL_PLAN compact_count_all: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_all: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_all: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_RESULT {"analyzed_ms":438.3675,"analyzed_warm_ms":400.7754,"matches":50000,"name":"all","timeout_or_error":null,"vacuum_only_ms":null}
+CONTROL_SQL analyzed_not_done: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,0 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("done"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_not_done: CO-ROUTINE items
+CONTROL_PLAN analyzed_not_done: MATERIALIZE c0
+CONTROL_PLAN analyzed_not_done: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_not_done: SCAN c0
+CONTROL_PLAN analyzed_not_done: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_not_done: SCAN s
+CONTROL_PLAN analyzed_not_done: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_done: LIST SUBQUERY 4
+CONTROL_PLAN analyzed_not_done: MATERIALIZE c1
+CONTROL_PLAN analyzed_not_done: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN analyzed_not_done: SCAN c1
+CONTROL_PLAN analyzed_not_done: CORRELATED SCALAR SUBQUERY 5
+CONTROL_PLAN analyzed_not_done: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_done: CORRELATED SCALAR SUBQUERY 6
+CONTROL_PLAN analyzed_not_done: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_done: USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL compact_count_not_done: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND NOT (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?))
+PARAMS [Integer(0), Integer(0), Text("done")]
+CONTROL_PLAN compact_count_not_done: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_not_done: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_not_done: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_PLAN compact_count_not_done: CORRELATED SCALAR SUBQUERY 2
+CONTROL_PLAN compact_count_not_done: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+CONTROL_RESULT {"analyzed_ms":15895.7903,"matches":42500,"name":"not_done","timeout_or_error":null,"vacuum_only_ms":16165.7638}
+CONTROL_SQL analyzed_not_bob_month: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c3 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value > ?),c4 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value < ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1,0,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c3 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c4 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("open"), Text("org.memory.people.connection"), Text("[\"assign\",\"bob\"]"), Text("org.memory.tasks.due"), Text("2026-08-31"), Text("org.memory.tasks.due"), Text("2026-10-01"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_not_bob_month: CO-ROUTINE items
+CONTROL_PLAN analyzed_not_bob_month: MATERIALIZE c0
+CONTROL_PLAN analyzed_not_bob_month: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_not_bob_month: SCAN c0
+CONTROL_PLAN analyzed_not_bob_month: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_not_bob_month: SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN analyzed_not_bob_month: LIST SUBQUERY 10
+CONTROL_PLAN analyzed_not_bob_month: MATERIALIZE c4
+CONTROL_PLAN analyzed_not_bob_month: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)
+CONTROL_PLAN analyzed_not_bob_month: SCAN c4
+CONTROL_PLAN analyzed_not_bob_month: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_bob_month: LIST SUBQUERY 7
+CONTROL_PLAN analyzed_not_bob_month: MATERIALIZE c1
+CONTROL_PLAN analyzed_not_bob_month: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN analyzed_not_bob_month: SCAN c1
+CONTROL_PLAN analyzed_not_bob_month: LIST SUBQUERY 8
+CONTROL_PLAN analyzed_not_bob_month: MATERIALIZE c2
+CONTROL_PLAN analyzed_not_bob_month: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN analyzed_not_bob_month: SCAN c2
+CONTROL_PLAN analyzed_not_bob_month: LIST SUBQUERY 9
+CONTROL_PLAN analyzed_not_bob_month: MATERIALIZE c3
+CONTROL_PLAN analyzed_not_bob_month: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)
+CONTROL_PLAN analyzed_not_bob_month: SCAN c3
+CONTROL_PLAN analyzed_not_bob_month: LIST SUBQUERY 10
+CONTROL_PLAN analyzed_not_bob_month: SCAN c4
+CONTROL_PLAN analyzed_not_bob_month: CORRELATED SCALAR SUBQUERY 11
+CONTROL_PLAN analyzed_not_bob_month: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_bob_month: CORRELATED SCALAR SUBQUERY 12
+CONTROL_PLAN analyzed_not_bob_month: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_bob_month: CORRELATED SCALAR SUBQUERY 13
+CONTROL_PLAN analyzed_not_bob_month: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_bob_month: USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL compact_count_not_bob_month: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND NOT (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<?))
+PARAMS [Integer(0), Integer(0), Text("open"), Integer(2), Text("[\"assign\",\"bob\"]"), Integer(1), Text("2026-08-31"), Integer(1), Text("2026-10-01")]
+CONTROL_PLAN compact_count_not_bob_month: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_not_bob_month: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_not_bob_month: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_PLAN compact_count_not_bob_month: CORRELATED SCALAR SUBQUERY 2
+CONTROL_PLAN compact_count_not_bob_month: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+CONTROL_PLAN compact_count_not_bob_month: CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN compact_count_not_bob_month: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+CONTROL_PLAN compact_count_not_bob_month: CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN compact_count_not_bob_month: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+CONTROL_PLAN compact_count_not_bob_month: CORRELATED SCALAR SUBQUERY 5
+CONTROL_PLAN compact_count_not_bob_month: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+CONTROL_RESULT {"analyzed_ms":21625.9473,"matches":25000,"name":"not_bob_month","timeout_or_error":null,"vacuum_only_ms":null}
+CONTROL_SQL analyzed_not_either: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value IN (SELECT value FROM json_each(?))),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,0 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.people.connection"), Text("[\"[\\\"assign\\\",\\\"alice\\\"]\",\"[\\\"assign\\\",\\\"bob\\\"]\"]"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_not_either: CO-ROUTINE items
+CONTROL_PLAN analyzed_not_either: MATERIALIZE c0
+CONTROL_PLAN analyzed_not_either: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_not_either: SCAN c0
+CONTROL_PLAN analyzed_not_either: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_not_either: SCAN s
+CONTROL_PLAN analyzed_not_either: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_either: LIST SUBQUERY 5
+CONTROL_PLAN analyzed_not_either: MATERIALIZE c1
+CONTROL_PLAN analyzed_not_either: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN analyzed_not_either: LIST SUBQUERY 2
+CONTROL_PLAN analyzed_not_either: SCAN json_each VIRTUAL TABLE INDEX 1:
+CONTROL_PLAN analyzed_not_either: SCAN c1
+CONTROL_PLAN analyzed_not_either: CORRELATED SCALAR SUBQUERY 6
+CONTROL_PLAN analyzed_not_either: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_either: CORRELATED SCALAR SUBQUERY 7
+CONTROL_PLAN analyzed_not_either: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_either: CORRELATED SCALAR SUBQUERY 8
+CONTROL_PLAN analyzed_not_either: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_either: USE TEMP B-TREE FOR ORDER BY
+test search::items::records_prototype::benchmark::matrix::profile_dsl_matrix_statistics_controls has been running for over 60 seconds
+CONTROL_SQL compact_count_not_either: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND NOT (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value IN (?,?)))
+PARAMS [Integer(0), Integer(2), Text("[\"assign\",\"alice\"]"), Text("[\"assign\",\"bob\"]")]
+CONTROL_PLAN compact_count_not_either: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_not_either: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_not_either: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_PLAN compact_count_not_either: CORRELATED SCALAR SUBQUERY 2
+CONTROL_PLAN compact_count_not_either: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+CONTROL_RESULT {"analyzed_ms":16844.5402,"matches":7500,"name":"not_either","timeout_or_error":null,"vacuum_only_ms":null}
+CONTROL_SQL analyzed_not_week: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value >= ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value <= ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,0 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND NOT (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL)) AND ((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.due"), Text("2026-09-06"), Text("org.memory.tasks.due"), Text("2026-09-12"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_not_week: CO-ROUTINE items
+CONTROL_PLAN analyzed_not_week: MATERIALIZE c0
+CONTROL_PLAN analyzed_not_week: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_not_week: SCAN c0
+CONTROL_PLAN analyzed_not_week: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_not_week: SCAN s
+CONTROL_PLAN analyzed_not_week: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_week: LIST SUBQUERY 5
+CONTROL_PLAN analyzed_not_week: MATERIALIZE c1
+CONTROL_PLAN analyzed_not_week: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)
+CONTROL_PLAN analyzed_not_week: SCAN c1
+CONTROL_PLAN analyzed_not_week: LIST SUBQUERY 6
+CONTROL_PLAN analyzed_not_week: MATERIALIZE c2
+CONTROL_PLAN analyzed_not_week: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)
+CONTROL_PLAN analyzed_not_week: SCAN c2
+CONTROL_PLAN analyzed_not_week: CORRELATED SCALAR SUBQUERY 7
+CONTROL_PLAN analyzed_not_week: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_week: CORRELATED SCALAR SUBQUERY 8
+CONTROL_PLAN analyzed_not_week: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_not_week: USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL compact_count_not_week: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND NOT (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>=?) AND EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<=?))
+PARAMS [Integer(0), Integer(1), Text("2026-09-06"), Integer(1), Text("2026-09-12")]
+CONTROL_PLAN compact_count_not_week: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_not_week: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_not_week: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_PLAN compact_count_not_week: CORRELATED SCALAR SUBQUERY 2
+CONTROL_PLAN compact_count_not_week: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+CONTROL_PLAN compact_count_not_week: CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN compact_count_not_week: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+CONTROL_RESULT {"analyzed_ms":30020.9953,"matches":null,"name":"not_week","timeout_or_error":"storage: interrupted","vacuum_only_ms":null}
+CONTROL_SQL analyzed_body_sparse: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (1) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_body_sparse: CO-ROUTINE items
+CONTROL_PLAN analyzed_body_sparse: MATERIALIZE c0
+CONTROL_PLAN analyzed_body_sparse: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_body_sparse: SCAN c0
+CONTROL_PLAN analyzed_body_sparse: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_body_sparse: SCAN s
+CONTROL_PLAN analyzed_body_sparse: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_body_sparse: CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN analyzed_body_sparse: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_body_sparse: CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN analyzed_body_sparse: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_body_sparse: USE TEMP B-TREE FOR ORDER BY
+CONTROL_RESULT {"analyzed_ms":345.6524,"analyzed_warm_ms":340.9884,"matches":1,"name":"body_sparse","timeout_or_error":null,"vacuum_only_ms":null}
+CONTROL_SQL analyzed_root_property: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL) OR (u.rel_path,u.source_version) IN (SELECT rel_path,source_version FROM c1 WHERE item_key IS NULL AND line IS NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter.connections"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_root_property: CO-ROUTINE items
+CONTROL_PLAN analyzed_root_property: MATERIALIZE c0
+CONTROL_PLAN analyzed_root_property: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_root_property: SCAN c0
+CONTROL_PLAN analyzed_root_property: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_root_property: SCAN s
+CONTROL_PLAN analyzed_root_property: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_root_property: LIST SUBQUERY 4
+CONTROL_PLAN analyzed_root_property: MATERIALIZE c1
+CONTROL_PLAN analyzed_root_property: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_root_property: SCAN c1
+CONTROL_PLAN analyzed_root_property: LIST SUBQUERY 5
+CONTROL_PLAN analyzed_root_property: SCAN c1
+CONTROL_PLAN analyzed_root_property: CORRELATED SCALAR SUBQUERY 6
+CONTROL_PLAN analyzed_root_property: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_root_property: CORRELATED SCALAR SUBQUERY 7
+CONTROL_PLAN analyzed_root_property: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_root_property: USE TEMP B-TREE FOR ORDER BY
+CONTROL_RESULT {"analyzed_ms":405.3604,"analyzed_warm_ms":399.1499,"matches":50000,"name":"root_property","timeout_or_error":null,"vacuum_only_ms":null}
+CONTROL_SQL analyzed_alice_month_due: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),c1 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c2 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND value = ?),c3 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value > ?),c4 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ? AND num IS NULL AND typed = 1 AND value < ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1,1,1,1,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c1 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c2 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c3 WHERE item_key IS NOT NULL))) AND (((u.rel_path,u.source_version,u.item_key) IN (SELECT rel_path,source_version,item_key FROM c4 WHERE item_key IS NOT NULL))) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("org.memory.tasks.state"), Text("open"), Text("org.memory.people.connection"), Text("[\"assign\",\"alice\"]"), Text("org.memory.tasks.due"), Text("2026-08-31"), Text("org.memory.tasks.due"), Text("2026-10-01"), Text("frontmatter"), Text("org.memory.people"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_alice_month_due: CO-ROUTINE items
+CONTROL_PLAN analyzed_alice_month_due: MATERIALIZE c0
+CONTROL_PLAN analyzed_alice_month_due: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_alice_month_due: SCAN c0
+CONTROL_PLAN analyzed_alice_month_due: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_alice_month_due: SEARCH s USING INDEX sqlite_autoindex_source_maps_1 (rel_path=?)
+CONTROL_PLAN analyzed_alice_month_due: LIST SUBQUERY 10
+CONTROL_PLAN analyzed_alice_month_due: MATERIALIZE c4
+CONTROL_PLAN analyzed_alice_month_due: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value<?)
+CONTROL_PLAN analyzed_alice_month_due: SCAN c4
+CONTROL_PLAN analyzed_alice_month_due: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_alice_month_due: LIST SUBQUERY 7
+CONTROL_PLAN analyzed_alice_month_due: MATERIALIZE c1
+CONTROL_PLAN analyzed_alice_month_due: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN analyzed_alice_month_due: SCAN c1
+CONTROL_PLAN analyzed_alice_month_due: LIST SUBQUERY 8
+CONTROL_PLAN analyzed_alice_month_due: MATERIALIZE c2
+CONTROL_PLAN analyzed_alice_month_due: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value=?)
+CONTROL_PLAN analyzed_alice_month_due: SCAN c2
+CONTROL_PLAN analyzed_alice_month_due: LIST SUBQUERY 9
+CONTROL_PLAN analyzed_alice_month_due: MATERIALIZE c3
+CONTROL_PLAN analyzed_alice_month_due: SEARCH facts USING INDEX facts_predicate_value (predicate=? AND value>?)
+CONTROL_PLAN analyzed_alice_month_due: SCAN c3
+CONTROL_PLAN analyzed_alice_month_due: LIST SUBQUERY 10
+CONTROL_PLAN analyzed_alice_month_due: SCAN c4
+CONTROL_PLAN analyzed_alice_month_due: CORRELATED SCALAR SUBQUERY 11
+CONTROL_PLAN analyzed_alice_month_due: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_alice_month_due: CORRELATED SCALAR SUBQUERY 12
+CONTROL_PLAN analyzed_alice_month_due: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_alice_month_due: CORRELATED SCALAR SUBQUERY 13
+CONTROL_PLAN analyzed_alice_month_due: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_alice_month_due: USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL compact_count_alice_month_due: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value=?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value>?)) AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=? AND x.value<?))
+PARAMS [Integer(0), Integer(0), Text("open"), Integer(2), Text("[\"assign\",\"alice\"]"), Integer(1), Text("2026-08-31"), Integer(1), Text("2026-10-01")]
+CONTROL_PLAN compact_count_alice_month_due: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_alice_month_due: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_alice_month_due: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_PLAN compact_count_alice_month_due: CORRELATED SCALAR SUBQUERY 2
+CONTROL_PLAN compact_count_alice_month_due: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+CONTROL_PLAN compact_count_alice_month_due: CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN compact_count_alice_month_due: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+CONTROL_PLAN compact_count_alice_month_due: CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN compact_count_alice_month_due: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value>?)
+CONTROL_PLAN compact_count_alice_month_due: CORRELATED SCALAR SUBQUERY 5
+CONTROL_PLAN compact_count_alice_month_due: SEARCH x USING PRIMARY KEY (target=? AND predicate=? AND value<?)
+CONTROL_RESULT {"analyzed_ms":1198.2250999999999,"analyzed_warm_ms":1148.5375,"matches":17500,"name":"alice_month_due","timeout_or_error":null,"vacuum_only_ms":1558.7296}
+CONTROL_SQL analyzed_all_due_nullable: WITH c0 AS MATERIALIZED (SELECT rel_path, line, item_key, source_version, namespace FROM facts WHERE predicate = ?),items AS (SELECT DISTINCT rel_path,source_version,item_key FROM c0 WHERE item_key IS NOT NULL) SELECT u.rel_path,u.item_key,1 FROM items u JOIN source_maps s ON s.rel_path=u.rel_path AND s.source_version=u.source_version WHERE (1) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) AND EXISTS (SELECT 1 FROM fact_sources r WHERE r.namespace=? AND r.rel_path=u.rel_path AND r.source_version=u.source_version) ORDER BY u.rel_path,u.item_key
+PARAMS [Text("org.memory.tasks.state"), Text("frontmatter"), Text("org.memory.tasks")]
+CONTROL_PLAN analyzed_all_due_nullable: CO-ROUTINE items
+CONTROL_PLAN analyzed_all_due_nullable: MATERIALIZE c0
+CONTROL_PLAN analyzed_all_due_nullable: SEARCH facts USING INDEX facts_predicate_num (predicate=?)
+CONTROL_PLAN analyzed_all_due_nullable: SCAN c0
+CONTROL_PLAN analyzed_all_due_nullable: USE TEMP B-TREE FOR DISTINCT
+CONTROL_PLAN analyzed_all_due_nullable: SCAN s
+CONTROL_PLAN analyzed_all_due_nullable: SEARCH u USING AUTOMATIC PARTIAL COVERING INDEX (source_version=? AND rel_path=?)
+CONTROL_PLAN analyzed_all_due_nullable: CORRELATED SCALAR SUBQUERY 3
+CONTROL_PLAN analyzed_all_due_nullable: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_all_due_nullable: CORRELATED SCALAR SUBQUERY 4
+CONTROL_PLAN analyzed_all_due_nullable: SEARCH r USING INDEX sqlite_autoindex_fact_sources_1 (namespace=? AND rel_path=?)
+CONTROL_PLAN analyzed_all_due_nullable: USE TEMP B-TREE FOR ORDER BY
+CONTROL_SQL compact_count_all_due_nullable: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?))
+PARAMS [Integer(0)]
+CONTROL_PLAN compact_count_all_due_nullable: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+CONTROL_PLAN compact_count_all_due_nullable: CORRELATED SCALAR SUBQUERY 1
+CONTROL_PLAN compact_count_all_due_nullable: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+CONTROL_RESULT {"analyzed_ms":623.0402,"analyzed_warm_ms":611.5849,"matches":50000,"name":"all_due_nullable","timeout_or_error":null,"vacuum_only_ms":null}
+test search::items::records_prototype::benchmark::matrix::profile_dsl_matrix_statistics_controls ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 299 filtered out; finished in 114.28s
+
+     Running tests\operation_vectors.rs (target\release\deps\operation_vectors-5605a5349a760b74.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

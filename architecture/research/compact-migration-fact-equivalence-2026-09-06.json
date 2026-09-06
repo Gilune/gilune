@@ -1,0 +1,24 @@
+{
+  "missing_location_or_predicate": 0,
+  "unbound_facts": 0,
+  "invalid_bindings": 0,
+  "unused_locations": 0,
+  "facts": 63505,
+  "baseline_facts": 63505,
+  "missing_facts": 0,
+  "extra_facts": 0,
+  "facts_storage_kind": "view",
+  "baseline": "app\\build\\search-shapes-2026-09-06\\native-write-5VQZmO\\current_triggers.db",
+  "current": "app\\build\\search-shapes-2026-09-06\\items-10000\\.gilune\\local\\index.db",
+  "compared_fields": [
+    "rel_path",
+    "line",
+    "item_key",
+    "namespace",
+    "predicate",
+    "value",
+    "num",
+    "typed"
+  ],
+  "note": "Duplicate-sensitive comparison after all edit/restore trials. Source versions differ from the frozen synthetic control and are validated against current targets separately."
+}

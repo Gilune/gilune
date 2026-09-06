@@ -1,0 +1,77 @@
+    Finished `release` profile [optimized] target(s) in 0.21s
+     Running unittests src\lib.rs (target\release\deps\gilune_kernel-ce86377558dc2b4c.exe)
+
+running 1 test
+FIXTURE real plugin data read=393.7762ms targets=50500 documents=500
+BASELINE native_existing first50_due_sorted_with_count=2.1528916s (no Store entry/FFI)
+BUILD records: elapsed=513.1656ms query_store_bytes=6766592
+BUILD facts: elapsed=643.2645ms query_store_bytes=8704000
+PAGE records case=alice matched=17500 first50_select=188.1µs first50_with_text_facts=12.3058ms exact_count=279.5748ms
+SQL records_alice_count: SELECT COUNT(*) FROM r0 b WHERE b.f0 = ? AND b.f1 >= ? AND b.f1 < ? AND EXISTS(SELECT 1 FROM r1 j0 INDEXED BY sqlite_autoindex_r1_1 WHERE j0.target=b.target AND j0.f0 = ? AND j0.f1 = ?) AND b.f1 IS NOT NULL
+PARAMS [Text("open"), Text("2026-09-01"), Text("2026-10-01"), Text("assign"), Text("alice")]
+PLAN records_alice_count: SEARCH b USING COVERING INDEX r0_i0 (f0=? AND f1>? AND f1<?)
+PLAN records_alice_count: CORRELATED SCALAR SUBQUERY 1
+PLAN records_alice_count: SEARCH j0 USING PRIMARY KEY (target=? AND f0=? AND f1=?)
+WORK records_alice_count: rows=1 vm_steps=605019 fullscan_steps=0 sorts=0
+SQL records: SELECT b.target,b.f1 FROM r0 b WHERE b.f0 = ? AND b.f1 >= ? AND b.f1 < ? AND EXISTS(SELECT 1 FROM r1 j0 INDEXED BY sqlite_autoindex_r1_1 WHERE j0.target=b.target AND j0.f0 = ? AND j0.f1 = ?) AND b.f1 IS NOT NULL ORDER BY b.f1,b.target LIMIT ?
+PARAMS [Text("open"), Text("2026-09-01"), Text("2026-10-01"), Text("assign"), Text("alice"), Integer(51)]
+PLAN records: SEARCH b USING COVERING INDEX r0_i0 (f0=? AND f1>? AND f1<?)
+PLAN records: CORRELATED SCALAR SUBQUERY 1
+PLAN records: SEARCH j0 USING PRIMARY KEY (target=? AND f0=? AND f1=?)
+WORK records: rows=51 vm_steps=1190 fullscan_steps=0 sorts=0
+ENUM records first500_with_text_facts=83.5991ms page19_only=78.2746ms all17500_with_text_facts=3.041171s
+PAGE facts case=alice matched=17500 first50_select=132µs first50_with_text_facts=7.951ms exact_count=30.5997ms
+SQL facts_alice_count: SELECT COUNT(*) FROM f d WHERE d.predicate=1 AND d.value>=? AND d.value<? AND EXISTS(SELECT 1 FROM f s WHERE s.target=d.target AND s.predicate=0 AND s.value=?) AND EXISTS(SELECT 1 FROM f c WHERE c.target=d.target AND c.predicate=2 AND c.value IN (?))
+PARAMS [Text("2026-09-01"), Text("2026-10-01"), Text("open"), Text("[\"assign\",\"alice\"]")]
+PLAN facts_alice_count: SEARCH d USING COVERING INDEX f_value (predicate=? AND value>? AND value<?)
+PLAN facts_alice_count: CORRELATED SCALAR SUBQUERY 1
+PLAN facts_alice_count: SEARCH s USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN facts_alice_count: CORRELATED SCALAR SUBQUERY 2
+PLAN facts_alice_count: SEARCH c USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK facts_alice_count: rows=1 vm_steps=1032518 fullscan_steps=0 sorts=0
+SQL facts: SELECT d.target,d.value FROM f d WHERE d.predicate=1 AND d.value>=? AND d.value<? AND EXISTS(SELECT 1 FROM f s WHERE s.target=d.target AND s.predicate=0 AND s.value=?) AND EXISTS(SELECT 1 FROM f c WHERE c.target=d.target AND c.predicate=2 AND c.value IN (?)) ORDER BY d.value,d.target LIMIT ?
+PARAMS [Text("2026-09-01"), Text("2026-10-01"), Text("open"), Text("[\"assign\",\"alice\"]"), Integer(51)]
+PLAN facts: SEARCH d USING COVERING INDEX f_value (predicate=? AND value>? AND value<?)
+PLAN facts: CORRELATED SCALAR SUBQUERY 1
+PLAN facts: SEARCH s USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN facts: CORRELATED SCALAR SUBQUERY 2
+PLAN facts: SEARCH c USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK facts: rows=51 vm_steps=2450 fullscan_steps=0 sorts=0
+ENUM facts first500_with_text_facts=74.6591ms page19_only=80.7014ms all17500_with_text_facts=2.6344634s
+PAGE records case=alice_bob matched=25000 first50_select=139.1µs first50_with_text_facts=7.7596ms exact_count=18.9913ms
+PAGE facts case=alice_bob matched=25000 first50_select=167.3µs first50_with_text_facts=7.0853ms exact_count=40.2713ms
+PAGE records case=sparse matched=1 first50_select=81.8µs first50_with_text_facts=952.4µs exact_count=65.5µs
+PAGE facts case=sparse matched=1 first50_select=84.6µs first50_with_text_facts=1.1574ms exact_count=54.3µs
+PAGE records case=absent matched=0 first50_select=53.3µs first50_with_text_facts=72µs exact_count=45.9µs
+PAGE facts case=absent matched=0 first50_select=14µs first50_with_text_facts=13.8µs exact_count=18µs
+PAGE records case=open_month matched=32500 first50_select=73.2µs first50_with_text_facts=9.6664ms exact_count=4.296ms
+PAGE facts case=open_month matched=32500 first50_select=98.5µs first50_with_text_facts=9.1832ms exact_count=25.1888ms
+PAGE records case=not_bob matched=25000 first50_select=308.2µs first50_with_text_facts=11.1578ms exact_count=142.3179ms
+SQL records_not_bob_count: SELECT COUNT(*) FROM r0 b WHERE b.f0 = ? AND b.f1 >= ? AND b.f1 < ? AND NOT EXISTS(SELECT 1 FROM r1 j0 INDEXED BY sqlite_autoindex_r1_1 WHERE j0.target=b.target AND j0.f0 = ? AND j0.f1 = ?) AND b.f1 IS NOT NULL
+PARAMS [Text("open"), Text("2026-09-01"), Text("2026-10-01"), Text("assign"), Text("bob")]
+PLAN records_not_bob_count: SEARCH b USING COVERING INDEX r0_i0 (f0=? AND f1>? AND f1<?)
+PLAN records_not_bob_count: CORRELATED SCALAR SUBQUERY 1
+PLAN records_not_bob_count: SEARCH j0 USING PRIMARY KEY (target=? AND f0=? AND f1=?)
+WORK records_not_bob_count: rows=1 vm_steps=592519 fullscan_steps=0 sorts=0
+PAGE facts case=not_bob matched=25000 first50_select=125.8µs first50_with_text_facts=7.4268ms exact_count=33.6736ms
+SQL facts_not_bob_count: SELECT COUNT(*) FROM f d WHERE d.predicate=1 AND d.value>=? AND d.value<? AND EXISTS(SELECT 1 FROM f s WHERE s.target=d.target AND s.predicate=0 AND s.value=?) AND NOT EXISTS(SELECT 1 FROM f c WHERE c.target=d.target AND c.predicate=2 AND c.value IN (?))
+PARAMS [Text("2026-09-01"), Text("2026-10-01"), Text("open"), Text("[\"assign\",\"bob\"]")]
+PLAN facts_not_bob_count: SEARCH d USING COVERING INDEX f_value (predicate=? AND value>? AND value<?)
+PLAN facts_not_bob_count: CORRELATED SCALAR SUBQUERY 1
+PLAN facts_not_bob_count: SEARCH s USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+PLAN facts_not_bob_count: CORRELATED SCALAR SUBQUERY 2
+PLAN facts_not_bob_count: SEARCH c USING PRIMARY KEY (target=? AND predicate=? AND value=?)
+WORK facts_not_bob_count: rows=1 vm_steps=1020018 fullscan_steps=0 sorts=0
+UPDATE records replace_100_tasks_median=4.4007ms store_growth=4096
+UPDATE facts replace_100_tasks_median=3.1087ms store_growth=4096
+PROTOTYPE complete; original index opened read-only; no application/API changes
+test search::items::records_prototype::benchmark::compare_structured_records_and_compact_facts ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 289 filtered out; finished in 21.48s
+
+     Running tests\operation_vectors.rs (target\release\deps\operation_vectors-5605a5349a760b74.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

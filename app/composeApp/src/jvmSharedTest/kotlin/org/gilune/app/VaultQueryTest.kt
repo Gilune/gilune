@@ -8,6 +8,17 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.SearchOperator
+import org.gilune.plugin.sdk.SearchedNote
+import org.gilune.plugins.tasks.TASKS_INDEXER_VERSION
+import org.gilune.plugins.tasks.TASKS_INDEX_NAMESPACE
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.taskFacts
+import org.gilune.plugins.tasks.taskPredicateKinds
+import org.gilune.plugins.tasks.tasksDeclaration
+import org.gilune.plugins.tasks.tasksDecorations
+
 import java.io.File
 import java.nio.file.Files
 import java.time.LocalDate
@@ -34,14 +45,14 @@ private object SilentTagOperator : SearchOperator {
 
 /// The tasks indexer with a tally, registered in its own namespace's
 /// place so what the agenda costs is a number rather than an argument.
-private class CountingIndexer : NoteIndexer {
+private class CountingIndexer : uniffi.gilune_ffi.ScopedIndexer {
     val calls = AtomicInteger()
     val notes = mutableListOf<String>()
 
-    override fun index(relPath: String, text: String): List<Fact> {
+    override fun index(relPath: String, text: uniffi.gilune_ffi.SourceTextSnapshot): List<uniffi.gilune_ffi.ScopedFact> {
         calls.incrementAndGet()
         synchronized(notes) { notes += relPath }
-        return taskFacts(text)
+        return org.gilune.plugins.tasks.TasksScopedIndexer().index(relPath, text)
     }
 }
 
@@ -62,7 +73,7 @@ class VaultQueryTest {
         val vault = IndexedVault("gilune-observer")
         for (n in 1..20) vault.write("Notes/note-$n.md", "- [ ] task $n due:$today\n")
         val observer = CountingIndexer()
-        vault.gilune.registerIndexer(
+        vault.gilune.registerScopedIndexer(
             TASKS_INDEX_NAMESPACE,
             TASKS_INDEXER_VERSION,
             taskPredicateKinds(),
@@ -266,7 +277,8 @@ class VaultQueryTest {
         registerShellIndexers(vault.gilune)
         vault.gilune.advanceIndex()
 
-        assertTrue(vault.gilune.factsOf(rel).any { it.namespace == TASKS_INDEX_NAMESPACE })
+        val retained = compileSearch("type:task", types = types, groupByNote = false)!!.page(vault.gilune).requireComplete()
+        assertTrue(retained.hits.any { it.relPath == rel && it.items.any { item -> item.facts.any { fact -> fact.key == org.gilune.plugins.tasks.TASK_STATE_PREDICATE } } })
         val off = vault.gilune.plugins().filter { it.state == "enabled" }
         assertTrue(runFilterBlock(vault.gilune, vault.dir, "type:task", off, today) is FilterResult.Hint)
     }

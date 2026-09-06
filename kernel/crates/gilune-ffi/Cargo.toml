@@ -26,6 +26,7 @@ whisper-rs = { version = "0.16", optional = true }
 tempfile.workspace = true
 
 [features]
+index-profile = ["gilune-kernel/index-profile"]
 # Local speech-to-text (desktop builds; the Android v0 profile captures
 # and syncs to a coordinator instead, per the threat-model decision).
 whisper = ["dep:whisper-rs"]

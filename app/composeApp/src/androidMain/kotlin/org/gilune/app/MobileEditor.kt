@@ -47,6 +47,14 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.DecorationMatch
+import org.gilune.plugin.sdk.DecorationRender
+import org.gilune.plugin.sdk.EditorDecoration
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.tasksDecorations
+import org.gilune.plugins.tasks.tasksFilter
+
 import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -393,7 +401,9 @@ class MobileEditorState {
     /// answered, saving would destroy whatever arrived.
     var stale by mutableStateOf(false)
 
-    val dirty: Boolean get() = body.text.toString() != savedBody
+    var savedHeader by mutableStateOf("")
+
+    val dirty: Boolean get() = body.text.toString() != savedBody || frontMatterRaw != savedHeader
 
     fun document(): String = assembleNote(frontMatterRaw, body.text.toString())
 
@@ -409,7 +419,13 @@ class MobileEditorState {
         body.undoState.clearHistory()
         hashAtOpen = contentHash(content)
         savedBody = text
+        savedHeader = header
         stale = false
+    }
+
+    fun applyProperties(expectedHeader: String, updatedHeader: String) {
+        require(frontMatterRaw == expectedHeader) { "The properties changed while this form was open. Reopen it to review the current values." }
+        frontMatterRaw = updatedHeader
     }
 
     /// The guarded write (ADR 0012). False means the file changed under
@@ -426,6 +442,7 @@ class MobileEditorState {
         runCatching { file.writeText(document) }.onFailure { return false }
         hashAtOpen = contentHash(document)
         savedBody = body.text.toString()
+        savedHeader = frontMatterRaw
         stale = false
         return true
     }
@@ -479,6 +496,7 @@ fun EditScreen(
         }
     }
 
+    var propertiesOpen by remember(relPath) { mutableStateOf(false) }
     val bodyText = editor.body.text.toString()
 
     // Idle autosave, the desktop's cadence exactly.
@@ -531,7 +549,10 @@ fun EditScreen(
         // here rather than in the accessory row: `note.actions` already
         // gates it, and removing the transcription plugin takes the
         // button rather than leaving a dead key in a fixed row.
-        NoteActions(state = state, editor = editor, transcription = transcription)
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            TextButton(onClick = { propertiesOpen = true }, modifier = Modifier.testTag("open-properties")) { Text("Properties") }
+            NoteActions(state = state, editor = editor, transcription = transcription)
+        }
         Column(
             Modifier
                 .weight(1f)
@@ -576,6 +597,8 @@ fun EditScreen(
             onAction = { save() },
         )
     }
+    if (propertiesOpen) SourcePropertiesDialog(editor.document(), { propertiesOpen = false }, editor::applyProperties)
+
 }
 
 /// Should the editor draw a dictation mic at all (ADR 0017 § 3, § 4)?

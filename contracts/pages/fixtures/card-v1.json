@@ -1,0 +1,6 @@
+{
+  "version": 1,
+  "schema": 1,
+  "default_folder": "Cards",
+  "template": "---\nname: Example\nunknown: {nested: true}\n---\n# Notes\n"
+}

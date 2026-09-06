@@ -22,7 +22,15 @@ Populated from vertical-slice milestone M4 (plugin contract) and M5
 - [`indexer/`](indexer/README.md) — describing a note as facts about
   anchors, which the kernel stores and joins (ADR 0020). Its WIT half is
   deferred; the README is the contract meanwhile.
-- [`search/`](search/README.md) — complete indexed result pages with
+- [`search/`](search/README.md) — complete indexed result pages, independent generation-bound counts and cancellation, with
   plugin-owned vocabulary and kernel-owned execution (ADR 0021).
+- [`lookup/`](lookup/README.md) — ranked prefix alternatives and complete
+  source-qualified root lookup through independently owned providers.
 - [`bundled-extensions/`](bundled-extensions/README.md) — executable bundled
   search, suggestion-provider and indexer registrations (ADR 0022).
+
+- [`documents/`](documents/README.md) — exact source snapshots, shared Markdown
+  locations and protected text-change preparation without domain dependencies.
+
+- [`pages/`](pages/README.md) — scoped typed-page declarations and durable creation,
+  with property preservation and recoverable first publication.

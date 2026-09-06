@@ -137,7 +137,7 @@ fn a_foreign_indexer_is_asked_about_a_note_and_its_facts_come_back_as_anchors() 
     );
 
     let status = gilune.index_status().expect("status");
-    assert_eq!(status.schema_version, 2);
+    assert_eq!(status.schema_version, gilune_kernel::index::SCHEMA_VERSION);
     assert!(status
         .namespaces
         .iter()

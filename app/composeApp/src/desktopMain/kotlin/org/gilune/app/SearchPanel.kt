@@ -13,6 +13,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
+
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -136,9 +138,12 @@ fun SearchPanel(
         }
 
         QueryNotice(search.listing.loading, search.listing.error, state::retrySearchIndex)
+        if (search.listing.generation != null && search.listing.total == null) {
+            Text(if (search.listing.countError == null) "Counting results…" else "Total unavailable")
+        }
         if (search.listing.next != null) {
             androidx.compose.material3.TextButton(onClick = search.more, enabled = !search.listing.loading) {
-                Text("Load more (${hits.size} of ${search.listing.total})")
+                Text(search.listing.total?.let { "Load more (${hits.size} of $it)" } ?: "Load more (${hits.size} loaded)")
             }
         }
         when {

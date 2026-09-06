@@ -1,3 +1,6 @@
 target/
 
 app/.kotlin/
+
+# Per-target UniFFI output belongs to the kernel binding module.
+app/kernelBindings/src/*Main/generated/

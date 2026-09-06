@@ -1,0 +1,16 @@
+SHAPE items_per_document=10 tasks=10000 documents=1000 build_ms=14771.0227 edit_median_ms=105.6227 index_bytes=35237888
+SHAPE items_per_document=100 tasks=10000 documents=100 build_ms=8109.9153 edit_median_ms=95.806 index_bytes=32030720
+SHAPE items_per_document=1000 tasks=10000 documents=10 build_ms=7369.5326 edit_median_ms=797.0344 index_bytes=32579584
+SHAPE items_per_document=10000 tasks=10000 documents=1 build_ms=6781.4018 edit_median_ms=8097.962 index_bytes=35016704
+SHAPE_EDIT items_per_document=10 sample=0 reconcile_ms=162.4363 settled_advance_ms=0.2368 callbacks_ms={org.memory.tasks=15.3101, org.memory.people=25.6639}
+SHAPE_EDIT items_per_document=10 sample=1 reconcile_ms=109.8062 settled_advance_ms=0.1908 callbacks_ms={org.memory.tasks=1.3112, org.memory.people=9.3371}
+SHAPE_EDIT items_per_document=10 sample=2 reconcile_ms=113.3185 settled_advance_ms=0.1935 callbacks_ms={org.memory.tasks=1.2672, org.memory.people=11.8019}
+SHAPE_EDIT items_per_document=100 sample=0 reconcile_ms=123.7546 settled_advance_ms=0.1665 callbacks_ms={org.memory.tasks=6.9378, org.memory.people=32.7464}
+SHAPE_EDIT items_per_document=100 sample=1 reconcile_ms=112.3257 settled_advance_ms=0.1754 callbacks_ms={org.memory.tasks=4.401, org.memory.people=20.3203}
+SHAPE_EDIT items_per_document=100 sample=2 reconcile_ms=90.5434 settled_advance_ms=0.1545 callbacks_ms={org.memory.tasks=1.9884, org.memory.people=15.3441}
+SHAPE_EDIT items_per_document=1000 sample=0 reconcile_ms=830.2943 settled_advance_ms=0.1703 callbacks_ms={org.memory.tasks=8.0341, org.memory.people=205.8289}
+SHAPE_EDIT items_per_document=1000 sample=1 reconcile_ms=877.3043 settled_advance_ms=0.1825 callbacks_ms={org.memory.tasks=7.6713, org.memory.people=211.5075}
+SHAPE_EDIT items_per_document=1000 sample=2 reconcile_ms=873.3492 settled_advance_ms=0.1669 callbacks_ms={org.memory.tasks=5.6935, org.memory.people=217.6449}
+SHAPE_EDIT items_per_document=10000 sample=0 reconcile_ms=8400.3917 settled_advance_ms=0.2677 callbacks_ms={org.memory.tasks=42.2124, org.memory.people=2033.1993}
+SHAPE_EDIT items_per_document=10000 sample=1 reconcile_ms=9497.0531 settled_advance_ms=0.2234 callbacks_ms={org.memory.tasks=31.8758, org.memory.people=2191.9527}
+SHAPE_EDIT items_per_document=10000 sample=2 reconcile_ms=8282.499 settled_advance_ms=0.2097 callbacks_ms={org.memory.tasks=36.2992, org.memory.people=2132.2667}

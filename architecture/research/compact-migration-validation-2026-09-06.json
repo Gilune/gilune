@@ -1,0 +1,189 @@
+{
+  "native": {
+    "total": {
+      "passed": 565,
+      "failed": 0,
+      "ignored": 21
+    },
+    "suites": {
+      "gilune_cli:gilune_cli": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:apply_crash_matrix": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:change_feed": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:crash_matrix": {
+        "passed": 8,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:external_route": {
+        "passed": 7,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:migration_v5": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:multi_process": {
+        "passed": 1,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:plugin_registry": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_cli:system_index": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_document:gilune_document": {
+        "passed": 16,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:gilune_ffi": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:uniffi_bindgen": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:address_surface": {
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:alert_surface": {
+        "passed": 6,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:builtin_grants": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:change_feed": {
+        "passed": 4,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:external_route": {
+        "passed": 12,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:index_surface": {
+        "passed": 5,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:live_discovery": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_ffi:whisper_smoke": {
+        "passed": 0,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_kernel:gilune_kernel": {
+        "passed": 305,
+        "failed": 0,
+        "ignored": 19,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_kernel:operation_vectors": {
+        "passed": 5,
+        "failed": 0,
+        "ignored": 1,
+        "log": "app/build/compact-workspace-final-tests.log"
+      },
+      "gilune_sync:gilune_sync": {
+        "passed": 78,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-sync-final-tests.log"
+      },
+      "gilune_sync:bounds": {
+        "passed": 9,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-sync-final-tests.log"
+      },
+      "gilune_sync:change_feed": {
+        "passed": 3,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-sync-final-tests.log"
+      },
+      "gilune_sync:gate_b": {
+        "passed": 26,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-sync-final-tests.log"
+      },
+      "gilune_sync:gate_c": {
+        "passed": 32,
+        "failed": 0,
+        "ignored": 1,
+        "log": "app/build/compact-sync-final-tests.log"
+      },
+      "gilune_sync:s4_scenarios": {
+        "passed": 21,
+        "failed": 0,
+        "ignored": 0,
+        "log": "app/build/compact-sync-final-tests.log"
+      }
+    }
+  },
+  "desktop": {
+    "tests": 638,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5,
+    "passed": 633
+  },
+  "native_note": "Final workspace run encountered a sync listener-port race in gate_b. The entire sync suite was rerun serially and passed; totals substitute those sync results without double counting.",
+  "clippy": "Release workspace/all-targets passed with warnings denied.",
+  "android": "Application and instrumented-test APK builds passed. No device attached; runtime checks unrun."
+}

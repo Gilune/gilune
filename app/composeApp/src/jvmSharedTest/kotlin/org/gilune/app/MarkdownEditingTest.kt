@@ -6,6 +6,11 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.DecorationMatch
+import org.gilune.plugin.sdk.DecorationRender
+import org.gilune.plugin.sdk.DecorationRole
+import org.gilune.plugin.sdk.EditorDecoration
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight

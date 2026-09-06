@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/gilune-document",
     "crates/gilune-kernel",
     "crates/gilune-sync",
     "crates/gilune-ffi",

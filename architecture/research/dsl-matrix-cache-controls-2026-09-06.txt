@@ -1,0 +1,37 @@
+   Compiling gilune-kernel v0.1.0 (D:\CuttingCode\SneddoBuilds\gilune\kernel\crates\gilune-kernel)
+    Finished `release` profile [optimized] target(s) in 20.15s
+     Running unittests src\lib.rs (target\release\deps\gilune_kernel-ce86377558dc2b4c.exe)
+
+running 1 test
+STORAGE {"compact_build_ms":528.4763,"compact_query_only":{"allocated_bytes":8720384,"objects":[{"bytes":3588096,"name":"f"},{"bytes":3489792,"name":"f_value"},{"bytes":815104,"name":"sqlite_autoindex_targets_1"},{"bytes":733184,"name":"targets"},{"bytes":53248,"name":"sources"},{"bytes":16384,"name":"sqlite_autoindex_sources_1"},{"bytes":12288,"name":"sqlite_stat4"},{"bytes":4096,"name":"state"},{"bytes":4096,"name":"sqlite_stat1"},{"bytes":4096,"name":"sqlite_schema"}],"vacuum_bytes":7864320},"old_whole":{"allocated_bytes":137596928,"objects":[{"bytes":51286016,"name":"facts"},{"bytes":16592896,"name":"facts_predicate_value"},{"bytes":16592896,"name":"facts_predicate_folded"},{"bytes":13746176,"name":"facts_predicate_num"},{"bytes":13357056,"name":"facts_namespace_path"},{"bytes":7454720,"name":"facts_path"},{"bytes":6922240,"name":"lines_fts_data"},{"bytes":6459392,"name":"lines"},{"bytes":3076096,"name":"source_maps"},{"bytes":1277952,"name":"lines_path"},{"bytes":536576,"name":"lines_fts_docsize"},{"bytes":167936,"name":"fact_sources"},{"bytes":65536,"name":"sqlite_autoindex_fact_sources_1"},{"bytes":16384,"name":"sqlite_autoindex_source_maps_1"},{"bytes":12288,"name":"lines_fts_idx"},{"bytes":4096,"name":"sqlite_schema"},{"bytes":4096,"name":"sqlite_autoindex_predicate_kinds_1"},{"bytes":4096,"name":"sqlite_autoindex_namespaces_1"},{"bytes":4096,"name":"sqlite_autoindex_index_meta_1"},{"bytes":4096,"name":"predicate_kinds"},{"bytes":4096,"name":"namespaces"},{"bytes":4096,"name":"lines_fts_config"},{"bytes":4096,"name":"index_meta"}],"vacuum_bytes":131080192},"records_query_only":{"allocated_bytes":6766592,"objects":[{"bytes":1314816,"name":"r0"},{"bytes":1306624,"name":"r0_i0"},{"bytes":1273856,"name":"r1"},{"bytes":1245184,"name":"r1_i0"},{"bytes":815104,"name":"sqlite_autoindex_targets_1"},{"bytes":733184,"name":"targets"},{"bytes":53248,"name":"sources"},{"bytes":16384,"name":"sqlite_autoindex_sources_1"},{"bytes":4096,"name":"state"},{"bytes":4096,"name":"sqlite_schema"}],"vacuum_bytes":6082560},"transitional_whole":{"allocated_bytes":160313344,"objects":[{"bytes":53374976,"name":"facts"},{"bytes":16502784,"name":"facts_predicate_value"},{"bytes":16502784,"name":"facts_predicate_folded"},{"bytes":13414400,"name":"facts_predicate_num"},{"bytes":13258752,"name":"facts_namespace_path"},{"bytes":8097792,"name":"facts_compact_predicate_value"},{"bytes":7733248,"name":"facts_compact_target_value"},{"bytes":7438336,"name":"facts_path"},{"bytes":6922240,"name":"lines_fts_data"},{"bytes":6459392,"name":"lines"},{"bytes":3682304,"name":"index_targets"},{"bytes":3076096,"name":"source_maps"},{"bytes":1716224,"name":"sqlite_autoindex_index_targets_1"},{"bytes":1277952,"name":"lines_path"},{"bytes":536576,"name":"lines_fts_docsize"},{"bytes":167936,"name":"fact_sources"},{"bytes":65536,"name":"sqlite_autoindex_fact_sources_1"},{"bytes":16384,"name":"sqlite_schema"},{"bytes":16384,"name":"sqlite_autoindex_source_maps_1"},{"bytes":12288,"name":"lines_fts_idx"},{"bytes":4096,"name":"sqlite_sequence"},{"bytes":4096,"name":"sqlite_autoindex_predicate_kinds_1"},{"bytes":4096,"name":"sqlite_autoindex_namespaces_1"},{"bytes":4096,"name":"sqlite_autoindex_index_predicates_1"},{"bytes":4096,"name":"sqlite_autoindex_index_meta_1"},{"bytes":4096,"name":"predicate_kinds"},{"bytes":4096,"name":"namespaces"},{"bytes":4096,"name":"lines_fts_config"},{"bytes":4096,"name":"index_predicates"},{"bytes":4096,"name":"index_meta"}],"vacuum_bytes":153006080}}
+BEGIN all DSL="type:task"
+SQL all: SELECT t.id,'' FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?)) ORDER BY t.id LIMIT ?
+PARAMS [Integer(0), Integer(51)]
+PLAN all: SCAN t
+PLAN all: CORRELATED SCALAR SUBQUERY 1
+PLAN all: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+WORK all: rows=51 vm_steps=1033 fullscan_steps=51 sorts=0
+SQL count_all: SELECT count(*) FROM targets t WHERE t.kind=1 AND (EXISTS(SELECT 1 FROM f x WHERE x.target=t.id AND x.predicate=?))
+PARAMS [Integer(0)]
+PLAN count_all: SEARCH t USING COVERING INDEX sqlite_autoindex_targets_1 (ANY(source) AND kind=?)
+PLAN count_all: CORRELATED SCALAR SUBQUERY 1
+PLAN count_all: SEARCH x USING PRIMARY KEY (target=? AND predicate=?)
+WORK count_all: rows=1 vm_steps=803511 fullscan_steps=0 sorts=0
+RESULT {"case":{"body_needles":[],"clauses":[{"constraints":[{"kind":"at","locality":"EXACT","op":"EXISTS","predicate":"org.memory.tasks.state","value":""}],"negated":false,"never":false,"residual":null,"sensitive":false}],"compile_ms":0.06907666666666666,"dsl":"type:task","grouped":false,"name":"all","name_needles":[],"required":["org.memory.tasks"],"residual_ms":null,"sort":""},"compact_all_projection_only_ms":361.9961,"compact_all_select_ms":283.5996,"compact_count_ms":258.97569999999996,"compact_first500_project_ms":3.0338000000000003,"compact_first_select_ms":0.3436,"compact_page19_project_ms":4.8568999999999996,"compact_project_ms":0.928,"compact_select_ms":0.41829999999999995,"matches":50000,"old_first500_ms":378.97209999999995,"old_first_ms":362.0563,"old_page19_ms":486.67650000000003,"old_warm_ms":349.6306,"transitional_first_ms":419.1069}
+BEGIN empty_negative_membership DSL="type:task people.connection:assign NOT IN []"
+RESULT {"case":{"body_needles":[],"clauses":[{"constraints":[{"kind":"at","locality":"EXACT","op":"EXISTS","predicate":"org.memory.tasks.state","value":""}],"negated":false,"never":false,"residual":null,"sensitive":false},{"constraints":[{"kind":"in","locality":"EXACT","predicate":"org.memory.people.connection","values":[]}],"negated":true,"never":false,"residual":null,"sensitive":false}],"compile_ms":0.04603666666666666,"dsl":"type:task people.connection:assign NOT IN []","grouped":false,"name":"empty_negative_membership","name_needles":[],"required":["org.memory.people","org.memory.tasks"],"residual_ms":null,"sort":""},"compact_all_select_ms":295.5804,"compact_count_ms":276.2678,"compact_first_select_ms":0.5088,"compact_project_ms":0.9478000000000001,"compact_select_ms":0.4334,"matches":50000,"old_first_ms":401.4601,"old_warm_ms":398.2822}
+CACHE_CONTROL {"complete_count_ms":270.0017,"phase":"initial"}
+CACHE_CONTROL {"complete_count_ms":19.0167,"phase":"large_cache"}
+CACHE_CONTROL {"complete_count_ms":21.3168,"phase":"reset_small_cache"}
+CACHE_CONTROL {"complete_count_ms":20.927,"phase":"checkpointed"}
+MATRIX_OUTPUT D:\CuttingCode\SneddoBuilds\gilune\app\build\dsl-matrix\run-4IU3Dp
+test search::items::records_prototype::benchmark::matrix::profile_exported_dsl_matrix ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 301 filtered out; finished in 13.34s
+
+     Running tests\operation_vectors.rs (target\release\deps\operation_vectors-5605a5349a760b74.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

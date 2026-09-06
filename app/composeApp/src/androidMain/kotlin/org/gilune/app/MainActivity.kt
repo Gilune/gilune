@@ -9,6 +9,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
+
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -693,6 +695,11 @@ internal fun NavigationPanelScreen(
     onOpenNote: (String) -> Unit,
     onStartTask: () -> Unit = {},
 ) {
+    val collection = BUNDLED_PLUGIN_EXTENSIONS.pageCollections(state.plugins).singleOrNull { it.collection.id == key }
+    if (collection != null) {
+        PageCollectionPanel(collection, state, onOpenNote, Modifier.fillMaxSize())
+        return
+    }
     when (key) {
         TASKS_RAIL_PANEL -> AgendaScreen(state, onOpenNote, onStartTask)
         else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

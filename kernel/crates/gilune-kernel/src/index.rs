@@ -26,6 +26,7 @@
 //!   changed note once, whatever the number of registered namespaces,
 //!   and reads nothing else.
 
+use rusqlite::OptionalExtension;
 use crate::changes::{ChangeKind, Cursor, VaultChange};
 use crate::store::Store;
 use crate::{ids, probe, KernelError, Result};
@@ -37,7 +38,12 @@ use std::sync::Arc;
 /// vault's: this database is derived, so a version it does not recognise
 /// is discarded rather than migrated (constitution rule 12 governs the
 /// record, and this is not the record).
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 9;
+
+pub mod scoped;
+pub mod lookup;
+mod targets;
+mod writer;
 
 /// The kernel's own namespace, holding the note text every full-text
 /// query is answered from. Reserved: a plugin cannot register it, and it
@@ -92,6 +98,20 @@ const TRIGRAM_MIN: usize = 3;
 /// and every other namespace carries on.
 pub trait NoteIndexer: Send + Sync {
     fn index(&self, rel_path: &str, text: &str) -> std::result::Result<Vec<Fact>, String>;
+
+    /// Source-aware adapters may inspect the exact supplied source. Legacy
+    /// implementations retain their body-only input and body-relative facts.
+    fn index_source(&self, rel_path: &str, _source: &str, body: &str) -> std::result::Result<Vec<Fact>, String> {
+        self.index(rel_path, body)
+    }
+
+    /// Opt-in source locations. Legacy callbacks continue to use physical body
+    /// lines; they are never silently promoted to Markdown item scope.
+    fn index_scoped(&self, _rel_path: &str, _source: &gilune_document::TextSnapshot) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
+        Err("scoped input is not implemented".into())
+    }
+
+    fn uses_scoped_input(&self) -> bool { false }
 }
 
 /// One thing a plugin says about an anchor. `line` is `None` for the
@@ -209,6 +229,23 @@ pub enum TextTarget {
     Path,
 }
 
+/// Where a fact may satisfy a result. The legacy `Fact` variant uses
+/// `Inherited`; new cross-domain contributions should choose explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FactLocality {
+    /// Match the result's own location; never broadcast a root fact to lines.
+    /// Document search may still ask for contained matches at any location.
+    Exact,
+    /// Read only document-root facts, explicitly qualifying a contained result.
+    DocumentRoot,
+    /// Compatibility: a root fact also satisfies every line in its document.
+    Inherited,
+}
+
+/// Bound the raw input, before deduplication; never silently truncate a set.
+pub const MAX_FACT_SET_VALUES: usize = 256;
+pub const MAX_FACT_SET_BYTES: usize = 65_536;
+
 /// One term of a query. A query is a conjunction of these and nothing
 /// else: there is no `OR` (ADR 0020 § 2.4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,10 +255,45 @@ pub enum Constraint {
         op: ConstraintOp,
         value: String,
     },
+    FactAt {
+        predicate: String,
+        op: ConstraintOp,
+        value: String,
+        locality: FactLocality,
+    },
+    /// Existential exact membership. Negate the enclosing search clause for
+    /// NOT IN, including objects with no value. An empty set matches nothing.
+    FactIn {
+        predicate: String,
+        values: Vec<String>,
+        locality: FactLocality,
+    },
     Text {
         target: TextTarget,
         query: String,
     },
+}
+
+impl Constraint {
+    pub(crate) fn validate(&self) -> Result<()> {
+        if let Self::FactIn { values, .. } = self {
+            if values.len() > MAX_FACT_SET_VALUES
+                || values.iter().map(String::len).sum::<usize>() > MAX_FACT_SET_BYTES
+            {
+                return Err(KernelError::SearchInvalid {
+                    detail: "fact membership set exceeds its bounds".into(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn canonicalize(&mut self) {
+        if let Self::FactIn { values, .. } = self {
+            values.sort();
+            values.dedup();
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,11 +361,12 @@ pub struct IndexStatus {
 
 // ----------------------------------------------------------- the database
 
-const SCHEMA: &str = "
+const SCHEMA: &str = concat!("
 CREATE TABLE index_meta (key TEXT PRIMARY KEY, value NOT NULL);
 CREATE TABLE namespaces (
     namespace TEXT PRIMARY KEY,
     version INTEGER NOT NULL,
+    scoped INTEGER NOT NULL DEFAULT 0,
     cursor_seq INTEGER NOT NULL DEFAULT 0,
     last_error TEXT,
     last_error_ms INTEGER
@@ -304,19 +377,19 @@ CREATE TABLE predicate_kinds (
     kind TEXT NOT NULL CHECK (kind IN ('text','number','date')),
     PRIMARY KEY (namespace, predicate)
 );
-CREATE TABLE facts (
-    rel_path TEXT NOT NULL,
-    line INTEGER,
-    namespace TEXT NOT NULL,
-    predicate TEXT NOT NULL,
-    value TEXT NOT NULL,
-    num REAL,
-    typed INTEGER NOT NULL DEFAULT 1
+CREATE TABLE source_maps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    rel_path TEXT NOT NULL UNIQUE,
+    source_version TEXT NOT NULL,
+    layout TEXT NOT NULL,
+    map_version INTEGER GENERATED ALWAYS AS (json_extract(layout,'$.version')) STORED
 );
-CREATE INDEX facts_predicate_value ON facts(predicate, value);
-CREATE INDEX facts_predicate_num ON facts(predicate, num);
-CREATE INDEX facts_path ON facts(rel_path);
-CREATE INDEX facts_namespace_path ON facts(namespace, rel_path);
+CREATE TABLE fact_sources (
+    namespace TEXT NOT NULL,
+    rel_path TEXT NOT NULL,
+    source_version TEXT NOT NULL,
+    PRIMARY KEY (namespace, rel_path)
+);
 CREATE TABLE lines (
     id INTEGER PRIMARY KEY,
     rel_path TEXT NOT NULL,
@@ -326,6 +399,7 @@ CREATE TABLE lines (
     folded TEXT NOT NULL
 );
 CREATE INDEX lines_path ON lines(rel_path);
+CREATE INDEX lines_path_field_line ON lines(rel_path,field,line);
 CREATE VIRTUAL TABLE lines_fts USING fts5(
     folded, content='lines', content_rowid='id', tokenize='trigram case_sensitive 1'
 );
@@ -344,14 +418,26 @@ END;
 CREATE TRIGGER namespaces_ad AFTER DELETE ON namespaces BEGIN
     UPDATE index_meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'generation';
 END;
-";
+", include_str!("index/targets.sql"), include_str!("index/storage.sql"));
 
 const DROP_ALL: &str = "
+DROP VIEW IF EXISTS source_target_layout;
+DROP TRIGGER IF EXISTS source_targets_insert;
+DROP TRIGGER IF EXISTS source_targets_before_update;
+DROP TRIGGER IF EXISTS source_targets_update;
+DROP TRIGGER IF EXISTS source_targets_delete;
+DROP TRIGGER IF EXISTS fact_ids_insert;
+DROP TRIGGER IF EXISTS fact_ids_update;
+DROP TABLE IF EXISTS index_targets;
+DROP TABLE IF EXISTS index_predicates;
 DROP TRIGGER IF EXISTS lines_ai;
 DROP TRIGGER IF EXISTS lines_ad;
 DROP TABLE IF EXISTS lines_fts;
 DROP TABLE IF EXISTS lines;
-DROP TABLE IF EXISTS facts;
+DROP TABLE IF EXISTS fact_values;
+DROP TABLE IF EXISTS fact_locations;
+DROP TABLE IF EXISTS source_maps;
+DROP TABLE IF EXISTS fact_sources;
 DROP TABLE IF EXISTS predicate_kinds;
 DROP TABLE IF EXISTS namespaces;
 DROP TABLE IF EXISTS index_meta;
@@ -428,6 +514,10 @@ fn meta(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>> {
 fn create(conn: &rusqlite::Connection, epoch: &str) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let done: Result<()> = (|| {
+        let facts_kind: Option<String> = conn.query_row("SELECT type FROM sqlite_master WHERE name='facts'", [], |r| r.get(0)).optional()?;
+        if let Some(kind) = facts_kind {
+            conn.execute_batch(if kind == "view" { "DROP VIEW facts;" } else { "DROP TABLE facts;" })?;
+        }
         conn.execute_batch(DROP_ALL)?;
         conn.execute_batch(SCHEMA)?;
         // Text, and read back as text: `index_meta.value` has no
@@ -477,8 +567,8 @@ enum Step {
 }
 
 enum Rows {
-    Lines(Vec<LineRow>),
-    Facts(Vec<FactRow>),
+    Lines(Vec<LineRow>, Option<(String, String)>),
+    Facts(Vec<FactRow>, Option<String>),
 }
 
 struct LineRow {
@@ -489,6 +579,8 @@ struct LineRow {
 
 struct FactRow {
     line: Option<i64>,
+    item_key: Option<i64>,
+    source_version: Option<String>,
     predicate: String,
     value: String,
     num: Option<f64>,
@@ -521,8 +613,20 @@ enum Source<'a> {
 /// A note as one pass reads it: the prose an indexer sees and the header
 /// it does not.
 struct NoteText {
+    source: String,
     body: String,
     front_matter: Vec<(String, String)>,
+    snapshot: std::sync::OnceLock<std::result::Result<gilune_document::TextSnapshot, String>>,
+}
+
+impl NoteText {
+    fn snapshot(&self) -> std::result::Result<&gilune_document::TextSnapshot, String> {
+        self.snapshot.get_or_init(|| {
+            let _profile = crate::update_profile::span("source_snapshot_parse", "");
+            gilune_document::TextSnapshot::new(self.source.clone()).map_err(|e| e.to_string())
+        })
+            .as_ref().map_err(Clone::clone)
+    }
 }
 
 /// Notes read during one pass, so a note changed under several
@@ -538,11 +642,14 @@ impl Notes {
         rel_path: &str,
     ) -> std::result::Result<Option<&NoteText>, String> {
         if !self.0.contains_key(rel_path) {
+            let _profile = crate::update_profile::span("read_and_split_source", "");
             probe::file_read();
             let read = match std::fs::read_to_string(store.vault().join(rel_path)) {
                 Ok(text) => Ok(Some(NoteText {
                     body: body_of(&text),
                     front_matter: front_matter_of(&text),
+                    source: text,
+                    snapshot: Default::default(),
                 })),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(error) => Err(format!("cannot index {rel_path}: {error}")),
@@ -568,7 +675,7 @@ pub(crate) fn body_of(text: &str) -> String {
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
         .collect();
-    if lines.first().map(|line| line.trim()) != Some("---") {
+    if lines.first().map(|line| line.trim_start_matches('\u{feff}').trim()) != Some("---") {
         return lines.join("\n");
     }
     let Some(close) = lines.iter().skip(1).position(|line| line.trim() == "---") else {
@@ -711,22 +818,26 @@ impl Store {
             });
         }
         self.with_index(|db| {
-            let held: Option<i64> = db
+            let held: Option<(i64,bool)> = db
                 .query_row(
-                    "SELECT version FROM namespaces WHERE namespace = ?1",
+                    "SELECT version,scoped FROM namespaces WHERE namespace = ?1",
                     [namespace],
-                    |row| row.get(0),
+                    |row| Ok((row.get(0)?,row.get(1)?)),
                 )
                 .map(Some)
                 .or_else(no_rows_none)?;
-            if held != Some(version) {
+            let scoped=indexer.uses_scoped_input();
+            if held.is_some_and(|(v,s)| v==version && s!=scoped) {
+                return Err(KernelError::SearchInvalid { detail:"Changing indexer location mode requires a version bump".into() });
+            }
+            if held != Some((version,scoped)) {
                 db.execute_batch("BEGIN IMMEDIATE;")?;
                 let done: Result<()> = (|| {
                     forget_namespace(db, namespace)?;
                     db.execute(
-                        "INSERT OR REPLACE INTO namespaces (namespace, version, cursor_seq)
-                         VALUES (?1, ?2, 0)",
-                        rusqlite::params![namespace, version],
+                        "INSERT OR REPLACE INTO namespaces (namespace, version, cursor_seq, scoped)
+                         VALUES (?1, ?2, 0, ?3)",
+                        rusqlite::params![namespace, version, scoped],
                     )?;
                     Ok(())
                 })();
@@ -772,6 +883,7 @@ impl Store {
     /// can ask for it directly. Idempotent: a settled vault reads the
     /// cursor, finds nothing waiting, and stops.
     pub fn advance_index(&self) -> Result<IndexPass> {
+        let _profile = crate::update_profile::span("advance_index", "");
         let epoch = self.change_epoch()?;
         let mut pass = IndexPass::default();
         let mut notes = Notes::default();
@@ -842,7 +954,11 @@ impl Store {
                         )?;
                     }
                     None => {
-                        db.execute("DELETE FROM facts", [])?;
+                        db.execute("DELETE FROM fact_values", [])?;
+                        db.execute("DELETE FROM fact_locations", [])?;
+                        db.execute("DELETE FROM index_predicates", [])?;
+                        db.execute("DELETE FROM fact_sources", [])?;
+                        db.execute("DELETE FROM source_maps", [])?;
                         db.execute("DELETE FROM lines", [])?;
                         db.execute(
                             "UPDATE namespaces SET cursor_seq = 0, last_error = NULL,
@@ -919,7 +1035,7 @@ impl Store {
         self.with_index(|db| {
             let mut stmt = db.prepare(
                 "SELECT namespace, rel_path, line, predicate, value FROM facts
-                  WHERE rel_path = ?1
+                  WHERE rel_path = ?1 AND item_key IS NULL
                   ORDER BY namespace, line IS NOT NULL, line, predicate, value",
             )?;
             let rows = stmt.query_map([rel_path], |row| {
@@ -1048,6 +1164,7 @@ impl Store {
             if page.changes.is_empty() {
                 return Ok(());
             }
+            let _profile = crate::update_profile::span("namespace_batch", namespace);
             let mut plan = self.plan(namespace, source, &page.changes, notes)?;
             plan.expected_cursor = seq;
             plan.expected_version = version;
@@ -1075,6 +1192,7 @@ impl Store {
         changes: &[VaultChange],
         notes: &mut Notes,
     ) -> Result<Plan> {
+        let _profile = crate::update_profile::span("plan", namespace);
         let mut steps: Vec<(i64, Step)> = Vec::new();
         let mut current: BTreeSet<String> = BTreeSet::new();
         let mut cursor = 0;
@@ -1217,26 +1335,43 @@ impl Store {
             });
         };
         let rows = match source {
-            Source::Text => Rows::Lines(text_rows(rel_path, &note.body)),
+            Source::Text => {
+                let _profile = crate::update_profile::span("derive_text", TEXT_NAMESPACE);
+                Rows::Lines(text_rows(rel_path, &note.body), note.snapshot().ok().map(|s|
+                    (s.version().into(), scoped::encode_layout(s.layout()))))
+            },
             Source::FrontMatter => Rows::Facts(
                 note.front_matter
                     .iter()
                     .map(|(key, value)| FactRow {
                         line: None,
+                        item_key: None,
+                        source_version: note.snapshot().ok().map(|s| s.version().into()),
                         predicate: front_matter_predicate(key),
                         value: value.clone(),
                         num: None,
                         typed: true,
                     })
-                    .collect(),
+                    .collect(), note.snapshot().ok().map(|s| s.version().into()),
             ),
             Source::Plugin(registration) => {
-                let facts = registration.indexer.index(rel_path, &note.body)?;
+                if registration.indexer.uses_scoped_input() {
+                    let snapshot = note.snapshot()?;
+                    let facts = {
+                        let _profile = crate::update_profile::span("plugin_call_including_adapter", &registration.namespace);
+                        registration.indexer.index_scoped(rel_path, snapshot)?
+                    };
+                    let _profile = crate::update_profile::span("validate_scoped_facts", &registration.namespace);
+                    return Ok(Step::Put { rel_path: rel_path.into(), rows: Rows::Facts(
+                        facts.into_iter().map(|fact| scoped::typed_scoped_row(&registration.kinds, snapshot, fact)).collect::<std::result::Result<_, _>>()?, Some(snapshot.version().into())
+                    ) });
+                }
+                let facts = registration.indexer.index_source(rel_path, &note.source, &note.body)?;
                 Rows::Facts(
                     facts
                         .into_iter()
                         .map(|fact| typed_row(&registration.kinds, fact))
-                        .collect(),
+                        .collect(), None,
                 )
             }
         };
@@ -1249,6 +1384,7 @@ impl Store {
     /// Write a planned batch and move the namespace's cursor, in one
     /// transaction. Nothing here reads a file or calls a plugin.
     fn commit_plan(&self, namespace: &str, plan: Plan, pass: &mut IndexPass) -> Result<bool> {
+        let _profile = crate::update_profile::span("commit_plan", namespace);
         self.with_index(|db| {
             db.execute_batch("BEGIN IMMEDIATE;")?;
             let current = db.query_row(
@@ -1285,8 +1421,18 @@ impl Store {
                                   WHERE namespace = ?1 AND rel_path = ?2",
                                 rusqlite::params![namespace, from, to],
                             )?;
+                            db.execute("UPDATE fact_sources SET rel_path=?3 WHERE namespace=?1 AND rel_path=?2", rusqlite::params![namespace, from, to])?;
                             pass.moved += 1;
                         }
+                    }
+                }
+                for (_, step) in &plan.steps {
+                    let paths: Vec<&str> = match step {
+                        Step::Forget { rel_path } | Step::Put { rel_path, .. } => vec![rel_path],
+                        Step::Rekey { from, to } => vec![from, to],
+                    };
+                    for path in paths {
+                        db.execute("DELETE FROM fact_locations WHERE rel_path=?1 AND NOT EXISTS (SELECT 1 FROM fact_values WHERE location_id=fact_locations.id)", [path])?;
                     }
                 }
                 set_cursor(db, namespace, plan.cursor.max(plan.expected_cursor))?;
@@ -1305,7 +1451,10 @@ impl Store {
                 Ok(())
             })();
             match done {
-                Ok(()) => db.execute_batch("COMMIT;")?,
+                Ok(()) => {
+                    let _profile = crate::update_profile::span("durable_commit", namespace);
+                    db.execute_batch("COMMIT;")?;
+                },
                 Err(e) => {
                     let _ = db.execute_batch("ROLLBACK;");
                     return Err(e);
@@ -1339,6 +1488,9 @@ impl Store {
         scope: QueryScope,
         limit: u32,
     ) -> Result<Vec<Anchor>> {
+        for constraint in constraints {
+            constraint.validate()?;
+        }
         if !constraints.iter().any(generates) {
             return Ok(Vec::new());
         }
@@ -1397,27 +1549,45 @@ fn set_cursor(db: &rusqlite::Connection, namespace: &str, seq: i64) -> Result<()
 fn forget_namespace(db: &rusqlite::Connection, namespace: &str) -> Result<()> {
     if namespace == TEXT_NAMESPACE {
         db.execute("DELETE FROM lines", [])?;
+        db.execute("DELETE FROM source_maps", [])?;
     } else {
-        db.execute("DELETE FROM facts WHERE namespace = ?1", [namespace])?;
+        db.execute("DELETE FROM fact_values WHERE predicate_id IN (SELECT id FROM index_predicates WHERE namespace=?1)", [namespace])?;
+        db.execute("DELETE FROM fact_sources WHERE namespace = ?1", [namespace])?;
+        db.execute("DELETE FROM index_predicates WHERE namespace = ?1", [namespace])?;
+        db.execute("DELETE FROM fact_locations WHERE NOT EXISTS (SELECT 1 FROM fact_values WHERE location_id=fact_locations.id)", [])?;
     }
     Ok(())
 }
 
 fn forget_path(db: &rusqlite::Connection, namespace: &str, rel_path: &str) -> Result<()> {
+    let _profile = crate::update_profile::span("forget_path", namespace);
     if namespace == TEXT_NAMESPACE {
-        db.execute("DELETE FROM lines WHERE rel_path = ?1", [rel_path])?;
+        {
+            let _profile = crate::update_profile::span("delete_text_rows", namespace);
+            db.execute("DELETE FROM lines WHERE rel_path = ?1", [rel_path])?;
+        }
+        {
+            let _profile = crate::update_profile::span("delete_source_map_targets", namespace);
+            db.execute("DELETE FROM source_maps WHERE rel_path = ?1", [rel_path])?;
+        }
     } else {
         db.execute(
-            "DELETE FROM facts WHERE namespace = ?1 AND rel_path = ?2",
+            "DELETE FROM fact_values WHERE location_id IN (SELECT id FROM fact_locations WHERE rel_path=?2) AND predicate_id IN (SELECT id FROM index_predicates WHERE namespace=?1)",
             rusqlite::params![namespace, rel_path],
         )?;
+        db.execute("DELETE FROM fact_sources WHERE namespace=?1 AND rel_path=?2", rusqlite::params![namespace, rel_path])?;
     }
     Ok(())
 }
 
 fn put(db: &rusqlite::Connection, namespace: &str, rel_path: &str, rows: &Rows) -> Result<()> {
     match rows {
-        Rows::Lines(lines) => {
+        Rows::Lines(lines, source) => {
+            if let Some((version, layout)) = source {
+                let _profile = crate::update_profile::span("insert_source_map_targets", namespace);
+                db.execute("INSERT INTO source_maps (rel_path, source_version, layout) VALUES (?1, ?2, ?3)", rusqlite::params![rel_path, version, layout])?;
+            }
+            let _profile = crate::update_profile::span("insert_text_rows_fts", namespace);
             let mut stmt = db.prepare_cached(
                 "INSERT INTO lines (rel_path, line, field, text, folded) VALUES (?1, ?2, ?3, ?4, ?5)",
             )?;
@@ -1431,22 +1601,9 @@ fn put(db: &rusqlite::Connection, namespace: &str, rel_path: &str, rows: &Rows) 
                 ])?;
             }
         }
-        Rows::Facts(facts) => {
-            let mut stmt = db.prepare_cached(
-                "INSERT INTO facts (rel_path, line, namespace, predicate, value, num, typed)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            )?;
-            for row in facts {
-                stmt.execute(rusqlite::params![
-                    rel_path,
-                    row.line,
-                    namespace,
-                    row.predicate,
-                    row.value,
-                    row.num,
-                    row.typed as i64,
-                ])?;
-            }
+        Rows::Facts(facts, source_version) => {
+            let _profile = crate::update_profile::span("insert_facts_receipt_indexes", namespace);
+            writer::put_facts(db, namespace, rel_path, facts, source_version.as_deref())?;
         }
     }
     Ok(())
@@ -1513,6 +1670,8 @@ fn typed_row(kinds: &BTreeMap<String, ValueKind>, fact: Fact) -> FactRow {
     };
     FactRow {
         line: fact.line.map(i64::from),
+        item_key: None,
+        source_version: None,
         predicate: fact.predicate,
         value,
         num,
@@ -1552,8 +1711,8 @@ fn prefix_end(prefix: &str) -> String {
 
 fn generates(constraint: &Constraint) -> bool {
     match constraint {
-        Constraint::Fact { op, .. } => op.generates(),
-        Constraint::Text { .. } => true,
+        Constraint::Fact { op, .. } | Constraint::FactAt { op, .. } => op.generates(),
+        Constraint::Text { .. } | Constraint::FactIn { .. } => true,
     }
 }
 
@@ -1574,6 +1733,7 @@ pub(crate) struct Piece {
     pub(crate) sql: String,
     pub(crate) params: Vec<Value>,
     pub(crate) generates: bool,
+    pub(crate) broadcast_root: bool,
 }
 
 /// The whole query as one statement.
@@ -1632,17 +1792,27 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
     // Every positive row, carrying the constraint it satisfies.
     let positive_rows = positive
         .iter()
-        .map(|index| format!("SELECT {index} AS tag, rel_path, line FROM c{index}"))
+        .map(|index| {
+            format!(
+                "SELECT {index} AS tag, rel_path, line, {} AS broadcast FROM c{index}",
+                u8::from(pieces[*index].broadcast_root)
+            )
+        })
         .collect::<Vec<_>>()
         .join(" UNION ALL ");
     // Every negative row. Which negative it came from does not matter:
     // not this and not that is not (this or that).
     let negative_rows = if negative.is_empty() {
-        "SELECT NULL AS rel_path, NULL AS line WHERE 0".to_string()
+        "SELECT NULL AS rel_path, NULL AS line, 0 AS broadcast WHERE 0".to_string()
     } else {
         negative
             .iter()
-            .map(|index| format!("SELECT rel_path, line FROM c{index}"))
+            .map(|index| {
+                format!(
+                    "SELECT rel_path, line, {} AS broadcast FROM c{index}",
+                    u8::from(pieces[*index].broadcast_root)
+                )
+            })
             .collect::<Vec<_>>()
             .join(" UNION ALL ")
     };
@@ -1657,11 +1827,12 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
              SELECT rel_path, line, tag FROM pos WHERE line IS NOT NULL \
              UNION ALL \
              SELECT a.rel_path, a.line, p.tag FROM anchors a \
-               JOIN pos p ON p.rel_path = a.rel_path AND p.line IS NULL), \
+               JOIN pos p ON p.rel_path = a.rel_path AND p.line IS NULL AND p.broadcast = 1), \
          hits AS MATERIALIZED (SELECT rel_path, line FROM matched \
                    GROUP BY rel_path, line HAVING COUNT(DISTINCT tag) = {wanted}), \
          denied_line AS MATERIALIZED (SELECT rel_path, line FROM neg WHERE line IS NOT NULL), \
-         denied_whole AS MATERIALIZED (SELECT DISTINCT rel_path FROM neg WHERE line IS NULL), \
+         denied_whole AS MATERIALIZED (SELECT DISTINCT rel_path FROM neg WHERE line IS NULL AND broadcast = 1), \
+         denied_root AS MATERIALIZED (SELECT DISTINCT rel_path FROM neg WHERE line IS NULL), \
          kept AS MATERIALIZED (SELECT rel_path, line FROM hits \
                    WHERE (rel_path, line) NOT IN (SELECT rel_path, line FROM denied_line) \
                      AND rel_path NOT IN (SELECT rel_path FROM denied_whole))"
@@ -1684,7 +1855,7 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
                  SELECT rel_path, NULL AS line FROM \
                  (SELECT rel_path FROM kept \
                    UNION SELECT rel_path FROM whole \
-                    WHERE rel_path NOT IN (SELECT rel_path FROM denied_whole)) \
+                    WHERE rel_path NOT IN (SELECT rel_path FROM denied_root)) \
                  ORDER BY rel_path LIMIT ?",
                 ctes.join(", ")
             )
@@ -1694,18 +1865,89 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
 }
 
 pub(crate) fn piece(constraint: &Constraint) -> Piece {
+    let mut part = document_piece(constraint);
+    if !matches!(constraint, Constraint::Text { .. }) {
+        part.sql = format!("SELECT rel_path, line FROM ({}) WHERE item_key IS NULL", part.sql);
+    }
+    part
+}
+
+pub(crate) fn scoped_piece(constraint: &Constraint) -> Piece {
+    scoped_piece_from(constraint, "facts")
+}
+
+/// A caller has already selected a source root. Bind each fact probe to its
+/// path index: choosing a broad predicate/value index here makes N selected
+/// roots scan the same N equal values, producing quadratic work.
+#[cfg(test)]
+pub(crate) fn scoped_piece_at_root(constraint: &Constraint) -> Piece {
+    scoped_piece_from(constraint, "(SELECT l.rel_path,l.line,l.item_key,l.source_version,p.namespace,p.predicate,f.predicate_id,f.value,f.num,f.typed FROM fact_locations l CROSS JOIN fact_values f INDEXED BY fact_values_location ON f.location_id=l.id CROSS JOIN index_predicates p ON p.id=f.predicate_id)")
+}
+
+fn scoped_piece_from(constraint: &Constraint, fact_table: &str) -> Piece {
     match constraint {
         Constraint::Fact {
             predicate,
             op,
             value,
-        } => fact_piece(predicate, *op, value),
+        } => fact_piece_from(predicate, *op, value, fact_table),
+        Constraint::FactAt {
+            predicate,
+            op,
+            value,
+            locality,
+        } => localize(fact_piece_from(predicate, *op, value, fact_table), *locality),
+        Constraint::FactIn {
+            predicate,
+            values,
+            locality,
+        } => {
+            let mut values = values.clone();
+            values.sort();
+            values.dedup();
+            localize(Piece {
+                sql: format!("SELECT rel_path, line, item_key, source_version, namespace FROM {fact_table} WHERE predicate_id IN (SELECT id FROM index_predicates WHERE predicate=?) AND value IN (SELECT value FROM json_each(?))"),
+                params: vec![Value::Text(predicate.clone()), Value::Text(serde_json::json!(values).to_string())],
+                generates: true,
+                broadcast_root: true,
+            }, *locality)
+        }
         Constraint::Text { target, query } => text_piece(*target, query),
     }
 }
 
-fn fact_piece(predicate: &str, op: ConstraintOp, value: &str) -> Piece {
+pub(crate) fn document_piece(constraint: &Constraint) -> Piece {
+    let mut part=scoped_piece(constraint);
+    if !matches!(constraint,Constraint::Text { .. }) {
+        part.sql=format!("SELECT f.* FROM ({}) f WHERE f.source_version IS NULL OR EXISTS (SELECT 1 FROM source_maps s WHERE s.rel_path=f.rel_path AND s.source_version=f.source_version)",part.sql);
+    }
+    part
+}
+
+fn localize(mut piece: Piece, locality: FactLocality) -> Piece {
+    match locality {
+        FactLocality::Exact => piece.broadcast_root = false,
+        FactLocality::DocumentRoot => piece.sql.push_str(" AND line IS NULL AND item_key IS NULL"),
+        FactLocality::Inherited => {}
+    }
+    piece
+}
+
+fn fact_piece_from(predicate: &str, op: ConstraintOp, value: &str, fact_table: &str) -> Piece {
+    let (condition, values) = fact_value_condition(op, value);
     let mut params = vec![Value::Text(predicate.to_string())];
+    params.extend(values);
+    Piece {
+        sql: format!("SELECT rel_path, line, item_key, source_version, namespace FROM {fact_table} WHERE predicate_id IN (SELECT id FROM index_predicates WHERE predicate=?){condition}"),
+        params,
+        generates: op.generates(),
+        broadcast_root: true,
+    }
+}
+
+/// Shared value semantics for wide and target-bound fact execution.
+pub(crate) fn fact_value_condition(op: ConstraintOp, value: &str) -> (String, Vec<Value>) {
+    let mut params = Vec::new();
     let condition = match op {
         ConstraintOp::Exists | ConstraintOp::NotExists => String::new(),
         ConstraintOp::Eq | ConstraintOp::Ne => {
@@ -1717,8 +1959,17 @@ fn fact_piece(predicate: &str, op: ConstraintOp, value: &str) -> Piece {
             " AND instr(gilune_fold(value), ?) > 0".to_string()
         }
         ConstraintOp::Prefix => {
-            params.push(Value::Text(crate::search_text::fold(value)));
-            " AND instr(gilune_fold(value), ?) = 1".to_string()
+            let folded = crate::search_text::fold(value);
+            let end = crate::search_text::prefix_end(&folded);
+            params.push(Value::Text(folded));
+            // The expression index stores the fold at write time. Both bounds
+            // use BINARY order; punctuation has no LIKE/GLOB wildcard meaning.
+            if let Some(end) = end {
+                params.push(Value::Text(end));
+                " AND gilune_fold(value) >= ? AND gilune_fold(value) < ?".to_string()
+            } else {
+                " AND gilune_fold(value) >= ?".to_string()
+            }
         }
         ConstraintOp::Lt | ConstraintOp::Le | ConstraintOp::Gt | ConstraintOp::Ge => {
             let symbol = match op {
@@ -1744,11 +1995,7 @@ fn fact_piece(predicate: &str, op: ConstraintOp, value: &str) -> Piece {
             }
         }
     };
-    Piece {
-        sql: format!("SELECT rel_path, line FROM facts WHERE predicate = ?{condition}"),
-        params,
-        generates: op.generates(),
-    }
+    (condition, params)
 }
 
 fn text_piece(target: TextTarget, query: &str) -> Piece {
@@ -1778,6 +2025,7 @@ fn text_piece(target: TextTarget, query: &str) -> Piece {
         sql: format!("SELECT l.rel_path, l.line FROM lines l WHERE {fields} AND {condition}"),
         params: vec![param],
         generates: true,
+        broadcast_root: true,
     }
 }
 
@@ -1789,3 +2037,6 @@ fn fts_phrase(query: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod prefix_tests;

@@ -7,6 +7,9 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.EditorDecoration
+import org.gilune.plugins.tasks.TaskHit
+
 import java.io.File
 
 /// One note in the flat list the Notes destination shows: where it is,

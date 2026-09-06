@@ -15,6 +15,9 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.TaskHit
+import org.gilune.plugins.tasks.tasksFilter
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -74,7 +77,7 @@ fun MobileFilterBlock(
     val today = rememberQueryDay()
     val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today) {
         if (open == null) FilterResult.Hint("Opening vault...")
-        else evaluateFilterBlock(open, state.vaultDir, block, types, today)
+        else evaluateFilterBlock(open, state.vaultDir, block, types, today, operators = searchOperatorsFor(plugins, today))
     }.value
     val result = computed.value ?: FilterResult.Hint(computed.error ?: "Searching...")
 

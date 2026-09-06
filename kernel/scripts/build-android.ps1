@@ -14,7 +14,7 @@
 
     app/composeApp/src/androidMain/jniLibs/<abi>/libgilune_ffi.so
     app/composeApp/src/androidMain/jniLibs/<abi>/libc++_shared.so
-    app/composeApp/src/androidMain/generated/uniffi/gilune_ffi/gilune_ffi.kt
+    app/kernelBindings/src/androidMain/generated/uniffi/gilune_ffi/gilune_ffi.kt
 
   Bindings are generated PER TARGET from that target's own binary: UniFFI
   embeds checksums that differ between the desktop DLL and the Android .so, so
@@ -93,7 +93,7 @@ $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $manifest = Join-Path $repo 'kernel\Cargo.toml'
 $jniRoot = Join-Path $repo 'app\composeApp\src\androidMain\jniLibs'
-$bindingsOut = Join-Path $repo 'app\composeApp\src\androidMain\generated'
+$bindingsOut = Join-Path $repo 'app\kernelBindings\src\androidMain\generated'
 
 # Prefer the configured SDK while retaining the standard Windows fallback.
 $sdkCandidate = if ($env:ANDROID_HOME) {

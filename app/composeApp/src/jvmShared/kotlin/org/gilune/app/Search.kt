@@ -3,74 +3,15 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Compiled
+import org.gilune.plugin.sdk.SearchOperator
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.SearchedNote
+
 import java.time.LocalDate
 import uniffi.gilune_ffi.Constraint
 import uniffi.gilune_ffi.ConstraintOp
 import uniffi.gilune_ffi.TextTarget
-
-/// A note as an operator sees it, with front matter already split off by
-/// `splitNote`, so `body` and `lines` are prose alone. `lines` is computed
-/// on first use: an operator that never reads them costs nothing.
-class SearchedNote(
-    val relPath: String,
-    val name: String,
-    val body: String,
-    val frontMatter: List<FrontMatterEntry>,
-) {
-    val lines: List<String> by lazy { body.lines() }
-
-    /// The same note with one of its lines for a body — **the narrowed-note
-    /// rule** (ADR 0015 § 4), and the whole of what a line-level type needs
-    /// from the evaluator. Name, path and front matter are the containing
-    /// note's, so terms about text bind to the line and terms about the
-    /// note bind to the note, with no new operator interface.
-    fun narrowedTo(line: String): SearchedNote = SearchedNote(relPath, name, line, frontMatter)
-}
-
-/// One keyword of the query language: `name` is what the user types before
-/// the colon, `matches` is its predicate over a note. Implementations must
-/// be pure and total — a query is run against every note in the vault, and
-/// an operator that throws would lose the whole result set.
-///
-/// The needle hooks are optional and affect presentation and rank only. An
-/// operator that looks for a literal substring says so, and a hit then
-/// highlights it (`bodyNeedle`) or counts as a name match (`nameNeedle`).
-/// The default — null — means the operator filters without highlighting.
-interface SearchOperator {
-    val name: String
-
-    fun matches(note: SearchedNote, argument: String): Boolean
-
-    fun bodyNeedle(argument: String): String? = null
-
-    fun nameNeedle(argument: String): String? = null
-
-    /// Compile the positive meaning to generic constraints. Exact means the
-    /// kernel can decide it completely; Terms is a conservative prefilter;
-    /// Scan delegates only the pure predicate over an indexed snapshot.
-    /// The host applies whole-term negation, so it calls this with false.
-    /// The parameter remains for source compatibility with existing plugins.
-    fun compile(argument: String, negated: Boolean): Compiled = Compiled.Scan
-}
-
-/// What a term says to the index.
-sealed interface Compiled {
-    /// Constraints that must all hold of an anchor. They are ANDed with
-    /// every other term's, which is what makes a query across two
-    /// plugins a join nobody wrote.
-    data class Terms(val constraints: List<Constraint>) : Compiled
-
-    /** Complete declarative meaning; no residual predicate is required. */
-    data class Exact(val constraints: List<Constraint>) : Compiled
-
-    /// A pure residual predicate over indexed content; no vault reads.
-    data object Scan : Compiled
-
-    /// The term can hold of nothing at all — a date operator handed a
-    /// value that is not a date. The query is answered with silence
-    /// rather than with a pass over the vault that would keep nothing.
-    data object Never : Compiled
-}
 
 /// The operators a query may use: the built-ins, plus whatever is
 /// registered beside them. **This is the plugin seam for the search
@@ -79,61 +20,31 @@ sealed interface Compiled {
 /// operators in its manifest and they arrive as `extra`; until then the
 /// shell registers them in code (ADR 0011).
 ///
-/// Keywords are matched case-insensitively, and a later registration
-/// replaces an earlier one of the same name, so a plugin may deliberately
-/// override a built-in.
+/// Keywords are matched case-insensitively. Duplicate names are rejected;
+/// registration order must never silently change a filter's meaning.
 class SearchOperators(vararg extra: SearchOperator) {
     private val registered: List<SearchOperator> = extra.toList()
 
     private val byName: Map<String, SearchOperator> =
-        (BUILT_INS + registered).associateBy { it.name.lowercase() }
+        (BUILT_INS + registered).also { operators ->
+            val names = operators.map { it.name.lowercase(java.util.Locale.ROOT) }
+            require(names.all { it.isNotBlank() && it != "type" } && names.distinct().size == names.size) {
+                "Invalid or duplicate search operator registration"
+            }
+        }.associateBy { it.name.lowercase(java.util.Locale.ROOT) }
 
-    operator fun get(name: String): SearchOperator? = byName[name.lowercase()]
+    operator fun get(name: String): SearchOperator? = byName[name.lowercase(java.util.Locale.ROOT)]
 
     val names: Set<String> get() = byName.keys
 
-    /// The same set with the active type's keywords layered on top
-    /// (ADR 0015 § 4). **Operators arrive through a type**, so `due:` is a
-    /// keyword under `task` and prose under `note`, and switching a plugin
-    /// off cannot leave a keyword behind meaning something nobody can
-    /// answer. `today` is passed because a relative word resolves at
-    /// evaluation, not at registration.
+    /// Combine independent cross-domain contributions with the selected
+    /// type's own operators. Neither contributor receives the other plugin.
+    /// `today` resolves relative words when the query is evaluated.
     fun scopedTo(type: SearchType, today: LocalDate): SearchOperators {
         val scoped = type.operators(today)
         return if (scoped.isEmpty()) this else SearchOperators(*(registered + scoped).toTypedArray())
     }
 }
-
-/// One line a line-level type offers the evaluator. `number` is
-/// body-relative and 1-based, exactly as [MatchedLine.number] is, so a hit
-/// addresses the buffer the same way whichever type produced it.
-data class CandidateLine(val number: Int, val text: String)
-
-/// What a `type:` names — what a hit **is** (ADR 0015 § 4). [extract] is
-/// which of the two kinds this is:
-///
-/// - **note-level** (no extractor): a hit is a note. `note` is the shell's
-///   own, and the search panel's semantics unchanged.
-/// - **line-level** (an extractor): a hit is a line, and each candidate is
-///   judged by [SearchedNote.narrowedTo].
-///
-/// [operators] is a function of the day the query runs, because relative
-/// words resolve **at evaluation**: `due:today` is the query's meaning,
-/// not a date that rots.
-/// [constraints] is what the type itself asks of the index — for a
-/// line-level type, whatever makes a line one of its candidates. It is
-/// a conservative prefilter unless [indexed] is true. An indexed type
-/// declares its full membership with constraints and required namespaces;
-/// other types supply candidate line numbers over the indexed document.
-class SearchType(
-    val key: String,
-    val operators: (today: LocalDate) -> List<SearchOperator> = { emptyList() },
-    val extract: ((SearchedNote) -> List<CandidateLine>)? = null,
-    val constraints: List<Constraint> = emptyList(),
-    val indexed: Boolean = false,
-    val caseSensitiveFilter: String = "",
-    val indexNamespaces: List<String> = emptyList(),
-)
 
 /// The shell's own type, always registered beside whatever a plugin
 /// contributes, exactly as [SearchOperators] always carries its built-ins.
@@ -235,7 +146,18 @@ internal fun parseQuery(
     val typed = splitType(tokenise(query))
     val type = resolveType(types, typed.typeKey) ?: return null
     val scoped = operators.scopedTo(type, today)
-    val terms = typed.tokens.mapNotNull { parseTerm(it, scoped) }
+    val terms = buildList {
+        var index = 0
+        while (index < typed.tokens.size) {
+            val membership = parseMembership(typed.tokens, index, scoped)
+            if (membership != null) {
+                add(membership.parsed)
+                index += membership.consumed
+            } else {
+                parseTerm(typed.tokens[index++], scoped)?.let { add(it) }
+            }
+        }
+    }
     // An empty query finds nothing rather than everything — unchanged, and
     // § 4's empty block for the same reason. A query that names its type
     // and nothing else is **not** empty: it has asked a well-formed
@@ -266,7 +188,8 @@ private class TypedQuery(val typeKey: String?, val tokens: List<String>)
 private fun splitType(tokens: List<String>): TypedQuery {
     var key: String? = null
     val rest = mutableListOf<String>()
-    for (token in tokens) {
+    for ((index, token) in tokens.withIndex()) {
+        if (membershipMarker(tokens, index) != 0) { rest.add(token); continue }
         val colon = if (token.startsWith('[')) -1 else token.indexOf(':')
         val argument = if (colon > 0) unquote(token.drop(colon + 1)) else ""
         if (argument.isNotEmpty() && token.take(colon).equals(TYPE_KEYWORD, ignoreCase = true)) {
@@ -279,6 +202,7 @@ private fun splitType(tokens: List<String>): TypedQuery {
 }
 
 internal sealed interface Term {
+    val indexNamespaces: List<String> get() = emptyList()
     fun matches(note: SearchedNote): Boolean
     val bodyNeedle: String? get() = null
     val nameNeedle: String? get() = null
@@ -303,6 +227,7 @@ private class TextTerm(private val text: String) : Term {
 }
 
 private class OperatorTerm(private val operator: SearchOperator, private val argument: String) : Term {
+    override val indexNamespaces get() = operator.indexNamespaces
     override fun matches(note: SearchedNote) = operator.matches(note, argument)
     override val bodyNeedle get() = operator.bodyNeedle(argument)
     override val nameNeedle get() = operator.nameNeedle(argument)
@@ -352,7 +277,10 @@ private fun tokenise(query: String): List<String> {
     val token = StringBuilder()
     var quoted = false
     var brackets = 0
+    var escaped = false
     for (char in query) {
+        if (escaped) { token.append(char); escaped = false; continue }
+        if (quoted && char == '\\') { token.append(char); escaped = true; continue }
         when {
             char == '"' -> {
                 quoted = !quoted
@@ -392,6 +320,9 @@ private fun parseTerm(raw: String, operators: SearchOperators): ParsedTerm? {
         if (colon > 0) {
             val operator = operators[token.take(colon)]
             val argument = unquote(token.drop(colon + 1))
+            if (operator == null && !token.startsWith('"') && '.' in token.take(colon)) {
+                throw InvalidSearchQuery("Field '${token.take(colon)}' is unavailable.")
+            }
             if (operator != null && argument.isNotEmpty()) {
                 return ParsedTerm(OperatorTerm(operator, argument), negated)
             }

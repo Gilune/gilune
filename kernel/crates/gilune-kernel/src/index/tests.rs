@@ -105,7 +105,7 @@ fn a_stale_maintenance_plan_cannot_replace_a_newer_handles_rows_or_cursor() {
             expected,
             Step::Put {
                 rel_path: "race.md".into(),
-                rows: Rows::Lines(text_rows("race.md", "old value")),
+                rows: Rows::Lines(text_rows("race.md", "old value"), None),
             },
         )],
     };

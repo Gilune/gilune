@@ -1,0 +1,57 @@
+   Compiling gilune-kernel v0.1.0 (D:\CuttingCode\SneddoBuilds\gilune\kernel\crates\gilune-kernel)
+    Finished `release` profile [optimized] target(s) in 16.57s
+     Running unittests src\lib.rs (kernel\target\release\deps\gilune_kernel-ce86377558dc2b4c.exe)
+
+running 1 test
+test index::lookup::tests::profile::profile_lookup_fifty_thousand_matches ... Preparing 50000 indexed roots; setup excluded from query timings
+Fixture ready
+PROFILE matches=50000 page_size=1 total_median=727.7315ms
+  SQL composition/parameters: 34.6µs
+  SQLite execute/result rows: 627.3328ms
+  SQLite prepare: 387µs
+  generation/cursor/feed tip: 77µs
+  index access/transaction begin: 1.3µs
+  namespace/source freshness SQL: 100.0137ms
+  request validation/canonicalisation/fingerprint: 13.7µs
+  result/cursor assembly/transaction end: 29.1µs
+  selected-root fact hydration: 49.5µs
+PROFILE matches=50000 page_size=30 total_median=721.3159ms
+  SQL composition/parameters: 44.6µs
+  SQLite execute/result rows: 622.3515ms
+  SQLite prepare: 392.5µs
+  generation/cursor/feed tip: 76.8µs
+  index access/transaction begin: 1.4µs
+  namespace/source freshness SQL: 99.3598ms
+  request validation/canonicalisation/fingerprint: 12.7µs
+  result/cursor assembly/transaction end: 25.8µs
+  selected-root fact hydration: 165.9µs
+PROFILE matches=50000 page_size=500 total_median=729.0735ms
+  SQL composition/parameters: 34.5µs
+  SQLite execute/result rows: 626.5573ms
+  SQLite prepare: 405.4µs
+  generation/cursor/feed tip: 75.7µs
+  index access/transaction begin: 1.6µs
+  namespace/source freshness SQL: 99.6718ms
+  request validation/canonicalisation/fingerprint: 12.8µs
+  result/cursor assembly/transaction end: 28.3µs
+  selected-root fact hydration: 2.1009ms
+PROFILE matches=1 page_size=1 total_median=100.6853ms
+  SQL composition/parameters: 34.3µs
+  SQLite execute/result rows: 136.8µs
+  SQLite prepare: 350.4µs
+  generation/cursor/feed tip: 50.9µs
+  index access/transaction begin: 1µs
+  namespace/source freshness SQL: 100.0854ms
+  request validation/canonicalisation/fingerprint: 9.8µs
+  result/cursor assembly/transaction end: 13.4µs
+  selected-root fact hydration: 8.4µs
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 282 filtered out; finished in 26.09s
+
+     Running tests\operation_vectors.rs (kernel\target\release\deps\operation_vectors-5605a5349a760b74.exe)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

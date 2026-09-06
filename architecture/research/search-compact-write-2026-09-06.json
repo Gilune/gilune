@@ -1,0 +1,65 @@
+{
+  "fact_indexes": 4,
+  "facts": 63505,
+  "limits": "Full compact fact and target replacement only, from pre-extracted data; includes source-map write, foreign keys, four fact indexes, generation and WAL FULL commit. Excludes source reading/reconciliation, parsing/plugins, FFI, fact validation, text/FTS and producer receipts. No production maintenance API or complete-edit latency claim.",
+  "samples": [
+    {
+      "commit_ms": 67.8511,
+      "delete_ms": 208.9838,
+      "facts_indexes_ms": 309.9647,
+      "sample": 0,
+      "targets_map_ms": 35.467999999999996,
+      "total_ms": 622.2824999999999
+    },
+    {
+      "commit_ms": 63.437599999999996,
+      "delete_ms": 203.02200000000002,
+      "facts_indexes_ms": 306.5691,
+      "sample": 1,
+      "targets_map_ms": 35.406600000000005,
+      "total_ms": 608.4705
+    },
+    {
+      "commit_ms": 61.2168,
+      "delete_ms": 203.7725,
+      "facts_indexes_ms": 305.0974,
+      "sample": 2,
+      "targets_map_ms": 35.313900000000004,
+      "total_ms": 605.4312
+    },
+    {
+      "commit_ms": 64.8203,
+      "delete_ms": 208.7718,
+      "facts_indexes_ms": 313.1574,
+      "sample": 3,
+      "targets_map_ms": 35.2414,
+      "total_ms": 622.0160999999999
+    },
+    {
+      "commit_ms": 62.171499999999995,
+      "delete_ms": 208.0662,
+      "facts_indexes_ms": 313.8442,
+      "sample": 4,
+      "targets_map_ms": 36.4483,
+      "total_ms": 620.5584
+    },
+    {
+      "commit_ms": 73.8993,
+      "delete_ms": 203.5325,
+      "facts_indexes_ms": 395.2192,
+      "sample": 5,
+      "targets_map_ms": 36.2219,
+      "total_ms": 708.8986000000001
+    },
+    {
+      "commit_ms": 64.2097,
+      "delete_ms": 226.3129,
+      "facts_indexes_ms": 353.2475,
+      "sample": 6,
+      "targets_map_ms": 37.5372,
+      "total_ms": 681.3376
+    }
+  ],
+  "targets": 20503,
+  "tasks": 10000
+}

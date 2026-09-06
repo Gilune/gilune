@@ -1,0 +1,86 @@
+{
+  "note": "Three complete real-plugin edit/restore trials per size, isolated from builds and other SQLite workloads. Earlier schema-8 medians are separate runs, not paired causal controls.",
+  "sizes": {
+    "100": {
+      "samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 75.0064,
+          "settled_advance_ms": 0.2227,
+          "tasks_callback_ms": 0.5831,
+          "people_callback_ms": 0.8432
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 79.6567,
+          "settled_advance_ms": 0.174,
+          "tasks_callback_ms": 0.6932,
+          "people_callback_ms": 0.4891
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 60.8742,
+          "settled_advance_ms": 0.2311,
+          "tasks_callback_ms": 0.5151,
+          "people_callback_ms": 0.6201
+        }
+      ],
+      "median_reconcile_ms": 75.0064,
+      "previous_schema8_median_ms": 67.67
+    },
+    "1000": {
+      "samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 311.7099,
+          "settled_advance_ms": 0.1977,
+          "tasks_callback_ms": 3.1377,
+          "people_callback_ms": 1.5745
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 305.8705,
+          "settled_advance_ms": 0.182,
+          "tasks_callback_ms": 3.1124,
+          "people_callback_ms": 1.5615
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 304.3351,
+          "settled_advance_ms": 0.1612,
+          "tasks_callback_ms": 3.0086,
+          "people_callback_ms": 1.5038
+        }
+      ],
+      "median_reconcile_ms": 305.8705,
+      "previous_schema8_median_ms": 288.607
+    },
+    "10000": {
+      "samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 2965.736,
+          "settled_advance_ms": 0.3051,
+          "tasks_callback_ms": 33.7807,
+          "people_callback_ms": 17.1237
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 4043.9182,
+          "settled_advance_ms": 0.3051,
+          "tasks_callback_ms": 39.4234,
+          "people_callback_ms": 16.1859
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 3096.7631,
+          "settled_advance_ms": 0.208,
+          "tasks_callback_ms": 41.832,
+          "people_callback_ms": 15.1772
+        }
+      ],
+      "median_reconcile_ms": 3096.7631,
+      "previous_schema8_median_ms": 2724.314
+    }
+  }
+}

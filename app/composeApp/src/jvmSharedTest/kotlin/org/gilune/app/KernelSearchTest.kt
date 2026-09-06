@@ -1,5 +1,10 @@
 package org.gilune.app
 
+import org.gilune.plugin.sdk.CandidateLine
+import org.gilune.plugin.sdk.SearchOperator
+import org.gilune.plugin.sdk.SearchType
+import org.gilune.plugin.sdk.SearchedNote
+
 import java.io.File
 import java.time.LocalDate
 import kotlin.test.Test
@@ -90,6 +95,28 @@ class KernelSearchTest {
         }
         assertFailsWith<GiluneException> {
             compileSearch("broken:x", operators = SearchOperators(broken))!!.page(vault.gilune)
+        }
+    }
+
+    @Test
+    fun independentTaskPagesExposePendingCountsAndRejectOldGenerations() {
+        val vault = IndexedVault()
+        vault.write("tasks.md", (0 until 7).joinToString("\n") { "- [ ] Work $it" })
+        val compiled = compileSearch("type:task", types = types, pageSize = 2u, groupByNote = false)!!
+        compiled.prepare(vault.gilune).use { reader ->
+            val first = reader.page(null)
+            kotlin.test.assertNull(first.totalHits)
+            assertEquals(2, first.hits.size)
+            assertTrue(first.indexComplete)
+            val count = reader.count(first.generation)
+            assertEquals(first.generation, count.generation)
+            assertEquals(7uL, count.totalHits)
+            assertEquals(2, reader.page(first.nextCursor).hits.size)
+            vault.write("tasks.md", "- [ ] Changed")
+            assertFailsWith<GiluneException.SearchCursorExpired> { reader.count(first.generation) }
+            assertFailsWith<GiluneException.SearchCursorExpired> { reader.page(first.nextCursor) }
+            reader.cancel()
+            assertFailsWith<GiluneException.Invalid> { reader.page(null) }
         }
     }
 }

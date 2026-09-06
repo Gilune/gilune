@@ -78,61 +78,17 @@ class FrontMatterTest {
     }
 
     @Test
-    fun systemLinesSurviveByteIdenticalWhenCustomKeysChange() {
-        val raw = "---\ngilune-id:   0193f0c2-9a\ntags: kitchen\ngilune-type: org.memory.note\n---\n"
-        val edited = applyFrontMatterEdits(raw, listOf("tags" to "kitchen, wiring", "status" to "open"))
-        assertTrue(
-            edited.contains("\ngilune-id:   0193f0c2-9a\n"),
-            "a system line is contract; its bytes are carried over, spacing included",
-        )
-        assertTrue(edited.contains("\ngilune-type: org.memory.note\n"))
-        assertEquals(
-            listOf("gilune-id", "gilune-type", "tags", "status"),
-            splitNote(edited).frontMatter.map { it.key },
-            "system keys keep their order and custom keys follow them",
-        )
+    fun bomStaysInThePreludeWhenANoteHasNoHeader() {
+        val text = "\uFEFFbody\r\n"
+        roundTrips(text)
+        assertEquals("\uFEFF" to "body\r\n", splitNoteRaw(text))
     }
 
     @Test
-    fun customKeysRenderInTheOrderGiven() {
-        val edited = applyFrontMatterEdits(
-            "---\ngilune-id: abc\n---\n",
-            listOf("zeta" to "1", "alpha" to "2"),
-        )
-        assertEquals("---\ngilune-id: abc\nzeta: 1\nalpha: 2\n---\n", edited)
-    }
-
-    @Test
-    fun offeringSystemKeysBackDoesNotDuplicateThem() {
-        val raw = "---\ngilune-id: abc\n---\n"
-        val edited = applyFrontMatterEdits(raw, listOf("gilune-id" to "tampered", "tags" to "kitchen"))
-        assertEquals("---\ngilune-id: abc\ntags: kitchen\n---\n", edited)
-    }
-
-    @Test
-    fun removingEveryCustomKeyFromANoteWithoutSystemKeysRemovesTheBlock() {
-        val raw = "---\ntags: kitchen\n---\n"
-        assertEquals("", applyFrontMatterEdits(raw, emptyList()))
-        assertEquals("# Kitchen\n", assembleNote(applyFrontMatterEdits(raw, emptyList()), "# Kitchen\n"))
-    }
-
-    @Test
-    fun removingEveryCustomKeyKeepsABlockThatStillHasSystemKeys() {
-        val raw = "---\ngilune-id: abc\ntags: kitchen\n---\n"
-        assertEquals("---\ngilune-id: abc\n---\n", applyFrontMatterEdits(raw, emptyList()))
-    }
-
-    @Test
-    fun addingAPropertyToANoteWithoutFrontMatterCreatesAWellFormedBlock() {
-        val body = "# Kitchen\n"
-        val header = applyFrontMatterEdits("", listOf("tags" to "kitchen"))
-        val note = assembleNote(header, body)
-        assertEquals("---\ntags: kitchen\n---\n# Kitchen\n", note)
-        assertEquals(header to body, splitNoteRaw(note))
-    }
-
-    @Test
-    fun aBlankKeyIsNotWrittenAsAProperty() {
-        assertEquals("", applyFrontMatterEdits("", listOf("  " to "orphan")))
+    fun bomAndCrLfArePartOfThePreservedHeader() {
+        val text = "\uFEFF---\r\nname: Alice\r\n---\r\nbody\r\n"
+        roundTrips(text)
+        assertEquals("body\r\n", splitNoteRaw(text).second)
+        assertTrue(splitNoteRaw(text).first.startsWith("\uFEFF"))
     }
 }

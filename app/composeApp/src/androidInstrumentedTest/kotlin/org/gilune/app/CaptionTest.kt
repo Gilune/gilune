@@ -13,6 +13,9 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.tasksDeclaration
+
 import uniffi.gilune_ffi.PluginContribution
 import uniffi.gilune_ffi.PluginInfo
 import kotlin.test.Test

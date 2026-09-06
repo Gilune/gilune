@@ -6,6 +6,23 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.tasks.DATE_VALUES_PROVIDER
+import org.gilune.plugins.tasks.TASKS_DECORATIONS_CONTRIBUTION
+import org.gilune.plugins.tasks.TASKS_DUE_FIELD
+import org.gilune.plugins.tasks.TASKS_NAVIGATION_CONTRIBUTION
+import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
+import org.gilune.plugins.tasks.TASKS_SUGGEST_CONTRIBUTION
+import org.gilune.plugins.tasks.TASK_FIELDS_SLOT
+import org.gilune.plugins.tasks.stampDone
+import org.gilune.plugins.tasks.stripDone
+import org.gilune.plugins.tasks.tasksDeclaration
+import org.gilune.plugins.tasks.tasksDecorations
+import org.gilune.plugins.tasks.tasksFilter
+import org.gilune.plugins.tasks.tasksPanelEnabled
+import org.gilune.plugins.tasks.tasksSettingsDocument
+
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import uniffi.gilune_ffi.PluginContribution

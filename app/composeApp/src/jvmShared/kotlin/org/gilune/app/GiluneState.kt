@@ -5,6 +5,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.tasks.tasksFilter
+
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.CoroutineScope
@@ -472,13 +474,14 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 // decides whether this machine is the device the vault
                 // believes it belongs to. Nothing binds a socket here.
                 val notice = enrol(g)
+                val initializationProblems = BUNDLED_PLUGIN_EXTENSIONS.initializePages(g)
                 g.project()
                 gilune.value = g
                 refresh()
                 // A re-enrolment notice outranks the routine line: it is
                 // the one thing about opening this vault that the user
                 // has to be told.
-                message.value = notice ?: "vault: ${g.vaultPath()}"
+                message.value = notice ?: initializationProblems.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: "vault: ${g.vaultPath()}"
                 onOpened(g)
                 // Last, and on a thread of its own: the vault is open and
                 // usable before this begins.
@@ -671,8 +674,9 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         scope.launch(Dispatchers.IO) {
             try {
                 act(g)
+                val initializationProblems = BUNDLED_PLUGIN_EXTENSIONS.initializePages(g)
                 refresh()
-                message.value = describe
+                message.value = initializationProblems.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: describe
             } catch (e: Throwable) {
                 message.value = "$describe failed: ${e.message}"
             }

@@ -9,14 +9,14 @@
 
 package org.gilune.app
 
+import org.gilune.plugin.sdk.FrontMatterEntry
+
 import org.intellij.markdown.MarkdownElementTypes
 import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.getTextInNode
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
 import org.intellij.markdown.parser.MarkdownParser
-
-data class FrontMatterEntry(val key: String, val value: String)
 
 /// A note split into its machine header and its prose. `body` starts at
 /// the first line after the closing fence, so offsets into it are stable.
