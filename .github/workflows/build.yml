@@ -351,6 +351,12 @@ jobs:
           rm -rf -- "${RUNNER_TEMP:?}/gilune-android"
           # Bindgen has finished too; all later steps use staged outputs.
           cargo clean --manifest-path kernel/Cargo.toml
+          # This disposable Android runner does not use the preinstalled
+          # .NET SDK. Leave room for both the system image and guest data.
+          if [ -d /usr/share/dotnet ]; then
+            du -sh /usr/share/dotnet
+            sudo rm -rf -- /usr/share/dotnet
+          fi
           df -h "$RUNNER_TEMP"
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
@@ -367,6 +373,8 @@ jobs:
           arch: x86_64
           profile: pixel_6
           ram-size: 3072M
+          disk-size: 3G
+          emulator-boot-timeout: 300
           disable-animations: true
           working-directory: app
           script: ./gradlew :composeApp:connectedDebugAndroidTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}

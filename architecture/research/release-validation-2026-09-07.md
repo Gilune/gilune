@@ -109,3 +109,13 @@ trees and cleans the host Cargo build after staging libraries and bindings,
 before installing the emulator image. Later steps consume only staged outputs.
 The required runtime gate remains enabled; its successful hosted execution is
 required before this release-validation milestone is complete.
+
+The next hosted attempt, [run 34101699315](https://github.com/Gilune/gilune/actions/runs/34101699315),
+passed both desktop jobs (593 Linux native tests, plus Windows native and both
+desktop suites) but exposed the second part of emulator capacity: after image
+installation, 3.5 GB remained while its default data partition required 7.4 GB
+of host space. The emulator exited before tests and its runner waited for boot.
+CI now explicitly sizes guest data at 3 GB, removes the unused preinstalled
+.NET SDK from that disposable Android runner, and bounds boot waiting at five
+minutes. The local API 36 run uses about 1.7 GB of guest data during the suite;
+the smaller partition retains headroom while avoiding the default's allocation.
