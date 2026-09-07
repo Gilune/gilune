@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -83,6 +83,7 @@ impl Store {
             indexers: std::cell::RefCell::default(),
         };
         capture::recover(&store)?;
+        store.recover_refactorings()?;
         // A data merge, not a schema step: it depends on object state that
         // recovery may still have been completing (ADR 0013), and it is
         // flagged rather than versioned so it can be re-run to converge.
@@ -684,6 +685,19 @@ const MIGRATIONS: &[&str] = &[
       WHERE NOT EXISTS (SELECT 1 FROM vault_changes c WHERE c.rel_path = imports.rel_path);
      UPDATE meta SET value = (SELECT IFNULL(MAX(seq), 0) FROM vault_changes)
       WHERE key = 'vault_change_seq';",
+    // Reviewed document edits and their execution evidence are local durable
+    // state. They are never derived index data or executable sync operations.
+    "CREATE TABLE refactoring_plans (
+         plan_id TEXT PRIMARY KEY, provider TEXT NOT NULL, provider_version TEXT NOT NULL,
+         configuration TEXT NOT NULL, label TEXT NOT NULL, state TEXT NOT NULL,
+         review_token TEXT, created_ms INTEGER NOT NULL);
+     CREATE TABLE refactoring_entries (
+         entry_id TEXT PRIMARY KEY, plan_id TEXT NOT NULL REFERENCES refactoring_plans(plan_id),
+         rel_path TEXT NOT NULL, expected_version TEXT NOT NULL, before_text TEXT NOT NULL,
+         after_text TEXT NOT NULL, published_text TEXT, object_id TEXT, expected_revision TEXT,
+         payload TEXT, state TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+         UNIQUE(plan_id, rel_path));
+     CREATE INDEX refactoring_entries_plan ON refactoring_entries(plan_id, entry_id);",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {

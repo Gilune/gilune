@@ -140,10 +140,10 @@ fun ReadScreen(
         }
     }
 
-    fun toggle(line: Int) {
+    fun toggle(line: Int) = synchronized(DocumentEditGate.monitor) {
         val onDisk = runCatching { file.readText() }.getOrNull()
         val updated = toggleTaskAtLine(
-            current = onDisk ?: return,
+            current = onDisk ?: return@synchronized,
             hashAtRead = hashAtRead,
             hashOnDisk = onDisk.let(::contentHash),
             bodyLine = line,
@@ -155,7 +155,7 @@ fun ReadScreen(
             // reload so what is on screen is what is on disk.
             reloadTick++
             state.message.value = "the note changed on disk; reloaded"
-            return
+            return@synchronized
         }
         runCatching { file.writeText(updated) }
             .onSuccess {
@@ -174,6 +174,8 @@ fun ReadScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Text(noteTitle(relPath), style = MaterialTheme.typography.titleLarge)
+        DocumentLinksButton(state, content, onOpenNote)
+        RefactoringButton(state, relPath, content)
         if (content.isEmpty()) {
             Text(
                 "This note is empty.",

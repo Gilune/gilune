@@ -507,6 +507,7 @@ fun GiluneMobileApp(vaultDir: String, launchRequest: State<LaunchRequest?> = rem
                         is Screen.Edit -> EditScreen(
                             state = state,
                             relPath = open.relPath,
+                            onOpenNote = { screen = Screen.Read(it) },
                             // A rename moves the file under the open
                             // buffer, so the screen follows it rather
                             // than holding a path nothing answers.

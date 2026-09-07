@@ -4,8 +4,9 @@
 
 use crate::{probe, revisions, store::Store, KernelError, Result};
 pub use gilune_document::{
-    byte_to_utf16, casefold_nfc, source_properties, utf16_to_byte, BodyLine, ByteSpan, DocumentError, Location, MarkdownItem,
-    MarkdownLayout, PropertyChange, PropertyField, PropertySheet, SourceHeader, TextEdit, TextSnapshot,
+    byte_to_utf16, casefold_nfc, source_properties, utf16_to_byte, BodyLine, ByteSpan,
+    DocumentError, Location, MarkdownItem, MarkdownLayout, PropertyChange, PropertyField,
+    PropertySheet, SourceHeader, TextEdit, TextSnapshot,
 };
 use rusqlite::OptionalExtension;
 use std::path::{Component, Path, PathBuf};
@@ -52,7 +53,12 @@ impl Store {
         let (rel_path, path) = document_path(self.vault(), rel_path)?;
         // One consistent database view. This does not lock an external editor;
         // a later apply must check the source again and preserve recovery bytes.
-        let transaction = self.conn().unchecked_transaction()?;
+        let owned_transaction = if self.conn().is_autocommit() {
+            Some(self.conn().unchecked_transaction()?)
+        } else {
+            None
+        };
+        let transaction = self.conn();
         let recorded: Option<(String, String, String, bool)> = transaction
             .query_row(
                 "SELECT p.object_id, p.revision_id, p.content_sha256, o.deleted
@@ -76,7 +82,7 @@ impl Store {
         let mut pending = false;
         let mut state = DocumentState::Unmanaged;
         if let Some((id, recorded_revision, digest, deleted)) = &recorded {
-            heads = revisions::heads(&transaction, id)?;
+            heads = revisions::heads(transaction, id)?;
             pending = transaction.query_row(
                 "SELECT EXISTS(SELECT 1 FROM proposals WHERE object_id = ?1 AND state = 'open')",
                 [id],
@@ -124,7 +130,9 @@ impl Store {
             &heads,
             pending,
         ))?);
-        transaction.commit()?;
+        if let Some(transaction) = owned_transaction {
+            transaction.commit()?;
+        }
         Ok(DocumentSnapshot {
             source: DocumentSource {
                 document_key,
@@ -175,7 +183,7 @@ fn invalid(error: DocumentError) -> KernelError {
     }
 }
 
-fn document_path(vault: &Path, supplied: &str) -> Result<(String, PathBuf)> {
+pub(crate) fn document_path(vault: &Path, supplied: &str) -> Result<(String, PathBuf)> {
     let invalid = || KernelError::DocumentInvalid {
         detail: "expected a Markdown path inside the vault, outside .gilune".into(),
     };

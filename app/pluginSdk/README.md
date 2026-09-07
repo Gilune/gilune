@@ -55,9 +55,12 @@ may declare its own lookup provider for the standard Find field. The independent
 Labels fixture exercises this without People or Tasks. See the
 [lookup contract](../../contracts/lookup/README.md).
 
-Editor lookup triggers, richer domain/detail views, a component runtime and
-journalled refactoring remain
-in the [People/refactoring delivery plan](../../architecture/plans/people-and-document-refactoring.md).
+Editor completions and standard reference/query views use the
+[editor contract](../../contracts/editor-contributions/README.md). Independent
+refactoring providers propose edits through the
+[shared refactoring contract](../../contracts/refactoring/README.md); the host
+and kernel retain write/recovery authority. A general component runtime remains
+deferred. See the [delivery evidence](../../architecture/plans/people-and-document-refactoring.md#39-people-editor-and-shared-refactoring-delivery-2026-09-07).
 
 
 Typed-page consumers use `PageCreationService`, bound by the host to their plugin,

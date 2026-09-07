@@ -21,6 +21,9 @@ class BundledPluginExtensions(
     val pageCollections: List<PageCollectionRegistration> = emptyList(),
     val scopedIndexer: ScopedIndexerRegistration? = null,
     val indexedLookups: List<IndexedLookupRegistration> = emptyList(),
+    val editorCompletions: List<EditorCompletionRegistration> = emptyList(),
+    val documentViews: List<DocumentViewRegistration> = emptyList(),
+    val refactorings: List<RefactoringRegistration> = emptyList(),
 )
 
 class SearchTypeRegistration(

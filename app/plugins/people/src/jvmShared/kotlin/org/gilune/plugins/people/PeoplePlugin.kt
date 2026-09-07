@@ -81,6 +81,9 @@ fun peopleExtensions(): BundledPluginExtensions {
                 }),
             PluginContribution(Slots.SEARCH_TYPES, "person", "People"),
             PluginContribution(Slots.INDEXED_LOOKUP, PEOPLE_LOOKUP, "Find people"),
+            PluginContribution(Slots.EDITOR_COMPLETIONS, PEOPLE_EDITOR, "People and connections"),
+            PluginContribution(Slots.DOCUMENT_VIEWS, PEOPLE_VIEW, "People links"),
+            PluginContribution(Slots.DOCUMENT_REFACTORINGS, PEOPLE_REFACTORING, "Rename people and connections"),
             PluginContribution(Slots.SEARCH_TYPES, "person-connection", "People connections"),
         ) + operators.map { PluginContribution(Slots.SEARCH_OPERATORS, it.contributionId, it.name) } + collections.flatMap { c -> listOf(
             PluginContribution(PAGE_COLLECTIONS_SLOT, c.id, c.title),
@@ -88,6 +91,9 @@ fun peopleExtensions(): BundledPluginExtensions {
         ) })
     return BundledPluginExtensions(declaration,
         indexedLookups = listOf(peopleLookupRegistration()),
+        editorCompletions = listOf(peopleEditorRegistration()),
+        documentViews = listOf(peopleViewRegistration()),
+        refactorings = listOf(peopleRefactoringRegistration()),
         searchOperators = operators,
         searchTypes = listOf(
             SearchTypeRegistration("person", "person") { personSearchType() },

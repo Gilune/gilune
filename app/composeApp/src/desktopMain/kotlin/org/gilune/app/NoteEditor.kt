@@ -157,7 +157,10 @@ private fun continued(before: TextFieldValue, typed: TextFieldValue): TextFieldV
     return TextFieldValue(written.text, TextRange(written.caret))
 }
 
-class EditorState {
+class EditorState : LiveDocumentBuffer {
+    private var bufferVault: String? = null
+    override val documentFile: String? get() = openRelPath?.let { path -> bufferVault?.let { File(it, path).absoluteFile.normalize().path } }
+    override val hasUnsavedText: Boolean get() = dirty
     var openRelPath by mutableStateOf<String?>(null)
 
     /// The editable buffer: the note's body only, with its selection, so
@@ -202,6 +205,8 @@ class EditorState {
     fun document(): String = assembleNote(frontMatterRaw, text.text)
 
     fun open(vaultDir: String, relPath: String) {
+        bufferVault = vaultDir
+        DocumentEditGate.register(this)
         val file = File(vaultDir, relPath)
         val content = if (file.exists()) file.readText() else ""
         val (header, body) = splitNoteRaw(content)
@@ -220,6 +225,7 @@ class EditorState {
     }
 
     fun close() {
+        bufferVault = null
         openRelPath = null
         text = TextFieldValue("")
         frontMatterRaw = ""
@@ -350,7 +356,7 @@ private fun OpenNote(
     // (ADR 0020 § 2.2). A save nobody hears about is an agenda that only
     // catches up on reload (owner report, 2026-08-31).
     fun write(force: Boolean = false) {
-        if (force) {
+        if (force) synchronized(DocumentEditGate.monitor) {
             val document = editor.document()
             file.writeText(document)
             editor.hashAtOpen = contentHash(document)
@@ -453,6 +459,8 @@ private fun OpenNote(
                     )
                 }
             }
+            DocumentLinksButton(state, editor.document(), openRow ?: {})
+            RefactoringButton(state, relPath, editor.document())
             SegmentedToggle(editor.reading) { editor.reading = it }
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
@@ -570,18 +578,6 @@ private fun OpenNote(
                     builtInDecorations()
                 }
             }
-            // Stage one's fields, gated the same way and additionally by
-            // the both-enabled rule inside `taskFields`. Empty means
-            // `openAt` can never fire, so a removed plugin takes the
-            // trigger with it rather than leaving a menu with no rows.
-            val fields = remember(plugins) {
-                if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_SUGGEST)) {
-                    taskFields(plugins)
-                } else {
-                    emptyList()
-                }
-            }
-
             // The raw-line exception follows a caret someone can see: an
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
@@ -659,7 +655,15 @@ private fun OpenNote(
             // The `/` menu belongs to this note and this mode; leaving
             // either drops it. Dismissal costs the buffer nothing, because
             // a session never wrote to it (ADR 0015 § 2).
-            var session by remember(relPath) { mutableStateOf<SuggestSession?>(null) }
+            val completions = rememberEditorCompletions(state, editor.text.text, editor.text.selection.start,
+                editor.text.selection.collapsed, documentKey = editor.openRelPath.orEmpty()) { start, end, replacement ->
+                editor.text = replaceRange(editor.text, start until end, replacement)
+                editor.dirty = true
+                bodyFocus.requestFocus()
+            }
+            Row {
+                TextButton(onClick = completions.toolbar) { Text("Insert…") }
+            }
             var fieldOrigin by remember { mutableStateOf(Offset.Zero) }
 
             /// The one question both the tap and the pointer ask of the
@@ -744,26 +748,7 @@ private fun OpenNote(
                             // nobody typed into would sit dirty for ever.
                             editor.dirty = editor.dirty || changed.text != editor.text.text
                             editor.text = changed
-                            // A live session re-reads the line; otherwise
-                            // the trigger is offered the caret. `openAt`
-                            // asks § 2's own questions — a `/` at a word
-                            // boundary on a task line — so all that is
-                            // owed here is what it cannot see: an empty
-                            // registry, a selection, and the fence rule.
-                            val live = session
-                            session = when {
-                                live != null -> live.updateAt(changed.text, changed.selection.start)
-                                fields.isEmpty() -> null
-                                !changed.selection.collapsed -> null
-                                caretIsInsideCodeFence(changed.text, changed.selection.start) -> null
-                                else -> SuggestSession.openAt(
-                                    changed.text,
-                                    changed.selection.start,
-                                    fields,
-                                    filter,
-                                    LocalDate.now(),
-                                )
-                            }
+
                         },
                         modifier = Modifier
                             .fillMaxWidth()
@@ -778,7 +763,7 @@ private fun OpenNote(
                             // over its caret.
                             .onFocusChanged {
                                 bodyFocused = it.isFocused
-                                if (!it.isFocused) session = null
+                                if (!it.isFocused) completions.dismiss()
                             }
                             // The menu's keys, and **only** while it is up:
                             // with no session every key is the field's, so
@@ -786,48 +771,17 @@ private fun OpenNote(
                             // popup is not focusable, so this is where its
                             // keyboard lives (§ 2).
                             .onPreviewKeyEvent { event ->
-                                val live = session
                                 when {
-                                    live == null -> false
+                                    !completions.visible -> false
                                     event.type != KeyEventType.KeyDown -> false
-                                    event.key == Key.DirectionDown -> {
-                                        session = live.moveDown()
-                                        true
-                                    }
-                                    event.key == Key.DirectionUp -> {
-                                        session = live.moveUp()
-                                        true
-                                    }
-                                    event.key == Key.Enter -> {
-                                        when (val outcome = live.accept()) {
-                                            // The session decided the exact
-                                            // range and the exact text; the
-                                            // caller is what writes.
-                                            is SuggestOutcome.Insert -> {
-                                                editor.text = replaceRange(
-                                                    editor.text,
-                                                    outcome.acceptance.replaceRange,
-                                                    outcome.acceptance.text,
-                                                )
-                                                editor.dirty = true
-                                                session = null
-                                            }
-                                            is SuggestOutcome.Open -> session = outcome.session
-                                            SuggestOutcome.Dismissed -> session = null
-                                        }
-                                        true
-                                    }
-                                    // Consumed, so dismissing the menu
-                                    // cannot also close settings behind it.
-                                    // The `/` and what follows stay: they
-                                    // are the user's own bytes.
-                                    event.key == Key.Escape -> {
-                                        session = null
-                                        true
-                                    }
+                                    event.key == Key.DirectionDown -> { completions.move(1); true }
+                                    event.key == Key.DirectionUp -> { completions.move(-1); true }
+                                    event.key == Key.Enter -> { completions.choose(completions.selected); true }
+                                    event.key == Key.Escape -> { completions.dismiss(); true }
                                     else -> false
                                 }
                             }
+
                             // A tap on a checkbox glyph toggles it and never
                             // moves the caret, so it is intercepted ahead of
                             // the field on the initial pass. A tap anywhere
@@ -891,28 +845,21 @@ private fun OpenNote(
                     }
                 }
 
-                // The caret-anchored menu (ADR 0015 § 2). The session's
-                // document offset travels through the transformation the
-                // field is actually showing, then through the layout,
-                // then into window coordinates — so the popup follows the
-                // caret rather than a node, and a checkbox glyph earlier
-                // on the line cannot put it in the wrong place.
-                val live = session
                 val placed = layout
-                if (live != null && placed != null) {
-                    val anchor = runCatching {
-                        val transformed = transformation
-                            .filter(AnnotatedString(editor.text.text))
-                            .offsetMapping
-                            .originalToTransformed(live.caret)
-                        placed
-                            .getCursorRect(transformed.coerceIn(0, placed.layoutInput.text.length))
-                            .translate(fieldOrigin)
-                    }.getOrNull()
-                    if (anchor != null) {
-                        SuggestPopup(live, anchor, onDismiss = { session = null })
+                if (placed != null && (completions.visible || completions.creation != null)) {
+                    val transformed = transformation.filter(AnnotatedString(editor.text.text)).offsetMapping
+                        .originalToTransformed(editor.text.selection.start)
+                    val anchor = placed.getCursorRect(transformed.coerceIn(0, placed.layoutInput.text.length)).translate(fieldOrigin)
+                    androidx.compose.ui.window.Popup(CaretPositionProvider(anchor),
+                        onDismissRequest = completions.dismiss,
+                        properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
+                        Box(Modifier.width(360.dp).testTag("suggest-popup")) {
+                            EditorCompletionMenu(completions, state, openRow ?: {})
+                        }
                     }
                 }
+
+
             }
         }
     }

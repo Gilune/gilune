@@ -1,9 +1,10 @@
 # Bundled search and suggestion extensions
 
-Status: Kotlin source contract v0.4, exercised by `PluginExtensionsTest` and
+Status: Kotlin source contract v0.5, exercised by `PluginExtensionsTest` and
 `SearchMembershipTest`.
 
-Version 0.4 adds an optional `ScopedIndexerRegistration.createLocal` factory for
+Version 0.5 adds owned editor completion, document view and refactoring
+registrations. Version 0.4 adds an optional `ScopedIndexerRegistration.createLocal` factory for
 the [local scoped-input contract](../indexer/README.md#optional-local-scoped-input).
 The original constructor and full-output factory remain available. The generic
 host selects the declared registration; it does not recognise plugin domains.
@@ -145,3 +146,11 @@ the SDK rejects combining it with either legacy callback form in one namespace.
 The kernel owns source-version evidence, persistence and paged location queries.
 `SourceView` and `SourceValue` are pure SDK helpers over that supplied data. People
 uses this contract without importing or naming another domain implementation.
+
+## Editor, view and refactoring extensions
+
+The [editor contribution contract](../editor-contributions/README.md) specifies
+immutable buffer contexts, bounded lookup, continuations, creation and standard
+reference/query views. The [refactoring contract](../refactoring/README.md) defines
+provider proposals and the separate host/kernel write authority. These use the
+same enabled-owner registration and build-enforced SDK boundary as search.

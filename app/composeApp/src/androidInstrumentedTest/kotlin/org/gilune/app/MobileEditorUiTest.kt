@@ -139,7 +139,7 @@ class MobileEditorUiTest {
         // The row's `/` types the trigger the shared machine listens for.
         rule.onNodeWithTag("slash").performClick()
         rule.waitUntil(WAIT) {
-            rule.onAllNodesWithTag("suggest").fetchSemanticsNodes().isNotEmpty()
+            rule.onAllNodesWithTag("editor-completions").fetchSemanticsNodes().isNotEmpty()
         }
         // Stage one is the registered field; tapping it is Enter.
         rule.onNodeWithText("Due date").performClick()
@@ -150,6 +150,7 @@ class MobileEditorUiTest {
         rule.waitForIdle()
 
         val today = LocalDate.now().toString()
+        rule.waitUntil(WAIT) { editor.body.text.toString().contains("due:$today") }
         assertTrue(
             editor.body.text.toString().contains("due:$today"),
             "the token was written: ${editor.body.text}",

@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>People — Gilune guide</title>
+<meta name="description" content="People, mentions, custom connections and reviewed Markdown renames in Gilune.">
+<link rel="icon" href="../assets/gilune-logo.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="brand" href="../index.html"><img src="../assets/gilune-logo.png" alt=""> Gilune</a>
+    <nav class="site-nav">
+      <a href="notes.html">Notes</a>
+      <a href="capture.html">Capture</a>
+      <a href="tasks.html">Tasks</a>
+      <a class="here" href="people.html">People</a>
+      <a href="search.html">Search</a>
+      <a href="workspace.html">Workspace</a>
+      <a href="sync.html">Sync</a>
+      <a href="plugins.html">Plugins</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <h1>People</h1>
+  <p class="lede">Keep a page for a person, mention them in a note, and name your own connections. Everything stays readable Markdown.</p>
+  <h2>Create a person</h2>
+  <p>Open <strong>People</strong> and choose <strong>New person</strong>. Give the page a name and a handle such as <code>alice.smith</code>. The default location is <code>People/alice.smith.md</code>. Write freely in the page and use Properties to edit its fields. Page defaults let you change the folder and initial template for future pages.</p>
+  <h2>Mention someone or add a connection</h2>
+  <p>Type <code>@</code> and part of a name or handle. Choose a result to insert a mention. If there is no page yet, <strong>Create person…</strong> opens a form and returns the new handle to your original note.</p>
+  <p>Type <code>/</code>, or use <strong>Insert…</strong>, to choose a connection and then a person. <code>/ow</code> narrows to Owner. Choosing both writes:</p>
+  <pre><code>owner: @alice.smith</code></pre>
+  <p>The default connections are <code>assign</code> and <code>owner</code>. Add your own through the connections collection. Their names carry the meaning you give them: Gilune imposes no responsibility hierarchy. A plain mention does not imply assignment.</p>
+  <p>You can type the same text in any editor. Code examples, escaped references and email addresses do not become connections. Missing or ambiguous handles remain explicit; the lookup will not silently choose the first page.</p>
+  <h2>Follow references and search</h2>
+  <p>Use <strong>Links</strong> on a note to open a referenced person. On a person page, Links provides All references, Mentions and Connections. Results open their source pages. A page connection does not automatically apply to each item inside it.</p>
+  <p>With the Tasks plugin enabled too, a filter can combine independently contributed fields:</p>
+  <pre><code>type:task is:open people.connection:assign IN ["alice.smith", "bob"]</code></pre>
+  <h2>Rename visible text</h2>
+  <p>Open the person or connection definition and choose <strong>Refactor…</strong>. Choose Rename handle or Rename connection, enter the new spelling, and prepare a preview. An existing connection destination requires the explicit merge option.</p>
+  <p>The preview includes defining pages and recognised references in ordinary Markdown, including files without Gilune metadata. Review the before/after text, choose a folder scope or exclude individual files, then apply. Save unsaved editor changes before preparing a preview. Applied changes remain listed if you cancel; resume finishes eligible entries. Conflicts require a fresh preview.</p>
+  <p>The defining page changes after the other reviewed files succeed. Excluding a file leaves that plan incomplete. A later edit using an old spelling stays as written: use <strong>Find remaining occurrences / new preview</strong> when you want to update it.</p>
+  <h2>Undo and recovery</h2>
+  <p>Refactor history provides <strong>Preview undo</strong>. Undo is another guarded edit, preserving subsequent work where the old change can still be identified safely. Ambiguous or overlapping changes need resolution.</p>
+  <p>Retained copies are available from each document preview, including after People is removed. Inspect a copy and choose Preview restoration to review it against the current file. An external editor keeping an old file handle can still write to a retained copy; Gilune preserves those bytes for explicit recovery.</p>
+  <p>Managed page changes sync as ordinary revisions. Unmanaged Markdown remains a plain file and uses its existing file-transfer mechanism. Bulk history and recovery copies stay on the originating device until its local application data is removed.</p>
+  <p>Disabling People keeps your text and pages. Re-enabling it restores lookup and indexed meaning from those documents. Birthdays and other dates can be ordinary page information; reminders are a future capability.</p>
+</main>
+<footer class="site-footer">
+  <div class="inner">
+    MIT licence · <a href="https://github.com/Gilune/gilune">Gilune on GitHub</a>
+  </div>
+</footer>
+
+</body>
+</html>

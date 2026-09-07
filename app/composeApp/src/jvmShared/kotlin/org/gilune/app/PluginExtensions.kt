@@ -34,9 +34,21 @@ class PluginExtensions(implementations: List<BundledPluginExtensions>) {
         unique(this.implementations.flatMap { it.searchTypes }.map { it.key.lowercase(Locale.ROOT) } + "note", "search type")
         unique(this.implementations.flatMap { it.suggestionProviders }.map { it.id }, "suggestion provider")
         unique(this.implementations.flatMap { it.indexedLookups }.map { it.id }, "indexed lookup provider")
+        unique(this.implementations.flatMap { it.editorCompletions }.map { it.id }, "editor completion")
+        unique(this.implementations.flatMap { it.documentViews }.map { it.id }, "document view")
+        unique(this.implementations.flatMap { it.refactorings }.map { it.id }, "refactoring provider")
         unique(this.implementations.flatMap { it.fieldSlots }, "field slot")
         unique(this.implementations.flatMap { it.searchOperators }.map { it.name.lowercase(Locale.ROOT) } + SearchOperators().names + "type", "search operator")
         this.implementations.forEach { implementation ->
+            implementation.refactorings.forEach {
+                require(implementation.declares(Slots.DOCUMENT_REFACTORINGS, it.id)) { "Undeclared refactoring provider: ${it.id}" }
+            }
+            implementation.documentViews.forEach {
+                require(implementation.declares(Slots.DOCUMENT_VIEWS, it.id)) { "Undeclared document view: ${it.id}" }
+            }
+            implementation.editorCompletions.forEach {
+                require(implementation.declares(Slots.EDITOR_COMPLETIONS, it.id)) { "Undeclared editor completion: ${it.id}" }
+            }
             implementation.indexedLookups.forEach {
                 require(implementation.declares(Slots.INDEXED_LOOKUP, it.id)) { "Undeclared indexed lookup: ${it.id}" }
             }
@@ -149,6 +161,22 @@ class PluginExtensions(implementations: List<BundledPluginExtensions>) {
                 ?: return@firstNotNullOfOrNull null
             BoundIndexedLookup(owner, registration)
         }
+
+    internal fun editorCompletions(plugins: List<PluginInfo>): List<BoundEditorCompletion> = implementations.flatMap { implementation ->
+        val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
+        implementation.editorCompletions.filter { owner.declares(Slots.EDITOR_COMPLETIONS, it.id) }
+            .map { BoundEditorCompletion(owner, it) }
+    }
+
+    internal fun documentViews(plugins: List<PluginInfo>): List<org.gilune.plugin.sdk.DocumentViewRegistration> = implementations.flatMap { implementation ->
+        val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
+        implementation.documentViews.filter { owner.declares(Slots.DOCUMENT_VIEWS, it.id) }
+    }
+
+    internal fun refactorings(plugins: List<PluginInfo>): List<BoundRefactoring> = implementations.flatMap { implementation ->
+        val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
+        implementation.refactorings.filter { owner.declares(Slots.DOCUMENT_REFACTORINGS, it.id) }.map { BoundRefactoring(owner, it) }
+    }
 
     /** Cross-domain filters are independent of all registered target types. */
     fun searchOperators(plugins: List<PluginInfo>, today: LocalDate): SearchOperators = SearchOperators(

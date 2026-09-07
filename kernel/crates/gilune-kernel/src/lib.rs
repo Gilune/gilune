@@ -9,6 +9,7 @@ pub mod capture;
 pub mod changes;
 pub mod crashpoints;
 pub mod documents;
+pub mod refactoring;
 pub mod external;
 pub mod fs;
 pub mod ids;

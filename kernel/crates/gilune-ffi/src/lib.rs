@@ -19,6 +19,8 @@ mod pages;
 pub use pages::*;
 mod documents;
 pub use documents::*;
+mod refactoring;
+pub use refactoring::*;
 mod scoped_index;
 pub use scoped_index::*;
 mod lookup;

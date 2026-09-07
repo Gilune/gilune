@@ -125,7 +125,7 @@ internal fun PageCollectionPanel(binding: BoundPageCollection, state: GiluneStat
 }
 
 @Composable
-private fun PageCreationForm(binding: BoundPageCollection, preset: PagePreset, state: GiluneState,
+internal fun PageCreationForm(binding: BoundPageCollection, preset: PagePreset, state: GiluneState,
     onOpen: (String) -> Unit, dismiss: () -> Unit) {
     val collection = binding.collection
     val kernel = state.gilune.value ?: return
@@ -142,14 +142,16 @@ private fun PageCreationForm(binding: BoundPageCollection, preset: PagePreset, s
     var saving by remember { mutableStateOf(false) }
     // Preserve the UUID and exact request if publication/refresh fails after commit.
     var pending by remember { mutableStateOf<CreatePageRequest?>(null) }
-    LaunchedEffect(kernel, binding, reload) {
+    LaunchedEffect(kernel, binding.pluginId, collection.pageTypeId, reload) {
         try {
             val definition = withContext(Dispatchers.IO) { BoundPageCreation(kernel, binding.pluginId).definitions().single { it.typeId == collection.pageTypeId } }
             check(definition.defaultsProblem == null) { definition.defaultsProblem!! }
-            folder = definition.defaultFolder; template = definition.template; version = definition.version
-            if (reload > 0) showTemplate = true
+            withContext(Dispatchers.Main.immediate) {
+                folder = definition.defaultFolder; template = definition.template; version = definition.version
+                if (reload > 0) showTemplate = true
+            }
         } catch (e: CancellationException) { throw e }
-        catch (e: Exception) { error = e.message ?: "Page creation is unavailable." }
+        catch (e: Exception) { withContext(Dispatchers.Main.immediate) { error = e.message ?: "Page creation is unavailable." } }
     }
     AlertDialog(onDismissRequest = { if (!saving) dismiss() }, title = { Text(preset.label) },
         text = {

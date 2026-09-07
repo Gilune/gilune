@@ -1,8 +1,9 @@
-# Source documents — v0.2
+# Source documents — v0.3
 
-Status: implemented snapshot, Markdown-location, property forms and edit-preparation foundation.
+Status: implemented snapshots, Markdown locations, property forms and validated edits.
 Namespace: `memory:documents`. The Rust crate and UniFFI surface are the executable
-contract for bundled consumers; a WIT package and journalled apply are deferred.
+contract for bundled consumers; a WIT package remains deferred. Journalled apply
+is specified by the [shared refactoring contract](../refactoring/README.md).
 
 This contract supplies exact source coordinates to independent plugins. It does
 not recognise tasks, people, connection keywords or any other domain vocabulary.
@@ -59,6 +60,14 @@ YAML and resolves values for protected identity checks, including aliases and
 merges. It never serialises the document. Unknown nested fields, spelling,
 comments, ordering and body bytes remain intact unless an edit names them.
 Plugins retain ownership of the meaning of their properties.
+
+`SourceTextSnapshot.metadata_entries` exposes conservative top-level property
+key, full-entry range and value range. These are generic source coordinates,
+available to every plugin. A consumer may replace a recognised structured
+property while retaining the surrounding source. YAML aliases/flow-root forms
+without a safe independent entry range must be reported as unsupported for that
+edit; resolved values do not authorise guessing source offsets. The normal
+protected-metadata validation still applies to every proposed range.
 
 Opening/closing delimiters and root keys prefixed `gilune-` (case-insensitive) are
 protected. Simple block-map entries have conservative source spans including

@@ -97,6 +97,7 @@ class TasksPluginTest {
         val slots = tasksDeclaration().contributions.associate { it.slot to it.id }
         assertEquals(
             mapOf(
+                Slots.EDITOR_COMPLETIONS to "$TASKS_PLUGIN.editor",
                 Slots.SUGGEST_VALUES to DATE_VALUES_PROVIDER,
                 TASK_FIELDS_SLOT to TASKS_DUE_FIELD,
                 Slots.EDITOR_DECORATIONS to TASKS_DECORATIONS_CONTRIBUTION,

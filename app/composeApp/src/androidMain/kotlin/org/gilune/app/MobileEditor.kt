@@ -382,7 +382,10 @@ private fun glyphTargets(source: String, decorations: List<EditorDecoration>): L
 /// did not change do not change (ADR 0012, mirroring the desktop's
 /// `EditorState`).
 @OptIn(ExperimentalFoundationApi::class)
-class MobileEditorState {
+class MobileEditorState : LiveDocumentBuffer {
+    override var documentFile: String? = null
+        private set
+    override val hasUnsavedText: Boolean get() = dirty
     val body = TextFieldState()
 
     var frontMatterRaw by mutableStateOf("")
@@ -408,6 +411,8 @@ class MobileEditorState {
     fun document(): String = assembleNote(frontMatterRaw, body.text.toString())
 
     fun open(vaultDir: String, relPath: String) {
+        documentFile = File(vaultDir, relPath).absoluteFile.normalize().path
+        DocumentEditGate.register(this)
         val file = File(vaultDir, relPath)
         val content = if (file.exists()) runCatching { file.readText() }.getOrDefault("") else ""
         val (header, text) = splitNoteRaw(content)
@@ -431,7 +436,7 @@ class MobileEditorState {
     /// The guarded write (ADR 0012). False means the file changed under
     /// the buffer: nothing is written, and the buffer stays dirty and
     /// stale until someone answers for it.
-    fun write(vaultDir: String, relPath: String, force: Boolean = false): Boolean {
+    fun write(vaultDir: String, relPath: String, force: Boolean = false): Boolean = synchronized(DocumentEditGate.monitor) {
         val file = File(vaultDir, relPath)
         val document = document()
         val onDisk = if (file.exists()) runCatching { contentHash(file.readBytes()) }.getOrNull() else null
@@ -444,7 +449,7 @@ class MobileEditorState {
         savedBody = body.text.toString()
         savedHeader = frontMatterRaw
         stale = false
-        return true
+        true
     }
 }
 
@@ -454,12 +459,13 @@ class MobileEditorState {
 /// when it is committed — the keyboard's Done key, or losing the focus;
 /// the body is the live-preview buffer; the accessory row and its panel
 /// are anchored beneath, outliving the keyboard.
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun EditScreen(
     state: GiluneState,
     relPath: String,
     onRenamed: (String) -> Unit = {},
+    onOpenNote: (String) -> Unit = {},
     modifier: Modifier = Modifier,
     // The buffer is a parameter for the reason the desktop's `NoteEditor`
     // takes an `EditorState`: a test that asks where the caret went after
@@ -482,9 +488,6 @@ fun EditScreen(
                 builtInDecorations()
             },
         )
-    }
-    val fields = remember(plugins) {
-        if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_SUGGEST)) taskFields(plugins) else emptyList()
     }
 
     fun save(force: Boolean = false) {
@@ -517,19 +520,12 @@ fun EditScreen(
         onDispose { if (editor.dirty) editor.write(state.vaultDir, relPath) }
     }
 
-    // The `/` menu belongs to this note; leaving it drops it. Dismissal
-    // costs the buffer nothing, because a session never wrote to it.
-    var session by remember(relPath) { mutableStateOf<SuggestSession?>(null) }
     var bodyFocused by remember(relPath) { mutableStateOf(false) }
     val selection = editor.body.selection
-    LaunchedEffect(bodyText, selection, fields) {
-        val live = session
-        session = when {
-            live != null -> live.updateAt(bodyText, selection.start)
-            fields.isEmpty() -> null
-            !selection.collapsed -> null
-            editorCaretInsideFence(bodyText, selection.start) -> null
-            else -> SuggestSession.openAt(bodyText, selection.start, fields, filter, LocalDate.now())
+    val completions = rememberEditorCompletions(state, bodyText, selection.start, selection.collapsed, documentKey = relPath) { start, end, replacement ->
+        editor.body.edit {
+            replace(start, end, replacement)
+            this.selection = TextRange(start + replacement.length)
         }
     }
 
@@ -549,8 +545,11 @@ fun EditScreen(
         // here rather than in the accessory row: `note.actions` already
         // gates it, and removing the transcription plugin takes the
         // button rather than leaving a dead key in a fixed row.
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        androidx.compose.foundation.layout.FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
             TextButton(onClick = { propertiesOpen = true }, modifier = Modifier.testTag("open-properties")) { Text("Properties") }
+            DocumentLinksButton(state, editor.document(), onOpenNote)
+            RefactoringButton(state, relPath, editor.document())
+            TextButton(onClick = completions.toolbar) { Text("Insert…") }
             NoteActions(state = state, editor = editor, transcription = transcription)
         }
         Column(
@@ -583,17 +582,18 @@ fun EditScreen(
                 decorations = decorations,
                 onFocusChanged = { focused ->
                     bodyFocused = focused
-                    if (!focused) session = null
+                    if (!focused) completions.dismiss()
                 },
                 onToggled = { save(force = false) },
                 caretLine = if (bodyFocused) caretLine(bodyText, selection.start) else null,
             )
         }
+        EditorCompletionMenu(completions, state, onOpenNote)
         EditorToolbar(
             state = editor.body,
             decorations = decorations,
-            session = session,
-            onSession = { session = it },
+            session = null,
+            onSession = {},
             onAction = { save() },
         )
     }

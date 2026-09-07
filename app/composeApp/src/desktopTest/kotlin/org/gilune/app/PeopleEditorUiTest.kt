@@ -1,0 +1,111 @@
+package org.gilune.app
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
+import kotlinx.coroutines.*
+import org.gilune.plugins.people.*
+import org.junit.Rule
+import java.nio.file.Files
+import kotlin.test.*
+import uniffi.gilune_ffi.*
+
+@OptIn(ExperimentalTestApi::class)
+class PeopleEditorUiTest {
+    @get:Rule val compose = createComposeRule()
+
+    private fun fixture(run: (GiluneState, Gilune) -> Unit) {
+        val root = Files.createTempDirectory("gilune-people-ui").toFile()
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        Gilune.open(root.path).use { kernel ->
+            BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(kernel)
+            BUNDLED_PLUGIN_EXTENSIONS.registerIndexers(kernel)
+            BUNDLED_PLUGIN_EXTENSIONS.initializePages(kernel)
+            root.resolve("alice.md").writeText("---\ngilune-type: $PERSON_TYPE\ngilune-id: alice\nname: Alice Smith\nhandle: alice.smith\n---\n")
+            kernel.reconcilePath("alice.md")
+            val state = GiluneState(root.path, scope)
+            state.gilune.value = kernel
+            state.plugins.addAll(kernel.plugins())
+            try { run(state, kernel) } finally { compose.setContent {}; scope.cancel() }
+        }
+    }
+
+    private fun waitText(text: String) = compose.waitUntil(10_000) {
+        compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+    }
+
+    @Test fun selectingAConnectionAndPersonInsertsOneCompleteMarkdownToken() = fixture { state, _ ->
+        var text by mutableStateOf(TextFieldValue("Publish /ow", TextRange(11)))
+        compose.setContent {
+            val ui = rememberEditorCompletions(state, text.text, text.selection.end, true) { start, end, value ->
+                text = TextFieldValue(text.text.replaceRange(start, end, value), TextRange(start + value.length))
+            }
+            Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
+        }
+        waitText("Owner")
+        compose.onNodeWithText("Owner").performClick()
+        waitText("Alice Smith")
+        assertEquals("Publish /ow", text.text)
+        compose.onNodeWithText("Alice Smith").performClick()
+        compose.waitUntil(10_000) { text.text == "Publish owner: @alice.smith " }
+    }
+
+    @Test fun creatingFromLookupReturnsTheNewHandleToTheOriginalEditor() = fixture { state, _ ->
+        var text by mutableStateOf(TextFieldValue("Hello @alicia", TextRange(13)))
+        compose.setContent {
+            val ui = rememberEditorCompletions(state, text.text, text.selection.end, true) { start, end, value ->
+                text = TextFieldValue(text.text.replaceRange(start, end, value), TextRange(start + value.length))
+            }
+            Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
+        }
+        waitText("Create person…")
+        compose.onNodeWithText("Create person…").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Create") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Create").performClick()
+        compose.waitUntil(10_000) { text.text == "Hello @alicia " }
+        assertTrue(java.io.File(state.vaultDir, "People/alicia.md").exists())
+    }
+
+    @Test fun linksNavigateResolvedReferencesAndExposeUnresolvedOnes() = fixture { state, _ ->
+        var opened: String? = null
+        compose.setContent { DocumentLinksButton(state, "Hello @alice.smith and @missing") { opened = it } }
+        compose.onNodeWithText("Links").performClick()
+        waitText("@missing")
+        compose.onNodeWithText("@missing").performClick()
+        waitText("Unresolved reference. The text remains searchable.")
+        compose.onNodeWithText("Back to links").performClick()
+        compose.onNodeWithText("@alice.smith").performClick()
+        waitText("alice.md")
+        compose.onNodeWithText("alice.md").performClick()
+        assertEquals("alice.md", opened)
+    }
+
+    @Test fun renamePreviewApplyAndUndoUseTheSharedDialog() = fixture { state, kernel ->
+        val root = java.io.File(state.vaultDir)
+        root.resolve("note.md").writeText("owner: @alice.smith")
+        compose.setContent { GiluneTheme(dark = false) { Box(Modifier.fillMaxSize()) { RefactoringButton(state, "alice.md", root.resolve("alice.md").readText()) } } }
+        compose.onNodeWithText("Refactor…").performClick()
+        waitText("Rename handle")
+        compose.onNodeWithText("Rename handle").performClick()
+        compose.onNodeWithText("New name").performTextInput("alicia")
+        compose.onNodeWithText("Prepare preview").performClick()
+        waitText("Apply reviewed changes / resume")
+        assertEquals("owner: @alice.smith", root.resolve("note.md").readText())
+        compose.onNodeWithText("Apply reviewed changes / resume").performClick()
+        waitText("Preview undo")
+        assertEquals("owner: @alicia", root.resolve("note.md").readText())
+        compose.onNodeWithText("Preview undo").performClick()
+        waitText("Apply reviewed changes / resume")
+        compose.onNodeWithText("Apply reviewed changes / resume").performClick()
+        compose.waitUntil(10_000) { root.resolve("note.md").readText() == "owner: @alice.smith" }
+        assertTrue(kernel.refactoringPlans().size >= 2)
+    }
+}

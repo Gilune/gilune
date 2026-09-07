@@ -58,6 +58,7 @@ fun tasksDeclaration(): PluginDeclaration =
         emits = emptyList(),
         capabilities = emptyList(),
         contributions = listOf(
+            PluginContribution(Slots.EDITOR_COMPLETIONS, "$TASKS_PLUGIN.editor", "Task fields"),
             PluginContribution(
                 slot = Slots.SUGGEST_VALUES,
                 id = DATE_VALUES_PROVIDER,
@@ -272,6 +273,27 @@ private const val TASK_PANEL_KEY = "panel"
  * The host supplies only this owner's settings and generic query execution. */
 fun tasksExtensions(): BundledPluginExtensions = BundledPluginExtensions(
     declaration = tasksDeclaration(),
+    editorCompletions = listOf(org.gilune.plugin.sdk.EditorCompletionRegistration("$TASKS_PLUGIN.editor", TASK_FIELDS_SLOT) { context, settings ->
+        val start = context.continuation?.start ?: org.gilune.plugin.sdk.editorTrigger(context, '/')
+            ?: if (context.toolbar) context.caret else null
+        val lineStart = context.text.lastIndexOf('\n', (context.caret - 1).coerceAtLeast(0)) + 1
+        val lineEnd = context.text.indexOf('\n', context.caret).let { if (it < 0) context.text.length else it }
+        val line = context.text.substring(lineStart, lineEnd)
+        if (start == null || start < lineStart || !isTaskLine(line, jsonString(settings, TASK_FILTER_KEY).orEmpty())) null
+        else {
+            val next = context.continuation
+            val fragmentStart = next?.fragmentStart ?: if (context.toolbar) context.caret else start + 1
+            if (fragmentStart > context.caret || (next != null && !context.text.regionMatches(start, next.triggerText, 0, next.triggerText.length))) null
+            else {
+                val fragment = context.text.substring(fragmentStart, context.caret)
+                val options = if (next == null) context.fields.filter { it.key.contains(fragment, true) || it.label.contains(fragment, true) }
+                    .map { org.gilune.plugin.sdk.EditorOption(it.label, it.key, continueWith = it.key) }
+                else context.fields.singleOrNull { it.key == next.data }?.values?.invoke(fragment, context.today).orEmpty()
+                    .map { org.gilune.plugin.sdk.EditorOption(it.display, it.detail, it.insert?.let { token -> "$token " }) }
+                org.gilune.plugin.sdk.EditorCompletion(start, context.caret, options)
+            }
+        }
+    }),
     searchTypes = listOf(SearchTypeRegistration("task", TASK_SEARCH_TYPE) { settings ->
         taskSearchType(jsonString(settings, TASK_FILTER_KEY).orEmpty())
     }),

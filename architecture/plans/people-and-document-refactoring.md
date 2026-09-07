@@ -1,7 +1,7 @@
 # People and shared document refactoring
 
 Date: 2026-09-05
-Status: **Implementation in progress. Query membership, source documents, typed-page creation, plugin boundaries, People pages/catalogue, scoped reference facts, item-aware application search and ranked directory lookup are implemented. Editor lookup triggers, reference navigation and refactoring remain open; no full milestone completion is claimed.**
+Status: **People and shared refactoring delivery complete. P0–P6 evidence and explicit release limits are recorded in section 39. Reminders, Projects and Decisions remain deferred.**
 
 The owner has agreed the product direction and requested this plan. Proposed
 defaults below make the work concrete; they are not shipped public contracts.
@@ -599,18 +599,18 @@ for one implementation effort; it does not require parallel agents.
 
 ### P0 — Freeze examples and resolve contract choices
 
-- [ ] Write executable golden fixtures for person pages, portable connection
+- [x] Write executable golden fixtures for person pages, portable connection
   definitions, insertion, root/item/line scope, explicit person creation,
   unmanaged Markdown inclusion, keyword rename and handle rename.
-- [ ] Set lexical/collision rules, qualified query syntax, target scope, offset
+- [x] Set lexical/collision rules, qualified query syntax, target scope, offset
   units, undo retention, unmanaged-file recovery/sync mechanics and partial-
   catalogue behaviour. Whole-item scope, optional explicit person creation and
   all-Markdown rename coverage are accepted requirements, not open choices.
   Validate the proposed fixed fact schema and query compilation tables above.
-- [ ] Freeze shared list-literal/membership syntax and limits, field-value
+- [x] Freeze shared list-literal/membership syntax and limits, field-value
   binding, negation and empty-set semantics using the Alice-or-Bob filter and
   an unrelated plugin fixture. Keep the keyword/handle encoding in People.
-- [ ] Validate paired fact encoding/normalisation and prototype source-versioned
+- [x] Validate paired fact encoding/normalisation and prototype source-versioned
   file edits, including an external-editor race. Record limits and recovery
   evidence in proposed ADRs.
 
@@ -623,21 +623,21 @@ unresolved product choices are explicit rather than hidden in implementation.
   FFI, with verified source identity, protected metadata and exact newline/Unicode
   handling. Include metadata-free files without mandatory adoption. See the
   [document contract](../../contracts/documents/README.md) and section 11.
-- [ ] Extend preparation into the scoped document-edit authority and journal
+- [x] Extend preparation into the scoped document-edit authority and journal
   integration required by P4; reading/preparing a snapshot is not an apply API.
 - [x] Implement scoped typed user-authored page creation and property-preserving
   projection/reconciliation; preserve unknown properties and content. See sections
   13–14 and the public page contract. Standard page forms/views and portable
-  override management remain P2 work.
+  overrides are covered by P2 and section 39.
 - [x] Establish build-enforced SDK/domain/host dependencies for the introduced
   capabilities and migrate the relevant existing Tasks registrations. Tasks and
   the unrelated query fixture now compile against the SDK without the host or
-  another domain module. See section 12; future page/view contracts remain open.
+  another domain module. See section 12 and the editor/view contracts in section 39.
 - [x] Add the generic set-valued fact constraint to kernel/FFI and the shared
   query compiler contract. Test equality equivalence, scope, negation, complete
   totals/pagination and compatibility without depending on the People module.
-  Root/body-line scope is proven; Markdown-item scope remains a P3 obligation.
-- [ ] Publish contracts with conformance tests, version changes and stored
+  Root, body-line and Markdown-item scope are proven by the scoped query suites.
+- [x] Publish contracts with conformance tests, version changes and stored
   migration fixtures. Generate native bindings from each target's own binary.
 
 Exit: a test consumer creates/edits a typed page using public APIs, preserves
@@ -657,11 +657,11 @@ external edits and round-trips unknown content without importing host internals.
   scalar access and root display facts, preserving legacy body-only callbacks.
 - [x] Test portable definition rebuilds, normalized identifier collisions,
   header-only pages, paging and disable/removal through the public SDK/FFI.
-- [ ] Implement the People schema, list/create/edit/detail contributions,
+- [x] Implement the People schema, list/create/edit/detail contributions,
   default folder/template and user overrides through standard page contracts.
 - [x] Implement editable connection definitions with `assign`/`owner` defaults,
   arbitrary additional keywords, retirement and explicit collision states.
-- [ ] Establish visible identity/handle resolution and export/rebuild fixtures.
+- [x] Establish visible identity/handle resolution and export/rebuild fixtures.
 
 Exit: People works without Tasks; pages and definitions remain readable and
 recoverable when People is disabled or removed. No reminder engine is required.
@@ -678,22 +678,22 @@ recoverable when People is disabled or removed. No reminder engine is required.
   adopts the shared SDK location contract and rebuilds its derived facts; no task
   documents or domain objects migrate. Test combined results without cross-plugin
   dependencies, including an unrelated item type without Tasks installed.
-- [ ] Add definition-cache invalidation with the reference-resolution/lookup work.
+- [x] Add definition-cache invalidation with the reference-resolution/lookup work.
 - [x] Implement complete indexed prefix lookup with declared alternatives/ranking,
   bounded provider callbacks and asynchronous context-keyed publication. Exercise
   the shared contract through directory lookup and an unrelated SDK consumer.
-- [ ] Generalise editor trigger/target contracts and connect lookup; migrate the
+- [x] Generalise editor trigger/target contracts and connect lookup; migrate the
   existing task/date insertion flow. Add `/`, toolbar and `@` People flows, including
   explicit create-from-lookup and version-checked text insertion.
 - [x] Add cross-domain query contributions. The shared composer combines independently
   registered type/operator constraints; People neither names nor calls another
   domain plugin. Verify that boundary with both Tasks and an unrelated fixture.
-- [ ] Add person navigation/backlinks and standard People-only query sections.
+- [x] Add person navigation/backlinks and standard People-only query sections.
 - [x] Wire typed lists and `IN`/`NOT IN` into the shared parser/filter UI on both
   platforms. People binds selected handles to connection-pair values through
   the public contract. Test the motivating filter without per-person searches
   or People-specific query-engine branches.
-- [ ] Exercise large person lists, incomplete indexes, ambiguity, cancellation,
+- [x] Exercise large person lists, incomplete indexes, ambiguity, cancellation,
   direct Markdown edits and plugin toggles on both UI platforms.
 
 Exit: current connections rebuild from text; item continuations match together,
@@ -703,24 +703,24 @@ People's compiled module has no dependency on another domain implementation.
 
 ### P4 — Shared refactoring service and independent consumer
 
-- [ ] Implement candidate paging, persisted plans/previews, scoped apply,
+- [x] Implement candidate paging, persisted plans/previews, scoped apply,
   journal recovery, progress, cancellation/resume and guarded undo.
-- [ ] Integrate version checks, open buffers, filesystem preservation, revision
+- [x] Integrate version checks, open buffers, filesystem preservation, revision
   history, sync operations, index refresh and removed-plugin recovery.
-- [ ] Build a small unrelated fixture (for example a plugin-defined text label
+- [x] Build a small unrelated fixture (for example a plugin-defined text label
   rename) against the public contract, with no People dependency or host switch.
-- [ ] Add fault injection across planning, replacement, commit, index refresh,
+- [x] Add fault injection across planning, replacement, commit, index refresh,
   restart and undo. Prove retries are idempotent and partial results accurate.
 
 Exit: shared refactoring is usable and recoverable independently of People.
 
 ### P5 — People rename and merge workflows
 
-- [ ] Wire keyword rename, keyword merge and person-handle rename to the shared
+- [x] Wire keyword rename, keyword merge and person-handle rename to the shared
   provider contract. Include defining documents and all discovered references.
-- [ ] Deliver counts/previews, readable diffs, scope selection, progress,
+- [x] Deliver counts/previews, readable diffs, scope selection, progress,
   conflict resolution, partial completion, resume and undo in both shells.
-- [ ] Keep catalogue state truthful throughout partial application. Surface
+- [x] Keep catalogue state truthful throughout partial application. Surface
   late old-spelling occurrences and allow a new reviewed follow-up plan.
 
 Exit: a user can rename a custom connection throughout a vault, inspect the
@@ -728,20 +728,20 @@ updated files elsewhere, restart Gilune and rebuild the same current meaning.
 
 ### P6 — Integration, compatibility and performance gate
 
-- [ ] Run focused kernel/FFI/plugin tests, the Rust workspace and clippy,
+- [x] Run focused kernel/FFI/plugin tests, the Rust workspace and clippy,
   desktop tests against the packaged release kernel, Android builds and
   available device tests. Record unrun device/platform checks explicitly.
-- [ ] Test two-device offline edits and out-of-order sync around renames;
+- [x] Test two-device offline edits and out-of-order sync around renames;
   exercise collisions, partial configuration delivery and preserved conflicts.
-- [ ] Measure small and large vaults, including over 10,000 matches, Unicode
+- [x] Measure small and large vaults, including over 10,000 matches, Unicode
   and large files. Record discovery/apply time, peak memory and lookup latency;
   establish regression budgets from measured baselines, not invented targets.
-- [ ] Exercise membership sets up to the public limit and result sets spanning
+- [x] Exercise membership sets up to the public limit and result sets spanning
   many pages, with overlapping matches, reordered values, missing namespaces
   and index updates between pages. Verify complete counts and no duplicates.
-- [ ] Verify export/rebuild, disable/uninstall/re-enable, migration fixtures,
+- [x] Verify export/rebuild, disable/uninstall/re-enable, migration fixtures,
   permission scope, byte preservation and an unrelated consumer.
-- [ ] Update ADRs and contracts with evidence; document public API limits and
+- [x] Update ADRs and contracts with evidence; document public API limits and
   user-facing rename/recovery behaviour. Mark only proven milestones complete.
 
 ## 8. Release acceptance scenarios
@@ -2185,3 +2185,91 @@ Whole-document geometry/fact comparison and adapter costs remain, measured
 separately in the report. A future phase can narrow those inputs further; this
 delivery does not pretend that replacing coordinate writes removes all work
 proportional to document size. Broader People/refactoring acceptance remains open.
+
+
+## 39. People editor and shared refactoring delivery (2026-09-07)
+
+P0–P5 now have implementations and executable acceptance coverage. The new SDK
+seams are editor completions, document views and refactoring providers. People
+owns its syntax, definitions, reference facts and rename/merge proposals; it does
+not import Tasks. Tasks independently contributes its existing date insertion.
+The unrelated label fixture uses the same refactoring API without either plugin.
+
+Delivered interactions: @ lookup; connection selection followed by person lookup;
+explicit create-and-insert; toolbar insertion; reference navigation and indexed
+backlink sections; keyword rename/merge and person-handle rename; paged immutable
+previews with folder/file selection; progress, cancellation/resume, new previews
+for conflicts/late occurrences; generic guarded undo and retained-copy restoration.
+The shared page form publishes asynchronously loaded defaults on the UI thread;
+Android testing caught and now covers its previously disabled Create state.
+
+The public contracts are [editor contributions](../../contracts/editor-contributions/README.md),
+[source documents v0.3](../../contracts/documents/README.md), and
+[refactoring](../../contracts/refactoring/README.md). [ADR 0026](../decisions/0026-shared-editor-and-document-refactoring.md)
+records ownership and tradeoffs. Durable schema 9 adds local journals; derived
+index schema 13 and the query executor do not change. Platform bindings are
+produced from the corresponding native binary.
+
+Explicit release limits:
+
+- Unmanaged Markdown participates without adoption. It has local journal/change
+  receipts, not managed revision-sync identity; existing file transfer remains
+  responsible for those files. Managed edits use ordinary sync operations.
+- Definition changes apply after all other reviewed documents. Partial/new
+  spellings remain visible and can be unresolved until completion. Exclusions
+  leave pending work; a new folder scope defines a new completion claim.
+- Journal/undo evidence and displaced inodes remain local until local application
+  data is removed. They consume full-document storage and are not automatically
+  expired. Retained bytes can be inspected and restored through a new preview.
+- An arbitrary editor ignoring locks cannot be serialised. A late write through
+  a displaced handle is preserved in its retained inode, not silently merged.
+  Guarded undo can conservatively conflict inside a large changed region.
+- Source navigation opens the page. Exact caret navigation and persistent inline
+  item identity are not promised. Clean editor reloads retain their existing
+  undo-stack reset behaviour; bulk undo is durable in the refactoring history.
+
+Final local release evidence:
+
+| Check | Result |
+| --- | --- |
+| Rust workspace | 605 passed, 24 ignored, zero failures |
+| Clippy, all workspace targets, warnings denied | Passed |
+| Full desktop suite against release kernel | 659 tests: 654 passed, 5 skipped, zero failures |
+| Final packaged-kernel desktop refactoring/UI regression run | 13 passed |
+| Full Android API 36 x86_64 emulator suite | XML reports 892 tests: 877 passed, 15 skipped, zero failures |
+| Final native refactoring suite | 11 passed; separate ignored child harness is executed by the five-window crash test |
+| Android native packaging | arm64-v8a and x86_64 rebuilt; bindings generated from the corresponding Android binary |
+| Dependency and whitespace checks | Passed; no People → Tasks or SDK → app dependency |
+
+Android skips concern optional voice models/real-engine probes and pre-existing
+IME spike cases. No physical-device, release-signing or app-store acceptance is
+claimed. The first broad run caught the obsolete mobile suggestion-widget test
+selector; it now exercises the shared menu and the final full run is green.
+
+The final 10,001-reference fixture changes all references plus the defining page,
+pages every resulting location, and confirms identical facts after rebuilding:
+
+| Platform/run | Discovery + preview | Apply | Sampled used-heap peak |
+| --- | --- | --- | --- |
+| Windows release kernel / final focused run | 5,071 ms | 2,829 ms | 138 MiB |
+| Android API 36 emulator / final full run | 6,532 ms | 2,935 ms | 47 MiB |
+
+Heap is sampled every 10 ms across fixture preparation/application and includes
+runtime/plugin allocations; native allocations and OS working-set peaks are not
+measured by this probe. These are loaded developer-machine samples, not latency
+SLAs. Earlier isolated Windows samples were 3,503/1,862 ms. The enduring regression
+checks are complete enumeration/rebuild, bounded entry pages and no source-file
+reads from lookup/query execution. Existing large-vault lookup, membership and
+mixed-plugin query baselines in sections 22–38 remain applicable because this
+delivery leaves their executor and index schema unchanged.
+
+Conformance also covers CRLF/BOM/Unicode preservation, ambiguous destinations
+introduced after preview, dirty buffers, user-selected exclusions, late old-name
+occurrences, merge/retirement, removed-provider undo, retained-copy restoration,
+ordinary offline/out-of-order sync, moved-parent recovery and prevention of an
+inverse property edit binding to matching body prose.
+
+Sections 7 and 39 are the current completion record. Earlier dated sections retain
+historical investigation checklists; their unchecked entries describe the state
+at that checkpoint. The [People user guide](../../docs/guide/people.html) explains
+creation, connections, queries, rename previews and recovery.

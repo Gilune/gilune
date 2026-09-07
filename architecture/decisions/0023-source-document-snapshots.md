@@ -1,7 +1,7 @@
 # ADR 0023: Exact source snapshots and shared Markdown locations
 
 Date: 2026-09-05
-Status: Snapshot and edit-preparation foundation implemented; apply/recovery deferred.
+Status: Implemented. Journalled apply/recovery extends this foundation in [ADR 0026](0026-shared-editor-and-document-refactoring.md).
 
 ## Problem
 

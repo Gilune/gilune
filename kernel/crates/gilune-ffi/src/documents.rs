@@ -86,6 +86,16 @@ pub struct SourceTextSnapshot {
     pub items: Vec<SourceItem>,
     pub text_ranges: Vec<SourceSpan>,
     pub metadata: Vec<SourceValueNode>,
+    pub metadata_entries: Vec<SourceMetadataEntry>,
+}
+
+/// Exact top-level property ranges. Consumers must still propose validated
+/// edits; a range alone does not establish writable ownership or safe YAML.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SourceMetadataEntry {
+    pub key: String,
+    pub range: SourceSpan,
+    pub value_range: SourceSpan,
 }
 
 impl From<&core::TextSnapshot> for SourceTextSnapshot {
@@ -122,7 +132,25 @@ impl From<&core::TextSnapshot> for SourceTextSnapshot {
                 })
                 .collect(),
             text_ranges: layout.text_ranges.iter().copied().map(Into::into).collect(),
-            metadata: value.metadata_nodes().into_iter().map(|n| SourceValueNode { kind: n.kind, value: n.value, children: n.children }).collect(),
+            metadata: value
+                .metadata_nodes()
+                .into_iter()
+                .map(|n| SourceValueNode {
+                    kind: n.kind,
+                    value: n.value,
+                    children: n.children,
+                })
+                .collect(),
+            metadata_entries: value
+                .header()
+                .into_iter()
+                .flat_map(|h| h.entries.iter())
+                .map(|e| SourceMetadataEntry {
+                    key: e.key.clone(),
+                    range: e.range.into(),
+                    value_range: e.value_range.into(),
+                })
+                .collect(),
         }
     }
 }

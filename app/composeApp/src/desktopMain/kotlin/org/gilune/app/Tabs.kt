@@ -525,7 +525,7 @@ private fun normalised(weights: List<Float>): List<Float> {
 /// and closing one save exactly as autosave does. False means the file
 /// changed under the buffer: nothing is written, and the buffer stays
 /// dirty and stale until someone answers for it (ADR 0012).
-fun flushEditor(vaultDir: String, editor: EditorState, onSaved: ((String) -> Unit)? = null): Boolean {
+fun flushEditor(vaultDir: String, editor: EditorState, onSaved: ((String) -> Unit)? = null): Boolean = synchronized(DocumentEditGate.monitor) {
     if (!editor.dirty) return true
     val relPath = editor.openRelPath ?: return true
     val file = File(vaultDir, relPath)
@@ -544,5 +544,5 @@ fun flushEditor(vaultDir: String, editor: EditorState, onSaved: ((String) -> Uni
     // reached the disk and nothing else in the app knew, which is the
     // same silence `write` was fixed for and one call further out.
     onSaved?.invoke(relPath)
-    return true
+    true
 }

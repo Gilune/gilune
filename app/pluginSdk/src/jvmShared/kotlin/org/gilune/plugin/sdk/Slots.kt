@@ -15,6 +15,9 @@ object Slots {
     const val SEARCH_OPERATORS = "search.operators"
     const val SUGGEST_VALUES = "suggest.values"
     const val INDEXED_LOOKUP = "lookup.indexed"
+    const val EDITOR_COMPLETIONS = "editor.completions"
+    const val DOCUMENT_VIEWS = "document.views"
+    const val DOCUMENT_REFACTORINGS = "document.refactorings"
 
     /// A contributed renderer for a fenced block. Unknown fences remain text.
     const val EDITOR_BLOCKS = "editor.blocks"

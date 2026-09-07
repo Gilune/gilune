@@ -34,3 +34,8 @@ Populated from vertical-slice milestone M4 (plugin contract) and M5
 
 - [`pages/`](pages/README.md) — scoped typed-page declarations and durable creation,
   with property preservation and recoverable first publication.
+
+- [`editor-contributions/`](editor-contributions/README.md) — immutable completion
+  contexts, bounded lookup, creation and standard document reference/query views.
+- [`refactoring/`](refactoring/README.md) — reviewed document plans, scoped apply,
+  durable recovery and guarded undo, independently of domain plugins.

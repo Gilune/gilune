@@ -75,6 +75,18 @@ pub(crate) fn preserved_page_source(payload: &serde_json::Value) -> Result<Strin
     Ok(format!("{}{body}", header.raw()))
 }
 
+pub(crate) fn with_current_projection_metadata(source: &str, current: &str) -> Result<String> {
+    let original = Header::parse(source).ok_or_else(|| KernelError::DocumentInvalid {
+        detail: "unsupported original metadata".into(),
+    })?;
+    let header = original
+        .render(current)
+        .ok_or_else(|| KernelError::DocumentInvalid {
+            detail: "metadata cannot be preserved for undo".into(),
+        })?;
+    Ok(format!("{header}{}", original.snapshot.body()))
+}
+
 /// Origin recorded for reconciled external document edits.
 pub(crate) const EXTERNAL_EDIT_ORIGIN: &str = "external-edit";
 
@@ -151,6 +163,92 @@ pub fn plugin_descriptor() -> crate::plugins::PluginDescriptor {
 }
 
 impl Store {
+    /// Prepare the ordinary projection for a reviewed edit, without committing.
+    /// The shared journal supplies the revision identity; domain payload fields
+    /// and original capture blobs survive exactly as with external editing.
+    pub(crate) fn refactoring_projection(
+        &self,
+        object_id: &str,
+        revision_id: &str,
+        source: &str,
+        origin: &str,
+    ) -> Result<(String, String)> {
+        let header = Header::parse(source).ok_or_else(|| KernelError::DocumentInvalid {
+            detail: "document metadata has no safe projection representation".into(),
+        })?;
+        let mut payload: serde_json::Value = serde_json::from_str(
+            &crate::revisions::head_payload(self.conn(), object_id)?
+                .ok_or_else(|| KernelError::DocumentChanged)?,
+        )?;
+        payload["text"] = header.snapshot.body().into();
+        payload[header::PAYLOAD_KEY] = header.payload();
+        let (type_id, type_schema, created_ms) = self.conn().query_row(
+            "SELECT type_id, type_schema, created_ms FROM objects WHERE object_id = ?1 AND deleted = 0",
+            [object_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
+        let head = Head {
+            object_id: object_id.into(),
+            type_id,
+            type_schema,
+            created_ms,
+            revision_id: revision_id.into(),
+            payload: payload.to_string(),
+            origin: origin.into(),
+            conflicted: false,
+        };
+        let rendered = self
+            .render(&head)?
+            .ok_or_else(|| KernelError::DocumentInvalid {
+                detail: "document metadata cannot be projected without loss".into(),
+            })?;
+        Ok((head.payload, rendered))
+    }
+
+    /// Called inside the journal's write transaction after publication. A retry
+    /// is resolved by the journal before this method, never by adding a new ID.
+    pub(crate) fn record_refactoring_revision(
+        &self,
+        object_id: &str,
+        revision_id: &str,
+        payload: &str,
+        origin: &str,
+        rel_path: &str,
+        disk: &str,
+    ) -> Result<()> {
+        add_revision(
+            self.conn(),
+            object_id,
+            revision_id,
+            payload,
+            origin,
+            ids::now_ms(),
+            Announce::Event,
+        )?;
+        let stat = stat_of(&self.vault().join(rel_path));
+        self.conn().execute(
+            "UPDATE projections SET revision_id = ?2, content_sha256 = ?3,
+            size = ?4, mtime_ns = ?5, recorded_ns = ?6 WHERE object_id = ?1",
+            rusqlite::params![
+                object_id,
+                revision_id,
+                ids::sha256_hex(disk.as_bytes()),
+                stat.map(|s| s.size).unwrap_or(-1),
+                stat.map(|s| s.mtime_ns).unwrap_or(0),
+                if stat.is_some() { now_ns() } else { 0 }
+            ],
+        )?;
+        changes::record(
+            self.conn(),
+            Change {
+                kind: ChangeKind::Modified,
+                rel_path,
+                previous_rel_path: None,
+                object_id: Some(object_id),
+                revision_id: Some(revision_id),
+                cause: ChangeCause::LocalEdit,
+            },
+        )?;
+        Ok(())
+    }
     /// Project every live object into the vault, attached captures aside
     /// (ADR 0013). Idempotent and safe to run at any time: a file that
     /// differs from what the kernel last wrote is held back for
