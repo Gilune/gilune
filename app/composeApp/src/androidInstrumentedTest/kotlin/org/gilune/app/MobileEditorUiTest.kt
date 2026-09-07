@@ -160,6 +160,28 @@ class MobileEditorUiTest {
     }
 
     @Test
+    fun peopleLookupRetainsFullSourceContextWhileEditingTheBody() {
+        val (state, note) = vaultWith("---\n@ali")
+        File(state.vaultDir, "alice.md").writeText("---\ngilune-id: alice\ngilune-type: org.memory.people/person\nname: Alice Smith\nhandle: alice.smith\n---\n")
+        state.openVault()
+        rule.waitUntil(WAIT) { state.plugins.any { it.pluginId == "org.memory.people" && it.state == "enabled" } }
+        val editor = MobileEditorState()
+        show(state, editor)
+        rule.waitUntil(WAIT) { editor.body.text.toString() == "---\n@ali" }
+        rule.runOnUiThread { editor.body.edit { selection = TextRange(8) } }
+        rule.waitUntil(WAIT) { rule.onAllNodes(hasText("Alice Smith")).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithText("Alice Smith").performClick()
+        rule.waitUntil(WAIT) { editor.body.text.toString() == "---\n@alice.smith " }
+        assertEquals(NOTE_HEAD + "---\n@alice.smith ", editor.document())
+        rule.waitForIdle()
+        try {
+            rule.waitUntil(WAIT) { note.readText() == editor.document() }
+        } catch (failure: Throwable) {
+            throw AssertionError("Autosave: disk=${note.readText()}, buffer=${editor.document()}, dirty=${editor.dirty}, stale=${editor.stale}, message=${state.message.value}", failure)
+        }
+    }
+
+    @Test
     fun typedTextReachesDiskAfterThePause() {
         val (state, note) = vaultWith("start\n")
         val editor = MobileEditorState()

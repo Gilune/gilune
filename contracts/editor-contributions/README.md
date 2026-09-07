@@ -5,7 +5,8 @@ and `DocumentViewRegistration` at `document.views`. The registry enforces unique
 IDs and enabled-owner declarations. People and Tasks independently compile
 against the SDK; no domain plugin imports another domain implementation.
 
-`EditorContext` carries immutable text, UTF-16 caret, document identity, current
+`EditorContext` carries immutable full-source text (including frontmatter), a
+full-source UTF-16 caret, document identity, current
 date, optional continuation and toolbar invocation. A registered field slot
 receives its resolved fields. The provider proposes an exact replacement range
 ending at the caret, static choices and/or a bounded indexed lookup. Provider
@@ -44,3 +45,7 @@ Tasks editor tests exercise the seam, including explicit create-and-insert,
 two-stage connections/dates, syntax exclusions, definition changes, removability,
 plain text preservation and reference navigation. The shared kernel lookup suite
 supplies complete paging, index-freshness and no-source-read coverage.
+
+Both live editors translate body selections into full-source offsets and translate
+accepted ranges back. They reject insertions outside the visible body. Metadata
+changes therefore invalidate pending completions even when body text is unchanged.

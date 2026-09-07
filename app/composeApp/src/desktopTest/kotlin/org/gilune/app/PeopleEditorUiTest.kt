@@ -42,6 +42,23 @@ class PeopleEditorUiTest {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
     }
 
+    @Test fun theRealEditorKeepsFrontmatterContextAndTranslatesBodyInsertion() = fixture { state, _ ->
+        val header = "---\ncustom: kept\n---\n"
+        java.io.File(state.vaultDir, "note.md").writeText(header + "---\n@ali")
+        val editor = EditorState()
+        editor.open(state.vaultDir, "note.md")
+        editor.reading = false
+        editor.text = TextFieldValue("---\n", TextRange(4))
+        compose.setContent { GiluneTheme(dark = false) { Box(Modifier.fillMaxSize()) {
+            NoteEditor(state, editor, Modifier.fillMaxSize())
+        } } }
+        compose.onNodeWithTag("note-body").performTextInput("@ali")
+        waitText("Alice Smith")
+        compose.onNodeWithText("Alice Smith").performClick()
+        compose.waitUntil(10_000) { editor.text.text == "---\n@alice.smith " }
+        assertEquals(header + "---\n@alice.smith ", editor.document())
+    }
+
     @Test fun selectingAConnectionAndPersonInsertsOneCompleteMarkdownToken() = fixture { state, _ ->
         var text by mutableStateOf(TextFieldValue("Publish /ow", TextRange(11)))
         compose.setContent {

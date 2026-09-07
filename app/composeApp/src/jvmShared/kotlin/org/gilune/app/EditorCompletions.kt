@@ -136,7 +136,9 @@ internal fun rememberEditorCompletions(state: GiluneState, text: String, caret: 
         val offers = ui.offers ?: return@choose
         val choice = offers.choices.getOrNull(index) ?: return@choose
         if (offers.context != latestContext) return@choose
-        scope.launch {
+        // Native validation runs on IO; publish acceptance on the platform UI
+        // thread so the editor observes the edit and schedules its autosave.
+        scope.launch(Dispatchers.Main.immediate) {
             try {
                 val current = withContext(Dispatchers.IO) {
                     validateEditorOption(kernel, BUNDLED_PLUGIN_EXTENSIONS, plugins, choice.binding, choice.option)
@@ -164,7 +166,7 @@ internal fun rememberEditorCompletions(state: GiluneState, text: String, caret: 
     }
     ui.created = { choice, creation, path ->
         val input = ui.creationContext
-        scope.launch {
+        scope.launch(Dispatchers.Main.immediate) {
             try {
                 val option = withContext(Dispatchers.IO) {
                     check(BUNDLED_PLUGIN_EXTENSIONS.editorCompletions(checkNotNull(kernel).plugins()).contains(choice.binding)) { "The provider is no longer available." }

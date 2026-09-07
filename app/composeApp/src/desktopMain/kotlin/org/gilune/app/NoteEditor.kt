@@ -655,9 +655,11 @@ private fun OpenNote(
             // The `/` menu belongs to this note and this mode; leaving
             // either drops it. Dismissal costs the buffer nothing, because
             // a session never wrote to it (ADR 0015 § 2).
-            val completions = rememberEditorCompletions(state, editor.text.text, editor.text.selection.start,
+            val bodyStart = editor.frontMatterRaw.length
+            val completions = rememberEditorCompletions(state, editor.document(), bodyStart + editor.text.selection.start,
                 editor.text.selection.collapsed, documentKey = editor.openRelPath.orEmpty()) { start, end, replacement ->
-                editor.text = replaceRange(editor.text, start until end, replacement)
+                require(start >= bodyStart) { "Insertion must stay in the editable body." }
+                editor.text = replaceRange(editor.text, (start - bodyStart) until (end - bodyStart), replacement)
                 editor.dirty = true
                 bodyFocus.requestFocus()
             }

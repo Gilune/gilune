@@ -2236,6 +2236,7 @@ Final local release evidence:
 | Clippy, all workspace targets, warnings denied | Passed |
 | Full desktop suite against release kernel | 659 tests: 654 passed, 5 skipped, zero failures |
 | Final packaged-kernel desktop refactoring/UI regression run | 13 passed |
+| Final full-source editor-context regression run | 19 desktop and 17 Android checks passed, zero failures |
 | Full Android API 36 x86_64 emulator suite | XML reports 892 tests: 877 passed, 15 skipped, zero failures |
 | Final native refactoring suite | 11 passed; separate ignored child harness is executed by the five-window crash test |
 | Android native packaging | arm64-v8a and x86_64 rebuilt; bindings generated from the corresponding Android binary |
@@ -2245,6 +2246,14 @@ Android skips concern optional voice models/real-engine probes and pre-existing
 IME spike cases. No physical-device, release-signing or app-store acceptance is
 claimed. The first broad run caught the obsolete mobile suggestion-widget test
 selector; it now exercises the shared menu and the final full run is green.
+
+The final editor review also corrected both shells to pass full source, including
+frontmatter, to completion providers and translate insertion offsets back into
+the visible body. Real-editor regressions cover a body beginning with a Markdown
+rule, exact frontmatter preservation, People insertion and Tasks date completion.
+Completion acceptance and create-and-insert return explicitly to the UI thread
+after native lookup validation; the combined Android run caught and now covers
+the otherwise unobserved programmatic edit that left autosave unscheduled.
 
 The final 10,001-reference fixture changes all references plus the defining page,
 pages every resulting location, and confirms identical facts after rebuilding:

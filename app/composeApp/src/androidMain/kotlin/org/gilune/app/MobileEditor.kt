@@ -522,10 +522,12 @@ fun EditScreen(
 
     var bodyFocused by remember(relPath) { mutableStateOf(false) }
     val selection = editor.body.selection
-    val completions = rememberEditorCompletions(state, bodyText, selection.start, selection.collapsed, documentKey = relPath) { start, end, replacement ->
+    val bodyStart = editor.frontMatterRaw.length
+    val completions = rememberEditorCompletions(state, editor.document(), bodyStart + selection.start, selection.collapsed, documentKey = relPath) { start, end, replacement ->
+        require(start >= bodyStart) { "Insertion must stay in the editable body." }
         editor.body.edit {
-            replace(start, end, replacement)
-            this.selection = TextRange(start + replacement.length)
+            replace(start - bodyStart, end - bodyStart, replacement)
+            this.selection = TextRange(start - bodyStart + replacement.length)
         }
     }
 

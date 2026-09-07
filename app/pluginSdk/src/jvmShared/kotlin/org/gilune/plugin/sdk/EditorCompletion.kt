@@ -4,7 +4,8 @@ import java.time.LocalDate
 import uniffi.gilune_ffi.LookupHit
 import uniffi.gilune_ffi.LookupRequest
 
-/** Immutable editor input. Coordinates are UTF-16, exclusive at the end.
+/** Immutable full-source editor input, including frontmatter. Coordinates are
+ * full-source UTF-16, exclusive at the end; shells translate visible body offsets.
  * A continuation belongs to one provider and never grants access to a buffer. */
 data class EditorContext(
     val text: String,
