@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import java.io.File
 import java.nio.file.Files
 import java.time.LocalDate
@@ -56,8 +57,12 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalFoundationApi::class)
 class MobileEditorUiTest {
+    private val rule = createComposeRule()
+
+    // The test drives the real InputConnection. A second keyboard must not
+    // independently select a composing word while the test inserts text.
     @get:Rule
-    val rule = createComposeRule()
+    val chain: RuleChain = RuleChain.outerRule(Ms1InputSessionRule()).around(rule)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 

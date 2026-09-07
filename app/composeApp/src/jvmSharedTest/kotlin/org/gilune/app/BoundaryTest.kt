@@ -49,7 +49,7 @@ class BoundaryTest {
         g.captureText("original thought")
         g.project()
         val rel = g.recentSources(1u)[0].projectionRelPath!!
-        val path = java.nio.file.Path.of(g.vaultPath(), rel)
+        val path = java.nio.file.Paths.get(g.vaultPath(), rel)
         val edited = String(Files.readAllBytes(path)).replace("original thought", "edited thought")
         Files.write(path, edited.toByteArray())
         val summary = g.reconcile()
@@ -64,12 +64,12 @@ class BoundaryTest {
         g.captureText("delete me maybe")
         g.project()
         val rel = g.recentSources(1u)[0].projectionRelPath!!
-        Files.delete(java.nio.file.Path.of(g.vaultPath(), rel))
+        Files.delete(java.nio.file.Paths.get(g.vaultPath(), rel))
         assertEquals(1L, g.reconcile().tombstoneProposals)
         val proposal = g.openProposals()[0]
         g.resolveTombstone(proposal.proposalId, false)
         g.project()
-        assertTrue(Files.exists(java.nio.file.Path.of(g.vaultPath(), rel)))
+        assertTrue(Files.exists(java.nio.file.Paths.get(g.vaultPath(), rel)))
     }
 
     @Test

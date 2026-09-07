@@ -49,6 +49,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.viewinterop.AndroidView
 import org.junit.Rule
+import androidx.test.filters.SdkSuppress
 import org.junit.Test
 import org.junit.rules.RuleChain
 import kotlin.test.assertEquals
@@ -122,6 +123,9 @@ class Ms1ControlsTest {
     }
 
     @WithSystemKeyboard
+    // A reproduction of the API 36 LatinIME observation in spikes/ms1-ime,
+    // not an expectation that every Android keyboard must exhibit this bug.
+    @SdkSuppress(minSdkVersion = 36, maxSdkVersion = 36)
     @Test
     fun theSameComposeFieldIsTornDownWithNoTransformationAtAll() {
         val focus = FocusRequester()

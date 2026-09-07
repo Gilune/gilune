@@ -27,6 +27,11 @@ anchor = (rel_path, line)          // line absent = the note itself
 - **Called once per changed note per pass**, in the pass that recorded
   the change, from the kernel's change feed (ADR 0020 § 2.1). Never on a
   note the feed did not name; never on the whole vault except a rebuild.
+  An explicit `reconcile_path`/`reconcilePath` save notification reads the
+  named file even when size and mtime match the cache: those values cannot
+  distinguish rapid same-size edits on coarse clocks. Identical content
+  emits no new change. Background discovery retains its stat shortcut;
+  this does not introduce source-file reads into queries.
 - **Predicates are opaque.** The kernel stores, orders and joins them and
   interprets none of them, exactly as it interprets no event type. No
   domain word appears in kernel code.

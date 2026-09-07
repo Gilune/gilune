@@ -6,7 +6,8 @@ Date: 2026-09-07. Follow-up to the incremental indexing delivery at
 The first remote build exposed portability failures that the local Windows
 checks and Android compilation had not caught. This work fixes those failures
 and adds Android execution to the existing release gate. It does not change
-the index schema, query executor, plugin contracts or performance results.
+the index schema, query executor or plugin callback contracts. The follow-up
+below also corrects detection of explicitly reported file edits.
 
 ## Failures and fixes
 
@@ -68,3 +69,43 @@ This is not physical ARM64 execution, an installed MSI/DEB smoke test or speech
 accuracy evidence. The 12 skipped Android tests require opt-in speech inputs.
 The broader People editor/navigation and shared refactoring milestones remain
 open; these release corrections do not mark them complete.
+
+## Minimum-version follow-up
+
+An additional Pixel 6 x86_64 emulator run on Android 10 (API 29, the declared
+minimum) found eight failures. Two used Java's `Path.of`, absent on that OS;
+the shared tests now use `Paths.get`. An agenda test waited for an already
+visible neighbouring row rather than the asynchronous removal it asserted;
+it now waits for that removal. The editor test drove a real InputConnection
+while the system keyboard independently selected a composing word; it now
+uses the existing exclusive input-session rule, retaining real IME protocol
+calls and undo assertions.
+
+Three failures were reproductions of a historical Android 16 LatinIME bug,
+documented for that exact environment in [the MS1 report](../../spikes/ms1-ime/README.md).
+Their requirement is now explicitly API 36. The portable composing/commit
+invariants and platform EditText control still run on API 29. These three
+diagnostics are filtered from API 29 discovery, not counted as passing there.
+
+The remaining failure exposed a production bug: rapid equal-length saves
+could keep the same mtime, so the reconciliation stat cache suppressed their
+change events. Explicit one-file reconciliation now reads the named file;
+unchanged content still emits nothing. The native fixture covers managed
+projections and import candidates with deliberately identical size/mtime,
+checking the resulting Modified event and a no-op repeat. Restoring the old
+stat shortcut makes that fixture fail; restoring the fix makes it pass.
+Background scans retain their existing stat cache and verification policy.
+
+After these corrections, the full applicable API 29 suite reports **870 tests,
+858 passed, 12 speech-input skips, zero failures**, in 143.576 seconds of test
+time (2 min 57 s Gradle elapsed). Both native ABIs were rebuilt. The 54 native
+vault tests and release workspace Clippy also pass. Local before/after logs
+are `release-android-runtime-api29*.log` and `release-same-stamp-before/after.log`.
+
+The first hosted emulator attempt in [run 34099027332](https://github.com/Gilune/gilune/actions/runs/34099027332)
+failed while unpacking the system image because the runner had no disk space;
+both desktop jobs passed. The Android job now removes its temporary cross-build
+trees and cleans the host Cargo build after staging libraries and bindings,
+before installing the emulator image. Later steps consume only staged outputs.
+The required runtime gate remains enabled; its successful hosted execution is
+required before this release-validation milestone is complete.

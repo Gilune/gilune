@@ -319,6 +319,9 @@ class MobileAgendaTest {
         // leaves the agenda on the recompute its own write triggered.
         compose.waitForIdle()
         awaitText("phone the council")
+        compose.waitUntil(WAIT) {
+            compose.onAllNodesWithText("collect the keys").fetchSemanticsNodes().isEmpty()
+        }
         compose.onNodeWithText("collect the keys").assertDoesNotExist()
         compose.onNodeWithText("overdue (1)").assertDoesNotExist()
     }

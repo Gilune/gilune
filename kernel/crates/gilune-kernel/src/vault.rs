@@ -455,7 +455,7 @@ impl Store {
 
         for rel_path in self.markdown_files()? {
             seen_paths.push(rel_path.clone());
-            self.reconcile_file(&rel_path, &mut summary, &mut kept)?;
+            self.reconcile_file(&rel_path, &mut summary, &mut kept, true)?;
         }
 
         // Tracked projections whose file is gone become tombstone
@@ -529,7 +529,7 @@ impl Store {
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         if self.vault().join(&rel).is_file() {
-            if let Some(object_id) = self.reconcile_file(&rel, &mut summary, &mut kept)? {
+            if let Some(object_id) = self.reconcile_file(&rel, &mut summary, &mut kept, false)? {
                 seen.insert(object_id);
             }
         } else if let Some(record) = self.recorded_at_path(&rel)? {
@@ -565,14 +565,15 @@ impl Store {
         rel_path: &str,
         summary: &mut ReconcileSummary,
         kept: &mut std::collections::BTreeSet<String>,
+        trust_stat_cache: bool,
     ) -> Result<Option<String>> {
         let tracked = self.recorded_at_path(rel_path)?;
-        // Size and mtime that both match the record mean the bytes the
-        // record names, so there is no edit, no rename (the file is at
-        // its recorded path) and nothing to parse. This is the read the
-        // steady state used to pay for every file on every pass.
+        // Background scans use the stat cache. An explicit one-file save
+        // notification must read that file: rapid same-size edits can share
+        // an mtime on coarse clocks, and external tools can preserve it.
+        // A content comparison still suppresses no-op revisions and events.
         if let Some((object_id, record)) = &tracked {
-            if self.file_matches_record(object_id, &self.vault().join(rel_path), record)? {
+            if trust_stat_cache && self.file_matches_record(object_id, &self.vault().join(rel_path), record)? {
                 return Ok(Some(object_id.clone()));
             }
         }
@@ -582,7 +583,7 @@ impl Store {
         // is one — so without this every import in the vault was read on
         // every pass, which is exactly the cost § 2.5 removed for the
         // files the kernel writes.
-        if tracked.is_none() {
+        if trust_stat_cache && tracked.is_none() {
             if let Some(object_id) = self.import_matches_record(rel_path)? {
                 // A kept note is still about its object while its file is
                 // there, and the notice that says so is withdrawn by not
@@ -3062,6 +3063,38 @@ mod tests {
         let summary = store.reconcile_path(&rel).expect("reconcile one file");
         assert_eq!(summary, ReconcileSummary::default());
         assert!(page(&store, &settled).is_empty());
+    }
+
+    #[test]
+    fn a_named_save_detects_changed_bytes_with_unchanged_size_and_timestamp() {
+        for managed in [false, true] {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let store = Store::open(dir.path()).expect("open");
+            let rel = if managed {
+                store.capture_bytes("txt", b"before").expect("capture");
+                store.project().expect("project");
+                store.conn().query_row("SELECT rel_path FROM projections", [], |r| r.get::<_, String>(0)).expect("path")
+            } else {
+                std::fs::write(store.vault().join("external.md"), "before\n").expect("write");
+                "external.md".to_string()
+            };
+            store.reconcile().expect("settle");
+            let path = store.vault().join(&rel);
+            let before = std::fs::read_to_string(&path).expect("read");
+            let stamp = stat_of(&path).expect("stat");
+            let cursor = cursor_now(&store);
+            std::fs::write(&path, before.replace("before", "edited")).expect("edit");
+            set_mtime(&path, stamp.mtime_ns);
+            assert_eq!(stat_of(&path), Some(stamp), "identical metadata cannot prove identical content");
+
+            let summary = store.reconcile_path(&rel).expect("named save");
+            assert_eq!(summary.edits, i64::from(managed), "managed={managed}");
+            assert_eq!(summary.imports, 0, "an edit is not a new import offer");
+            let changes = page(&store, &cursor);
+            assert_eq!(changes.len(), 1, "the save reaches the index feed; managed={managed}");
+            assert_eq!(changes[0].0, ChangeKind::Modified);
+            assert_eq!(store.reconcile_path(&rel).expect("same bytes again"), ReconcileSummary::default());
+        }
     }
 
     #[test]
