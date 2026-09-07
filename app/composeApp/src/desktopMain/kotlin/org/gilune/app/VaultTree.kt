@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
@@ -61,6 +62,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -79,6 +81,9 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -139,7 +144,7 @@ private val TREE_ORDER =
 /// `kitchen.wav` is an attachment of `kitchen.md`. Sharing the stem is
 /// the whole of the binding — nothing records it — which is why renaming
 /// a note has to take its attachments with it.
-private fun File.attachmentStem(): String? =
+internal fun File.attachmentStem(): String? =
     if (isFile && !name.startsWith(".") && !name.endsWith(".md")) {
         name.substringBeforeLast('.')
     } else {
@@ -349,12 +354,15 @@ fun VaultTree(
 ) {
     var pending by remember { mutableStateOf<PendingName?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
-    val entries = remember(state.vaultCursor.value, state.vaultDir, tree.expanded.toList()) {
+    var moveRevision by remember { mutableStateOf(0) }
+    val drag = remember(state.vaultDir) { VaultTreeDrag() }
+    val list = rememberLazyListState()
+    val entries = remember(state.vaultCursor.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
         listVault(state.vaultDir, tree.expanded.toSet())
     }
     // The Captures folder is the inbox: the count is simply how many
     // notes still sit in it, shown quietly — never a nagging badge.
-    val capturesCount = remember(state.vaultCursor.value, state.vaultDir) {
+    val capturesCount = remember(state.vaultCursor.value, state.vaultDir, moveRevision) {
         File(state.vaultDir, "Captures").listFiles()?.count { it.name.endsWith(".md") } ?: 0
     }
     val colours = MaterialTheme.colorScheme
@@ -385,18 +393,48 @@ fun VaultTree(
         delete = { relPath -> deleting = relPath },
     )
 
-    Column(modifier) {
+    val dragModifier = treeDragModifier(drag, tree, list) { entry, directory ->
+        try {
+            synchronized(DocumentEditGate.monitor) {
+                val moved = moveVaultEntry(state.vaultDir, entry.relPath, directory)
+                reportMovedNotes(state.vaultDir, entry.relPath, moved, entry.isDir, onRenamed)
+                tree.selectedFile = tree.selectedFile?.let { movedPath(it, entry.relPath, moved) }
+                tree.selectedDir = movedPath(tree.selectedDir, entry.relPath, moved)
+                val expanded = tree.expanded.map { movedPath(it, entry.relPath, moved) }
+                tree.expanded.clear()
+                tree.expanded.addAll(expanded)
+                reveal(directory)
+                moveRevision++
+            }
+            state.message.value = "Moved ${entry.relPath.substringAfterLast('/')} to ${directory.ifEmpty { "vault" }}"
+            state.sync(announce = false)
+        } catch (failure: Exception) {
+            state.message.value = "Could not move ${entry.relPath.substringAfterLast('/')}: ${failure.message}"
+            moveRevision++
+        }
+    }
+    Column(modifier.testTag("vault-tree").then(dragModifier)) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                if (tree.selectedDir.isEmpty()) "vault" else tree.selectedDir,
-                fontSize = 11.sp,
-                color = colours.onSurfaceVariant,
-                maxLines = 1,
-                modifier = Modifier.weight(1f),
-            )
+            Box(
+                modifier = Modifier.weight(1f).height(26.dp)
+                    .testTag("vault-root-drop")
+                    .onGloballyPositioned { drag.rootTarget = it.boundsInRoot() }
+                    .background(if (drag.destination == "") colours.primaryContainer else colours.surface)
+                    .clickable { tree.selectedDir = "" },
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                Text(
+                    if (drag.source == null) "vault" else
+                        drag.destination?.let { "Move to ${it.ifEmpty { "vault" }}" } ?: "Choose another folder",
+                    fontSize = 11.sp,
+                    color = colours.onSurfaceVariant,
+                    maxLines = 1,
+                    modifier = if (drag.source != null) Modifier.testTag("vault-drag-status") else Modifier,
+                )
+            }
             IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
                 Icon(
                     Icons.Outlined.CreateNewFolder,
@@ -415,7 +453,11 @@ fun VaultTree(
             }
         }
 
-        LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp)) {
+        LazyColumn(
+            Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp).testTag("vault-tree-list")
+                .onGloballyPositioned { drag.viewport = it.boundsInRoot() },
+            state = list,
+        ) {
             val atRoot = (pending as? PendingName.CreateFolder)?.takeIf { it.parent.isEmpty() }
             if (atRoot != null) {
                 item(key = "pending-root") {
@@ -433,7 +475,7 @@ fun VaultTree(
                         onRenamed = onRenamed,
                     )
                 } else {
-                    TreeRow(entry, tree, state.vaultDir, capturesCount, actions)
+                    TreeRow(entry, tree, state.vaultDir, capturesCount, actions, drag)
                 }
                 val inside = (pending as? PendingName.CreateFolder)
                     ?.takeIf { entry.isDir && it.parent == entry.relPath }
@@ -457,9 +499,13 @@ private fun TreeRow(
     vaultDir: String,
     capturesCount: Int,
     actions: TreeActions,
+    drag: VaultTreeDrag,
 ) {
+    DisposableEffect(entry, drag) { onDispose { drag.rows.remove(entry) } }
+    val rowModifier = Modifier.testTag("vault-entry:${entry.relPath}")
+        .onGloballyPositioned { drag.rows[entry] = it.boundsInRoot() }
     if (entry.kind == VaultEntryKind.ATTACHMENT) {
-        AttachmentRow(entry, vaultDir)
+        AttachmentRow(entry, vaultDir, rowModifier)
         return
     }
     val colours = MaterialTheme.colorScheme
@@ -483,11 +529,15 @@ private fun TreeRow(
         }
     }) {
         Row(
-            Modifier
+            rowModifier
                 .fillMaxWidth()
                 .padding(horizontal = 6.dp, vertical = 1.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .background(if (selected) colours.primaryContainer else colours.surface)
+                .background(when {
+                    entry.isDir && drag.destination == entry.relPath -> colours.secondaryContainer
+                    selected || drag.source == entry -> colours.primaryContainer
+                    else -> colours.surface
+                })
                 .clickable {
                     if (entry.isDir) {
                         tree.selectedDir = if (tree.selectedDir == entry.relPath) "" else entry.relPath
@@ -547,13 +597,13 @@ private fun TreeRow(
 /// opened here — the editor edits notes, and the file itself belongs to
 /// whichever application owns its type.
 @Composable
-private fun AttachmentRow(entry: VaultEntry, vaultDir: String) {
+private fun AttachmentRow(entry: VaultEntry, vaultDir: String, modifier: Modifier = Modifier) {
     val colours = MaterialTheme.colorScheme
     ContextMenuArea(items = {
         listOf(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
     }) {
         Row(
-            Modifier
+            modifier
                 .fillMaxWidth()
                 .padding(
                     start = (12 + entry.depth * 14).dp,
@@ -753,18 +803,28 @@ private fun renameEntry(
         return
     }
     if (renamed != pending.relPath) {
-        if (pending.isDir) {
-            File(state.vaultDir, renamed).walkTopDown()
-                .filter { it.isFile && it.name.endsWith(".md") }
-                .forEach { file ->
-                    val now = file.relativeTo(File(state.vaultDir)).invariantSeparatorsPath
-                    onRenamed(pending.relPath + now.removePrefix(renamed), now)
-                }
-        } else {
-            onRenamed(pending.relPath, renamed)
-        }
+        reportMovedNotes(state.vaultDir, pending.relPath, renamed, pending.isDir, onRenamed)
     }
     state.sync(announce = false)
+}
+
+private fun reportMovedNotes(
+    vaultDir: String,
+    old: String,
+    renamed: String,
+    isDir: Boolean,
+    onRenamed: (String, String) -> Unit,
+) {
+    if (isDir) {
+        File(vaultDir, renamed).walkTopDown()
+            .filter { it.isFile && it.name.endsWith(".md") }
+            .forEach { file ->
+                val now = file.relativeTo(File(vaultDir)).invariantSeparatorsPath
+                onRenamed(old + now.removePrefix(renamed), now)
+            }
+    } else {
+        onRenamed(old, renamed)
+    }
 }
 
 private fun revealInExplorer(vaultDir: String, entry: VaultEntry) {
