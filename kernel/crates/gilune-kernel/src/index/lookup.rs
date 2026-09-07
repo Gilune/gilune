@@ -313,7 +313,7 @@ fn sql(request: &LookupRequest) -> (String, Vec<Value>, String) {
             let select = format!("SELECT id FROM c{id}");
             if negated { negative.push(select); } else { positive.push(select); }
         }
-        if positive.is_empty() { positive.push("SELECT id FROM index_targets WHERE kind=0".into()); }
+        if positive.is_empty() { positive.push("SELECT id FROM target_slots WHERE kind=0".into()); }
         let mut select = positive.join(" INTERSECT ");
         for exclude in negative { select.push_str(" EXCEPT "); select.push_str(&exclude); }
         let name = format!("g{}", ctes.len());
@@ -342,7 +342,7 @@ fn sql(request: &LookupRequest) -> (String, Vec<Value>, String) {
         conditions.push("EXISTS (SELECT 1 FROM fact_sources r WHERE r.rel_path=s.rel_path AND r.source_version=s.source_version AND r.namespace=?)".into());
         params.push(Value::Text(ns.clone()));
     }
-    ctes.push(format!("matched AS MATERIALIZED (SELECT t.id,s.rel_path,s.source_version,b.priority FROM candidates b CROSS JOIN index_targets t ON t.id=b.id CROSS JOIN source_maps s ON s.id=t.source_id WHERE {})", conditions.join(" AND ")));
+    ctes.push(format!("matched AS MATERIALIZED (SELECT t.id,s.rel_path,s.source_version,b.priority FROM candidates b CROSS JOIN target_slots t ON t.id=b.id CROSS JOIN source_maps s ON s.id=t.source_id WHERE {})", conditions.join(" AND ")));
     let mut sorts = Vec::new();
     let mut order = vec!["priority".to_string()];
     for (i, predicate) in request.sort_predicates.iter().enumerate() {

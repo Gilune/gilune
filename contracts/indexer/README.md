@@ -191,7 +191,7 @@ Schema 7 resolves private predicate/target IDs in batches inside the existing
 producer write transaction and inserts them with each fact. This removes repeated
 per-fact trigger updates without changing callbacks, ownership, source-version
 checks, receipts or query semantics. Unversioned/stale facts remain unbound;
-source replacement still invalidates old target IDs. Older disposable indexes
+source replacement still invalidates old fact bindings. Older disposable indexes
 rebuild normally. The shared writer contains no plugin-domain interpretation.
 
 Schema 8 adds line-coordinate and source-byte indexes for bounded item projection.
@@ -214,10 +214,12 @@ continuations, nested items, explicit root scope, membership, negative absence,
 empty-output source versions, cursor expiry, lifecycle and more than 10,000
 matches with zero query-time file reads. People exercises the same API across FFI.
 
-## Current storage: schema 9
+## Current storage: schema 12
 
 `fact_values` stores location/predicate/target IDs and opaque value/typed data.
-`fact_locations` stores each path, optional source version and anchor once;
+`fact_frames` stores each path and optional source version once;
+`fact_location_slots` stores anchors by frame ID. `fact_locations` projects their
+existing relational shape without copying the path/version into every anchor;
 `index_predicates` owns each namespace/predicate pair. The `facts` SQL view is a
 relational compatibility projection, not a second table. Wide fact indexes and
 per-fact repeated paths, source hashes, namespaces and predicates are removed.
@@ -226,9 +228,95 @@ Value, numeric, folded-prefix, target and location access have compact indexes.
 Stale, unversioned and invalid/unavailable targets retain distinct location
 records and unbound facts. Source replacement detaches bindings; only facts for
 exactly the new source version can rebind. Successful producer replacement and
-namespace removal collect unused locations, without discarding failed producer
+namespace removal collect unused locations and frames, without discarding failed producer
 evidence. Batches intern locations and predicates inside their existing write
 transaction. Source-map JSON remains parser/rebuild evidence; result projection
 uses target ranges and indexed text. All public fact/search/lookup/location APIs
 read this same store. An older disposable schema rebuilds from sources; it does
 not migrate domain objects or add cross-plugin dependencies.
+
+Text maintenance compares each newly produced document with its stored text
+rows. Exact matches keep their private FTS row IDs; identical text moved within
+the same field updates its line coordinate without rewriting FTS. Removed or
+changed text uses the existing delete/insert triggers. Duplicate rows are matched
+as a multiset, and no row identity is exposed as persistent document identity.
+This needs no plugin edit stream and works with externally edited files. All
+changes still commit under the existing version/cursor checks and rollback
+boundary. Public APIs remain unchanged.
+
+Source-map updates normally detach old fact bindings; only exact source-version
+facts can bind. For an aligned, bounded edit to one path, the kernel can prepare
+all available producer outputs before taking a write transaction. It verifies
+all producer versions/cursors again inside that transaction. Only when every
+owner of the old source-qualified locations has successful fresh output may it
+advance shared locations and reuse target slots together with those outputs.
+A missing or refusing producer prevents that reuse for the path. Its old facts
+remain at their original source version and unbound; successful producers and
+independent failure receipts can still advance. No plugin callback runs while
+the write transaction is held. A database failure rolls back the whole publication.
+
+Reused slots can move to new coordinates. Exact first-line text is a slot-matching
+preference, never proof of unchanged domain meaning. Complete validated output
+still determines every fact value. Within reused locations, facts are compared
+as ordered slots; adding/removing facts in one location does not shift the
+comparison across other locations. Duplicate multiplicity is preserved. Private
+row order across locations and private target IDs are not public identities.
+The general path retains producer-wide comparison and independent transactions.
+
+Schema 12 normalises revision validity. A coherent publication advances one
+frame instead of rewriting a source hash into every location. Removed anchors
+retain their old frame until fresh producer output removes their facts. A held
+destination revision uses conservative replacement rather than merging frames.
+Frame changes, coordinate changes, facts and receipts share the transaction and
+reader snapshot. Old disposable indexes rebuild; documents remain unchanged.
+Schema 13 stores geometry relative to small position blocks and orders targets
+with private sparse labels. Current fact locations and indexed body text follow
+retained slots; stale evidence is detached and materialised at its original
+coordinates before live geometry changes. Public line numbers and byte ranges
+are reconstructed against the exact returned source revision. Private labels
+and target IDs carry no domain identity. Geometry, source text, facts and receipts
+publish together; all readers retain the existing transaction snapshot guarantees.
+The query model and all public result/source identities remain unchanged.
+
+## Optional local scoped input
+
+`LocalScopedIndexer.index_locations(path, source, locations)` and
+`register_local_scoped_indexer` add an opt-in contract. Existing scoped and legacy
+registrations retain their complete-document behavior. Bundled SDK registrations
+may provide `createLocal` alongside the original full-output factory.
+
+The callback returns complete facts **only for the selected locations**, including
+an empty result when a previously recognised construct no longer qualifies.
+Returning a fact outside the selection is rejected. The source remains exact,
+with the shared parser map and metadata available as context. The locality promise
+is stricter than the complete-document contract:
+
+- Root facts depend only on document metadata.
+- Item facts depend on the item's own source ranges, excluding child items, plus
+  metadata and the parser's ordinary-text eligibility within those ranges.
+- Line facts depend on that line's source, metadata, ordinary-text eligibility
+  and whether its text belongs to an item.
+- Fact values must not depend on unrelated locations, absolute coordinates,
+  parent/sibling counts or the source-version token. Fact locations still use
+  the exact coordinates of the supplied snapshot.
+
+The kernel fingerprints these inputs, reuses successful outputs for unchanged
+inputs, and remaps their locations when content moves. Repeated identical inputs
+are exchangeable under this contract; duplicate facts remain duplicates. Header
+changes invalidate all dependent inputs. Parser-context changes, including fences,
+can invalidate text beyond the edited line. Full Markdown parsing currently still
+runs to establish that context; local input selection prevents it from forcing
+full plugin recognition.
+
+The cache is disposable and scoped to a registration instance: one document,
+with a 32 MiB estimated payload limit. Restart, another document, registration
+replacement, overflow or failed derivation can require complete recognition.
+No cached result is evidence of filesystem freshness or an advanced index receipt.
+The writer still validates the assembled facts and the namespace's commit state.
+No persistent plugin SQL table or second authoritative fact store is added.
+
+People and Tasks opt in independently. Native fixtures and `LocalIndexerTest`
+compare local and complete results across edits, shifted locations, nesting,
+metadata, Unicode and code exclusions. See the
+[implementation report](../../architecture/research/local-input-publication-2026-09-06.md)
+for measurements and remaining whole-document storage costs.

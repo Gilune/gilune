@@ -1,0 +1,86 @@
+{
+  "note": "Real application complete edit/restore trials. Prior schema-9 full-text-replacement medians are separate runs.",
+  "sizes": {
+    "100": {
+      "samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 125.8336,
+          "settled_advance_ms": 0.478,
+          "tasks_callback_ms": 30.4382,
+          "people_callback_ms": 13.1898
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 67.4512,
+          "settled_advance_ms": 0.3239,
+          "tasks_callback_ms": 5.448,
+          "people_callback_ms": 3.8812
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 49.8443,
+          "settled_advance_ms": 0.3262,
+          "tasks_callback_ms": 2.954,
+          "people_callback_ms": 2.2535
+        }
+      ],
+      "median_reconcile_ms": 67.4512,
+      "previous_median_ms": 75.0064
+    },
+    "1000": {
+      "samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 259.2097,
+          "settled_advance_ms": 0.2558,
+          "tasks_callback_ms": 16.3508,
+          "people_callback_ms": 8.3378
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 230.6103,
+          "settled_advance_ms": 0.4181,
+          "tasks_callback_ms": 7.2367,
+          "people_callback_ms": 5.1564
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 224.2877,
+          "settled_advance_ms": 0.2811,
+          "tasks_callback_ms": 4.9988,
+          "people_callback_ms": 3.969
+        }
+      ],
+      "median_reconcile_ms": 230.6103,
+      "previous_median_ms": 305.8705
+    },
+    "10000": {
+      "samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 2168.8833,
+          "settled_advance_ms": 0.4988,
+          "tasks_callback_ms": 49.5978,
+          "people_callback_ms": 25.3027
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 2081.8534,
+          "settled_advance_ms": 0.2744,
+          "tasks_callback_ms": 35.6311,
+          "people_callback_ms": 18.5407
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 2100.4231,
+          "settled_advance_ms": 0.3323,
+          "tasks_callback_ms": 39.4835,
+          "people_callback_ms": 21.6179
+        }
+      ],
+      "median_reconcile_ms": 2100.4231,
+      "previous_median_ms": 3096.7631
+    }
+  }
+}

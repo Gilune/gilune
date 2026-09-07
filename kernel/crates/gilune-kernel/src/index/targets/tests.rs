@@ -168,7 +168,7 @@ fn a_failed_producer_cannot_bind_old_facts_to_reused_offsets_in_a_new_revision()
     f.store.reconcile().unwrap();
     f.store.with_index(|db|{
         assert_integrity(db);
-        assert!(current_ids(db).iter().all(|id|!ids.contains(id)));
+        assert_eq!(current_ids(db),ids,"unchanged coordinates reuse private IDs without validating old evidence");
         let held:(i64,i64)=db.query_row("SELECT count(*),count(target_id) FROM facts WHERE namespace='example.one'",[],|r|Ok((r.get(0)?,r.get(1)?)))?;
         assert!(held.0>0);assert_eq!(held.1,0,"old evidence survives without a current target binding");
         let current:i64=db.query_row("SELECT count(*) FROM facts WHERE namespace='example.two' AND target_id IS NOT NULL",[],|r|r.get(0))?;assert!(current>0);
@@ -243,11 +243,37 @@ fn failed_transactions_restore_targets_bindings_and_predicate_ids() {
 
 #[test]
 fn older_indexes_are_discarded_and_sources_rebuild_without_document_changes() {
-    for previous in ["5", "6", "7"] {
+    for previous in ["5", "6", "7", "8", "9", "10", "11", "12"] {
         let f = fixture("- portable\n");
         let before = std::fs::read(f.dir.path().join("a.md")).unwrap();
         f.store
             .with_index(|db| {
+                if previous == "12" {
+                    // Schema 12 stored public coordinates and indexed lines
+                    // in physical tables. Rebuild must handle both object kinds.
+                    db.execute_batch(
+                        "CREATE TEMP TABLE old_targets AS SELECT * FROM index_targets;
+                        DROP VIEW index_targets;
+                        CREATE TABLE index_targets AS SELECT * FROM old_targets;
+                        DROP TABLE old_targets;
+                        CREATE TEMP TABLE old_lines AS SELECT * FROM lines;
+                        DROP VIEW lines;
+                        CREATE TABLE lines AS SELECT * FROM old_lines;
+                        DROP TABLE old_lines;",
+                    )?;
+                }
+                if previous == "11" {
+                    // Exercise the actual old table shape, not only a changed
+                    // version marker on the new schema's compatibility view.
+                    db.execute_batch(
+                        "CREATE TEMP TABLE old_locations AS SELECT * FROM fact_locations;
+                        DROP VIEW fact_locations;
+                        CREATE TABLE fact_locations AS SELECT * FROM old_locations;
+                        DROP TABLE old_locations;
+                        DROP TABLE fact_location_slots;
+                        DROP TABLE fact_frames;",
+                    )?;
+                }
                 db.execute(
                     "UPDATE index_meta SET value=?1 WHERE key='index_schema_version'",
                     [previous],
@@ -276,7 +302,10 @@ fn older_indexes_are_discarded_and_sources_rebuild_without_document_changes() {
             .with_index(|db| {
                 assert_integrity(db);
                 assert!(!current_ids(db).is_empty());
-                assert_eq!(meta(db, "index_schema_version")?, Some(SCHEMA_VERSION.to_string()));
+                assert_eq!(
+                    meta(db, "index_schema_version")?,
+                    Some(SCHEMA_VERSION.to_string())
+                );
                 Ok(())
             })
             .unwrap();

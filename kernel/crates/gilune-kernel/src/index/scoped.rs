@@ -57,7 +57,7 @@ pub struct LocationPage {
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Map {
     pub(crate) version: u32,
-    length: u64,
+    pub(crate) length: u64,
     pub(crate) lines: Vec<(u32, u64, u64)>,
     pub(crate) items: Vec<ItemMap>,
 }
@@ -304,7 +304,8 @@ impl Store {
             } else {
                 Location::DocumentRoot
             };
-            page.matches.push(targets::resolve(db, path, version, location)?);
+            page.matches
+                .push(targets::resolve(db, path, version, location)?);
         }
         Ok(page)
     }

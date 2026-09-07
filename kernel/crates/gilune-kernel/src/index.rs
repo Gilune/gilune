@@ -26,10 +26,10 @@
 //!   changed note once, whatever the number of registered namespaces,
 //!   and reads nothing else.
 
-use rusqlite::OptionalExtension;
 use crate::changes::{ChangeKind, Cursor, VaultChange};
 use crate::store::Store;
 use crate::{ids, probe, KernelError, Result};
+use rusqlite::OptionalExtension;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
@@ -38,12 +38,16 @@ use std::sync::Arc;
 /// vault's: this database is derived, so a version it does not recognise
 /// is discarded rather than migrated (constitution rule 12 governs the
 /// record, and this is not the record).
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 13;
 
-pub mod scoped;
 pub mod lookup;
+pub(crate) mod positions;
+mod publication;
+pub mod scoped;
 mod targets;
+mod text_writer;
 mod writer;
+pub mod incremental;
 
 /// The kernel's own namespace, holding the note text every full-text
 /// query is answered from. Reserved: a plugin cannot register it, and it
@@ -53,12 +57,11 @@ pub const TEXT_NAMESPACE: &str = "text";
 /// The other kernel-owned namespace: a note's front matter, one fact per
 /// top-level entry. Reserved on the same terms as [`TEXT_NAMESPACE`].
 ///
-/// It is here and not in a plugin because an indexer is handed the note's
-/// **body**, front matter already split off — so no plugin can see a
-/// `key: value` header at all, and `[key:value]`, which the shipped
-/// search language has always answered, would have had no substrate. The
-/// kernel interprets none of it: `gilune-id` is stored exactly as
-/// `mood` is, and which keys mean anything stays the reader's question.
+/// Generic property queries use these uninterpreted header values regardless
+/// of installed domain plugins. Legacy body-only indexers do not receive the
+/// header; source/scoped indexers receive metadata through their public input
+/// contracts and can contribute their own interpretation. `gilune-id` is stored
+/// exactly as `mood` is; which keys mean anything stays the reader's question.
 pub const FRONT_MATTER_NAMESPACE: &str = "frontmatter";
 
 /// A front-matter key as a predicate. Namespaced, because
@@ -101,17 +104,39 @@ pub trait NoteIndexer: Send + Sync {
 
     /// Source-aware adapters may inspect the exact supplied source. Legacy
     /// implementations retain their body-only input and body-relative facts.
-    fn index_source(&self, rel_path: &str, _source: &str, body: &str) -> std::result::Result<Vec<Fact>, String> {
+    fn index_source(
+        &self,
+        rel_path: &str,
+        _source: &str,
+        body: &str,
+    ) -> std::result::Result<Vec<Fact>, String> {
         self.index(rel_path, body)
     }
 
     /// Opt-in source locations. Legacy callbacks continue to use physical body
     /// lines; they are never silently promoted to Markdown item scope.
-    fn index_scoped(&self, _rel_path: &str, _source: &gilune_document::TextSnapshot) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
+    fn index_scoped(
+        &self,
+        _rel_path: &str,
+        _source: &gilune_document::TextSnapshot,
+    ) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
         Err("scoped input is not implemented".into())
     }
 
-    fn uses_scoped_input(&self) -> bool { false }
+    fn uses_scoped_input(&self) -> bool {
+        false
+    }
+
+    /// Optional local-input callback. Only explicitly registered local producers
+    /// receive selections; all others retain the complete-document contract.
+    fn index_scoped_locations(
+        &self,
+        _rel_path: &str,
+        _source: &gilune_document::TextSnapshot,
+        _locations: &[gilune_document::Location],
+    ) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
+        Err("local scoped input is not implemented".into())
+    }
 }
 
 /// One thing a plugin says about an anchor. `line` is `None` for the
@@ -361,7 +386,8 @@ pub struct IndexStatus {
 
 // ----------------------------------------------------------- the database
 
-const SCHEMA: &str = concat!("
+const SCHEMA: &str = concat!(
+    "
 CREATE TABLE index_meta (key TEXT PRIMARY KEY, value NOT NULL);
 CREATE TABLE namespaces (
     namespace TEXT PRIMARY KEY,
@@ -390,23 +416,38 @@ CREATE TABLE fact_sources (
     source_version TEXT NOT NULL,
     PRIMARY KEY (namespace, rel_path)
 );
-CREATE TABLE lines (
+CREATE TABLE text_rows (
     id INTEGER PRIMARY KEY,
     rel_path TEXT NOT NULL,
     line INTEGER,
+    target_id INTEGER,
     field TEXT NOT NULL CHECK (field IN ('body','name','path')),
     text TEXT NOT NULL,
     folded TEXT NOT NULL
 );
-CREATE INDEX lines_path ON lines(rel_path);
-CREATE INDEX lines_path_field_line ON lines(rel_path,field,line);
+CREATE INDEX lines_path ON text_rows(rel_path);
+CREATE INDEX lines_path_field_line ON text_rows(rel_path,field,line);
+CREATE INDEX text_rows_target ON text_rows(target_id);
+CREATE VIEW lines AS SELECT l.id,l.rel_path,
+ CASE WHEN l.field='body' THEN COALESCE(t.anchor+b.base_key,l.line) ELSE l.line END AS line,
+ l.field,l.text,l.folded FROM text_rows l LEFT JOIN target_slots t ON t.id=l.target_id
+ LEFT JOIN position_blocks b ON b.id=t.block_id;
+CREATE TRIGGER lines_insert INSTEAD OF INSERT ON lines BEGIN
+ INSERT INTO text_rows(id,rel_path,line,field,text,folded) VALUES(NEW.id,NEW.rel_path,NEW.line,NEW.field,NEW.text,NEW.folded);
+END;
+CREATE TRIGGER lines_delete INSTEAD OF DELETE ON lines BEGIN
+ DELETE FROM text_rows WHERE id=OLD.id;
+END;
+CREATE TRIGGER lines_update INSTEAD OF UPDATE ON lines BEGIN
+ UPDATE text_rows SET rel_path=NEW.rel_path,line=NEW.line,target_id=CASE WHEN NEW.line IS OLD.line AND NEW.field=OLD.field THEN target_id END,field=NEW.field,text=NEW.text,folded=NEW.folded WHERE id=OLD.id;
+END;
 CREATE VIRTUAL TABLE lines_fts USING fts5(
-    folded, content='lines', content_rowid='id', tokenize='trigram case_sensitive 1'
+    folded, content='text_rows', content_rowid='id', tokenize='trigram case_sensitive 1'
 );
-CREATE TRIGGER lines_ai AFTER INSERT ON lines BEGIN
+CREATE TRIGGER lines_ai AFTER INSERT ON text_rows BEGIN
     INSERT INTO lines_fts(rowid, folded) VALUES (new.id, new.folded);
 END;
-CREATE TRIGGER lines_ad AFTER DELETE ON lines BEGIN
+CREATE TRIGGER lines_ad AFTER DELETE ON text_rows BEGIN
     INSERT INTO lines_fts(lines_fts, rowid, folded) VALUES ('delete', old.id, old.folded);
 END;
 CREATE TRIGGER namespaces_ai AFTER INSERT ON namespaces BEGIN
@@ -418,7 +459,10 @@ END;
 CREATE TRIGGER namespaces_ad AFTER DELETE ON namespaces BEGIN
     UPDATE index_meta SET value = CAST(value AS INTEGER) + 1 WHERE key = 'generation';
 END;
-", include_str!("index/targets.sql"), include_str!("index/storage.sql"));
+",
+    include_str!("index/targets.sql"),
+    include_str!("index/storage.sql")
+);
 
 const DROP_ALL: &str = "
 DROP VIEW IF EXISTS source_target_layout;
@@ -428,14 +472,18 @@ DROP TRIGGER IF EXISTS source_targets_update;
 DROP TRIGGER IF EXISTS source_targets_delete;
 DROP TRIGGER IF EXISTS fact_ids_insert;
 DROP TRIGGER IF EXISTS fact_ids_update;
-DROP TABLE IF EXISTS index_targets;
+DROP VIEW IF EXISTS initial_target_layout;
+DROP TABLE IF EXISTS target_slots;
+DROP TABLE IF EXISTS position_blocks;
+DROP TABLE IF EXISTS prepared_geometry;
 DROP TABLE IF EXISTS index_predicates;
 DROP TRIGGER IF EXISTS lines_ai;
 DROP TRIGGER IF EXISTS lines_ad;
 DROP TABLE IF EXISTS lines_fts;
-DROP TABLE IF EXISTS lines;
+DROP TABLE IF EXISTS text_rows;
 DROP TABLE IF EXISTS fact_values;
-DROP TABLE IF EXISTS fact_locations;
+DROP TABLE IF EXISTS fact_location_slots;
+DROP TABLE IF EXISTS fact_frames;
 DROP TABLE IF EXISTS source_maps;
 DROP TABLE IF EXISTS fact_sources;
 DROP TABLE IF EXISTS predicate_kinds;
@@ -514,9 +562,45 @@ fn meta(conn: &rusqlite::Connection, key: &str) -> Result<Option<String>> {
 fn create(conn: &rusqlite::Connection, epoch: &str) -> Result<()> {
     conn.execute_batch("BEGIN IMMEDIATE;")?;
     let done: Result<()> = (|| {
-        let facts_kind: Option<String> = conn.query_row("SELECT type FROM sqlite_master WHERE name='facts'", [], |r| r.get(0)).optional()?;
+        let facts_kind: Option<String> = conn
+            .query_row(
+                "SELECT type FROM sqlite_master WHERE name='facts'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
         if let Some(kind) = facts_kind {
-            conn.execute_batch(if kind == "view" { "DROP VIEW facts;" } else { "DROP TABLE facts;" })?;
+            conn.execute_batch(if kind == "view" {
+                "DROP VIEW facts;"
+            } else {
+                "DROP TABLE facts;"
+            })?;
+        }
+        let locations_kind: Option<String> = conn
+            .query_row(
+                "SELECT type FROM sqlite_master WHERE name='fact_locations'",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(kind) = locations_kind {
+            conn.execute_batch(if kind == "view" {
+                "DROP VIEW fact_locations;"
+            } else {
+                "DROP TABLE fact_locations;"
+            })?;
+        }
+        for name in ["index_targets", "lines"] {
+            let kind: Option<String> = conn
+                .query_row(
+                    "SELECT type FROM sqlite_master WHERE name=?1",
+                    [name],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(kind) = kind {
+                conn.execute_batch(&format!("DROP {kind} {name};"))?;
+            }
         }
         conn.execute_batch(DROP_ALL)?;
         conn.execute_batch(SCHEMA)?;
@@ -548,6 +632,88 @@ fn create(conn: &rusqlite::Connection, epoch: &str) -> Result<()> {
             return Err(e);
         }
     }
+    Ok(())
+}
+
+fn apply_plan(
+    db: &rusqlite::Connection,
+    namespace: &str,
+    plan: &Plan,
+    pass: &mut IndexPass,
+    reused: &BTreeSet<String>,
+) -> Result<()> {
+    for (_, step) in &plan.steps {
+        match step {
+            Step::Forget { rel_path } => {
+                forget_path(db, namespace, rel_path)?;
+                pass.removed += 1;
+            }
+            Step::Put { rel_path, rows } => {
+                if let Rows::Lines(lines, source) = rows {
+                    text_writer::replace(db, rel_path, lines, source.as_ref())?;
+                } else if let Rows::Facts(facts, source_version) = rows {
+                    if reused.contains(rel_path) {
+                        writer::replace_facts_mode(
+                            db,
+                            namespace,
+                            rel_path,
+                            facts,
+                            source_version.as_deref(),
+                            true,
+                        )?;
+                    } else {
+                        writer::replace_facts(
+                            db,
+                            namespace,
+                            rel_path,
+                            facts,
+                            source_version.as_deref(),
+                        )?;
+                    }
+                }
+                pass.indexed += 1;
+            }
+            Step::Rekey { from, to } => {
+                forget_path(db, namespace, to)?;
+                // Nothing moved means another process moved
+                // it first, which is the rows already being
+                // where this one was about to put them.
+                db.execute(
+                    "UPDATE facts SET rel_path = ?3
+                                  WHERE namespace = ?1 AND rel_path = ?2",
+                    rusqlite::params![namespace, from, to],
+                )?;
+                db.execute(
+                    "UPDATE fact_sources SET rel_path=?3 WHERE namespace=?1 AND rel_path=?2",
+                    rusqlite::params![namespace, from, to],
+                )?;
+                pass.moved += 1;
+            }
+        }
+    }
+    for (_, step) in &plan.steps {
+        let paths: Vec<&str> = match step {
+            Step::Forget { rel_path } | Step::Put { rel_path, .. } => vec![rel_path],
+            Step::Rekey { from, to } => vec![from, to],
+        };
+        for path in paths {
+            db.execute("DELETE FROM fact_locations WHERE rel_path=?1 AND NOT EXISTS (SELECT 1 FROM fact_values WHERE location_id=fact_locations.id)", [path])?;
+            db.execute("DELETE FROM fact_frames WHERE rel_path=?1 AND NOT EXISTS (SELECT 1 FROM fact_location_slots WHERE frame_id=fact_frames.id)", [path])?;
+        }
+    }
+    set_cursor(db, namespace, plan.cursor.max(plan.expected_cursor))?;
+    match &plan.failure {
+        Some(message) => db.execute(
+            "UPDATE namespaces SET last_error = ?2, last_error_ms = ?3
+                          WHERE namespace = ?1",
+            rusqlite::params![namespace, message, ids::now_ms()],
+        )?,
+        None => db.execute(
+            "UPDATE namespaces SET last_error = NULL, last_error_ms = NULL
+                          WHERE namespace = ?1 AND last_error IS NOT NULL",
+            [namespace],
+        )?,
+    };
     Ok(())
 }
 
@@ -621,11 +787,13 @@ struct NoteText {
 
 impl NoteText {
     fn snapshot(&self) -> std::result::Result<&gilune_document::TextSnapshot, String> {
-        self.snapshot.get_or_init(|| {
-            let _profile = crate::update_profile::span("source_snapshot_parse", "");
-            gilune_document::TextSnapshot::new(self.source.clone()).map_err(|e| e.to_string())
-        })
-            .as_ref().map_err(Clone::clone)
+        self.snapshot
+            .get_or_init(|| {
+                let _profile = crate::update_profile::span("source_snapshot_parse", "");
+                gilune_document::TextSnapshot::new(self.source.clone()).map_err(|e| e.to_string())
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 }
 
@@ -675,7 +843,11 @@ pub(crate) fn body_of(text: &str) -> String {
         .split('\n')
         .map(|line| line.strip_suffix('\r').unwrap_or(line))
         .collect();
-    if lines.first().map(|line| line.trim_start_matches('\u{feff}').trim()) != Some("---") {
+    if lines
+        .first()
+        .map(|line| line.trim_start_matches('\u{feff}').trim())
+        != Some("---")
+    {
         return lines.join("\n");
     }
     let Some(close) = lines.iter().skip(1).position(|line| line.trim() == "---") else {
@@ -818,19 +990,21 @@ impl Store {
             });
         }
         self.with_index(|db| {
-            let held: Option<(i64,bool)> = db
+            let held: Option<(i64, bool)> = db
                 .query_row(
                     "SELECT version,scoped FROM namespaces WHERE namespace = ?1",
                     [namespace],
-                    |row| Ok((row.get(0)?,row.get(1)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .map(Some)
                 .or_else(no_rows_none)?;
-            let scoped=indexer.uses_scoped_input();
-            if held.is_some_and(|(v,s)| v==version && s!=scoped) {
-                return Err(KernelError::SearchInvalid { detail:"Changing indexer location mode requires a version bump".into() });
+            let scoped = indexer.uses_scoped_input();
+            if held.is_some_and(|(v, s)| v == version && s != scoped) {
+                return Err(KernelError::SearchInvalid {
+                    detail: "Changing indexer location mode requires a version bump".into(),
+                });
             }
-            if held != Some((version,scoped)) {
+            if held != Some((version, scoped)) {
                 db.execute_batch("BEGIN IMMEDIATE;")?;
                 let done: Result<()> = (|| {
                     forget_namespace(db, namespace)?;
@@ -894,6 +1068,10 @@ impl Store {
             [],
             |row| row.get(0),
         )?;
+        let registered: Vec<Registration> = self.indexers.borrow().clone();
+        if self.publish_ready_page(&registered, &epoch, tip, &mut notes, &mut pass)? {
+            return Ok(pass);
+        }
         self.advance_namespace(
             TEXT_NAMESPACE,
             Source::Text,
@@ -910,7 +1088,6 @@ impl Store {
             &mut notes,
             &mut pass,
         )?;
-        let registered: Vec<Registration> = self.indexers.borrow().clone();
         for registration in &registered {
             self.advance_namespace(
                 &registration.namespace,
@@ -955,7 +1132,8 @@ impl Store {
                     }
                     None => {
                         db.execute("DELETE FROM fact_values", [])?;
-                        db.execute("DELETE FROM fact_locations", [])?;
+                        db.execute("DELETE FROM fact_location_slots", [])?;
+                        db.execute("DELETE FROM fact_frames", [])?;
                         db.execute("DELETE FROM index_predicates", [])?;
                         db.execute("DELETE FROM fact_sources", [])?;
                         db.execute("DELETE FROM source_maps", [])?;
@@ -1337,9 +1515,13 @@ impl Store {
         let rows = match source {
             Source::Text => {
                 let _profile = crate::update_profile::span("derive_text", TEXT_NAMESPACE);
-                Rows::Lines(text_rows(rel_path, &note.body), note.snapshot().ok().map(|s|
-                    (s.version().into(), scoped::encode_layout(s.layout()))))
-            },
+                Rows::Lines(
+                    text_rows(rel_path, &note.body),
+                    note.snapshot()
+                        .ok()
+                        .map(|s| (s.version().into(), scoped::encode_layout(s.layout()))),
+                )
+            }
             Source::FrontMatter => Rows::Facts(
                 note.front_matter
                     .iter()
@@ -1352,26 +1534,46 @@ impl Store {
                         num: None,
                         typed: true,
                     })
-                    .collect(), note.snapshot().ok().map(|s| s.version().into()),
+                    .collect(),
+                note.snapshot().ok().map(|s| s.version().into()),
             ),
             Source::Plugin(registration) => {
                 if registration.indexer.uses_scoped_input() {
                     let snapshot = note.snapshot()?;
                     let facts = {
-                        let _profile = crate::update_profile::span("plugin_call_including_adapter", &registration.namespace);
+                        let _profile = crate::update_profile::span(
+                            "plugin_call_including_adapter",
+                            &registration.namespace,
+                        );
                         registration.indexer.index_scoped(rel_path, snapshot)?
                     };
-                    let _profile = crate::update_profile::span("validate_scoped_facts", &registration.namespace);
-                    return Ok(Step::Put { rel_path: rel_path.into(), rows: Rows::Facts(
-                        facts.into_iter().map(|fact| scoped::typed_scoped_row(&registration.kinds, snapshot, fact)).collect::<std::result::Result<_, _>>()?, Some(snapshot.version().into())
-                    ) });
+                    let _profile = crate::update_profile::span(
+                        "validate_scoped_facts",
+                        &registration.namespace,
+                    );
+                    return Ok(Step::Put {
+                        rel_path: rel_path.into(),
+                        rows: Rows::Facts(
+                            facts
+                                .into_iter()
+                                .map(|fact| {
+                                    scoped::typed_scoped_row(&registration.kinds, snapshot, fact)
+                                })
+                                .collect::<std::result::Result<_, _>>()?,
+                            Some(snapshot.version().into()),
+                        ),
+                    });
                 }
-                let facts = registration.indexer.index_source(rel_path, &note.source, &note.body)?;
+                let facts =
+                    registration
+                        .indexer
+                        .index_source(rel_path, &note.source, &note.body)?;
                 Rows::Facts(
                     facts
                         .into_iter()
                         .map(|fact| typed_row(&registration.kinds, fact))
-                        .collect(), None,
+                        .collect(),
+                    None,
                 )
             }
         };
@@ -1400,61 +1602,14 @@ impl Store {
                 };
             }
             let done: Result<()> = (|| {
-                for (_, step) in &plan.steps {
-                    match step {
-                        Step::Forget { rel_path } => {
-                            forget_path(db, namespace, rel_path)?;
-                            pass.removed += 1;
-                        }
-                        Step::Put { rel_path, rows } => {
-                            forget_path(db, namespace, rel_path)?;
-                            put(db, namespace, rel_path, rows)?;
-                            pass.indexed += 1;
-                        }
-                        Step::Rekey { from, to } => {
-                            forget_path(db, namespace, to)?;
-                            // Nothing moved means another process moved
-                            // it first, which is the rows already being
-                            // where this one was about to put them.
-                            db.execute(
-                                "UPDATE facts SET rel_path = ?3
-                                  WHERE namespace = ?1 AND rel_path = ?2",
-                                rusqlite::params![namespace, from, to],
-                            )?;
-                            db.execute("UPDATE fact_sources SET rel_path=?3 WHERE namespace=?1 AND rel_path=?2", rusqlite::params![namespace, from, to])?;
-                            pass.moved += 1;
-                        }
-                    }
-                }
-                for (_, step) in &plan.steps {
-                    let paths: Vec<&str> = match step {
-                        Step::Forget { rel_path } | Step::Put { rel_path, .. } => vec![rel_path],
-                        Step::Rekey { from, to } => vec![from, to],
-                    };
-                    for path in paths {
-                        db.execute("DELETE FROM fact_locations WHERE rel_path=?1 AND NOT EXISTS (SELECT 1 FROM fact_values WHERE location_id=fact_locations.id)", [path])?;
-                    }
-                }
-                set_cursor(db, namespace, plan.cursor.max(plan.expected_cursor))?;
-                match &plan.failure {
-                    Some(message) => db.execute(
-                        "UPDATE namespaces SET last_error = ?2, last_error_ms = ?3
-                          WHERE namespace = ?1",
-                        rusqlite::params![namespace, message, ids::now_ms()],
-                    )?,
-                    None => db.execute(
-                        "UPDATE namespaces SET last_error = NULL, last_error_ms = NULL
-                          WHERE namespace = ?1 AND last_error IS NOT NULL",
-                        [namespace],
-                    )?,
-                };
+                apply_plan(db, namespace, &plan, pass, &BTreeSet::new())?;
                 Ok(())
             })();
             match done {
                 Ok(()) => {
                     let _profile = crate::update_profile::span("durable_commit", namespace);
                     db.execute_batch("COMMIT;")?;
-                },
+                }
                 Err(e) => {
                     let _ = db.execute_batch("ROLLBACK;");
                     return Err(e);
@@ -1553,8 +1708,12 @@ fn forget_namespace(db: &rusqlite::Connection, namespace: &str) -> Result<()> {
     } else {
         db.execute("DELETE FROM fact_values WHERE predicate_id IN (SELECT id FROM index_predicates WHERE namespace=?1)", [namespace])?;
         db.execute("DELETE FROM fact_sources WHERE namespace = ?1", [namespace])?;
-        db.execute("DELETE FROM index_predicates WHERE namespace = ?1", [namespace])?;
-        db.execute("DELETE FROM fact_locations WHERE NOT EXISTS (SELECT 1 FROM fact_values WHERE location_id=fact_locations.id)", [])?;
+        db.execute(
+            "DELETE FROM index_predicates WHERE namespace = ?1",
+            [namespace],
+        )?;
+        db.execute("DELETE FROM fact_location_slots WHERE NOT EXISTS (SELECT 1 FROM fact_values WHERE location_id=fact_location_slots.id)", [])?;
+        db.execute("DELETE FROM fact_frames WHERE NOT EXISTS (SELECT 1 FROM fact_location_slots WHERE frame_id=fact_frames.id)", [])?;
     }
     Ok(())
 }
@@ -1575,11 +1734,15 @@ fn forget_path(db: &rusqlite::Connection, namespace: &str, rel_path: &str) -> Re
             "DELETE FROM fact_values WHERE location_id IN (SELECT id FROM fact_locations WHERE rel_path=?2) AND predicate_id IN (SELECT id FROM index_predicates WHERE namespace=?1)",
             rusqlite::params![namespace, rel_path],
         )?;
-        db.execute("DELETE FROM fact_sources WHERE namespace=?1 AND rel_path=?2", rusqlite::params![namespace, rel_path])?;
+        db.execute(
+            "DELETE FROM fact_sources WHERE namespace=?1 AND rel_path=?2",
+            rusqlite::params![namespace, rel_path],
+        )?;
     }
     Ok(())
 }
 
+#[cfg(test)]
 fn put(db: &rusqlite::Connection, namespace: &str, rel_path: &str, rows: &Rows) -> Result<()> {
     match rows {
         Rows::Lines(lines, source) => {
@@ -1867,7 +2030,10 @@ fn build_query(constraints: &[Constraint], scope: QueryScope) -> (String, Vec<Va
 pub(crate) fn piece(constraint: &Constraint) -> Piece {
     let mut part = document_piece(constraint);
     if !matches!(constraint, Constraint::Text { .. }) {
-        part.sql = format!("SELECT rel_path, line FROM ({}) WHERE item_key IS NULL", part.sql);
+        part.sql = format!(
+            "SELECT rel_path, line FROM ({}) WHERE item_key IS NULL",
+            part.sql
+        );
     }
     part
 }
@@ -1896,7 +2062,10 @@ fn scoped_piece_from(constraint: &Constraint, fact_table: &str) -> Piece {
             op,
             value,
             locality,
-        } => localize(fact_piece_from(predicate, *op, value, fact_table), *locality),
+        } => localize(
+            fact_piece_from(predicate, *op, value, fact_table),
+            *locality,
+        ),
         Constraint::FactIn {
             predicate,
             values,
@@ -1917,8 +2086,8 @@ fn scoped_piece_from(constraint: &Constraint, fact_table: &str) -> Piece {
 }
 
 pub(crate) fn document_piece(constraint: &Constraint) -> Piece {
-    let mut part=scoped_piece(constraint);
-    if !matches!(constraint,Constraint::Text { .. }) {
+    let mut part = scoped_piece(constraint);
+    if !matches!(constraint, Constraint::Text { .. }) {
         part.sql=format!("SELECT f.* FROM ({}) f WHERE f.source_version IS NULL OR EXISTS (SELECT 1 FROM source_maps s WHERE s.rel_path=f.rel_path AND s.source_version=f.source_version)",part.sql);
     }
     part
@@ -2040,3 +2209,8 @@ mod tests;
 
 #[cfg(test)]
 mod prefix_tests;
+
+#[cfg(test)]
+pub(crate) fn create_position_fixture(db: &rusqlite::Connection) -> Result<()> {
+    create(db, "position-fixture")
+}

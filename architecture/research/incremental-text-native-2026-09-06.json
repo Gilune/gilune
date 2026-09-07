@@ -1,0 +1,323 @@
+{
+  "note": "Five alternated old/new trials. Parsing, source-map/target replacement, text/FTS, full-durability WAL commits included. No plugin facts or application reconciliation.",
+  "cases": [
+    {
+      "edit": "one_value",
+      "items": 100,
+      "samples": [
+        {
+          "deleted": 1,
+          "differential_ms": 2.9746,
+          "full_ms": 6.4947,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 102,
+          "trial": 0
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 2.342,
+          "full_ms": 5.9193,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 102,
+          "trial": 1
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 73.74680000000001,
+          "full_ms": 6.194500000000001,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 102,
+          "trial": 2
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 3.4707000000000003,
+          "full_ms": 6.5701,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 102,
+          "trial": 3
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 3.1403,
+          "full_ms": 6.616300000000001,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 102,
+          "trial": 4
+        }
+      ],
+      "full_median_ms": 6.4947,
+      "differential_median_ms": 3.1403
+    },
+    {
+      "edit": "insert_prefix",
+      "items": 100,
+      "samples": [
+        {
+          "deleted": 0,
+          "differential_ms": 3.1673999999999998,
+          "full_ms": 26.2578,
+          "inserted": 1,
+          "moved": 101,
+          "retained": 2,
+          "trial": 0
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 72.8182,
+          "full_ms": 6.0119,
+          "inserted": 1,
+          "moved": 101,
+          "retained": 2,
+          "trial": 1
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 3.4032,
+          "full_ms": 6.0903,
+          "inserted": 1,
+          "moved": 101,
+          "retained": 2,
+          "trial": 2
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 74.05499999999999,
+          "full_ms": 5.9785,
+          "inserted": 1,
+          "moved": 101,
+          "retained": 2,
+          "trial": 3
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 2.5841000000000003,
+          "full_ms": 6.300400000000001,
+          "inserted": 1,
+          "moved": 101,
+          "retained": 2,
+          "trial": 4
+        }
+      ],
+      "full_median_ms": 6.0903,
+      "differential_median_ms": 3.4032
+    },
+    {
+      "edit": "one_value",
+      "items": 1000,
+      "samples": [
+        {
+          "deleted": 1,
+          "differential_ms": 15.5168,
+          "full_ms": 83.20139999999999,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 1002,
+          "trial": 0
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 16.5112,
+          "full_ms": 81.1987,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 1002,
+          "trial": 1
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 15.3276,
+          "full_ms": 81.451,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 1002,
+          "trial": 2
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 14.1393,
+          "full_ms": 85.0933,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 1002,
+          "trial": 3
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 86.4492,
+          "full_ms": 91.5094,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 1002,
+          "trial": 4
+        }
+      ],
+      "full_median_ms": 83.20139999999999,
+      "differential_median_ms": 15.5168
+    },
+    {
+      "edit": "insert_prefix",
+      "items": 1000,
+      "samples": [
+        {
+          "deleted": 0,
+          "differential_ms": 21.621499999999997,
+          "full_ms": 81.4724,
+          "inserted": 1,
+          "moved": 1001,
+          "retained": 2,
+          "trial": 0
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 16.8688,
+          "full_ms": 86.15559999999999,
+          "inserted": 1,
+          "moved": 1001,
+          "retained": 2,
+          "trial": 1
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 86.6189,
+          "full_ms": 79.4178,
+          "inserted": 1,
+          "moved": 1001,
+          "retained": 2,
+          "trial": 2
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 16.1736,
+          "full_ms": 83.2266,
+          "inserted": 1,
+          "moved": 1001,
+          "retained": 2,
+          "trial": 3
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 16.4686,
+          "full_ms": 79.959,
+          "inserted": 1,
+          "moved": 1001,
+          "retained": 2,
+          "trial": 4
+        }
+      ],
+      "full_median_ms": 81.4724,
+      "differential_median_ms": 16.8688
+    },
+    {
+      "edit": "one_value",
+      "items": 10000,
+      "samples": [
+        {
+          "deleted": 1,
+          "differential_ms": 202.185,
+          "full_ms": 934.9471,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 10002,
+          "trial": 0
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 256.0856,
+          "full_ms": 971.3719,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 10002,
+          "trial": 1
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 134.6744,
+          "full_ms": 1033.3935999999999,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 10002,
+          "trial": 2
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 131.6063,
+          "full_ms": 1072.8310000000001,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 10002,
+          "trial": 3
+        },
+        {
+          "deleted": 1,
+          "differential_ms": 266.4033,
+          "full_ms": 1018.2379,
+          "inserted": 1,
+          "moved": 0,
+          "retained": 10002,
+          "trial": 4
+        }
+      ],
+      "full_median_ms": 1018.2379,
+      "differential_median_ms": 202.185
+    },
+    {
+      "edit": "insert_prefix",
+      "items": 10000,
+      "samples": [
+        {
+          "deleted": 0,
+          "differential_ms": 236.4521,
+          "full_ms": 1135.7306,
+          "inserted": 1,
+          "moved": 10001,
+          "retained": 2,
+          "trial": 0
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 154.6186,
+          "full_ms": 1120.6472999999999,
+          "inserted": 1,
+          "moved": 10001,
+          "retained": 2,
+          "trial": 1
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 285.01140000000004,
+          "full_ms": 1057.1964,
+          "inserted": 1,
+          "moved": 10001,
+          "retained": 2,
+          "trial": 2
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 219.0087,
+          "full_ms": 1041.4635,
+          "inserted": 1,
+          "moved": 10001,
+          "retained": 2,
+          "trial": 3
+        },
+        {
+          "deleted": 0,
+          "differential_ms": 237.0534,
+          "full_ms": 1031.3334,
+          "inserted": 1,
+          "moved": 10001,
+          "retained": 2,
+          "trial": 4
+        }
+      ],
+      "full_median_ms": 1057.1964,
+      "differential_median_ms": 236.4521
+    }
+  ]
+}

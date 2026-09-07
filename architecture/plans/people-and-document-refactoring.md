@@ -2022,3 +2022,166 @@ workspace/all-target Clippy passed, and Android app/test APK builds passed.
 Application and update benchmarks passed separately. No Android device was
 attached, so runtime validation remains unavailable. The migration is complete;
 broader People/refactoring P3/P6 acceptance remains open.
+
+## 34. Incremental text storage as the first differential-update step (2026-09-06)
+
+The owner requested a start on incremental database maintenance. The
+[implementation report](../research/incremental-text-maintenance-2026-09-06.md)
+records the first production change: compare the new text rows with the stored
+document instead of replacing every text/FTS entry. Plugin recognition, source
+target replacement and producer fact replacement remain complete-document work.
+
+- [x] Retain unchanged text entries and update only coordinates for identical
+  moved text. Preserve duplicate counts, field boundaries, Unicode/CRLF, FTS
+  integrity, transactional rollback and stale-source binding safeguards.
+- [x] Use snapshots supplied by ordinary reconciliation, including external
+  edits, without depending on a shell edit stream or adding domain identities.
+- [x] Compare against full replacement for single-line and prefix-insertion
+  edits at 100, 1,000 and 10,000 items, alternating execution order across five
+  trials. Verify complete indexed text and FTS equivalence after each edit.
+- [x] Run complete application edit/restore trials with both plugins and audit
+  all 63,505 restored facts and their current bindings. Rebuild/stage all shipped
+  native kernels and verify unchanged per-target public bindings.
+- [x] Design and implement differential fact/target maintenance (section 35) with
+  explicit handling of source revisions, shifted locations, independent producer
+  commits, lagging producers and rollback. Reusing text rows does not establish
+  permission to rebind old plugin evidence to a new snapshot.
+
+For 10,000 items, isolated parsing/source-target/text maintenance falls from
+**1.018 seconds to 202 ms** for one changed line, and **1.057 seconds to 236 ms**
+for a new prefix paragraph. The complete real-plugin edit falls from **3.097 to
+2.100 seconds median (32.2%)**. Full plugin facts still regenerate; this is not
+completion of task-level incremental indexing. All samples and comparison limits
+are retained in the report.
+
+Validation: **570 native tests passed** (22 ignored/opt-in), **633 desktop tests
+passed** (five opt-in methods skipped), release Clippy passed, and both Android
+APK builds passed. The manual benchmark passed separately. The final data audit
+found no fact differences, invalid/unbound targets or unused locations. Android
+device/runtime validation remains unavailable. Schema 9 and public APIs remain
+unchanged, and People and Tasks retain independent implementations.
+
+## 35. Incremental fact and target maintenance (2026-09-06)
+
+The [implementation and measurement report](../research/incremental-fact-target-maintenance-2026-09-06.md)
+records the next production phase. Schema 10 retains matching target coordinate
+rows and compares each producer's complete ordered facts against stored rows.
+Changed values update in place; additions/removals change row counts. Revision
+changes still detach old evidence and advance retained facts' bindings. People
+and Tasks remain independent, and query SQL and public FFI contracts are unchanged.
+
+- [x] Retain unchanged targets and fact values without allowing old producer
+  evidence to bind to a new source revision. Preserve ordered duplicates,
+  rollback, independent receipts, stale evidence and WAL reader snapshots.
+- [x] Compare structural, Unicode/CRLF, reordered, resized and empty outputs
+  with full replacement; exercise schema 5–9 rebuilds and failed producers.
+- [x] Measure complete application edits against a fresh previous-DLL baseline,
+  profile the remaining costs and audit all 63,505 restored facts and bindings.
+- [x] Rebuild and stage shipped kernels, verify per-target generated bindings,
+  and run native, desktop, Clippy and Android build validation.
+- [x] Investigate reducing revision-binding writes and commit overhead while
+  preserving exact source provenance and independent producer failure behavior.
+  Establish correctness and read/write performance evidence before changing
+  publication or provenance contracts.
+
+The 10,000-task edit improves from **1.733 to 1.652 seconds median (4.7%)** in
+fresh comparison runs. The earlier baseline measured 2.100 seconds elsewhere;
+it is not used to inflate this improvement. Instrumented medians attribute about
+452 ms to source/target maintenance, 747 ms to fact comparison/writes and 291 ms
+to durable commits. This does not yet make updates proportional to changed tasks.
+
+Validation: **574 native tests passed** (22 ignored/opt-in), **633 desktop tests
+passed** (five opt-in methods skipped), release Clippy and Android APK builds
+passed. A sync timing failure during a concurrent build was followed by a passing
+full isolated sync suite and a 4.165-second isolated timing repeat. The final
+fact audit found no differences or invalid bindings. No Android device was
+attached. Broader People/refactoring P3/P6 acceptance remains open.
+
+## 36. Local plugin inputs and coherent publication (2026-09-06)
+
+The owner asked to carry changed input through processing instead of treating
+each edit as a complete producer replacement. The
+[implementation report](../research/local-input-publication-2026-09-06.md)
+records the local-input contract and schema-11 publication work.
+
+- [x] Add an opt-in, domain-independent local scoped-indexer contract. Compare
+  source inputs and parser eligibility, reuse successful local outputs, and
+  remap shifted locations. Retain the full-input contract for other producers.
+- [x] Exercise the contract independently in People and Tasks, through the SDK
+  and FFI. Test full/local equivalence, metadata, fences, nesting, Unicode,
+  insertions, deletion and failed callbacks.
+- [x] Prepare aligned one-path outputs before the write transaction; validate
+  cursor/version state again before publishing. Preserve missing/failed owners'
+  old source evidence, rollback, receipts and independent reader snapshots.
+- [x] Reuse coordinate slots and compare facts within each reused location, so
+  inserting or removing one item's facts does not shift all later comparisons.
+  Replace pathological tuple membership in target removal.
+- [x] Measure complete 10,000-task edits, including cold registrations and
+  length-changing edits. Record the remaining absolute-coordinate and provenance
+  writes rather than declaring fully local storage or a completed latency budget.
+- [x] Investigate block-relative positions and coarser revision-validity records
+  so edits do not rewrite absolute coordinates or source versions for every later
+  location. Preserve source-qualified query results and measure read-path costs.
+
+Warm complete edits measure about 380 ms for a same-length value change and
+680–770 ms for longer lines, insertion or deletion. Cold samples remain about
+0.8–1.2 seconds. Full Markdown context parsing and assembled-fact comparison
+remain; opted-in plugin recognition is local. The cache is disposable and bounded.
+Broader People/refactoring acceptance remains open.
+
+## 37. Position storage investigation (2026-09-06)
+
+The owner asked to remove coordinate-moving costs while preserving query speed.
+The [experiment and delivery design](../research/revision-position-storage-2026-09-06.md)
+separate compact fact selection from revision-qualified position data. This is a
+test-only position-block experiment. The subsequent
+[shared-frame delivery](../research/shared-revision-frames-2026-09-07.md) moves
+revision validity into production schema 12. The
+[position-block delivery](../research/position-block-delivery-2026-09-07.md)
+completes geometry/order migration in schema 13.
+
+- [x] Audit uses of target IDs, order keys, byte ranges, line numbers and source
+  revisions. Keep plugin facts and the compact filtering indexes independent of
+  the position representation.
+- [x] Prototype bounded position blocks, direct item-slot projection, indexed
+  snippet reconstruction and sequential text reads. Compare actual exported DSL
+  results, counts and cursors against the current executor.
+- [x] Measure coordinate publication for a longer first line in a 10,000-task
+  document, including encoding and committed SQLite writes. Check all resulting
+  item ranges against the new parsed snapshot.
+- [x] Deliver private slot allocation and order maintenance for insertions,
+  deletions and reordering; preserve generation-qualified pagination.
+- [x] Normalise source frames and integrate real producer failure, stale evidence,
+  coherent publication, rollback and garbage collection. Keep the conservative
+  replacement path when all affected evidence cannot advance together.
+- [x] Migrate all public item/root/line and legacy location readers, plus indexed
+  prose coordinates. Freeze the checked encoding and schema rebuild fixtures.
+- [x] Repeat the query matrix and end-to-end update tests on the actual migrated
+  schema, with the old coordinate representation removed. Preserve query latency
+  and publish the remaining complete-fact-processing cost separately.
+
+The experiment demonstrates a way to replace thousands of indexed coordinate
+mutations with compact geometry writes. It does not make the whole edit pipeline
+local or establish a final end-to-end latency target.
+
+## 38. Relative position storage delivered (2026-09-07)
+
+The [delivery report](../research/position-block-delivery-2026-09-07.md) records
+production schema 13, using relational blocks and private sparse order labels.
+Current fact/text coordinates follow retained slots; stale producer evidence
+retains its original source coordinates. Position changes no longer rewrite
+every following target, fact location and text row. Queries resolve only the
+returned geometry and preserve indexed selection/pagination.
+
+All 118 old/new query comparisons preserve results. The Alice/open/due-month
+query over 50,000 tasks improves from 5.110 to 4.081 ms for the first 50; the
+first 500 improves from 28.858 to 18.520 ms. Vacuumed storage grows 3.9–6.5%
+against shared-frame schema 12. Complete 10,000-task edits improve from
+621 to 449 ms for a longer line, 720 to 506 ms for a prefix, and 703 to 441 ms
+for deletion. Normal same-length edits improve from 360 to 310 ms. These are
+fresh measured comparisons, not a completed latency target.
+
+Whole-document geometry/fact comparison and adapter costs remain, measured
+separately in the report. A future phase can narrow those inputs further; this
+delivery does not pretend that replacing coordinate writes removes all work
+proportional to document size. Broader People/refactoring acceptance remains open.

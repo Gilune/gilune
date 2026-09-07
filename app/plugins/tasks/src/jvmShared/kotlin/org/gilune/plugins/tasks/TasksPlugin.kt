@@ -279,5 +279,5 @@ fun tasksExtensions(): BundledPluginExtensions = BundledPluginExtensions(
         dateValues(key)
     }),
     fieldSlots = setOf(TASK_FIELDS_SLOT),
-    scopedIndexer = org.gilune.plugin.sdk.ScopedIndexerRegistration(TASKS_INDEXER_VERSION, taskPredicateKinds(), ::TasksScopedIndexer),
+    scopedIndexer = org.gilune.plugin.sdk.ScopedIndexerRegistration(TASKS_INDEXER_VERSION, taskPredicateKinds(), createLocal = ::TasksScopedIndexer, create = ::TasksScopedIndexer),
 )

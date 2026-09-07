@@ -1,0 +1,58 @@
+{
+  "date": "2026-09-07",
+  "index_schema": 12,
+  "native": {
+    "passed": 586,
+    "failed": 0,
+    "ignored": 26
+  },
+  "clippy": "release workspace/all targets, warnings denied: passed",
+  "desktop": {
+    "tests": 640,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5,
+    "passed": 635
+  },
+  "android": {
+    "abis": [
+      "arm64-v8a",
+      "x86_64"
+    ],
+    "native_builds": "passed, includes Whisper",
+    "bindings": "generated from Android binary",
+    "app_and_test_apks": "passed",
+    "device_execution": "not run: no attached device"
+  },
+  "initial_native_sandbox_failures": [
+    "mdns_coexists_with_whatever_else_holds_udp_5353_on_this_machine",
+    "what_goes_on_the_wire_names_no_person_and_no_device"
+  ],
+  "retry": "Complete workspace passed with network access; no network code changed.",
+  "artifacts": {
+    "app/composeApp/resources/windows-x64/gilune_ffi.dll": {
+      "bytes": 8230400,
+      "sha256": "6618a99ce9bca1b88c03ca5f59f041fb232747d3c353497dcdbab193f1f57aca"
+    },
+    "kernel/target/release/gilune_ffi.dll": {
+      "bytes": 8230400,
+      "sha256": "6618a99ce9bca1b88c03ca5f59f041fb232747d3c353497dcdbab193f1f57aca"
+    },
+    "app/composeApp/src/androidMain/jniLibs/arm64-v8a/libgilune_ffi.so": {
+      "bytes": 9579672,
+      "sha256": "6e8043c004e36b2f1c91ea5c1f47944ea2c78dc7c13106b6ed45ee64689d4950"
+    },
+    "app/composeApp/src/androidMain/jniLibs/x86_64/libgilune_ffi.so": {
+      "bytes": 9771952,
+      "sha256": "08d35ad4983fe8bea52fffcfe03cbd23a379cd816035a8186a2faf98cadf6a1c"
+    },
+    "app/kernelBindings/src/desktopMain/generated/uniffi/gilune_ffi/gilune_ffi.kt": {
+      "bytes": 496360,
+      "sha256": "646f28636e521c3b57bdad7e589b86fb7ea229ab6699c2142780409c0db8d216"
+    },
+    "app/kernelBindings/src/androidMain/generated/uniffi/gilune_ffi/gilune_ffi.kt": {
+      "bytes": 496676,
+      "sha256": "e9b28ac35e288d92783290928270f38260c574a8988f90cbc7b00790d9783b30"
+    }
+  }
+}

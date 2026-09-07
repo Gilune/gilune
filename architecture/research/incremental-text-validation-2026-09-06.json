@@ -1,0 +1,17 @@
+{
+  "native": {
+    "passed": 570,
+    "failed": 0,
+    "ignored": 22
+  },
+  "desktop": {
+    "passed": 633,
+    "failures": 0,
+    "tests": 638,
+    "errors": 0,
+    "skipped": 5
+  },
+  "clippy": "Release workspace/all-targets with warnings denied passed.",
+  "android": "Both kernels rebuilt with Whisper; app/test APK builds passed. No device attached; runtime checks unrun.",
+  "note": "Full release workspace run with serial test execution. Desktop counts saved before the opt-in benchmark replaced its XML results."
+}

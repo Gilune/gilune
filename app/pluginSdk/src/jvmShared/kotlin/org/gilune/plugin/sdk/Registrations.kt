@@ -59,5 +59,8 @@ class SourceIndexerRegistration(
 class ScopedIndexerRegistration(
     val version: Long,
     val predicates: List<PredicateKind>,
+    val createLocal: (() -> uniffi.gilune_ffi.LocalScopedIndexer)?,
     val create: () -> ScopedIndexer,
-)
+) {
+    constructor(version: Long, predicates: List<PredicateKind>, create: () -> ScopedIndexer) : this(version, predicates, null, create)
+}

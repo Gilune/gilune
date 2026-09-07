@@ -7,20 +7,50 @@ type Line = (u32, u64, u64, String);
 #[derive(Default)]
 pub(super) struct TextWindow {
     source: i64,
+    limit_to_span: bool,
     lines: Vec<Line>,
 }
 
 impl TextWindow {
-    fn ensure(&mut self, db: &Connection, source: i64, path: &str, offset: u64) -> Result<()> {
+    pub(super) fn at(db: &Connection, source: i64, offset: u64) -> Result<Self> {
+        let lines = index::positions::lines(db, source, offset, 1)?;
+        #[cfg(test)]
+        target_projection::WORK.with(|w| {
+            let (items, read) = w.get();
+            w.set((items, read + lines.len()));
+        });
+        Ok(Self {
+            source,
+            lines,
+            limit_to_span: true,
+        })
+    }
+
+    fn ensure(
+        &mut self,
+        db: &Connection,
+        source: i64,
+        _path: &str,
+        offset: u64,
+        finish: Option<u64>,
+    ) -> Result<()> {
         if self.source == source
             && self.lines.first().is_some_and(|l| l.1 <= offset)
             && self.lines.last().is_some_and(|l| offset < l.2)
         {
             return Ok(());
         }
-        let start: u64 = db.query_row("SELECT start_byte FROM index_targets WHERE source_id=?1 AND kind=1 AND start_byte<=?2 ORDER BY start_byte DESC LIMIT 1",rusqlite::params![source,offset],|r|r.get(0))?;
-        self.lines = db.prepare_cached("SELECT t.local_key,t.start_byte,t.end_byte,l.text FROM index_targets t LEFT JOIN lines l ON l.rel_path=?2 AND l.field='body' AND l.line=t.local_key WHERE t.source_id=?1 AND t.kind=1 AND t.start_byte>=?3 ORDER BY t.start_byte LIMIT 256")?
-            .query_map(rusqlite::params![source,path,start], |r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?.collect::<rusqlite::Result<_>>()?;
+        #[cfg(test)]
+        if position_prototype::enabled() {
+            self.lines = position_prototype::lines(db, source, _path, offset)?;
+            self.source = source;
+            return Ok(());
+        }
+        self.lines = if let Some(finish) = finish.filter(|_| self.limit_to_span) {
+            index::positions::lines_until(db, source, offset, finish)?
+        } else {
+            index::positions::lines(db, source, offset, 256)?
+        };
         self.source = source;
         #[cfg(test)]
         target_projection::WORK.with(|w| {
@@ -42,7 +72,7 @@ impl TextWindow {
         end: u64,
         own: Vec<(u64, u64)>,
     ) -> Result<SearchItem> {
-        self.ensure(db, source, path, key)?;
+        self.ensure(db, source, path, key, None)?;
         let first_line = self
             .lines
             .iter()
@@ -57,7 +87,7 @@ impl TextWindow {
             }
             let mut cursor = start;
             while cursor < finish {
-                self.ensure(db, source, path, cursor)?;
+                self.ensure(db, source, path, cursor, Some(finish))?;
                 let before = cursor;
                 for (number, lo, line_end, body) in
                     self.lines.iter().filter(|l| l.2 > before && l.1 < finish)

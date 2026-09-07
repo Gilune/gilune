@@ -10,6 +10,8 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BinaryHeap};
 
 mod items;
+#[cfg(test)]
+mod position_prototype;
 mod target_query;
 mod target_scan;
 mod text_window;
@@ -753,3 +755,6 @@ fn validate(request: &SearchRequest) -> Result<()> {
         }
     Ok(())
 }
+
+#[cfg(test)]
+mod absolute_baseline;

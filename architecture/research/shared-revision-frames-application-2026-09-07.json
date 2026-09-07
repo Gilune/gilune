@@ -1,0 +1,129 @@
+{
+  "updates": {
+    "baseline": {
+      "value": {
+        "samples_ms": [
+          893.6009,
+          409.3793,
+          385.6838
+        ],
+        "warm_median_ms": 397.53155000000004,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=value items_per_document=10000 sample=0 selections={org.memory.tasks=(20503, 19500), org.memory.people=(20503, 44004)}",
+          "LOCAL_EDIT kind=value items_per_document=10000 sample=1 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}",
+          "LOCAL_EDIT kind=value items_per_document=10000 sample=2 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}"
+        ]
+      },
+      "longer": {
+        "samples_ms": [
+          1102.1337,
+          689.8567,
+          700.9587
+        ],
+        "warm_median_ms": 695.4077,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=longer items_per_document=10000 sample=0 selections={org.memory.tasks=(20503, 19500), org.memory.people=(20503, 44004)}",
+          "LOCAL_EDIT kind=longer items_per_document=10000 sample=1 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}",
+          "LOCAL_EDIT kind=longer items_per_document=10000 sample=2 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}"
+        ]
+      },
+      "prefix": {
+        "samples_ms": [
+          1160.0001,
+          797.0762,
+          774.0998
+        ],
+        "warm_median_ms": 785.588,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=prefix items_per_document=10000 sample=0 selections={org.memory.tasks=(20505, 19500), org.memory.people=(20505, 44004)}",
+          "LOCAL_EDIT kind=prefix items_per_document=10000 sample=1 selections={org.memory.tasks=(2, 0), org.memory.people=(2, 0)}",
+          "LOCAL_EDIT kind=prefix items_per_document=10000 sample=2 selections={org.memory.tasks=(2, 0), org.memory.people=(2, 0)}"
+        ]
+      },
+      "delete": {
+        "samples_ms": [
+          1216.8361,
+          740.4877,
+          744.1699
+        ],
+        "warm_median_ms": 742.3288,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=delete items_per_document=10000 sample=0 selections={org.memory.tasks=(20501, 19498), org.memory.people=(20501, 44000)}",
+          "LOCAL_EDIT kind=delete items_per_document=10000 sample=1 selections={}",
+          "LOCAL_EDIT kind=delete items_per_document=10000 sample=2 selections={}"
+        ]
+      }
+    },
+    "current": {
+      "value": {
+        "samples_ms": [
+          332.2029,
+          317.0887,
+          315.2806
+        ],
+        "warm_median_ms": 316.18465000000003,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=value items_per_document=10000 sample=0 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}",
+          "LOCAL_EDIT kind=value items_per_document=10000 sample=1 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}",
+          "LOCAL_EDIT kind=value items_per_document=10000 sample=2 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}"
+        ]
+      },
+      "longer": {
+        "samples_ms": [
+          1060.4154,
+          629.2109,
+          614.8968
+        ],
+        "warm_median_ms": 622.05385,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=longer items_per_document=10000 sample=0 selections={org.memory.tasks=(20503, 19500), org.memory.people=(20503, 44004)}",
+          "LOCAL_EDIT kind=longer items_per_document=10000 sample=1 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}",
+          "LOCAL_EDIT kind=longer items_per_document=10000 sample=2 selections={org.memory.tasks=(2, 2), org.memory.people=(2, 4)}"
+        ]
+      },
+      "prefix": {
+        "samples_ms": [
+          1113.2964,
+          714.8941,
+          709.5105
+        ],
+        "warm_median_ms": 712.2022999999999,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=prefix items_per_document=10000 sample=0 selections={org.memory.tasks=(20505, 19500), org.memory.people=(20505, 44004)}",
+          "LOCAL_EDIT kind=prefix items_per_document=10000 sample=1 selections={org.memory.tasks=(2, 0), org.memory.people=(2, 0)}",
+          "LOCAL_EDIT kind=prefix items_per_document=10000 sample=2 selections={org.memory.tasks=(2, 0), org.memory.people=(2, 0)}"
+        ]
+      },
+      "delete": {
+        "samples_ms": [
+          1119.4155,
+          699.2717,
+          697.0238
+        ],
+        "warm_median_ms": 698.1477500000001,
+        "local_callbacks": [
+          "LOCAL_EDIT kind=delete items_per_document=10000 sample=0 selections={org.memory.tasks=(20501, 19498), org.memory.people=(20501, 44000)}",
+          "LOCAL_EDIT kind=delete items_per_document=10000 sample=1 selections={}",
+          "LOCAL_EDIT kind=delete items_per_document=10000 sample=2 selections={}"
+        ]
+      }
+    }
+  },
+  "audit": {
+    "facts": 63505,
+    "missing": 0,
+    "additional": 0,
+    "invalid_bindings": 0,
+    "unbound": 0,
+    "unused_locations": 0,
+    "unused_frames": 0,
+    "quick_check": "ok",
+    "schemas": [
+      "11",
+      "12"
+    ]
+  },
+  "baseline_sha256": "e466f6742e9aad6d7bce36fd54c90fcc962d35234896b05bdaa0466e9a02458a",
+  "current_sha256": "6618a99ce9bca1b88c03ca5f59f041fb232747d3c353497dcdbab193f1f57aca",
+  "notes": "All samples retained. Warm medians exclude sample zero. The first current value-edit sample was already warmed by the schema rebuild; it is not a comparable cold sample."
+}

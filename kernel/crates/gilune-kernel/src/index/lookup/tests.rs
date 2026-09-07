@@ -311,11 +311,13 @@ fn complete_lookup_pages_beyond_ten_thousand_indexed_roots() {
     // Scale the derived database independently of filesystem/indexer throughput.
     s.with_index(|db| {
         db.execute_batch("BEGIN;")?;
+        let seed: Vec<crate::index::FactRow> = db.prepare("SELECT line,item_key,source_version,predicate,value,num,typed FROM facts WHERE rel_path='seed.md' AND namespace='fixture' ORDER BY rowid")?
+            .query_map([],|r|Ok(crate::index::FactRow {line:r.get(0)?,item_key:r.get(1)?,source_version:r.get(2)?,predicate:r.get(3)?,value:r.get(4)?,num:r.get(5)?,typed:r.get(6)?}))?.collect::<rusqlite::Result<_>>()?;
         for i in 0..10_005 {
             let path=format!("{i:05}.md");
             db.execute("INSERT INTO source_maps(rel_path,source_version,layout) SELECT ?1,source_version,layout FROM source_maps WHERE rel_path='seed.md'",[&path])?;
             db.execute("INSERT INTO fact_sources SELECT namespace,?1,source_version FROM fact_sources WHERE rel_path='seed.md'",[&path])?;
-            db.execute("INSERT INTO facts(namespace,rel_path,line,item_key,source_version,predicate,value,predicate_id,target_id) SELECT f.namespace,?1,f.line,f.item_key,f.source_version,f.predicate,f.value,f.predicate_id,t.id FROM facts f JOIN source_maps s ON s.rel_path=?1 AND s.source_version=f.source_version LEFT JOIN index_targets t ON t.source_id=s.id AND t.kind=CASE WHEN f.item_key IS NOT NULL THEN 2 WHEN f.line IS NOT NULL THEN 1 ELSE 0 END AND t.local_key=COALESCE(f.item_key,f.line,0) WHERE f.rel_path='seed.md'",[&path])?;
+            crate::index::writer::put_facts(db,"fixture",&path,&seed,None)?;
         }
         db.execute_batch("COMMIT;")?;Ok(())
     }).unwrap();

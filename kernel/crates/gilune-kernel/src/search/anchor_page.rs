@@ -1,6 +1,7 @@
 //! Bounded projection for declarative document/physical-line APIs. Their legacy
 //! anchor semantics are preserved over the same compact fact store.
 use super::*;
+use rusqlite::OptionalExtension;
 
 pub(super) fn supports(q: &SearchRequest) -> bool {
     q.body_needles.is_empty()
@@ -108,9 +109,33 @@ pub(super) fn search(
     let mut hits = Vec::new();
     for (path, line, n, _, _) in selected {
         let doc = document(db, &path, false, false)?;
+        let source: Option<i64> = db
+            .query_row(
+                "SELECT id FROM source_maps WHERE rel_path=?1",
+                [&path],
+                |r| r.get(0),
+            )
+            .optional()?;
         let properties = |number: Option<u32>, inherited: bool| -> Result<Vec<SearchProperty>> {
-            Ok(db.prepare_cached("SELECT predicate,value FROM facts WHERE rel_path=?1 AND item_key IS NULL AND (line IS ?2 OR (?3 AND line IS NULL)) ORDER BY rowid")?
-                .query_map(rusqlite::params![path,number,inherited], |r| Ok(SearchProperty {key:r.get(0)?,value:r.get(1)?}))?.collect::<rusqlite::Result<_>>()?)
+            let mut targets = vec![];
+            if let Some(source) = source {
+                if let Some(id) = index::positions::target(
+                    db,
+                    source,
+                    if number.is_some() { 1 } else { 0 },
+                    i64::from(number.unwrap_or(0)),
+                )? {
+                    targets.push(id);
+                }
+                if inherited && number.is_some() {
+                    if let Some(id) = index::positions::target(db, source, 0, 0)? {
+                        targets.push(id);
+                    }
+                }
+            }
+            let ids = serde_json::to_string(&targets)?;
+            Ok(db.prepare_cached("SELECT p.predicate,f.value FROM fact_values f JOIN index_predicates p ON p.id=f.predicate_id WHERE f.location_id IN (SELECT l.id FROM fact_frames r CROSS JOIN fact_location_slots l INDEXED BY fact_location_slots_literal ON l.frame_id=r.id WHERE r.rel_path=?1 AND l.target_id IS NULL AND l.item_key IS NULL AND (l.line IS ?2 OR (?3 AND l.line IS NULL)) UNION ALL SELECT l.id FROM fact_location_slots l JOIN fact_frames r ON r.id=l.frame_id WHERE r.rel_path=?1 AND l.target_id IN (SELECT value FROM json_each(?4)) AND l.item_key IS NULL) ORDER BY f.id")?
+                .query_map(rusqlite::params![path,number,inherited,ids], |r| Ok(SearchProperty {key:r.get(0)?,value:r.get(1)?}))?.collect::<rusqlite::Result<_>>()?)
         };
         let roots = properties(None, false)?;
         let numbers: Vec<u32> = if !q.line_mode || q.max_lines == 0 {
@@ -128,11 +153,20 @@ pub(super) fn search(
         };
         let mut lines = Vec::new();
         for number in numbers {
-            let text = db.query_row(
-                "SELECT text FROM lines WHERE rel_path=?1 AND field='body' AND line=?2",
-                rusqlite::params![path, number],
-                |r| r.get(0),
-            )?;
+            let target = if let Some(source) = source {
+                index::positions::target(db, source, 1, i64::from(number))?
+            } else {
+                None
+            };
+            let text = if let Some(target) = target {
+                db.query_row(
+                    "SELECT text FROM text_rows WHERE target_id=?1",
+                    [target],
+                    |r| r.get(0),
+                )?
+            } else {
+                db.query_row("SELECT text FROM text_rows WHERE rel_path=?1 AND field='body' AND target_id IS NULL AND line=?2",rusqlite::params![path,number],|r|r.get(0))?
+            };
             let line_facts = if sorted {
                 properties(Some(number), false)?
                     .into_iter()

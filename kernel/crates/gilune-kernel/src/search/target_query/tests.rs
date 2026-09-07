@@ -104,8 +104,9 @@ fn equivalent(s: &Store, q: &SearchRequest) {
     s.with_index(|db| {
         db.execute_batch("BEGIN")?;
         let mut after = None;
+        let mut old_after = None;
         for _ in 0..100 {
-            let actual = items::search(
+            let mut actual = items::search(
                 db,
                 q,
                 None,
@@ -114,21 +115,25 @@ fn equivalent(s: &Store, q: &SearchRequest) {
                 after.clone(),
                 vec![],
             )?;
-            let expected = items::legacy_search(
+            let mut expected = items::legacy_search(
                 db,
                 q,
                 None,
                 "test".into(),
                 "test".into(),
-                after.clone(),
+                old_after.clone(),
                 vec![],
             )?;
+            let next = actual.next_cursor.take();
+            let old_next = expected.next_cursor.take();
+            assert_eq!(next.is_some(), old_next.is_some());
             assert_eq!(actual, expected, "query {q:?}, after {after:?}");
-            if actual.next_cursor.is_none() {
+            if next.is_none() {
                 db.execute_batch("ROLLBACK")?;
                 return Ok(());
             }
-            after = decode_cursor(actual.next_cursor.as_deref(), "test", "test")?;
+            after = decode_cursor(next.as_deref(), "test", "test")?;
+            old_after = decode_cursor(old_next.as_deref(), "test", "test")?;
         }
         panic!("continuation did not terminate")
     })
@@ -324,7 +329,12 @@ fn coincident_predicate_names_from_distinct_owners_keep_facts_and_stable_sorting
 #[test]
 fn text_relevance_mixed_negation_and_grouped_pages_match_the_previous_executor() {
     let (_, s) = setup("---\r\ntitle: properties\r\n---\r\n- First 😀\r\n  continued\r\n  - child é\r\n- third\r\n- fourth first\r\n");
-    for target in [TextTarget::Any, TextTarget::Body, TextTarget::Name, TextTarget::Path] {
+    for target in [
+        TextTarget::Any,
+        TextTarget::Body,
+        TextTarget::Name,
+        TextTarget::Path,
+    ] {
         for text in ["first", "First", "\n  continued", "é", "missing", ""] {
             for negated in [false, true] {
                 for grouped in [false, true] {
@@ -332,7 +342,21 @@ fn text_relevance_mixed_negation_and_grouped_pages_match_the_previous_executor()
                     q.group_by_note = grouped;
                     q.body_needles = vec!["first".into(), "é".into()];
                     q.name_needles = vec!["é".into()];
-                    q.clauses.push(clause(vec![at("example.colour", ConstraintOp::Eq, "red", FactLocality::Exact), Constraint::Text { target, query: text.into() }], negated));
+                    q.clauses.push(clause(
+                        vec![
+                            at(
+                                "example.colour",
+                                ConstraintOp::Eq,
+                                "red",
+                                FactLocality::Exact,
+                            ),
+                            Constraint::Text {
+                                target,
+                                query: text.into(),
+                            },
+                        ],
+                        negated,
+                    ));
                     equivalent(&s, &q);
                     q.clauses[0].case_sensitive = true;
                     q.sort_predicate = "example.colour".into();
@@ -364,12 +388,19 @@ fn independent_pages_and_counts_are_generation_bound_and_cancelled_queries_do_no
         });
         db.execute_batch("ROLLBACK")?;
         Ok(())
-    }).unwrap();
+    })
+    .unwrap();
     std::fs::write(dir.path().join("a.md"), "- changed").unwrap();
     s.reconcile().unwrap();
     s.advance_index().unwrap();
-    assert!(matches!(reader.count(&page.generation, None), Err(KernelError::SearchCursorExpired)));
-    assert!(matches!(reader.page(page.next_cursor, None), Err(KernelError::SearchCursorExpired)));
+    assert!(matches!(
+        reader.count(&page.generation, None),
+        Err(KernelError::SearchCursorExpired)
+    ));
+    assert!(matches!(
+        reader.page(page.next_cursor, None),
+        Err(KernelError::SearchCursorExpired)
+    ));
     reader.cancel();
     assert!(reader.page(None, None).is_err());
     assert!(reader.count(&page.generation, None).is_err());
@@ -377,11 +408,21 @@ fn independent_pages_and_counts_are_generation_bound_and_cancelled_queries_do_no
 
 #[test]
 fn cancelling_a_running_callback_count_keeps_an_independent_page_available() {
-    use std::sync::{Barrier, atomic::{AtomicBool, Ordering}};
-    struct Gate { entered: Barrier, release: Barrier, first: AtomicBool }
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Barrier,
+    };
+    struct Gate {
+        entered: Barrier,
+        release: Barrier,
+        first: AtomicBool,
+    }
     impl SearchExtension for Gate {
-        fn matches(&self, _: u32, _: &SearchDocument) -> std::result::Result<bool,String> {
-            if !self.first.swap(true, Ordering::SeqCst) { self.entered.wait(); self.release.wait(); }
+        fn matches(&self, _: u32, _: &SearchDocument) -> std::result::Result<bool, String> {
+            if !self.first.swap(true, Ordering::SeqCst) {
+                self.entered.wait();
+                self.release.wait();
+            }
             Ok(true)
         }
     }
@@ -389,13 +430,19 @@ fn cancelling_a_running_callback_count_keeps_an_independent_page_available() {
     let reader = s.prepare_search(query(), true).unwrap();
     let generation = reader.page(None, None).unwrap().generation;
     let mut request = query();
-    let mut c = clause(vec![], false); c.residual = Some(0); request.clauses.push(c);
+    let mut c = clause(vec![], false);
+    c.residual = Some(0);
+    request.clauses.push(c);
     let slow = s.prepare_search(request, true).unwrap();
-    let gate = Gate { entered: Barrier::new(2), release: Barrier::new(2), first: AtomicBool::new(false) };
+    let gate = Gate {
+        entered: Barrier::new(2),
+        release: Barrier::new(2),
+        first: AtomicBool::new(false),
+    };
     std::thread::scope(|scope| {
         let count = scope.spawn(|| slow.count(&generation, Some(&gate)));
         gate.entered.wait();
-        assert_eq!(reader.page(None,None).unwrap().hits.len(), 2);
+        assert_eq!(reader.page(None, None).unwrap().hits.len(), 2);
         slow.cancel();
         gate.release.wait();
         assert!(count.join().unwrap().is_err());
@@ -404,10 +451,22 @@ fn cancelling_a_running_callback_count_keeps_an_independent_page_available() {
 
 #[test]
 fn text_windows_cross_long_own_ranges_and_revisit_nested_children() {
-    let text=format!("- Parent 😀\r\n{}  - Child é\r\n{}- Last needle\r\n", "  continued needle\r\n".repeat(600), "    child continued\r\n".repeat(600));
-    let (_,s)=setup(&text);
-    let mut q=query(); q.body_needles=vec!["needle".into()];
-    q.clauses.push(clause(vec![Constraint::Text {target:TextTarget::Body,query:"needle".into()}],false));
-    equivalent(&s,&q);
-    q.group_by_note=true; equivalent(&s,&q);
+    let text = format!(
+        "- Parent 😀\r\n{}  - Child é\r\n{}- Last needle\r\n",
+        "  continued needle\r\n".repeat(600),
+        "    child continued\r\n".repeat(600)
+    );
+    let (_, s) = setup(&text);
+    let mut q = query();
+    q.body_needles = vec!["needle".into()];
+    q.clauses.push(clause(
+        vec![Constraint::Text {
+            target: TextTarget::Body,
+            query: "needle".into(),
+        }],
+        false,
+    ));
+    equivalent(&s, &q);
+    q.group_by_note = true;
+    equivalent(&s, &q);
 }

@@ -14,13 +14,17 @@ pub(super) fn resolve(
         Location::BodyLine { number } => (1, i64::from(number)),
         Location::MarkdownItem { key } => (2, i64::try_from(key).map_err(|_| invalid())?),
     };
+    let source: i64 = db.query_row(
+        "SELECT id FROM source_maps WHERE rel_path=?1 AND source_version=?2",
+        rusqlite::params![path, version],
+        |r| r.get(0),
+    )?;
+    let target = positions::target(db, source, kind, key)?.ok_or_else(invalid)?;
     let mut statement = db.prepare_cached(
-        "SELECT t.map_version,t.start_byte,t.end_byte,t.own_ranges
-         FROM source_maps s JOIN index_targets t ON t.source_id=s.id
-         WHERE s.rel_path=?1 AND s.source_version=?2 AND t.kind=?3 AND t.local_key=?4",
+        "SELECT map_version,start_byte,end_byte,own_ranges FROM index_targets WHERE id=?1",
     )?;
     let (map_version, start, end, own): (u32, u64, u64, String) = statement
-        .query_row(rusqlite::params![path, version, kind, key], |r| {
+        .query_row(rusqlite::params![target], |r| {
             Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
         })
         .map_err(|e| match e {

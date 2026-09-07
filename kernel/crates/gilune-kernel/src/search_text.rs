@@ -68,5 +68,6 @@ pub(crate) fn register(db: &rusqlite::Connection) -> rusqlite::Result<()> {
         FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
         |ctx| Ok(fold(&ctx.get::<String>(0)?)),
     )?;
+    crate::index::positions::register(db)?;
     Ok(())
 }

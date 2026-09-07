@@ -43,7 +43,7 @@ All production fact inserts use this writer, including legacy callback output.
 The old insert trigger is retained only in comparison fixtures: a guarded trigger
 still incurred substantial measured overhead even when its body did not run.
 Source-map lifecycle triggers maintain derived associations when sources change.
-Replacing a source map detaches old bindings and replaces targets;
+Replacing a source map detaches old bindings and maintains current targets;
 only facts for the replacement source version can rebind. Failed producers retain
 their previous facts and failure evidence, without joining them to new targets.
 A text-only rebuild can rebind facts for unchanged bytes without invoking plugins.
@@ -51,8 +51,10 @@ Moves, deletion, producer removal and transaction rollback use the same lifecycl
 Namespace removal clears its predicate dictionary; a full rebuild clears all of it.
 
 IDs are not exported object identity, durable task identity or permission tokens.
-They are not reused within an index lifetime; rebuilds have separate index
-identity/generation. Public results retain path, source version and location.
+Deleted target IDs are not reallocated within an index lifetime; schema 10 can
+retain a live coordinate slot across revisions while invalidating old bindings.
+Rebuilds have separate index identity/generation. Public results retain path,
+source version and location.
 Producer receipts and index completeness remain necessary, especially for absence
 queries. An ID join alone does not prove a producer has finished indexing.
 
@@ -172,3 +174,122 @@ Current evidence and measured limitations are recorded in the
 [migration report](../research/compact-migration-2026-09-06.md). Earlier sections
 record the incremental rollout; their wide-storage and pending-count descriptions
 apply to schemas 6–8, not the current representation.
+
+## Schema 10: differential target and fact maintenance
+
+Source-map updates retain target rows at matching kind/local keys, update only
+changed metadata, and add/remove changed keys. The existing detach/rebind boundary
+is retained: a private target ID surviving an update cannot cause a failed
+producer's old facts to join to the new source. Reader transactions retain their
+previous WAL snapshot, and public source-version references do not change meaning.
+
+Producer commits compare their complete ordered output with stored fact rows.
+Only changed value columns are replaced; unchanged values keep their rows while
+location/target columns advance as required. Additions/removals change row counts.
+This is a positional comparison within a producer, preserving duplicate counts
+and output order. Inserts/reordering can update later positions; it is not a
+minimal-diff or task-identity algorithm. Values are not shared across producers,
+and one producer's receipt cannot advance another producer's evidence.
+
+The public callback/query contracts and physical fact tables are unchanged.
+Schema 10 rebuilds old disposable indexes to install the target maintenance
+triggers. Source parsing and plugin recognition still run over the complete
+document. Revision changes still incur binding work proportional to the facts;
+removing that cost would require a separately proven provenance representation.
+
+The [implementation report](../research/incremental-fact-target-maintenance-2026-09-06.md)
+records conformance and complete application measurements: the fresh 10,000-task
+comparison improves from 1.733 to 1.652 seconds (4.7%). Binding maintenance and
+durable commits remain substantial costs; row reuse alone does not make updates
+proportional to changed task values.
+
+## Schema 11: coherent source publication and local derivation
+
+The [local-input report](../research/local-input-publication-2026-09-06.md)
+records an optional callback contract that derives only selected locations.
+The kernel compares local bytes and parser context, reuses successful outputs
+and relocates them when their coordinates shift. Cache loss requires complete
+derivation; it never changes source identity or commit eligibility.
+
+For aligned one-path edits, prepare all available producer outputs before the
+write transaction. Recheck cursors/versions inside it. Shared locations can
+advance only with fresh output from every owning producer. Otherwise ordinary
+invalidation preserves missing/failed owners' old evidence. Within a coherent
+publication, target slots can move and fact comparison is local to reused
+locations. SQL failure rolls back the publication; callback failures retain
+independent namespace results. No callback executes inside the transaction.
+
+Absolute byte ranges and per-location revision bindings still cause broad
+metadata writes. Block-relative positions and coarser validity records remain
+unimplemented investigation topics. Query SQL and public source identities are
+unchanged; schema 11 rebuilds disposable indexes to install the new triggers.
+
+The subsequent [position-storage experiment](../research/revision-position-storage-2026-09-06.md)
+tests keeping fact selection records stable while storing revision positions in
+bounded blocks. Its coordinate-publication component and query comparisons are
+promising, but it is compiled only for tests. It does not amend this ADR's
+production schema or establish a shared-frame failure/recovery contract; those
+delivery gates are recorded in plan section 37.
+
+## Schema 12: shared revision frames
+
+Normalise the repeated path/revision pair into `fact_frames`, referenced by
+`fact_location_slots`. The existing `fact_locations` shape becomes a relational
+view. Compact selection still joins opaque values directly by target ID; it
+does not resolve positions or join frames before filtering.
+
+Only the existing coherent-publication eligibility check can advance a frame:
+every owner must have freshly validated output for the new revision. Missing or
+failed owners retain old evidence through conservative replacement. Destination
+frame collisions also use that path. Removed anchors stay at the old revision
+until their owning producers replace them. Garbage collection removes only
+unreferenced locations/frames. All mutations share the existing transaction and
+WAL snapshot boundary. Older indexes rebuild without rewriting vault documents.
+
+This is the first production part of the position-storage delivery. Absolute
+coordinate writes and target ordering remain unchanged; binary position blocks
+are still test-only. Measurements and limits are recorded in the
+[shared-frame report](../research/shared-revision-frames-2026-09-07.md).
+
+## Schema 13: relative position blocks and private order
+
+Store source coordinates in small, relative SQL blocks. `target_slots` holds
+private target IDs, sparse ordering labels and block-relative anchors/ranges;
+`position_blocks` supplies the current absolute bases. The `index_targets` view
+projects the previous public coordinate shape. This replaces the experimental
+binary encoding with relational records: filtering keeps its direct target/value
+indexes, while point and range lookups use indexed block predecessors. No binary
+map decoder or document-sized read cache is required.
+
+Initial blocks contain at most 64 targets of one kind. Coherent edits retain
+blocks, split locally above 128 members and coalesce adjacent small runs.
+Moving a prefix changes block bases
+and records in the affected block, rather than all following indexed coordinates.
+Sparse integer order labels survive ordinary insertions/deletions; exhausted gaps
+redistribute a bounded neighbourhood. Arbitrary reordering or parser-context
+changes can legitimately require broader work. These labels are private cursor
+ordering data, never task/person identity. A new index generation invalidates
+old cursors, and result coordinates always describe the returned source revision.
+
+Current fact locations and indexed body text can refer to retained target slots.
+Unchanged text keeps its FTS address, and unchanged facts keep their value rows.
+Missing/failed producer evidence is materialised at its original coordinates and
+revision before live geometry changes. Equal-layout fallback may retain geometry
+IDs, but it still detaches old evidence. Removed targets materialise coordinates
+before deletion. No unavailable producer implicitly advances with a shared slot.
+
+Geometry preparation, source replacement, fact comparison and receipts remain
+inside the existing write transaction. A transaction-local preparation marker
+binds the prepared geometry to the exact new layout and is cleared by source
+publication. Rollback restores every block, slot, binding and marker. Independent
+WAL readers retain their prior source-qualified snapshot. Old disposable indexes
+rebuild through the existing schema-version mechanism; source documents and
+public plugin contracts are unchanged.
+
+Projection resolves only returned targets. Per-page document metadata is reused;
+item snippets read their own bounded line ranges. Sequential text evaluation
+retains its bounded line window. Legacy line queries still use indexed literal
+locations where required, without making source-file reads part of search.
+
+Delivery measurements and validation are recorded in the
+[position-block report](../research/position-block-delivery-2026-09-07.md).

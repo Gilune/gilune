@@ -91,7 +91,14 @@ pub(super) fn search(
     } else {
         format!(",{}", checks.join(","))
     };
-    let sql = format!("SELECT t.id,s.rel_path,s.id,s.source_version,t.map_version,t.local_key,t.end_byte,t.own_ranges{extra} FROM {} WHERE {} ORDER BY s.rel_path,t.local_key", target_query::FROM, filter.condition);
+    let map_column = "t.map_version";
+    #[cfg(test)]
+    let map_column = if position_prototype::enabled() {
+        "t.position_slot"
+    } else {
+        map_column
+    };
+    let sql = format!("SELECT t.id,s.rel_path,s.id,s.source_version,{map_column},t.anchor+b.base_key,t.end_byte+b.base_byte,t.own_ranges,b.base_byte,t.local_key{extra} FROM {} WHERE {} ORDER BY s.rel_path,t.local_key", "source_maps s CROSS JOIN target_slots t ON t.source_id=s.id JOIN position_blocks b ON b.id=t.block_id", filter.condition);
     let mut statement = db.prepare(&sql)?;
     let mut rows = statement.query(params_from_iter(args))?;
     let mut heap = BinaryHeap::new();
@@ -135,7 +142,9 @@ pub(super) fn search(
         let fetch_started = std::time::Instant::now();
         let row = rows.next()?;
         #[cfg(test)]
-        { sql_ms += fetch_started.elapsed().as_secs_f64()*1000.0; }
+        {
+            sql_ms += fetch_started.elapsed().as_secs_f64() * 1000.0;
+        }
         let Some(row) = row else { break };
         let id: i64 = row.get(0)?;
         let path: String = row.get(1)?;
@@ -167,23 +176,40 @@ pub(super) fn search(
             group_sort = None;
         }
         let checks: Vec<bool> = (0..q.clauses.len())
-            .map(|i| row.get(i + 8))
+            .map(|i| row.get(i + 10))
             .collect::<rusqlite::Result<_>>()?;
         #[cfg(test)]
         let text_started = std::time::Instant::now();
-        let own: String = row.get(7)?;
-        let mut item = window.item(
-            db,
-            row.get(2)?,
-            &path,
-            row.get(3)?,
-            row.get(4)?,
-            row.get(5)?,
-            row.get(6)?,
-            serde_json::from_str(&own)?,
-        )?;
+        let (map, key, end, own) = {
+            #[cfg(test)]
+            if position_prototype::enabled() {
+                let p = position_prototype::position_at(db, row.get(2)?, row.get(4)?)?;
+                (p.map, p.key, p.end, p.own)
+            } else {
+                let own: String = row.get(7)?;
+                (
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    shift_own(&own, row.get(8)?)?,
+                )
+            }
+            #[cfg(not(test))]
+            {
+                let own: String = row.get(7)?;
+                (
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                    shift_own(&own, row.get(8)?)?,
+                )
+            }
+        };
+        let mut item = window.item(db, row.get(2)?, &path, row.get(3)?, map, key, end, own)?;
         #[cfg(test)]
-        { text_ms += text_started.elapsed().as_secs_f64()*1000.0; }
+        {
+            text_ms += text_started.elapsed().as_secs_f64() * 1000.0;
+        }
         if !items::matches(q, extension, doc.as_ref().unwrap(), &item.text, &checks)? {
             continue;
         }
@@ -214,7 +240,7 @@ pub(super) fn search(
         } else {
             let mut hit = group.as_ref().unwrap().clone();
             hit.match_count = count;
-            let key = item.key;
+            let key = row.get(9)?;
             if q.max_lines > 0 {
                 hit.items.push(item);
             } else {
@@ -227,22 +253,26 @@ pub(super) fn search(
         accept(group.unwrap(), 0, group_sort);
     }
     #[cfg(test)]
-    TIMINGS.with(|t|t.set([sql_ms,text_ms,started.elapsed().as_secs_f64()*1000.0-sql_ms-text_ms]));
+    TIMINGS.with(|t| {
+        t.set([
+            sql_ms,
+            text_ms,
+            started.elapsed().as_secs_f64() * 1000.0 - sql_ms - text_ms,
+        ])
+    });
     let mut ranked = heap.into_sorted_vec();
+    let mut roots=BTreeMap::new();
     for row in &mut ranked {
-        let source: i64 = db.query_row(
-            "SELECT id FROM source_maps WHERE rel_path=?1",
-            [&row.hit.rel_path],
-            |r| r.get(0),
-        )?;
-        row.hit.facts = target_projection::hit(db, source, row.hit.rel_path.clone())?.facts;
+        if let std::collections::btree_map::Entry::Vacant(entry)=roots.entry(row.hit.rel_path.clone()) {
+            let source:i64=db.query_row("SELECT id FROM source_maps WHERE rel_path=?1",[&row.hit.rel_path],|r|r.get(0))?;
+            let facts=target_projection::hit(db,source,row.hit.rel_path.clone())?.facts;
+            entry.insert((source,facts));
+        }
+        let (source,facts)=&roots[&row.hit.rel_path];
+        row.hit.facts=facts.clone();
         for item in &mut row.hit.items {
-            let id: i64 = db.query_row(
-                "SELECT id FROM index_targets WHERE source_id=?1 AND kind=2 AND local_key=?2",
-                rusqlite::params![source, item.key],
-                |r| r.get(0),
-            )?;
-            item.facts = target_projection::facts(db, id)?;
+            let id=index::positions::target(db,*source,2,i64::try_from(item.key).map_err(|_|invalid("position overflow"))?)?.ok_or_else(||invalid("missing indexed item"))?;
+            item.facts=target_projection::facts(db,id)?;
         }
     }
     let next_cursor = if remaining > ranked.len() as u64 {
@@ -260,4 +290,19 @@ pub(super) fn search(
         issues,
         generation,
     })
+}
+
+fn shift_own(text: &str, base: u64) -> Result<Vec<(u64, u64)>> {
+    let ranges: Vec<(u64, u64)> = serde_json::from_str(text)?;
+    ranges
+        .into_iter()
+        .map(|(a, b)| {
+            Ok((
+                a.checked_add(base)
+                    .ok_or_else(|| invalid("position overflow"))?,
+                b.checked_add(base)
+                    .ok_or_else(|| invalid("position overflow"))?,
+            ))
+        })
+        .collect()
 }

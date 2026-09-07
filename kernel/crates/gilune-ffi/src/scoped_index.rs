@@ -19,6 +19,56 @@ pub trait ScopedIndexer: Send + Sync {
     fn index(&self, rel_path: String, source: SourceTextSnapshot) -> FfiResult<Vec<ScopedFact>>;
 }
 
+/// Opt-in location-local derivation. Return only facts at selected locations.
+/// Values may depend on their own source ranges, parser text eligibility and
+/// document metadata; not on other locations, absolute offsets or revision IDs.
+/// The kernel may reuse and relocate successful output when those inputs match.
+/// Root facts depend on metadata only. Item facts use own ranges, excluding
+/// children. Line facts may use that line's item membership and text eligibility.
+#[uniffi::export(with_foreign)]
+pub trait LocalScopedIndexer: Send + Sync {
+    fn index_locations(
+        &self,
+        rel_path: String,
+        source: SourceTextSnapshot,
+        locations: Vec<SourceLocation>,
+    ) -> FfiResult<Vec<ScopedFact>>;
+}
+
+struct LocalAdapter(Arc<dyn LocalScopedIndexer>);
+impl index::NoteIndexer for LocalAdapter {
+    fn index(&self, _: &str, _: &str) -> Result<Vec<index::Fact>, String> {
+        Err("scoped source input required".into())
+    }
+    fn uses_scoped_input(&self) -> bool {
+        true
+    }
+    fn index_scoped_locations(
+        &self,
+        path: &str,
+        source: &gilune_kernel::documents::TextSnapshot,
+        locations: &[gilune_kernel::documents::Location],
+    ) -> Result<Vec<core::ScopedFact>, String> {
+        self.0
+            .index_locations(
+                path.into(),
+                source.into(),
+                locations.iter().cloned().map(Into::into).collect(),
+            )
+            .map(|facts| {
+                facts
+                    .into_iter()
+                    .map(|f| core::ScopedFact {
+                        location: f.location.into(),
+                        predicate: f.predicate,
+                        value: f.value,
+                    })
+                    .collect()
+            })
+            .map_err(|e| e.to_string())
+    }
+}
+
 struct Adapter(Arc<dyn ScopedIndexer>);
 impl index::NoteIndexer for Adapter {
     fn index(&self, _: &str, _: &str) -> Result<Vec<index::Fact>, String> {
@@ -38,12 +88,19 @@ impl index::NoteIndexer for Adapter {
         };
         let facts = {
             let _profile = gilune_kernel::update_profile::span("ffi_callback_roundtrip", "");
-            self.0.index(rel_path.into(), wire).map_err(|e| e.to_string())?
+            self.0
+                .index(rel_path.into(), wire)
+                .map_err(|e| e.to_string())?
         };
         let _profile = gilune_kernel::update_profile::span("wire_facts_to_native", "");
-        Ok(facts.into_iter().map(|f| core::ScopedFact {
-            location: f.location.into(), predicate: f.predicate, value: f.value,
-        }).collect())
+        Ok(facts
+            .into_iter()
+            .map(|f| core::ScopedFact {
+                location: f.location.into(),
+                predicate: f.predicate,
+                value: f.value,
+            })
+            .collect())
     }
 }
 
@@ -95,6 +152,21 @@ pub struct LocationPage {
 
 #[uniffi::export]
 impl Gilune {
+    pub fn register_local_scoped_indexer(
+        &self,
+        namespace: String,
+        version: i64,
+        predicate_kinds: Vec<PredicateKind>,
+        indexer: Arc<dyn LocalScopedIndexer>,
+    ) -> FfiResult<()> {
+        let kinds: Vec<_> = predicate_kinds.into_iter().map(Into::into).collect();
+        Ok(self.store().register_indexer(
+            &namespace,
+            version,
+            &kinds,
+            index::incremental::local(Arc::new(LocalAdapter(indexer))),
+        )?)
+    }
     pub fn register_scoped_indexer(
         &self,
         namespace: String,

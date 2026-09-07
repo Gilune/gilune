@@ -1,0 +1,27 @@
+{
+  "native_final": {
+    "passed": 574,
+    "failed": 0,
+    "ignored": 22
+  },
+  "sync_rerun": {
+    "passed": 169,
+    "failed": 0,
+    "ignored": 1
+  },
+  "final_index_rerun": {
+    "passed": 79,
+    "failed": 0,
+    "ignored": 9
+  },
+  "desktop": {
+    "errors": 0,
+    "failures": 0,
+    "tests": 638,
+    "skipped": 5,
+    "passed": 633
+  },
+  "note": "The initial workspace run failed the sync timing gate at 17.31 s while an Android build was active. The full sync suite passed in isolation, and a separate timed repeat measured 4.165 s. Totals replace the original sync suites without double counting. The index suite was rerun after the final identical-layout shortcut and statement caching. Release Clippy and Android app/test APK builds passed; no Android device attached.",
+  "windows_dll_sha256": "5d19729ce4098e6d22b9cdeb1bc4118df1dbbd648a7bf0e68ef36bc0584532a7",
+  "baseline_dll_sha256": "569ec67264270cda30242172bbf84c9c450368661c3786244a08eb72b1e0ed66"
+}

@@ -1,0 +1,9 @@
+{
+  "facts": 63505,
+  "missing_facts": 0,
+  "extra_facts": 0,
+  "unbound_facts": 0,
+  "invalid_bindings": 0,
+  "unused_locations": 0,
+  "note": "Duplicate-sensitive audit after final restore. Frozen control has synthetic versions; current source-version bindings checked separately."
+}

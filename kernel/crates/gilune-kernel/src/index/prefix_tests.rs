@@ -6,6 +6,7 @@ fn indexed_prefix_preserves_literal_unicode_semantics_without_read_time_folding(
     let db = Connection::open_in_memory().unwrap();
     let folds = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let observed = folds.clone();
+    positions::register(&db).unwrap();
     db.create_scalar_function(
         "gilune_fold",
         1,

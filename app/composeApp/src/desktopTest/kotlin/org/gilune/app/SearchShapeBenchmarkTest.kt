@@ -45,11 +45,21 @@ class SearchShapeBenchmarkTest {
                 val implementations = listOf(tasksExtensions(), peopleExtensions())
                 PluginExtensions(implementations).registerPlugins(kernel)
                 val times = mutableMapOf<String, Long>()
+                val selections = mutableMapOf<String, Pair<Int, Int>>()
                 implementations.forEach { plugin ->
                     val registration = plugin.scopedIndexer!!
                     val producer = registration.create()
                     val owner = plugin.declaration.pluginId
-                    kernel.registerScopedIndexer(owner, registration.version, registration.predicates, object : ScopedIndexer {
+                    val local = registration.createLocal?.invoke()?.takeUnless { System.getenv("GILUNE_SHAPE_FULL") == "true" }
+                    if (local != null) kernel.registerLocalScopedIndexer(owner, registration.version, registration.predicates, object : uniffi.gilune_ffi.LocalScopedIndexer {
+                        override fun indexLocations(relPath: String, source: SourceTextSnapshot, locations: List<uniffi.gilune_ffi.SourceLocation>): List<ScopedFact> {
+                            val start = System.nanoTime()
+                            return local.indexLocations(relPath, source, locations).also {
+                                times[owner] = times.getOrDefault(owner, 0L) + System.nanoTime() - start
+                                selections[owner] = locations.size to it.size
+                            }
+                        }
+                    }) else kernel.registerScopedIndexer(owner, registration.version, registration.predicates, object : ScopedIndexer {
                         override fun index(relPath: String, source: SourceTextSnapshot): List<ScopedFact> {
                             val start = System.nanoTime()
                             return producer.index(relPath, source).also {
@@ -61,12 +71,19 @@ class SearchShapeBenchmarkTest {
                 kernel.reconcile(); kernel.advanceIndex()
                 val file = File(vault, "work-0000.md")
                 val original = file.readText()
-                val changed = original.replaceFirst("due:2026-09-01", "due:2026-10-01")
+                val kind = System.getenv("GILUNE_SHAPE_EDIT_KIND") ?: "value"
+                val changed = when (kind) {
+                    "longer" -> original.replaceFirst("due:2026-09-01", "due:2026-10-01 extra prose 😀")
+                    "prefix" -> original.replaceFirst("Ordinary page prose", "Inserted paragraph.\n\nOrdinary page prose")
+                    "delete" -> original.lines().toMutableList().also { lines -> lines.removeAt(lines.indexOfFirst { it.contains("due:2026-09-01") }) }.joinToString("\n")
+                    else -> original.replaceFirst("due:2026-09-01", "due:2026-10-01")
+                }
                 assertNotEquals(original, changed)
                 try {
                     repeat(3) { sample ->
                         file.writeText(changed)
                         times.clear()
+                        selections.clear()
                         println("PROFILE_EDIT_BEGIN items_per_document=$perFile sample=$sample")
                         val start = System.nanoTime()
                         kernel.reconcile() // Includes index maintenance.
@@ -75,7 +92,8 @@ class SearchShapeBenchmarkTest {
                         kernel.advanceIndex()
                         val settledMs = (System.nanoTime() - after) / 1_000_000.0
                         println("SHAPE_EDIT items_per_document=$perFile sample=$sample reconcile_ms=$reconcileMs settled_advance_ms=$settledMs callbacks_ms=${times.mapValues { it.value / 1_000_000.0 }}")
-                        assertEquals(implementations.map { it.declaration.pluginId }.toSet(), times.keys)
+                        println("LOCAL_EDIT kind=$kind items_per_document=$perFile sample=$sample selections=$selections")
+                        assertTrue(times.keys.all { owner -> implementations.any { it.declaration.pluginId == owner } })
                         println("PROFILE_RESTORE_BEGIN items_per_document=$perFile sample=$sample")
                         file.writeText(original); kernel.reconcile(); kernel.advanceIndex()
                     }

@@ -1,0 +1,10 @@
+{
+  "schema": "10",
+  "facts": 63505,
+  "missing": 0,
+  "additional": 0,
+  "unbound": 0,
+  "invalid_binding": 0,
+  "unused_locations": 0,
+  "note": "Duplicate-sensitive restored fact comparison. Frozen source tokens are synthetic; current source versions and coordinates are validated independently."
+}

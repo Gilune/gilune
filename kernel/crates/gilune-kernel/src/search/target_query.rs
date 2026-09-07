@@ -139,7 +139,7 @@ pub(super) fn compile(db: &Connection, q: &SearchRequest, required: &[String]) -
                 );
                 let exact =
                     format!("EXISTS (SELECT 1 FROM fact_values WHERE target_id=t.id AND {row})");
-                let root = format!("EXISTS (SELECT 1 FROM index_targets r JOIN fact_values ON fact_values.target_id=r.id WHERE r.source_id=t.source_id AND r.kind=0 AND r.local_key=0 AND {row})");
+                let root = format!("EXISTS (SELECT 1 FROM target_slots r JOIN fact_values ON fact_values.target_id=r.id WHERE r.source_id=t.source_id AND r.kind=0 AND r.local_key=0 AND {row})");
                 let term = match locality {
                     FactLocality::Exact => exact,
                     FactLocality::DocumentRoot => root,
@@ -177,7 +177,7 @@ pub(super) fn compile(db: &Connection, q: &SearchRequest, required: &[String]) -
     })
 }
 
-pub(super) const FROM: &str = "source_maps s CROSS JOIN index_targets t ON t.source_id=s.id";
+pub(super) const FROM: &str = "source_maps s CROSS JOIN target_slots t ON t.source_id=s.id";
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn execute(
@@ -288,8 +288,12 @@ pub(super) fn execute(
         None
     };
     let mut hits = Vec::with_capacity(rows.len());
+    let mut roots = BTreeMap::new();
     for row in rows {
-        let mut hit = target_projection::hit(db, row.source, row.path)?;
+        if let std::collections::btree_map::Entry::Vacant(entry) = roots.entry(row.source) {
+            entry.insert(target_projection::hit(db, row.source, row.path.clone())?);
+        }
+        let mut hit = roots[&row.source].clone();
         let ids = if q.max_lines == 0 {
             vec![]
         } else if q.group_by_note {
@@ -392,7 +396,7 @@ fn ordered_page(
         // The value index drives this phase; equality to the independent MIN
         // preserves multi-value semantics. DISTINCT removes duplicate facts and
         // coincident values from independent owners without duplicating targets.
-        let sql=format!("SELECT DISTINCT t.id,t.source_id,s.rel_path,t.local_key,o.value,0,1 FROM fact_values o INDEXED BY facts_compact_predicate_value CROSS JOIN index_targets t ON t.id=o.target_id CROSS JOIN source_maps s ON s.id=t.source_id WHERE o.target_id IS NOT NULL AND o.predicate_id IN ({ids}) AND o.value={minimum} AND {} AND {continuation} ORDER BY o.value,s.rel_path,t.local_key LIMIT {limit}",filter.condition);
+        let sql=format!("SELECT DISTINCT t.id,t.source_id,s.rel_path,t.local_key,o.value,0,1 FROM fact_values o INDEXED BY facts_compact_predicate_value CROSS JOIN target_slots t ON t.id=o.target_id CROSS JOIN source_maps s ON s.id=t.source_id WHERE o.target_id IS NOT NULL AND o.predicate_id IN ({ids}) AND o.value={minimum} AND {} AND {continuation} ORDER BY o.value,s.rel_path,t.local_key LIMIT {limit}",filter.condition);
         result = select(db, &sql, params)?;
     }
     if result.len() <= q.page_size as usize && after.is_none_or(|a| a.priority <= 1) {

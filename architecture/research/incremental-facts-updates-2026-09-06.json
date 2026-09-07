@@ -1,0 +1,155 @@
+{
+  "note": "Both versions use the real Kotlin/FFI complete edit/restore fixture. Preserved previous release DLL runs first, current release runs after builds finish; three trials per size, initial index rebuild excluded.",
+  "sizes": {
+    "100": {
+      "baseline_samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 114.0204,
+          "settled_advance_ms": 0.5276,
+          "tasks_ms": 27.8449,
+          "people_ms": 12.3674
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 64.51,
+          "settled_advance_ms": 0.3055,
+          "tasks_ms": 4.6885,
+          "people_ms": 3.2748
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 44.7067,
+          "settled_advance_ms": 0.2437,
+          "tasks_ms": 1.8492,
+          "people_ms": 2.0676
+        }
+      ],
+      "differential_samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 40.0296,
+          "settled_advance_ms": 0.2066,
+          "tasks_ms": 0.6802,
+          "people_ms": 1.0491
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 36.7389,
+          "settled_advance_ms": 0.1418,
+          "tasks_ms": 0.6723,
+          "people_ms": 0.8682
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 36.0708,
+          "settled_advance_ms": 0.1851,
+          "tasks_ms": 0.8114,
+          "people_ms": 0.6169
+        }
+      ],
+      "baseline_median_ms": 64.51,
+      "differential_median_ms": 36.7389
+    },
+    "1000": {
+      "baseline_samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 223.6988,
+          "settled_advance_ms": 0.2136,
+          "tasks_ms": 9.1215,
+          "people_ms": 8.4517
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 201.5884,
+          "settled_advance_ms": 0.2193,
+          "tasks_ms": 5.9818,
+          "people_ms": 4.758
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 193.8593,
+          "settled_advance_ms": 0.2641,
+          "tasks_ms": 4.6676,
+          "people_ms": 3.7834
+        }
+      ],
+      "differential_samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 156.7816,
+          "settled_advance_ms": 0.1821,
+          "tasks_ms": 3.1233,
+          "people_ms": 1.8371
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 174.3236,
+          "settled_advance_ms": 0.1583,
+          "tasks_ms": 3.3454,
+          "people_ms": 1.498
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 151.6697,
+          "settled_advance_ms": 0.1395,
+          "tasks_ms": 3.1677,
+          "people_ms": 1.4973
+        }
+      ],
+      "baseline_median_ms": 201.5884,
+      "differential_median_ms": 156.7816
+    },
+    "10000": {
+      "baseline_samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 1764.5314,
+          "settled_advance_ms": 0.2745,
+          "tasks_ms": 36.9479,
+          "people_ms": 22.1807
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 1725.9367,
+          "settled_advance_ms": 0.2323,
+          "tasks_ms": 31.7079,
+          "people_ms": 15.4476
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 1732.5738,
+          "settled_advance_ms": 0.2346,
+          "tasks_ms": 41.209,
+          "people_ms": 15.0855
+        }
+      ],
+      "differential_samples": [
+        {
+          "sample": 0,
+          "reconcile_ms": 1649.8965,
+          "settled_advance_ms": 0.2022,
+          "tasks_ms": 35.1251,
+          "people_ms": 14.6094
+        },
+        {
+          "sample": 1,
+          "reconcile_ms": 1651.5357,
+          "settled_advance_ms": 0.1996,
+          "tasks_ms": 27.8953,
+          "people_ms": 13.5592
+        },
+        {
+          "sample": 2,
+          "reconcile_ms": 1692.3573,
+          "settled_advance_ms": 0.2031,
+          "tasks_ms": 33.4046,
+          "people_ms": 13.7373
+        }
+      ],
+      "baseline_median_ms": 1732.5738,
+      "differential_median_ms": 1651.5357
+    }
+  }
+}

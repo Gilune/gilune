@@ -1,7 +1,12 @@
 # Bundled search and suggestion extensions
 
-Status: Kotlin source contract v0.3, exercised by `PluginExtensionsTest` and
+Status: Kotlin source contract v0.4, exercised by `PluginExtensionsTest` and
 `SearchMembershipTest`.
+
+Version 0.4 adds an optional `ScopedIndexerRegistration.createLocal` factory for
+the [local scoped-input contract](../indexer/README.md#optional-local-scoped-input).
+The original constructor and full-output factory remain available. The generic
+host selects the declared registration; it does not recognise plugin domains.
 Decision: [ADR 0022](../../architecture/decisions/0022-bundled-extension-registration.md).
 
 This is the composition contract for bundled implementations on desktop and

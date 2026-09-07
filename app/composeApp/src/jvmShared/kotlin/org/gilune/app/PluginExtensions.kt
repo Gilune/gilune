@@ -116,7 +116,11 @@ class PluginExtensions(implementations: List<BundledPluginExtensions>) {
             val sourceIndexer = implementation.sourceIndexer
             val scopedIndexer = implementation.scopedIndexer
             runCatching {
-                if (scopedIndexer != null) gilune.registerScopedIndexer(owner.pluginId, scopedIndexer.version, scopedIndexer.predicates, scopedIndexer.create())
+                if (scopedIndexer != null) {
+                    val local = scopedIndexer.createLocal
+                    if (local != null) gilune.registerLocalScopedIndexer(owner.pluginId, scopedIndexer.version, scopedIndexer.predicates, local())
+                    else gilune.registerScopedIndexer(owner.pluginId, scopedIndexer.version, scopedIndexer.predicates, scopedIndexer.create())
+                }
                 else if (sourceIndexer != null) gilune.registerSourceIndexer(owner.pluginId, sourceIndexer.version, sourceIndexer.predicates, sourceIndexer.create())
                 else if (indexer != null) gilune.registerIndexer(owner.pluginId, indexer.version, indexer.predicates, indexer.create())
             }.onFailure { GiluneLog.warn("Indexer registration failed for ${owner.pluginId}", it) }

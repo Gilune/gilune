@@ -4,10 +4,12 @@ use super::*;
 use crate::index::{Constraint, ConstraintOp as COp, FactLocality, TextTarget};
 use crate::search::{SearchClause, SearchRequest};
 use serde_json::{json, Value as Json};
-mod shapes;
-mod semantics;
-mod writes;
+mod frames;
+mod position_delivery;
 mod production;
+mod semantics;
+mod shapes;
+mod writes;
 
 #[test]
 #[ignore = "manual compact count access-path control"]

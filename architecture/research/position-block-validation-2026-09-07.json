@@ -1,0 +1,47 @@
+{
+  "native": {
+    "passed": 591,
+    "failed": 0,
+    "ignored": 27,
+    "suites": 32,
+    "note": "Full release workspace, serial, network-enabled. Four superseded opt-in controls retired afterward; final publication and rebuild regressions rerun separately, not added to the total."
+  },
+  "desktop": {
+    "passed": 635,
+    "skipped": 5,
+    "total": 640,
+    "errors": 0,
+    "failed": 0
+  },
+  "clippy": "Release workspace/all-targets with warnings denied passed.",
+  "publication_after_cleanup": {
+    "passed": 12,
+    "failed": 0
+  },
+  "query_comparisons": 118,
+  "application_edit_samples": 24,
+  "restored_fact_count": 63505,
+  "android": {
+    "arm64_whisper_build": "passed",
+    "x86_64_whisper_build": "passed",
+    "application_apk": "passed",
+    "instrumented_test_apk": "passed",
+    "device_runtime": "unrun: no attached device"
+  },
+  "bindings": "Generated independently from Windows, Android ARM64 and Android x86-64 binaries. Final generated bindings are identical across these binaries; previous staged Windows output differed only in the added locality-contract documentation.",
+  "normal_dll_restored_after_profile": true,
+  "sha256": {
+    "kernel/target/position-blocks-normal/gilune_ffi.dll": "e9351f3ea938473a1e89f7830858b188a1df5f9c3690685ec5a3ab13f651aa6b",
+    "kernel/target/release/gilune_ffi.dll": "e9351f3ea938473a1e89f7830858b188a1df5f9c3690685ec5a3ab13f651aa6b",
+    "app/composeApp/resources/windows-x64/gilune_ffi.dll": "e9351f3ea938473a1e89f7830858b188a1df5f9c3690685ec5a3ab13f651aa6b",
+    "app/composeApp/src/androidMain/jniLibs/arm64-v8a/libgilune_ffi.so": "9bdbd1a00e8e17fa3d55792e89f207c76d7ae9ef0af4996142eb3a3eec35f99e",
+    "app/composeApp/src/androidMain/jniLibs/x86_64/libgilune_ffi.so": "5fc37f31b816e7a6f1e72e32411890629aa03ab2c786c8e1ccb130cdec48685b",
+    "app/kernelBindings/src/desktopMain/generated/uniffi/gilune_ffi/gilune_ffi.kt": "e9b28ac35e288d92783290928270f38260c574a8988f90cbc7b00790d9783b30",
+    "app/kernelBindings/src/androidMain/generated/uniffi/gilune_ffi/gilune_ffi.kt": "e9b28ac35e288d92783290928270f38260c574a8988f90cbc7b00790d9783b30"
+  },
+  "schema_5_through_12_rebuild_regression": {
+    "passed": 1,
+    "failed": 0,
+    "schema12_shape": "Physical index_targets and lines tables, discarded and rebuilt without source document changes."
+  }
+}

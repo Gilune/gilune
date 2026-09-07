@@ -11,7 +11,7 @@ foreach ($line in Get-Content -LiteralPath $InputLog) {
         $event = $Matches[1] | ConvertFrom-Json
         $events.Add($event)
         if ($event.phase -eq 'reconcile_total') {
-            if (@($events | Where-Object { $_.phase -eq 'namespace_batch' }).Count -gt 0) {
+            if (@($events | Where-Object { $_.phase -in @('namespace_batch', 'publish_ready_page') }).Count -gt 0) {
                 $groups.Add([pscustomobject]@{ total_ms=[double]$event.ms; events=@($events.ToArray()); used=$false })
             }
             $events.Clear()
@@ -20,6 +20,7 @@ foreach ($line in Get-Content -LiteralPath $InputLog) {
     if ($line -match 'SHAPE_EDIT items_per_document=(\d+) sample=(\d+) reconcile_ms=([\d.]+) settled_advance_ms=([\d.]+) callbacks_ms=\{(.*)\}') {
         $callbacks = @{}
         foreach ($entry in $Matches[5].Split(',')) {
+            if ([string]::IsNullOrWhiteSpace($entry)) { continue }
             $pair = $entry.Trim().Split('=')
             $callbacks[$pair[0]] = [double]::Parse($pair[1], [cultureinfo]::InvariantCulture)
         }
@@ -54,7 +55,14 @@ $results = foreach ($edit in $edits) {
         storage_transactions_ms=(& $sum 'commit_plan')
         durable_commits_ms=(& $sum 'durable_commit')
         fact_insert_ms=(& $sum 'insert_facts_receipt_indexes')
+        fact_diff_ms=(& $sum 'diff_facts_receipt_indexes')
+        local_input_diff_ms=(& $sum 'local_input_diff')
+        publication_ms=(& $sum 'publish_ready_page')
+        shared_locations_ms=(& $sum 'advance_shared_locations')
+        coordinate_slots_ms=(& $sum 'advance_coordinate_slots')
         text_fts_insert_ms=(& $sum 'insert_text_rows_fts')
+        text_fts_diff_ms=(& $sum 'diff_text_rows_fts')
+        source_map_replace_ms=(& $sum 'replace_source_map_targets')
         source_map_insert_ms=(& $sum 'insert_source_map_targets')
         source_map_delete_ms=(& $sum 'delete_source_map_targets')
         all_events=$group.events

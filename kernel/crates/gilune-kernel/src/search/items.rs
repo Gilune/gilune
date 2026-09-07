@@ -30,7 +30,7 @@ pub(super) fn execute(db: &Connection, request: &SearchRequest, extension: Optio
     }
 }
 
-fn requirements(db: &Connection, request: &SearchRequest, issues: &mut Vec<String>) -> Result<Vec<String>> {
+pub(super) fn requirements(db: &Connection, request: &SearchRequest, issues: &mut Vec<String>) -> Result<Vec<String>> {
     let mut required = request.required_namespaces.clone();
     required.push(index::FRONT_MATTER_NAMESPACE.into());
     required.sort();

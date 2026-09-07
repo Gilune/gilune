@@ -91,7 +91,11 @@ class TasksNoteIndexer : NoteIndexer {
 
 /** Shipped producer. Shared Markdown structure supplies item boundaries;
  * Tasks interprets only its checkbox and date syntax within that item. */
-class TasksScopedIndexer : ScopedIndexer {
+class TasksScopedIndexer : ScopedIndexer, uniffi.gilune_ffi.LocalScopedIndexer {
+    override fun indexLocations(relPath: String, source: SourceTextSnapshot, locations: List<SourceLocation>): List<ScopedFact> {
+        val selected = locations.toSet()
+        return index(relPath, source.copy(items = source.items.filter { SourceLocation.MarkdownItem(it.key) in selected }))
+    }
     override fun index(relPath: String, source: SourceTextSnapshot): List<ScopedFact> {
         val view = SourceView(source)
         return source.items.flatMap { item ->

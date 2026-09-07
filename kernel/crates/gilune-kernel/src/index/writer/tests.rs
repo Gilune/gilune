@@ -173,7 +173,8 @@ fn large_batches_and_later_source_replacements_resolve_only_current_targets() {
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap();
-    // Replacing the layout can reuse source/version while changing private IDs.
+    // Reprocessing an identical layout preserves private IDs. Each writer still
+    // resolves them inside its own transaction rather than caching bindings.
     db.execute(
         "UPDATE source_maps SET layout=layout WHERE rel_path='b.md'",
         [],
@@ -190,10 +191,7 @@ fn large_batches_and_later_source_replacements_resolve_only_current_targets() {
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap();
-    assert!(
-        now.iter().all(|id| !old.contains(id)),
-        "bindings are not reused across transactions"
-    );
+    assert_eq!(now, old);
 }
 
 #[test]

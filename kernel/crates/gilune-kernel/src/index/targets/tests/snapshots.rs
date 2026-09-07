@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn shared_revision_advance_respects_an_independent_wal_snapshot() {
+    let f = fixture("- old\n");
+    let reader = rusqlite::Connection::open_with_flags(
+        f.dir.path().join(".gilune/local/index.db"),
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .unwrap();
+    crate::search_text::register(&reader).unwrap();
+    let tx = reader.unchecked_transaction().unwrap();
+    let version = |db: &rusqlite::Connection| {
+        db.query_row(
+            "SELECT source_version FROM facts WHERE namespace='example.one' LIMIT 1",
+            [],
+            |r| r.get::<_, String>(0),
+        )
+        .unwrap()
+    };
+    let old = version(&tx);
+    std::fs::write(f.dir.path().join("a.md"), "- new\n").unwrap();
+    f.store.reconcile().unwrap();
+    assert_eq!(version(&tx), old);
+    assert_integrity(&tx);
+    tx.commit().unwrap();
+    assert_ne!(version(&reader), old);
+    assert_integrity(&reader);
+}
+
+#[test]
 fn independent_reader_keeps_old_target_bindings_while_producers_advance() {
     let f = fixture("- old 😀\r\n");
     let reader = rusqlite::Connection::open_with_flags(
@@ -8,6 +36,7 @@ fn independent_reader_keeps_old_target_bindings_while_producers_advance() {
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .unwrap();
+    crate::search_text::register(&reader).unwrap();
     let tx = reader.unchecked_transaction().unwrap();
     let old_ids = current_ids(&tx); // Establish a real WAL snapshot.
     assert_integrity(&tx);
@@ -36,7 +65,10 @@ fn independent_reader_keeps_old_target_bindings_while_producers_advance() {
     );
     tx.commit().unwrap();
     assert_integrity(&reader);
-    assert!(current_ids(&reader).iter().all(|id| !old_ids.contains(id)));
+    assert!(
+        current_ids(&reader).iter().all(|id| !old_ids.contains(id)),
+        "structural fallback replaces private slots while the old reader retains its snapshot"
+    );
     assert_ne!(
         reader
             .query_row(

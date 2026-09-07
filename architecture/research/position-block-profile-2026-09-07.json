@@ -1,0 +1,485 @@
+[
+  {
+    "items_per_document": 10000,
+    "sample": 0,
+    "kotlin_reconcile_ms": 845.445,
+    "native_reconcile_ms": 844.7583,
+    "pairing_delta_ms": 0.6867000000000871,
+    "reconcile_before_index_ms": 14.8851,
+    "source_read_split_ms": 0.7278,
+    "snapshot_parse_ms": 4.7083,
+    "plugin_adapters_ms": 455.89590000000004,
+    "plugin_bodies_ms": {
+      "org.memory.tasks": 167.6606,
+      "org.memory.people": 129.3264
+    },
+    "validation_ms": 11.4429,
+    "storage_transactions_ms": null,
+    "durable_commits_ms": 8.2723,
+    "fact_insert_ms": null,
+    "fact_diff_ms": 153.91809999999998,
+    "local_input_diff_ms": 11.3994,
+    "publication_ms": 345.67350000000005,
+    "shared_locations_ms": 139.3811,
+    "coordinate_slots_ms": 124.13589999999999,
+    "text_fts_insert_ms": null,
+    "text_fts_diff_ms": 15.137400000000001,
+    "source_map_replace_ms": 8.2021,
+    "source_map_insert_ms": null,
+    "source_map_delete_ms": null,
+    "all_events": [
+      {
+        "ms": 0.13620000000000002,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 14.8851,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.7278,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 4.7083,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 7.1665,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 7.993099999999999,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.0059,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 5.7501,
+        "namespace": "",
+        "phase": "local_input_diff"
+      },
+      {
+        "ms": 265.55600000000004,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 4.2447,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 269.92319999999995,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 5.6493,
+        "namespace": "",
+        "phase": "local_input_diff"
+      },
+      {
+        "ms": 190.3399,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 7.1982,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 197.6707,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 124.13589999999999,
+        "namespace": "",
+        "phase": "advance_coordinate_slots"
+      },
+      {
+        "ms": 139.3811,
+        "namespace": "",
+        "phase": "advance_shared_locations"
+      },
+      {
+        "ms": 8.2021,
+        "namespace": "text",
+        "phase": "replace_source_map_targets"
+      },
+      {
+        "ms": 15.137400000000001,
+        "namespace": "text",
+        "phase": "diff_text_rows_fts"
+      },
+      {
+        "ms": 12.1914,
+        "namespace": "frontmatter",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 53.5021,
+        "namespace": "org.memory.tasks",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 88.2246,
+        "namespace": "org.memory.people",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 8.2723,
+        "namespace": "publication",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 345.67350000000005,
+        "namespace": "",
+        "phase": "publish_ready_page"
+      },
+      {
+        "ms": 829.7579000000001,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 844.7583,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 10000,
+    "sample": 1,
+    "kotlin_reconcile_ms": 464.5467,
+    "native_reconcile_ms": 463.8494,
+    "pairing_delta_ms": 0.6972999999999843,
+    "reconcile_before_index_ms": 12.4985,
+    "source_read_split_ms": 0.5518,
+    "snapshot_parse_ms": 4.8151,
+    "plugin_adapters_ms": 64.59440000000001,
+    "plugin_bodies_ms": {
+      "org.memory.tasks": 2.7932,
+      "org.memory.people": 5.3067
+    },
+    "validation_ms": 10.4183,
+    "storage_transactions_ms": null,
+    "durable_commits_ms": 25.4901,
+    "fact_insert_ms": null,
+    "fact_diff_ms": 153.5485,
+    "local_input_diff_ms": 10.213000000000001,
+    "publication_ms": 360.14570000000003,
+    "shared_locations_ms": 137.1626,
+    "coordinate_slots_ms": 122.98240000000001,
+    "text_fts_insert_ms": null,
+    "text_fts_diff_ms": 14.8765,
+    "source_map_replace_ms": 8.261700000000001,
+    "source_map_insert_ms": null,
+    "source_map_delete_ms": null,
+    "all_events": [
+      {
+        "ms": 0.1726,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 12.4985,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.5518,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 4.8151,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 7.2978000000000005,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 7.954299999999999,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.0037,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 5.0541,
+        "namespace": "",
+        "phase": "local_input_diff"
+      },
+      {
+        "ms": 29.9206,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 3.6775,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 33.7234,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 5.1589,
+        "namespace": "",
+        "phase": "local_input_diff"
+      },
+      {
+        "ms": 34.6738,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 6.7408,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 41.538,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 122.98240000000001,
+        "namespace": "",
+        "phase": "advance_coordinate_slots"
+      },
+      {
+        "ms": 137.1626,
+        "namespace": "",
+        "phase": "advance_shared_locations"
+      },
+      {
+        "ms": 8.261700000000001,
+        "namespace": "text",
+        "phase": "replace_source_map_targets"
+      },
+      {
+        "ms": 14.8765,
+        "namespace": "text",
+        "phase": "diff_text_rows_fts"
+      },
+      {
+        "ms": 12.2885,
+        "namespace": "frontmatter",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 53.6269,
+        "namespace": "org.memory.tasks",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 87.6331,
+        "namespace": "org.memory.people",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 25.4901,
+        "namespace": "publication",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 360.14570000000003,
+        "namespace": "",
+        "phase": "publish_ready_page"
+      },
+      {
+        "ms": 451.2401,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 463.8494,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  },
+  {
+    "items_per_document": 10000,
+    "sample": 2,
+    "kotlin_reconcile_ms": 437.8967,
+    "native_reconcile_ms": 437.4583,
+    "pairing_delta_ms": 0.43840000000000146,
+    "reconcile_before_index_ms": 12.3684,
+    "source_read_split_ms": 0.5387000000000001,
+    "snapshot_parse_ms": 4.355,
+    "plugin_adapters_ms": 62.8767,
+    "plugin_bodies_ms": {
+      "org.memory.tasks": 2.7604,
+      "org.memory.people": 5.8408
+    },
+    "validation_ms": 10.423,
+    "storage_transactions_ms": null,
+    "durable_commits_ms": 7.0775999999999994,
+    "fact_insert_ms": null,
+    "fact_diff_ms": 152.5166,
+    "local_input_diff_ms": 10.1309,
+    "publication_ms": 336.06550000000004,
+    "shared_locations_ms": 134.023,
+    "coordinate_slots_ms": 120.0033,
+    "text_fts_insert_ms": null,
+    "text_fts_diff_ms": 14.0887,
+    "source_map_replace_ms": 8.1593,
+    "source_map_insert_ms": null,
+    "source_map_delete_ms": null,
+    "all_events": [
+      {
+        "ms": 0.1589,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 12.3684,
+        "namespace": "",
+        "phase": "reconcile_before_index"
+      },
+      {
+        "ms": 0.5387000000000001,
+        "namespace": "",
+        "phase": "read_and_split_source"
+      },
+      {
+        "ms": 4.355,
+        "namespace": "",
+        "phase": "source_snapshot_parse"
+      },
+      {
+        "ms": 6.774900000000001,
+        "namespace": "text",
+        "phase": "derive_text"
+      },
+      {
+        "ms": 7.400399999999999,
+        "namespace": "text",
+        "phase": "plan"
+      },
+      {
+        "ms": 0.0029000000000000002,
+        "namespace": "frontmatter",
+        "phase": "plan"
+      },
+      {
+        "ms": 4.9004,
+        "namespace": "",
+        "phase": "local_input_diff"
+      },
+      {
+        "ms": 27.8416,
+        "namespace": "org.memory.tasks",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 3.5763000000000003,
+        "namespace": "org.memory.tasks",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 31.528399999999998,
+        "namespace": "org.memory.tasks",
+        "phase": "plan"
+      },
+      {
+        "ms": 5.2305,
+        "namespace": "",
+        "phase": "local_input_diff"
+      },
+      {
+        "ms": 35.0351,
+        "namespace": "org.memory.people",
+        "phase": "plugin_call_including_adapter"
+      },
+      {
+        "ms": 6.8467,
+        "namespace": "org.memory.people",
+        "phase": "validate_scoped_facts"
+      },
+      {
+        "ms": 42.0221,
+        "namespace": "org.memory.people",
+        "phase": "plan"
+      },
+      {
+        "ms": 120.0033,
+        "namespace": "",
+        "phase": "advance_coordinate_slots"
+      },
+      {
+        "ms": 134.023,
+        "namespace": "",
+        "phase": "advance_shared_locations"
+      },
+      {
+        "ms": 8.1593,
+        "namespace": "text",
+        "phase": "replace_source_map_targets"
+      },
+      {
+        "ms": 14.0887,
+        "namespace": "text",
+        "phase": "diff_text_rows_fts"
+      },
+      {
+        "ms": 12.3251,
+        "namespace": "frontmatter",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 52.744600000000005,
+        "namespace": "org.memory.tasks",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 87.4469,
+        "namespace": "org.memory.people",
+        "phase": "diff_facts_receipt_indexes"
+      },
+      {
+        "ms": 7.0775999999999994,
+        "namespace": "publication",
+        "phase": "durable_commit"
+      },
+      {
+        "ms": 336.06550000000004,
+        "namespace": "",
+        "phase": "publish_ready_page"
+      },
+      {
+        "ms": 424.9853,
+        "namespace": "",
+        "phase": "advance_index"
+      },
+      {
+        "ms": 437.4583,
+        "namespace": "",
+        "phase": "reconcile_total"
+      }
+    ]
+  }
+]

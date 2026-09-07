@@ -92,14 +92,18 @@ fun peopleExtensions(): BundledPluginExtensions {
         searchTypes = listOf(
             SearchTypeRegistration("person", "person") { personSearchType() },
             SearchTypeRegistration("person-connection", "person-connection") { connectionSearchType() }),
-        scopedIndexer = ScopedIndexerRegistration(3, emptyList()) { PeopleIndexer() }, pageCollections = collections)
+        scopedIndexer = ScopedIndexerRegistration(3, emptyList(), createLocal = { PeopleIndexer() }) { PeopleIndexer() }, pageCollections = collections)
 }
 fun personSearchType() = SearchType("person", indexed = true,
     constraints = listOf(Constraint.FactAt(PERSON_KIND, ConstraintOp.EQ, "person", FactLocality.DOCUMENT_ROOT)), indexNamespaces = listOf(PEOPLE_PLUGIN))
 fun connectionSearchType() = SearchType("person-connection", indexed = true,
     constraints = listOf(Constraint.FactAt(CONNECTION_KIND, ConstraintOp.EQ, "connection", FactLocality.DOCUMENT_ROOT)), indexNamespaces = listOf(PEOPLE_PLUGIN))
 
-class PeopleIndexer : ScopedIndexer {
+class PeopleIndexer : ScopedIndexer, LocalScopedIndexer {
+    override fun indexLocations(relPath: String, source: SourceTextSnapshot, locations: List<SourceLocation>): List<ScopedFact> {
+        val selected = locations.toSet()
+        return index(relPath, source.forLocations(selected)).filter { it.location in selected }
+    }
     fun index(relPath: String, source: String): List<ScopedFact> = index(relPath, inspectSourceText(source))
 
     override fun index(relPath: String, source: SourceTextSnapshot): List<ScopedFact> {

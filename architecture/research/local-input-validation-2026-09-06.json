@@ -1,0 +1,30 @@
+{
+  "completed": "2026-09-07",
+  "native": {
+    "passed": 583,
+    "failed": 0,
+    "ignored": 24
+  },
+  "desktop": {
+    "tests": 640,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 5,
+    "passed": 635
+  },
+  "release_clippy": "passed",
+  "android_native_abis": [
+    "arm64-v8a",
+    "x86_64"
+  ],
+  "android_bindings": "regenerated from Android binary",
+  "android_apks": "app and instrumentation APK builds passed",
+  "android_device_execution": "not run; no attached device",
+  "sha256": {
+    "kernel/target/release/gilune_ffi.dll": "e466f6742e9aad6d7bce36fd54c90fcc962d35234896b05bdaa0466e9a02458a",
+    "app/composeApp/resources/windows-x64/gilune_ffi.dll": "e466f6742e9aad6d7bce36fd54c90fcc962d35234896b05bdaa0466e9a02458a",
+    "app/composeApp/src/androidMain/jniLibs/arm64-v8a/libgilune_ffi.so": "54af7c0eb61e82a2b4e644a8824ee2956546483324ceb80c2b231d28d25b07db",
+    "app/composeApp/src/androidMain/jniLibs/x86_64/libgilune_ffi.so": "f533ec531692acf6cf48a56cc85e0efd7551ddfe76717dc7a59864248cf6107d"
+  },
+  "position_prototype": "test-only; runtime libraries remain schema 11"
+}
