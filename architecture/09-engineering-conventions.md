@@ -133,8 +133,9 @@ had not spoken. The rules that follow from it:
 ## Continuous builds and releases
 
 `.github/workflows/build.yml` is the only pipeline. Every push to `main`
-builds the three packages the project ships and runs every test that does
-not need a device; a `v*` tag additionally publishes a GitHub Release with
+builds the three packages the project ships, runs the native and desktop
+suites, and runs Android instrumented tests on an emulator; a `v*` tag
+additionally publishes a GitHub Release with
 those packages attached. `workflow_dispatch` exists so the pipeline can be
 driven by hand.
 
@@ -154,7 +155,10 @@ driven by hand.
   `.github/scripts/build-android.sh`, which is the Linux counterpart of
   `kernel/scripts/build-android.ps1` and does not replace it. The NDK is
   pinned by version, not taken as whichever the image ships: an NDK is a
-  compiler.
+  compiler. The instrumented suite then runs on an API 36 Google APIs
+  x86_64 emulator against the staged release kernel; its results are
+  uploaded even when tests fail. A failing runtime suite blocks the
+  Android job and therefore release publication.
 - **Bindings parity**. Generating bindings per target from that target's
   own binary stays the rule (07-compatibility). The three generated
   surfaces are then diffed, because they have been byte-identical since
@@ -187,9 +191,10 @@ unsigned.
 
 ### What this does not cover
 
-- **No instrumented tests.** There is no emulator in CI; the Android
-  suite stays a local run against a real AVD, and the machine notes for
-  it live in `CLAUDE.md`.
+- **No physical Android device.** The emulator exercises x86_64 runtime
+  behaviour; ARM64 execution, microphone quality and device performance
+  still need hardware. Model/clip-dependent speech tests remain opt-in
+  and report skips when their inputs are absent.
 - **No macOS**, and no Linux format but the DEB.
 - **Building is not running.** A green pipeline says the three packages
   build and the suites pass, not that a package installs and starts.

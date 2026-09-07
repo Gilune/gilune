@@ -45,6 +45,30 @@ pub fn fsync_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Atomically publish a prepared file without replacing an existing destination.
+/// Returns false on collision. The source may be consumed on success; callers
+/// still sync the parent directory and remove any remaining temporary file.
+pub(crate) fn publish_new_file(source: &Path, target: &Path) -> Result<bool> {
+    // Android app storage denies hard links. Rename with NOREPLACE preserves
+    // the same collision guarantee without publishing a partially written file.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let result = rustix::fs::renameat_with(
+        rustix::fs::CWD,
+        source,
+        rustix::fs::CWD,
+        target,
+        rustix::fs::RenameFlags::NOREPLACE,
+    )
+    .map_err(std::io::Error::from);
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let result = std::fs::hard_link(source, target);
+    match result {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+        Err(error) => Err(io_err(target, error)),
+    }
+}
+
 /// Bytes still available on the filesystem holding `path`. Used to refuse
 /// a declared blob length that would not fit before a byte of it is
 /// written (ADR 0019 § 8) — a length a peer declares is a claim, and this
@@ -63,3 +87,6 @@ pub fn portable_rel(rel: &Path) -> String {
         .collect::<Vec<_>>()
         .join("/")
 }
+
+#[cfg(test)]
+mod tests;

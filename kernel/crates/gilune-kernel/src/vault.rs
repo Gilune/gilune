@@ -1769,13 +1769,13 @@ fn write_new_projection(target: &Path, content: &[u8]) -> Result<bool> {
     file.write_all(content).map_err(|source| KernelError::Io {path:temporary.clone(),source})?;
     file.sync_all().map_err(|source| KernelError::Io {path:temporary.clone(),source})?;
     drop(file);
-    let published = match std::fs::hard_link(&temporary, target) {
-        Ok(()) => true,
-        Err(e) if e.kind()==std::io::ErrorKind::AlreadyExists => false,
-        Err(source) => return Err(KernelError::Io {path:target.into(),source}),
-    };
+    let published = fs::publish_new_file(&temporary, target)?;
     fs::fsync_dir(parent)?;
-    std::fs::remove_file(&temporary).map_err(|source| KernelError::Io {path:temporary,source})?;
+    match std::fs::remove_file(&temporary) {
+        Ok(()) => {},
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && published => {},
+        Err(source) => return Err(KernelError::Io {path:temporary,source}),
+    }
     Ok(published)
 }
 
