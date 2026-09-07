@@ -42,6 +42,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
 import androidx.test.runner.lifecycle.Stage
 import org.junit.rules.TestRule
+import org.junit.Assume.assumeTrue
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
 
@@ -76,6 +77,13 @@ internal fun imeConnection(view: View, info: EditorInfo): InputConnection? {
 @Target(AnnotationTarget.FUNCTION)
 annotation class WithSystemKeyboard
 
+/** Opt-in measurements that require a historical keyboard defect to reproduce.
+ * They remain falsifiable on other keyboards, but a fixed upstream keyboard
+ * must not fail the application's correctness gate. */
+@Retention(AnnotationRetention.RUNTIME)
+@Target(AnnotationTarget.FUNCTION)
+annotation class LegacyImeDiagnostic
+
 /// Gives each row the input session it needs and always hands the device
 /// back the way it found it.
 ///
@@ -87,6 +95,12 @@ class Ms1InputSessionRule : TestRule {
     override fun apply(base: Statement, description: Description): Statement =
         object : Statement() {
             override fun evaluate() {
+                if (description.getAnnotation(LegacyImeDiagnostic::class.java) != null) {
+                    assumeTrue(
+                        "Historical keyboard diagnostic: enable gilune.ime.legacyDiagnostics to reproduce the MS1 observation",
+                        InstrumentationRegistry.getArguments().getString("gilune.ime.legacyDiagnostics") == "true",
+                    )
+                }
                 val asFound = Ms1Ime.asFound()
                 if (description.getAnnotation(WithSystemKeyboard::class.java) != null) {
                     // Self-healing: if an earlier crash left the device with

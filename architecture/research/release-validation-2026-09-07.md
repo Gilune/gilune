@@ -119,3 +119,25 @@ CI now explicitly sizes guest data at 3 GB, removes the unused preinstalled
 .NET SDK from that disposable Android runner, and bounds boot waiting at five
 minutes. The local API 36 run uses about 1.7 GB of guest data during the suite;
 the smaller partition retains headroom while avoiding the default's allocation.
+
+With those capacity changes, [run 34104640030](https://github.com/Gilune/gilune/actions/runs/34104640030)
+booted the emulator and completed 873 tests in 706.761 seconds: 858 passed,
+12 speech-input skips and three failures confined to the historical MS1
+keyboard-bug reproductions. There were no application-invariant failures.
+API level alone was therefore insufficient to scope those measurements. They
+now opt in using `gilune.ime.legacyDiagnostics=true`, retaining their original
+assertions and permitting comparison on any OS/keyboard. The default gate
+continues to run the portable IME protocol, modern editor/undo and platform
+EditText control tests. See [the diagnostic command](../../spikes/ms1-ime/README.md).
+
+The final application code also passed a fresh local API 36 run (861 passed,
+12 skipped, zero failures; 175.273 seconds), and the rebuilt/staged Windows
+release library passed 635 desktop tests with five skips. Source-query
+contracts and shipped application behaviour are unchanged by diagnostic gating.
+
+The scoped local verification runs the same two IME suites in both modes:
+default mode reports 34 tests, 31 passed and three explicit diagnostic skips;
+enabling the argument reports all 34 passed with no skips. The original
+diagnostic assertions are therefore still executable and checked on their
+measured local keyboard environment. Logs are `release-diagnostics-default.log`
+and `release-diagnostics-enabled.log` under `app/build/`.

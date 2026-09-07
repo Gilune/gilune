@@ -158,7 +158,10 @@ driven by hand.
   compiler. The instrumented suite then runs on an API 36 Google APIs
   x86_64 emulator against the staged release kernel; its results are
   uploaded even when tests fail. A failing runtime suite blocks the
-  Android job and therefore release publication.
+  Android job and therefore release publication. Historical MS1 measurements
+  that assert a particular keyboard's bug must occur are opt-in diagnostics;
+  portable composing/commit/undo invariants and the platform control remain
+  mandatory. See `spikes/ms1-ime/README.md` for the diagnostic command.
 - **Bindings parity**. Generating bindings per target from that target's
   own binary stays the rule (07-compatibility). The three generated
   surfaces are then diffed, because they have been byte-identical since

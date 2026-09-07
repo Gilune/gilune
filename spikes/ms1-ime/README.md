@@ -1,5 +1,25 @@
 # Spike MS1 — The IME and the offset mapping
 
+**Diagnostic execution update (2026-09-07).** The three rows that require the
+historical keyboard teardown to occur now opt in through
+`gilune.ime.legacyDiagnostics=true`. They keep their original, falsifiable
+assertions. API 36 alone does not identify the measured keyboard or its timing:
+the hosted image did not reproduce those three observations while its 858
+non-opt-in application tests passed. Missing an upstream defect is not an
+application correctness failure. Portable composing/commit/undo tests and the
+platform EditText control remain in the default release gate on every supported
+API. To reproduce or compare the historical observation, run from `app/` (use
+`gradlew.bat` on Windows):
+
+```sh
+./gradlew :composeApp:connectedDebugAndroidTest -Pgilune.kernel.profile=release \
+  '-Pandroid.testInstrumentationRunnerArguments.class=org.gilune.app.Ms1ControlsTest,org.gilune.app.Ms1ImeSpikeTest' \
+  '-Pandroid.testInstrumentationRunnerArguments.gilune.ime.legacyDiagnostics=true' --rerun
+```
+
+This supersedes the short-lived API-36-only filter. The report below retains
+the original environment, observations and physical-device gaps.
+
 Status: **Complete** — verdict **PASS WITH CONDITIONS** (§ Verdict). The
 offset mapping ADR 0017 § 8 was chartered to doubt is sound under every
 composing sequence measured. A different defect was found in the same place

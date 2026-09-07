@@ -55,7 +55,6 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Rule
-import androidx.test.filters.SdkSuppress
 import org.junit.Test
 import org.junit.rules.RuleChain
 import org.junit.runner.RunWith
@@ -322,9 +321,7 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
 
     @WithSystemKeyboard
     @Test
-    // This pins the API 36 LatinIME observation documented in spikes/ms1-ime.
-    // Other OS versions still run the portable composing/commit invariants.
-    @SdkSuppress(minSdkVersion = 36, maxSdkVersion = 36)
+    @LegacyImeDiagnostic
     fun theBoundKeyboardTearsDownTheLegacyFieldsComposingRegion() {
         // MS1's headline measurement, and it is NOT about the decoration.
         //
