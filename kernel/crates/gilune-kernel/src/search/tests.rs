@@ -223,7 +223,7 @@ mod items;
 
 #[test]
 fn bounded_anchor_pages_match_relevance_route_without_highlights() {
-    let (_, s) = vault();
+    let (_dir, s) = vault();
     write(&s, "a.md", "---\ncolour: red\n---\nfirst\nsecond first\nthird\n");
     write(&s, "b.md", "---\ncolour: blue\n---\nsecond\nfirst\n");
     for line_mode in [false, true] {

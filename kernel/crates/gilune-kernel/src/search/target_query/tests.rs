@@ -142,7 +142,7 @@ fn equivalent(s: &Store, q: &SearchRequest) {
 
 #[test]
 fn all_fact_operators_scopes_clause_negation_sorting_and_grouping_match_legacy() {
-    let (_,s)=setup("\u{feff}---\r\ntitle: Sample\r\n---\r\n- first 😀\r\n  continued\r\n  - child\r\n- third\r\n- fourth\r\n- fifth\r\n");
+    let (_dir,s)=setup("\u{feff}---\r\ntitle: Sample\r\n---\r\n- first 😀\r\n  continued\r\n  - child\r\n- third\r\n- fourth\r\n- fifth\r\n");
     let mut cases = vec![query()];
     for locality in [
         FactLocality::Exact,
@@ -277,7 +277,7 @@ fn projection_reads_only_returned_items_and_preserves_snapshot_cursor_guards() {
 
 #[test]
 fn incomplete_source_receipts_and_detached_stale_facts_match_legacy() {
-    let (_, s) = setup("- entry\n- another\n");
+    let (_dir, s) = setup("- entry\n- another\n");
     let mut q = query();
     q.clauses.push(clause(
         vec![at(
@@ -308,7 +308,7 @@ fn incomplete_source_receipts_and_detached_stale_facts_match_legacy() {
 
 #[test]
 fn coincident_predicate_names_from_distinct_owners_keep_facts_and_stable_sorting() {
-    let (_, s) = setup("- first\n- second\n- third\n- fourth\n");
+    let (_dir, s) = setup("- first\n- second\n- third\n- fourth\n");
     s.register_indexer("other", 1, &[], Arc::new(Labels))
         .unwrap();
     s.advance_index().unwrap();
@@ -328,7 +328,7 @@ fn coincident_predicate_names_from_distinct_owners_keep_facts_and_stable_sorting
 
 #[test]
 fn text_relevance_mixed_negation_and_grouped_pages_match_the_previous_executor() {
-    let (_, s) = setup("---\r\ntitle: properties\r\n---\r\n- First 😀\r\n  continued\r\n  - child é\r\n- third\r\n- fourth first\r\n");
+    let (_dir, s) = setup("---\r\ntitle: properties\r\n---\r\n- First 😀\r\n  continued\r\n  - child é\r\n- third\r\n- fourth first\r\n");
     for target in [
         TextTarget::Any,
         TextTarget::Body,
@@ -426,7 +426,7 @@ fn cancelling_a_running_callback_count_keeps_an_independent_page_available() {
             Ok(true)
         }
     }
-    let (_, s) = setup("- entry");
+    let (_dir, s) = setup("- entry");
     let reader = s.prepare_search(query(), true).unwrap();
     let generation = reader.page(None, None).unwrap().generation;
     let mut request = query();
@@ -456,7 +456,7 @@ fn text_windows_cross_long_own_ranges_and_revisit_nested_children() {
         "  continued needle\r\n".repeat(600),
         "    child continued\r\n".repeat(600)
     );
-    let (_, s) = setup(&text);
+    let (_dir, s) = setup(&text);
     let mut q = query();
     q.body_needles = vec!["needle".into()];
     q.clauses.push(clause(

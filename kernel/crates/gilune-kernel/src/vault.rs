@@ -1390,7 +1390,11 @@ impl Store {
     /// ever projected.
     fn projected_path(&self, rel_path: &str) -> Result<String> {
         let rel = std::path::PathBuf::from(rel_path.replace('\\', "/"));
-        let usable = rel.is_relative()
+        // Path::is_relative follows the host OS. A Windows drive prefix must
+        // also be refused on Unix so a portable path has the same meaning.
+        let drive_prefix = rel_path.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            && rel_path.as_bytes().get(1) == Some(&b':');
+        let usable = !drive_prefix && rel.is_relative()
             && rel.components().all(|c| matches!(c, std::path::Component::Normal(_)))
             && rel_path.ends_with(".md")
             && !rel.starts_with(".gilune");
@@ -3081,7 +3085,8 @@ mod tests {
     #[test]
     fn a_reconcile_path_refuses_a_path_that_is_not_a_projected_file_in_this_vault() {
         let (_dir, store, _rel) = captured("resident");
-        for outside in ["../elsewhere.md", "C:/windows/system32/note.md", ".gilune/local/x.md"] {
+        for outside in ["../elsewhere.md", "C:/windows/system32/note.md", "C:note.md",
+            "z:\\outside.md", "/tmp/outside.md", "//server/share/note.md", ".gilune/local/x.md"] {
             assert!(
                 matches!(store.reconcile_path(outside), Err(KernelError::VaultUnusable { .. })),
                 "{outside} was not refused"

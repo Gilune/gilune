@@ -33,7 +33,7 @@ fn an_empty_result_from_a_newer_source_is_not_evidence_for_a_negative_on_an_old_
 
 #[test]
 fn more_than_ten_thousand_items_page_completely_without_source_reads() {
-    let (_, store, _) = fixture(&"- red square\n".repeat(10_005));
+    let (_dir, store, _) = fixture(&"- red square\n".repeat(10_005));
     let mut q = request(vec![eq("fixture.colour", "red"), eq("fixture.shape", "square")]);
     q.kind = LocationKind::MarkdownItem;
     q.page_size = 500;
@@ -261,7 +261,7 @@ fn joins_continuations_without_inheriting_nested_or_root_facts_and_reads_no_file
 
 #[test]
 fn membership_negation_paging_rebuild_and_cursor_invalidation() {
-    let (_, store, _) = fixture("- red\n- red square\n- red\n\nred prose\n");
+    let (_dir, store, _) = fixture("- red\n- red square\n- red\n\nred prose\n");
     let mut q = request(vec![
         Constraint::FactIn {
             predicate: "fixture.colour".into(),
@@ -329,7 +329,7 @@ fn rejects_unknown_locations_and_implicit_or_unsupported_query_semantics() {
         )
         .is_err());
     }
-    let (_, store, _) = fixture("- red\n");
+    let (_dir, store, _) = fixture("- red\n");
     assert!(store
         .query_locations(&request(vec![Constraint::Fact {
             predicate: "fixture.colour".into(),

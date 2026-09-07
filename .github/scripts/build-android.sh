@@ -145,7 +145,7 @@ echo "Generating Kotlin bindings from $source_lib"
   cd "$repo/kernel"
   cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
     --library "$source_lib" --language kotlin \
-    --out-dir "$repo/app/composeApp/src/androidMain/generated" --no-format
+    --out-dir "$repo/app/kernelBindings/src/androidMain/generated" --no-format
 )
 
 # ----------------------------------------------------------------- report

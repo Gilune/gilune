@@ -91,7 +91,7 @@ fn body(query: &str) -> Constraint {
 #[test]
 fn own_text_spans_and_unicode_survive_crlf_metadata_and_nested_items() {
     let source="\u{feff}---\r\ntitle: Example\r\n---\r\n- record 😀 first\r\n  red second\r\n  - record blue child\r\n- record other\r\n";
-    let (_, store) = setup(source);
+    let (_dir, store) = setup(source);
     let mut q = query();
     q.clauses.push(clause(
         vec![body("first"), body("second"), fact("red")],
@@ -120,7 +120,7 @@ fn own_text_spans_and_unicode_survive_crlf_metadata_and_nested_items() {
 
 #[test]
 fn whole_clause_negatives_membership_and_explicit_root_queries() {
-    let (_, store) =
+    let (_dir, store) =
         setup("- record red apple\n- record red pear\n- record blue apple\n- record plain\n");
     let mut q = query();
     q.clauses
@@ -160,7 +160,7 @@ fn whole_clause_negatives_membership_and_explicit_root_queries() {
 
 #[test]
 fn grouping_limits_sorting_paging_and_residuals_are_kernel_owned() {
-    let (_, store) = setup("- record red\n- record blue\n- record red\n");
+    let (_dir, store) = setup("- record red\n- record blue\n- record red\n");
     let mut q = query();
     q.page_size = 1;
     q.max_lines = 1;
