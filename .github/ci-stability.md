@@ -1,5 +1,41 @@
 # Intermittent build failures — 7 September 2026
 
+## v1.0.5: Android suggestion test was not waiting for its option
+
+[Main 34231892380](https://github.com/Gilune/gilune/actions/runs/34231892380)
+and [v1.0.5 34231892162](https://github.com/Gilune/gilune/actions/runs/34231892162)
+both passed Windows and Linux and completed Android's 898-test suite with one
+failure and 15 skips. Both failed
+`MobileEditorUiTest.theSlashMenuOffersCandidatesAboveTheRowAndWritesARealDate`
+at the attempt to tap **Due date**, with no matching text node. These were test
+failures, not another timeout (792.249 and 968.450 seconds of test execution).
+
+The test waited only for `editor-completions`, which is rendered during
+**Finding suggestions…** before IO publishes an option. This was the Android
+counterpart of the readiness pattern already fixed on desktop. The previous
+local validation compiled the Android APKs but did not execute this flow;
+compilation could not catch the runtime race.
+
+The unchanged test reproduced the exact CI failure on the first local API 36
+emulator run (10.876 seconds). After changing the wait, it passed on the same
+emulator (5.732 seconds). Logs: `app/build/ci-v105-android-baseline.log` and
+`app/build/ci-v105-android-fixed.log` (local build outputs).
+
+`EditorCompletionAwait` now lives in `jvmSharedTest`, shared by desktop and
+Android. Both platforms wait for the labelled first option and the absence of
+the loading notice, then tap the tagged interactive row. Android Tasks and
+People completion tests use this same helper. Exact token, frontmatter and
+saved-file assertions remain; there are no retry-on-failure or skip changes.
+
+Validation after the fix: 17 related desktop tests passed. The full local
+`:composeApp:connectedDebugAndroidTest` run on API 36 passed all 898 tests
+with zero failures/errors and the existing 15 skips (287.670 seconds of test
+execution, 5m 11s including Gradle/deployment). The corrected slash-menu test
+therefore passed both alone and in the full suite. Reports are under
+`app/composeApp/build/outputs/androidTest-results/connected/debug`; the console
+log is `app/build/ci-v105-android-full.log`. This verifies the specific test fix;
+the previously documented native rendering failures are separate open findings.
+
 ## v1.0.4: two different failures at the same commit
 
 Both runs used `0c00051856f67e08d0f99a9d5a9bd58c8049631e`:

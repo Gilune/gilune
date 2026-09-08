@@ -30,11 +30,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
@@ -138,16 +135,10 @@ class MobileEditorUiTest {
 
         // The row's `/` types the trigger the shared machine listens for.
         rule.onNodeWithTag("slash").performClick()
-        rule.waitUntil(WAIT) {
-            rule.onAllNodesWithTag("editor-completions").fetchSemanticsNodes().isNotEmpty()
-        }
-        // Stage one is the registered field; tapping it is Enter.
-        rule.onNodeWithText("Due date").performClick()
-        rule.waitUntil(WAIT) {
-            rule.onAllNodes(hasText("today", ignoreCase = true)).fetchSemanticsNodes().isNotEmpty()
-        }
-        rule.onNodeWithText("today", ignoreCase = true).performClick()
-        rule.waitForIdle()
+        // The container also exists while IO is still finding suggestions.
+        // Each stage must publish its actual option before we tap its row.
+        rule.chooseFirstEditorOption("Due date")
+        rule.chooseFirstEditorOption("today")
 
         val today = LocalDate.now().toString()
         rule.waitUntil(WAIT) { editor.body.text.toString().contains("due:$today") }
@@ -169,8 +160,7 @@ class MobileEditorUiTest {
         show(state, editor)
         rule.waitUntil(WAIT) { editor.body.text.toString() == "---\n@ali" }
         rule.runOnUiThread { editor.body.edit { selection = TextRange(8) } }
-        rule.waitUntil(WAIT) { rule.onAllNodes(hasText("Alice Smith")).fetchSemanticsNodes().isNotEmpty() }
-        rule.onNodeWithText("Alice Smith").performClick()
+        rule.chooseFirstEditorOption("Alice Smith")
         rule.waitUntil(WAIT) { editor.body.text.toString() == "---\n@alice.smith " }
         assertEquals(NOTE_HEAD + "---\n@alice.smith ", editor.document())
         rule.waitForIdle()

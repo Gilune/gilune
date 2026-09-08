@@ -42,13 +42,6 @@ class PeopleEditorUiTest {
         compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
     }
 
-    private fun chooseFirstOption(label: String) {
-        compose.waitForFirstEditorOption(label)
-        // Text can move between merged semantics during popup recomposition.
-        // The tagged, clickable row is the actual interaction target.
-        compose.onNodeWithTag("completion-0", useUnmergedTree = true).assertHasClickAction().performClick()
-    }
-
     @Test fun theRealEditorKeepsFrontmatterContextAndTranslatesBodyInsertion() = fixture { state, _ ->
         val header = "---\ncustom: kept\n---\n"
         java.io.File(state.vaultDir, "note.md").writeText(header + "---\n@ali")
@@ -60,7 +53,7 @@ class PeopleEditorUiTest {
             NoteEditor(state, editor, Modifier.fillMaxSize())
         } } }
         compose.onNodeWithTag("note-body").performTextInput("@ali")
-        chooseFirstOption("Alice Smith")
+        compose.chooseFirstEditorOption("Alice Smith")
         compose.waitUntil(10_000) { editor.text.text == "---\n@alice.smith " }
         assertEquals(header + "---\n@alice.smith ", editor.document())
     }
@@ -73,10 +66,10 @@ class PeopleEditorUiTest {
             }
             Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
         }
-        chooseFirstOption("Owner")
+        compose.chooseFirstEditorOption("Owner")
         compose.waitForFirstEditorOption("Alice Smith")
         assertEquals("Publish /ow", text.text)
-        chooseFirstOption("Alice Smith")
+        compose.chooseFirstEditorOption("Alice Smith")
         compose.waitUntil(10_000) { text.text == "Publish owner: @alice.smith " }
     }
 
@@ -88,7 +81,7 @@ class PeopleEditorUiTest {
             }
             Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
         }
-        chooseFirstOption("Create person…")
+        compose.chooseFirstEditorOption("Create person…")
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("Create") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Create").performClick()
         compose.waitUntil(10_000) { text.text == "Hello @alicia " }

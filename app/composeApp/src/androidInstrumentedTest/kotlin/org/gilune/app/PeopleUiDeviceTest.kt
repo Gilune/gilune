@@ -50,11 +50,10 @@ class PeopleUiDeviceTest {
             }
             Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
         }
-        waitText("Owner")
-        compose.onNodeWithText("Owner").performClick()
-        waitText("Alice Smith")
+        compose.chooseFirstEditorOption("Owner")
+        compose.waitForFirstEditorOption("Alice Smith")
         assertEquals("Publish /ow", text.text)
-        compose.onNodeWithText("Alice Smith").performClick()
+        compose.chooseFirstEditorOption("Alice Smith")
         compose.waitUntil(10_000) { text.text == "Publish owner: @alice.smith " }
     }
 
@@ -66,8 +65,7 @@ class PeopleUiDeviceTest {
             }
             Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
         }
-        waitText("Create person…")
-        compose.onNodeWithText("Create person…").performClick()
+        compose.chooseFirstEditorOption("Create person…")
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("Create") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Create").performClick()
         compose.waitUntil(10_000) { text.text == "Hello @alicia " }

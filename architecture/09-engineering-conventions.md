@@ -169,6 +169,28 @@ driven by hand.
 
 `contents: write` is granted to the release job and to nothing else.
 
+### Local release checks
+
+Before tagging an editor or shared-UI change, execute the corresponding desktop
+**and Android instrumented tests**, then the full Android suite on the candidate
+sources. Building an APK or compiling instrumentation is not device-test evidence.
+Use an API 36 x86_64 emulator and the staged release kernel, matching CI:
+
+```text
+./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+./gradlew :composeApp:connectedDebugAndroidTest -Pgilune.kernel.profile=release
+```
+
+Run these from `app` (`gradlew.bat` on Windows). Confirm the intended emulator
+is connected; retain the test reports and report which platforms actually ran.
+For a reported failure, first run the unchanged failing test locally when
+possible, then verify the fix in that same environment. When changing shared
+UI test synchronisation, inspect the equivalent flow on both targets and share
+the helper in `jvmSharedTest` to prevent separate implementations drifting.
+Local success does not replace Linux CI or prove an intermittent renderer fault
+resolved. This check follows the v1.0.5 Android failure that reproduced locally
+on the first attempt after an APK-only pre-release check missed it.
+
 ### The version rule
 
 jpackage on Windows accepts only `MAJOR.MINOR.BUILD` with MAJOR greater
