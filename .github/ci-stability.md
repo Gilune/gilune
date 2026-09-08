@@ -1,5 +1,43 @@
 # Intermittent build failures — 7 September 2026
 
+## v1.0.4: two different failures at the same commit
+
+Both runs used `0c00051856f67e08d0f99a9d5a9bd58c8049631e`:
+
+- [Main 34220708320](https://github.com/Gilune/gilune/actions/runs/34220708320):
+  Windows and Android passed. Linux completed 702 tests with one failure and
+  five skips. `PeopleEditorUiTest.theRealEditorKeepsFrontmatterContextAndTranslatesBodyInsertion`
+  found Alice Smith while waiting, then failed to locate that label in merged
+  semantics when injecting the click. The failure explicitly reports the label
+  still present in the unmerged tree. This was an assertion failure, not the
+  previously observed native render hang.
+- [Release 34220707390](https://github.com/Gilune/gilune/actions/runs/34220707390):
+  Windows and Linux passed. The APK compiled successfully. The Android test
+  action expired at its 20-minute limit, with its last progress update reporting
+  476/898 tests completed, six skipped and zero failed. Per-test logcat continued
+  to show tests starting and finishing until cancellation; it was not stuck on
+  one test. The final recorded test even finished during cancellation cleanup.
+
+The release Android action began at 11:43:49 UTC and tests began at 11:49:55,
+so setup/preparation consumed about six minutes. The corresponding successful
+main action took 19 minutes overall, with all 898 tests completing in 811.694
+seconds (15 skipped). Across 440 matched completed tests with start/finish logs,
+release execution totalled 642.254 seconds versus 515.454 on main, about 25%
+longer. This supports an insufficient step budget under variable runner load;
+it does not identify the host-level cause of the speed difference.
+
+The People completion tests now wait for the labelled first suggestion to be
+ready, then click its tagged interactive row in the unmerged tree. Exact token
+and frontmatter-preservation assertions remain. Android compiles its test APK
+before starting the emulator and allows 40 minutes for the full instrumented
+step, retaining its five-minute boot limit and always-uploaded diagnostics.
+No tests are skipped, assertions weakened, or automatic retries introduced.
+
+Local validation: all 17 People/Tasks/list-continuation desktop tests passed,
+followed by three independent runs of all five People-editor tests (15/15),
+and both Android APKs build with the revised preparation command. Hosted Linux
+and the longer Android budget still require verification in the next CI run.
+
 ## Desktop: completion tests raced background work
 
 [Main run 34156277391](https://github.com/Gilune/gilune/actions/runs/34156277391)
