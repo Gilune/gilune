@@ -17,6 +17,58 @@ import kotlin.test.assertSame
 import kotlin.test.assertTrue
 
 class TabsTest {
+    @Test
+    fun closeToRightAndCloseOthersKeepTheChosenTabAndSaveEdits() {
+        val dir = vault()
+        val tabs = TabsState(dir)
+        val a = tabs.open(note(dir, "a.md"))
+        val b = tabs.open(note(dir, "b.md"))
+        val c = tabs.open(note(dir, "c.md"))
+        edit(c, "saved before closing")
+        val pane = tabs.activePane
+        assertTrue(tabs.closeToRight(pane, b))
+        assertEquals(listOf(a, b), pane.tabs.toList())
+        assertTrue(onDisk(dir, "c.md").endsWith("saved before closing"))
+        assertTrue(tabs.closeOthers(pane, b))
+        assertEquals(listOf(b), pane.tabs.toList())
+        assertSame(b, tabs.activeTab)
+    }
+
+    @Test
+    fun bulkCloseStopsAtAConflictAndPreservesTheUnsavedBuffer() {
+        val dir = vault()
+        val tabs = TabsState(dir)
+        val keep = tabs.open(note(dir, "keep.md"))
+        val conflict = tabs.open(note(dir, "conflict.md"))
+        edit(conflict, "unsaved text")
+        File(dir, "conflict.md").writeText("external edit")
+        assertFalse(tabs.closeOthers(tabs.activePane, keep))
+        assertTrue(conflict in tabs.activePane.tabs)
+        assertEquals("unsaved text", conflict.editor.text.text)
+        assertEquals("external edit", onDisk(dir, "conflict.md"))
+    }
+
+    @Test
+    fun tabColoursSurviveRestoringPathsWithSpacesAndCanBeCleared() {
+        val dir = vault()
+        val tabs = TabsState(dir)
+        tabs.open(note(dir, "a note.md")).colour = TabColour.Purple
+        val restored = TabsState.restore(dir, tabs.serialise())
+        assertEquals(TabColour.Purple, restored.activeTab?.colour)
+        restored.activeTab!!.colour = null
+        assertNull(TabsState.restore(dir, restored.serialise()).activeTab?.colour)
+    }
+
+    @Test
+    fun creatingANoteStartsEditingRegardlessOfItsPreviousMode() {
+        val dir = vault()
+        val tabs = TabsState(dir)
+        val tab = tabs.open(note(dir, "Untitled.md"))
+        tab.editor.reading = true
+        assertSame(tab, tabs.openForEditing("Untitled.md"))
+        assertFalse(tab.editor.reading)
+        assertTrue(tab.editor.focusTitle)
+    }
     private fun vault(): String = Files.createTempDirectory("gilune-tabs").toFile().absolutePath
 
     private fun note(dir: String, rel: String, body: String = "body"): String {

@@ -56,7 +56,7 @@ fun peopleExtensions(): BundledPluginExtensions {
             { facts, fallback ->
                 fun value(key: String) = facts.firstOrNull { it.key == key }?.value
                 PageRow(value(PERSON_NAME) ?: fallback, value(HANDLE_DISPLAY)?.let { "@$it" }.orEmpty(), value(PROBLEM))
-            }, identityPredicate = PERSON_HANDLE, lookupProviderId = PEOPLE_LOOKUP),
+            }, identityPredicate = PERSON_HANDLE, lookupProviderId = PEOPLE_LOOKUP, folderCreateLabel = "Create person"),
         PageCollectionRegistration(CONNECTIONS_PANEL, CONNECTION_TYPE, "person-connection", "People connections", "New connection",
             listOf(PageField("keyword", "Keyword", hint = "reviewer"), PageField("label", "Display label"), PageField("retired", "Retired", "false", "true or false")), ::connectionDraft,
             { facts, fallback ->
@@ -85,10 +85,11 @@ fun peopleExtensions(): BundledPluginExtensions {
             PluginContribution(Slots.DOCUMENT_VIEWS, PEOPLE_VIEW, "People links"),
             PluginContribution(Slots.DOCUMENT_REFACTORINGS, PEOPLE_REFACTORING, "Rename people and connections"),
             PluginContribution(Slots.SEARCH_TYPES, "person-connection", "People connections"),
-        ) + operators.map { PluginContribution(Slots.SEARCH_OPERATORS, it.contributionId, it.name) } + collections.flatMap { c -> listOf(
-            PluginContribution(PAGE_COLLECTIONS_SLOT, c.id, c.title),
-            PluginContribution(Slots.NAVIGATION, c.id, c.title, "{\"panel\":${pageJsonString(c.id)}}"),
-        ) })
+        ) + operators.map { PluginContribution(Slots.SEARCH_OPERATORS, it.contributionId, it.name) } + collections.flatMap { c ->
+            listOf(PluginContribution(PAGE_COLLECTIONS_SLOT, c.id, c.title)) +
+                if (c.id == PEOPLE_PANEL) listOf(PluginContribution(Slots.NAVIGATION, c.id, c.title, "{\"panel\":${pageJsonString(c.id)}}"))
+                else emptyList()
+        })
     return BundledPluginExtensions(declaration,
         indexedLookups = listOf(peopleLookupRegistration()),
         editorCompletions = listOf(peopleEditorRegistration()),

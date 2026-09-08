@@ -4,11 +4,8 @@
 // `navigation` slot and leaves with the plugin, or with the plugin's own
 // panel switch; the rail knows it only by the key its contribution names.
 //
-// It is a reader and nothing else. Every row is a line that already sits
-// in a note, the query is the one search engine over the vault on disk
-// (§ 4: one grammar, one engine), and **rows navigate, they do not edit**
-// — a click opens the note, because toggling from here would write to a
-// file the user is not looking at.
+// The panel's rows navigate to their source notes. Filter blocks also offer
+// a separate checkbox, guarded against stale results and unsaved source edits.
 //
 // The partition itself is pure over rows and a day, and lives in
 // `Agenda.kt` in the shared set — the phone's agenda destination draws the
@@ -18,7 +15,7 @@
 // T4's `filter` block renders here too (§ 4: "what renders is the type's
 // row"), sharing [TaskHitRow] with the panel rather than forking it — one
 // row shape per type, so an agenda row and a block row cannot drift. The
-// panel groups and the block does not; everything else is the same row.
+// panel groups and the block does not; the block opts into checkbox actions.
 
 package org.gilune.app
 
@@ -177,14 +174,20 @@ private fun chevronFor(open: Boolean): ImageVector =
 ///
 /// `onOpen` is nullable because a row is only navigable where the surface
 /// drawing it has somewhere to send the click; null draws the same row,
-/// inert. **Rows navigate, they never toggle** (§ 4) either way.
+/// inert. An optional checkbox has its own action; the row text navigates.
 ///
 /// The colour comes from the date against `today` rather than from the
 /// panel's group, so the block gets the same reading with no groups at
 /// all — and the panel's four views agree with it by construction, since
 /// they partition on that same comparison.
 @Composable
-fun TaskHitRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?, modifier: Modifier = Modifier) {
+fun TaskHitRow(
+    hit: TaskHit,
+    today: LocalDate,
+    onOpen: ((String) -> Unit)?,
+    modifier: Modifier = Modifier,
+    onToggle: ((TaskHit) -> Unit)? = null,
+) {
     val colours = MaterialTheme.colorScheme
     Row(
         modifier
@@ -197,15 +200,16 @@ fun TaskHitRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?, modi
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        if (onToggle != null) TaskResultCheckbox(hit, onToggle)
         Column(Modifier.weight(1f)) {
-            Text(
+            NoteResultText(
                 taskLabel(hit.text),
                 fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 color = colours.onSurface,
             )
-            Text(
+            NoteResultText(
                 hit.relPath,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
@@ -216,7 +220,7 @@ fun TaskHitRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?, modi
         }
         val due = hit.due
         if (due != null) {
-            Text(
+            NoteResultText(
                 due.toString(),
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
@@ -278,8 +282,8 @@ fun filterBlockDecoration(results: Map<String, FilterResult>): EditorBlockDecora
 /// Every row **wraps its content** rather than filling the width. That is
 /// not styling: the space beside a row is where a click falls through to
 /// the field underneath, landing the caret inside the block and revealing
-/// the fence — which is how a covered block is edited. Rows themselves
-/// still navigate and never edit (§ 4).
+/// the fence — which is how a covered block is edited. Row text navigates;
+/// a checkbox updates the source task without moving the caret.
 @Composable
 fun FilterBlockLines(
     result: FilterResult,
@@ -288,13 +292,14 @@ fun FilterBlockLines(
     rowHeight: Dp,
     maxRowWidth: Dp,
     modifier: Modifier = Modifier,
+    onToggle: ((TaskHit) -> Unit)? = null,
 ) {
     Column(modifier) {
         when (result) {
             is FilterResult.Hint -> FilterTextLine(result.text, rowHeight, italic = true)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
-                for (row in result.rows) TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth)
+                for (row in result.rows) TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle)
                 if (result.more > 0) FilterTextLine("+${result.more} more", rowHeight, italic = false)
             }
             is FilterResult.Notes -> {
@@ -313,6 +318,7 @@ private fun TaskHitLine(
     onOpen: ((String) -> Unit)?,
     rowHeight: Dp,
     maxWidth: Dp,
+    onToggle: ((TaskHit) -> Unit)?,
 ) {
     val colours = MaterialTheme.colorScheme
     Row(
@@ -326,7 +332,8 @@ private fun TaskHitLine(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
+        if (onToggle != null) TaskResultCheckbox(hit, onToggle, Modifier.size(rowHeight))
+        NoteResultText(
             taskLabel(hit.text),
             fontSize = 12.sp,
             maxLines = 1,
@@ -336,7 +343,7 @@ private fun TaskHitLine(
         )
         val due = hit.due
         if (due != null) {
-            Text(
+            NoteResultText(
                 due.toString(),
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
@@ -360,7 +367,7 @@ private fun NoteHitLine(row: NoteRow, onOpen: ((String) -> Unit)?, rowHeight: Dp
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(
+        NoteResultText(
             row.name,
             fontSize = 12.sp,
             maxLines = 1,
@@ -368,7 +375,7 @@ private fun NoteHitLine(row: NoteRow, onOpen: ((String) -> Unit)?, rowHeight: Dp
             color = colours.onSurface,
             modifier = Modifier.weight(1f, fill = false),
         )
-        Text(
+        NoteResultText(
             row.relPath,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
@@ -388,7 +395,7 @@ private fun FilterTextLine(text: String, rowHeight: Dp, italic: Boolean) {
         Modifier.height(rowHeight).padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
+        NoteResultText(
             text,
             fontSize = 11.sp,
             fontStyle = if (italic) FontStyle.Italic else FontStyle.Normal,
@@ -437,13 +444,13 @@ fun FilterBlockView(
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         if (computed.error != null) {
-            androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { Text("Retry search") }
+            androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { NoteResultText("Retry search") }
         }
         when (result) {
             is FilterResult.Hint -> FilterNoteRow(result.text)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
-                for (row in result.rows) TaskHitRow(row, today, onOpen)
+                for (row in result.rows) TaskHitRow(row, today, onOpen, onToggle = { toggleTaskResult(state, it) })
                 FilterMore(result.more)
             }
             is FilterResult.Notes -> {
@@ -470,14 +477,14 @@ private fun NoteHitRow(row: NoteRow, onOpen: ((String) -> Unit)?) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Text(
+        NoteResultText(
             row.name,
             fontSize = 13.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             color = colours.onSurface,
         )
-        Text(
+        NoteResultText(
             row.relPath,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
@@ -494,7 +501,7 @@ private fun NoteHitRow(row: NoteRow, onOpen: ((String) -> Unit)?) {
 /// it never reads as a result.
 @Composable
 private fun FilterNoteRow(text: String) {
-    Text(
+    NoteResultText(
         text,
         fontSize = 11.sp,
         fontStyle = FontStyle.Italic,
@@ -508,7 +515,7 @@ private fun FilterNoteRow(text: String) {
 @Composable
 private fun FilterMore(count: Int) {
     if (count <= 0) return
-    Text(
+    NoteResultText(
         "+$count more",
         fontSize = 11.sp,
         color = MaterialTheme.colorScheme.outline,

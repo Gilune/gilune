@@ -614,6 +614,7 @@ private fun TabChip(
     val interaction = remember { MutableInteractionSource() }
     val hovered by interaction.collectIsHoveredAsState()
     var menuOpen by remember { mutableStateOf(false) }
+    var colourMenuOpen by remember { mutableStateOf(false) }
     val label = tabs.label(tab)
     val slop = with(LocalDensity.current) { DRAG_SLOP.toPx() }
     // The chip knows only its own coordinates; this is what turns them
@@ -636,6 +637,9 @@ private fun TabChip(
                 // width constraint is infinite, so fillMaxWidth cannot
                 // size a sibling accent.
                 .drawBehind {
+                    tab.colour?.let {
+                        drawRect(Color(it.argb), topLeft = Offset(0f, size.height - 3.dp.toPx()), size = Size(size.width, 3.dp.toPx()))
+                    }
                     if (active && paneActive) {
                         drawRect(rule, size = Size(size.width, 2.dp.toPx()))
                     }
@@ -700,26 +704,44 @@ private fun TabChip(
                 onClose = { closeTab(state, tabs, pane, tab) },
             )
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-            DropdownMenuItem(
-                text = { Text("Split right", fontSize = 13.sp) },
-                onClick = {
+        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false; colourMenuOpen = false }) {
+            if (colourMenuOpen) {
+                DropdownMenuItem(text = { Text("Default colour") }, onClick = { tab.colour = null; menuOpen = false; colourMenuOpen = false })
+                for (colour in TabColour.entries) {
+                    DropdownMenuItem(text = { Text(colour.name) },
+                        leadingIcon = { Box(Modifier.size(14.dp).background(Color(colour.argb))) },
+                        onClick = { tab.colour = colour; menuOpen = false; colourMenuOpen = false })
+                }
+            } else {
+                DropdownMenuItem(text = { Text("Close all but this") }, onClick = {
                     menuOpen = false
-                    tabs.select(pane, tab)
-                    // One buffer per note makes a split a move, so a pane
-                    // holding nothing else cannot give this tab away.
-                    if (!tabs.splitRight()) {
-                        state.message.value = "a pane needs a second tab before it can split"
-                    }
-                },
-            )
-            DropdownMenuItem(
-                text = { Text("Close", fontSize = 13.sp) },
-                onClick = {
+                    if (!tabs.closeOthers(pane, tab)) state.message.value = "Some tabs have unsaved changes over changed files; review them before closing."
+                })
+                DropdownMenuItem(text = { Text("Close to the right") }, onClick = {
                     menuOpen = false
-                    closeTab(state, tabs, pane, tab)
-                },
-            )
+                    if (!tabs.closeToRight(pane, tab)) state.message.value = "Some tabs have unsaved changes over changed files; review them before closing."
+                })
+                DropdownMenuItem(text = { Text("Pick a colour…") }, onClick = { colourMenuOpen = true })
+                DropdownMenuItem(
+                    text = { Text("Split right", fontSize = 13.sp) },
+                    onClick = {
+                        menuOpen = false
+                        tabs.select(pane, tab)
+                        // One buffer per note makes a split a move, so a pane
+                        // holding nothing else cannot give this tab away.
+                        if (!tabs.splitRight()) {
+                            state.message.value = "a pane needs a second tab before it can split"
+                        }
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Close", fontSize = 13.sp) },
+                    onClick = {
+                        menuOpen = false
+                        closeTab(state, tabs, pane, tab)
+                    },
+                )
+            }
         }
     }
 }

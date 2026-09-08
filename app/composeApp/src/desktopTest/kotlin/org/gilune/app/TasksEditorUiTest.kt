@@ -103,15 +103,16 @@ class TasksEditorUiTest {
 
         // `/`, Enter through the single field, `tom`, Enter — § 2's path.
         body().performTextInput("/")
-        compose.waitForIdle()
+        compose.waitForFirstEditorOption("Due date")
         body().performKeyInput { pressKey(Key.Enter) }
-        compose.waitForIdle()
+        compose.waitForFirstEditorOption("today")
         assertEquals(1, menus(), "stage one passed through to the field's values")
 
         body().performTextInput("tom")
-        compose.waitForIdle()
+        compose.waitForFirstEditorOption("tomorrow")
+        val beforeAcceptance = editor.text.text
         body().performKeyInput { pressKey(Key.Enter) }
-        compose.waitForIdle()
+        compose.waitUntil(5_000) { editor.text.text != beforeAcceptance }
 
         assertEquals(0, menus(), "accepting closes the menu")
         // The resolved date is whatever tomorrow is when the test runs, so

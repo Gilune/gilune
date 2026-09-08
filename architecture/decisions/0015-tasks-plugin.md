@@ -664,3 +664,20 @@ Post-delivery amendments (owner, 2026-08-31, after all four stages shipped):
   **8 rows** then `+N more` (Read mode keeps 50), and evaluates on the tick
   and on buffer settle, never per keystroke and never while the caret is
   inside the block.
+
+### Overview checkbox amendment — 2026-09-08
+
+The owner requested completing tasks directly from an overview note. Filter
+results therefore offer a separate checkbox on desktop (Read and collapsed
+Edit blocks) and Android. This supersedes the earlier read-only restriction
+for filter task rows: row text still opens the source note, while the checkbox
+changes its source task without navigating. Completed rows leave `is:open`
+results after the save is reconciled and indexed.
+
+The action uses the editor's decoration chain, including the tasks plugin's
+completion-date stamp. It requires the exact displayed checkbox line at the
+same body-relative position, serialises with autosave through the document
+edit gate, and refuses a source with unsaved editor text. A stale result is
+refreshed; it never overwrites newer source text. The overview's filter remains
+ordinary Markdown. The desktop note header also exposes a labelled pencil
+button that enters Edit mode and focuses the body.

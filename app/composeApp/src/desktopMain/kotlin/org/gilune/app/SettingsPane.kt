@@ -64,6 +64,7 @@ import uniffi.gilune_ffi.kernelVersion
 import javax.swing.JFileChooser
 
 private enum class Section(val label: String) {
+    General("General"),
     Vault("Vault"),
     Plugins("Plugins"),
     Sync("Sync"),
@@ -77,7 +78,7 @@ private sealed interface Pane {
 }
 
 private fun initialPane(initialSection: String?): Pane = when {
-    initialSection == null -> Pane.Fixed(Section.Vault)
+    initialSection == null -> Pane.Fixed(Section.General)
     initialSection.startsWith("plugin:") -> Pane.Plugin(initialSection.removePrefix("plugin:"))
     else ->
         Pane.Fixed(
@@ -154,6 +155,7 @@ fun SettingsPane(
                     ) {
                         when (val open = pane) {
                             is Pane.Fixed -> when (open.section) {
+                                Section.General -> GeneralSettings()
                                 Section.Vault -> VaultSection(state, vaultDir, onVaultChange)
                                 Section.Plugins -> PluginsManager(state) { pane = Pane.Plugin(it) }
                                 Section.Sync -> SyncSection(state)
@@ -310,6 +312,8 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
             )
         }
     }
+
+    PluginNavigationSettings(plugin)
 
     if (plugin.capabilities.isNotEmpty()) {
         Text("Permissions", style = MaterialTheme.typography.titleSmall)
@@ -650,10 +654,25 @@ private fun AppearanceSection(theme: ThemeChoice, onThemeChange: (ThemeChoice) -
 }
 
 @Composable
+internal fun PluginNavigationSettings(plugin: PluginInfo, navigation: NavigationVisibility = Prefs.navigation) {
+    val panels = navigationPanels(listOf(plugin.copy(state = "enabled")))
+    if (panels.isEmpty()) return
+    Text("Navigation", style = MaterialTheme.typography.titleSmall)
+    for (panel in panels) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("Show ${panel.label} in the sidebar", Modifier.weight(1f), fontSize = 12.sp)
+            Switch(checked = panel.key !in navigation.hidden,
+                onCheckedChange = { navigation.setVisible(panel.key, it) })
+        }
+    }
+}
+
+@Composable
 private fun AboutSection(state: GiluneState, vaultDir: String) {
     Text("Gilune", style = MaterialTheme.typography.titleSmall)
     Text(
         buildString {
+            appendLine("app $APP_VERSION")
             appendLine("kernel ${runCatching { kernelVersion() }.getOrDefault("unknown")}")
             appendLine("vault $vaultDir")
             appendLine(state.message.value)

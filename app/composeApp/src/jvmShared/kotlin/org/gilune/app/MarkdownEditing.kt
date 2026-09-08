@@ -176,12 +176,13 @@ class MarkdownEditTransformation(
     private val caretLine: Int? = null,
     private val decorations: List<EditorDecoration> = builtInDecorations(),
     private val blocks: List<EditorBlockDecoration> = emptyList(),
+    private val fontScale: Float = 1f,
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val source = text.text
         val placed = decorate(source, caretLine, decorations, blocks)
         if (placed.isEmpty()) {
-            return TransformedText(styleMarkdown(source, palette), OffsetMapping.Identity)
+            return TransformedText(styleMarkdown(source, palette, fontScale), OffsetMapping.Identity)
         }
         val starts = transformedStarts(placed)
         val transformed = applyDecorations(source, placed)
@@ -194,7 +195,7 @@ class MarkdownEditTransformation(
         } else {
             DecorationOffsetMapping(table, source.length, transformed.length)
         }
-        return TransformedText(styleDecorations(transformed, placed, starts, palette), mapping)
+        return TransformedText(styleDecorations(transformed, placed, starts, palette, fontScale), mapping)
     }
 }
 
@@ -601,8 +602,9 @@ private fun styleDecorations(
     placed: List<PlacedDecoration>,
     starts: List<Int>,
     palette: MarkdownPalette,
+    fontScale: Float,
 ): AnnotatedString {
-    val styled = styleMarkdown(transformed, palette)
+    val styled = styleMarkdown(transformed, palette, fontScale)
     if (placed.none { it.role != DecorationRole.NONE }) return styled
     return buildAnnotatedString {
         append(styled)
@@ -692,7 +694,7 @@ private val STRIKE = Regex("""~~[^~\n]+~~""")
 private val LINK = Regex("""\[([^\]\n]*)]\(([^)\n]*)\)""")
 private val WIKI = Regex("""!?\[\[[^\]\n]+]]""")
 
-fun styleMarkdown(source: String, palette: MarkdownPalette): AnnotatedString =
+fun styleMarkdown(source: String, palette: MarkdownPalette, fontScale: Float = 1f): AnnotatedString =
     buildAnnotatedString {
         append(source)
         val mutedStyle = SpanStyle(color = palette.muted)
@@ -738,7 +740,7 @@ fun styleMarkdown(source: String, palette: MarkdownPalette): AnnotatedString =
                     else -> 14.sp
                 }
                 addStyle(
-                    SpanStyle(color = palette.heading, fontWeight = FontWeight.Bold, fontSize = size),
+                    SpanStyle(color = palette.heading, fontWeight = FontWeight.Bold, fontSize = size * fontScale),
                     start,
                     end,
                 )

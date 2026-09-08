@@ -122,14 +122,15 @@ class ListContinuationUiTest {
         // menu's own path (ADR 0015 § 2), every step of it on the key the
         // continuation would otherwise take.
         body().performTextInput("/")
-        compose.waitForIdle()
+        compose.waitForFirstEditorOption("Due date")
         body().performKeyInput { pressKey(Key.Enter) }
-        compose.waitForIdle()
+        compose.waitForFirstEditorOption("today")
         assertEquals(1, compose.onAllNodesWithTag("suggest-popup").fetchSemanticsNodes().size)
         body().performTextInput("tom")
-        compose.waitForIdle()
+        compose.waitForFirstEditorOption("tomorrow")
+        val beforeAcceptance = editor.text.text
         body().performKeyInput { pressKey(Key.Enter) }
-        compose.waitForIdle()
+        compose.waitUntil(5_000) { editor.text.text != beforeAcceptance }
 
         assertTrue(
             Regex("""^- \[ ] milk due:\d{4}-\d{2}-\d{2} $""").matches(editor.text.text),

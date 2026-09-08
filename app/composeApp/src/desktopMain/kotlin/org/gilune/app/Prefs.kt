@@ -14,6 +14,12 @@ import java.util.prefs.Preferences
 object Prefs {
     private val node: Preferences = Preferences.userRoot().node("org/gilune/app")
 
+    internal val noteAppearance = NoteAppearance({ node.get(it, null) }, { key, value -> node.put(key, value) })
+
+    val navigation = NavigationVisibility(node.get("hiddenNavigation", "").split('\n').filter { it.isNotBlank() }.toSet()) {
+        node.put("hiddenNavigation", it.sorted().joinToString("\n"))
+    }
+
     var vaultDir: String
         get() = System.getProperty("gilune.vault")
             ?: node.get("vaultDir", System.getProperty("user.home") + "/Gilune")

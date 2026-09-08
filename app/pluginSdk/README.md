@@ -68,3 +68,9 @@ and `pageTypeContribution` for literal template/default-folder declarations.
 The [page contract](../../contracts/pages/README.md) specifies capabilities,
 namespace ownership, durable receipts and publication limits. The Cards fixture
 exercises this service without application or other-domain dependencies.
+
+Collections may opt into a desktop folder context action with
+`PageCollectionRegistration.folderCreateLabel`. The host shows it on the page
+type's current default folder (including portable overrides) and opens the
+standard creation form with that folder selected. Disabled owners or owners
+without `pages.create` have no action. Navigation visibility is independent.

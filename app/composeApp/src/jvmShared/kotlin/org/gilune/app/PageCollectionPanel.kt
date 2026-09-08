@@ -126,7 +126,7 @@ internal fun PageCollectionPanel(binding: BoundPageCollection, state: GiluneStat
 
 @Composable
 internal fun PageCreationForm(binding: BoundPageCollection, preset: PagePreset, state: GiluneState,
-    onOpen: (String) -> Unit, dismiss: () -> Unit) {
+    onOpen: (String) -> Unit, initialFolder: String? = null, dismiss: () -> Unit) {
     val collection = binding.collection
     val kernel = state.gilune.value ?: return
     val scope = rememberCoroutineScope()
@@ -147,7 +147,7 @@ internal fun PageCreationForm(binding: BoundPageCollection, preset: PagePreset, 
             val definition = withContext(Dispatchers.IO) { BoundPageCreation(kernel, binding.pluginId).definitions().single { it.typeId == collection.pageTypeId } }
             check(definition.defaultsProblem == null) { definition.defaultsProblem!! }
             withContext(Dispatchers.Main.immediate) {
-                folder = definition.defaultFolder; template = definition.template; version = definition.version
+                folder = initialFolder ?: definition.defaultFolder; template = definition.template; version = definition.version
                 if (reload > 0) showTemplate = true
             }
         } catch (e: CancellationException) { throw e }

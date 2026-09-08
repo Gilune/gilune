@@ -1,0 +1,132 @@
+# Intermittent build failures — 7 September 2026
+
+## Desktop: completion tests raced background work
+
+[Main run 34156277391](https://github.com/Gilune/gilune/actions/runs/34156277391)
+failed two Linux UI tests at commit `347b85f`, while the
+[v1.0.3 run](https://github.com/Gilune/gilune/actions/runs/34156277429)
+passed at the same commit:
+
+- `ListContinuationUiTest.theSuggestMenuKeepsItsEnterAndWritesADateRatherThanACheckbox`
+- `TasksEditorUiTest.enterTwiceWritesAnIsoDateTheUserNeverSpelledOut`
+
+`waitForIdle()` only established Compose idleness. Suggestions and acceptance
+validation run on `Dispatchers.IO`, and a popup can exist while loading its next
+stage. The tests now wait for the first option at each stage and for acceptance
+to change the buffer before asserting its exact contents. They retain the
+original assertions; there are no retries or fixed sleeps.
+
+The workflow now retains XML and HTML desktop test reports on failure as well
+as success, and Gradle prints full exception details.
+
+## Android: activity destruction crash remains unresolved
+
+[v1.0.2 run 34143245722](https://github.com/Gilune/gilune/actions/runs/34143245722)
+built its APK, then crashed during instrumentation. Its
+[main counterpart](https://github.com/Gilune/gilune/actions/runs/34126173220)
+passed at the same commit, `e66b9fe`.
+
+The failed test was
+`MobileAgendaTest.anAgendaWhoseTasksAreAllDoneOrFarOffSaysSoInstead`.
+The recorded exception was `ArrayIndexOutOfBoundsException: length=320; index=-71`,
+from Compose's `SlotWriter.moveSlotGapTo`, reached through
+`CompositionImpl.dispose` while Android destroyed the activity. The process
+crash stopped the suite after 257 of 893 tests. This is not an APK compilation
+failure, and the stack alone does not establish its underlying cause.
+
+`AgendaLifecycleTest` exercises 30 activity recreations around the loading and
+empty Agenda states. It has passed on the existing application code; it is
+additional coverage, not a reproducer or proof of a fix. `MobileAgendaTest`
+also logs test-body failures before activity cleanup so a destruction failure
+cannot hide the earlier exception from the retained CI logcat. Look for the
+`GiluneTest` tag if it recurs. Production Compose code and versions are unchanged.
+
+## Local validation
+
+- Windows desktop, release kernel: 672 tests, zero failures, five skipped.
+- Both affected desktop test classes: ten repeat runs with software rendering,
+  all successful.
+- Isolated Android API 36 emulator, release native library: 894 tests including
+  the new lifecycle test; zero failures, 15 skipped.
+- Final Agenda diagnostics and lifecycle check: all 20 tests passed.
+
+Local success does not establish that the Android crash has been eliminated.
+The next occurrence needs its first exception and activity-destruction stack
+examined together; do not automatically retry the suite to make it green.
+
+## Desktop renderer hang observed during issue validation (2026-09-08)
+
+`PeopleEditorUiTest.theRealEditorKeepsFrontmatterContextAndTranslatesBodyInsertion`
+can hang after choosing a completion. The test worker waits in
+`SkikoComposeUiTest.waitUntil` for the AWT thread, which spins in native
+`CanvasKt._nDrawPicture`, reached through `RenderNodeLayer.drawLayer`.
+Because drawing itself never returns, the test's ten-second wait timeout
+cannot fire. This is different from an assertion running before asynchronous
+completion insertion finishes.
+
+The same hang occurred with the committed `NoteEditor.kt` restored: two
+isolated runs passed, then the third hung with the same stack. Both layouts
+also passed other runs. Restoring toolbar controls or giving the header a
+minimum height did not establish a fix; those experiments were removed.
+The renderer and test remain unchanged, and this failure is unresolved.
+Local evidence is in `app/build/issues-focused-threads.txt` and
+`app/build/issues-people-baseline-threads.txt` (untracked build outputs).
+
+## Docking and undocking: content stops filling its window (2026-09-08)
+
+The owner reports that docking or undocking can leave Gilune's contents
+apparently resized inside the outer window, with unused space. This is a
+user-observed rendering problem, not just a test failure. Its relationship to
+the native drawing hang above is unknown: those tests did not exercise a
+display change, so their results cannot validate docking behaviour.
+
+The desktop uses Compose Multiplatform 1.7.3 and Skiko 0.8.18. `Main.kt`
+sets an initial window size but the root Surface and DesktopApp use
+`fillMaxSize()`. No application-level density override was found. A missed
+display-scale or native rendering-surface update is a hypothesis, not an
+established cause.
+
+Reproduce by docking and undocking with Gilune open, including maximised
+windows and displays with different Windows scale settings. Record the scale
+and resolution on both displays, which transition fails, whether clicks align
+with the visible controls, and whether resizing/restoring the window repairs
+the content. Compare the native client bounds, renderer bounds and Compose
+density before and after the transition. Ordinary offscreen UI tests cannot
+substitute for that check. Microsoft's [DPI testing guidance](https://learn.microsoft.com/en-us/windows/apps/develop/win2d/dpi-and-dips)
+also recommends changing scale while an app runs and moving between displays
+with different DPI settings.
+
+The owner subsequently confirmed that **any manual window resize repairs the
+content**, including restoring/maximising. A Windows-only mitigation now watches
+the window's display configuration after move, resize, activation and display
+change events. On a changed monitor/scale/resolution, it revalidates existing
+components, invokes Skiko's public scale/layout/redraw path and repeats the
+refresh once after settlement. Normal window movements do not trigger additional
+rendering, and closing the window removes the listeners and cancels pending work.
+The outer window and editor composition are not recreated or resized.
+
+This follows the [pinned Skiko 0.8.18 implementation](https://github.com/JetBrains/skiko/blob/v0.8.18/skiko/src/awtMain/kotlin/org/jetbrains/skiko/SkiaLayer.awt.kt):
+`checkContentScale()` notifies density changes, while `doLayout()` updates the
+child canvas and synchronises native renderer bounds. It is a targeted recovery
+path, not proof of the original dock-event ordering or a fix for the test hang.
+
+`DisplayChangesTest` injects display-signature changes into the watcher and uses
+a real ComposeWindow with a deliberately undersized native canvas, including a
+late child-canvas size change. It checks restored canvas bounds, unchanged outer
+window bounds, retained draft/cursor state, no composition recreation, no extra
+refresh for ordinary moves, and cancellation on disposal. The test does not
+physically change Windows DPI or connect/disconnect a dock; confirmation on the
+owner's hardware remains outstanding.
+
+During issue #12 validation, an initial test that immediately cancelled a still
+loading person form observed the dialog title while moving to another menu.
+A diagnostic run waiting for that title to disappear then hung in native
+`CanvasKt._nDrawRect`, drawing a Compose scene-layer background. The AWT thread
+used 63 CPU seconds in 64 elapsed seconds; the test worker waited in
+`SkikoComposeUiTest.waitUntil` at `renderNextFrame`. The local dump is
+`app/build/issue-12-threads.txt`. Only that test worker was stopped. This is
+additional evidence of native rendering failure, not proof that its cause is
+identical to the earlier `_nDrawPicture` hang. Menu-switch checks now dismiss
+popups with an outside pointer click; cancellation is separately checked after
+the form's asynchronous defaults preparation completes. No renderer change or
+automatic retry was introduced for this issue.

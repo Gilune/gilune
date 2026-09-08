@@ -188,3 +188,12 @@ docking.
   **M+2** drag. `Open to the side` appears in menus only from M+1.
 - Same-note-in-two-panes and ADR 0012's split source/preview both wait on
   the shared-buffer work above, and should land together.
+
+## Amendment — tab management (2026-09-08)
+
+The tab context menu offers closing every other tab in the same pane and
+closing tabs to its right. Both use the existing guarded close path and
+stop at the first unsaved conflict, leaving that buffer open for review.
+An optional colour marks the tab independently of the active-tab indicator.
+Colours follow the tab when moved and persist in the device-local layout;
+they do not modify note content or sync as document properties.

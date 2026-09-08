@@ -260,6 +260,12 @@ fun main() {
                 }
             },
         ) {
+            DisposableEffect(window) {
+                val displayChanges = if (System.getProperty("os.name").startsWith("Windows")) {
+                    watchDisplayChanges(window)
+                } else null
+                onDispose { displayChanges?.close() }
+            }
             GiluneTheme(dark) {
                 Surface(Modifier.fillMaxSize()) {
                     key(vaultDir) {
@@ -325,7 +331,7 @@ private fun DesktopApp(
     }
 
     fun createNote() {
-        tabs.open(createUntitledNote(state.vaultDir, tree.selectedDir)).editor.focusTitle = true
+        tabs.openForEditing(createUntitledNote(state.vaultDir, tree.selectedDir))
         state.sync(announce = false)
     }
 
@@ -563,7 +569,7 @@ private fun DesktopApp(
                     searchFocus = searchFocus,
                     onOpen = ::openNote,
                     onCreateNote = { rel ->
-                        tabs.open(rel).editor.focusTitle = true
+                        tabs.openForEditing(rel)
                         state.sync(announce = false)
                     },
                     modifier = Modifier.width(railWidth).fillMaxHeight(),

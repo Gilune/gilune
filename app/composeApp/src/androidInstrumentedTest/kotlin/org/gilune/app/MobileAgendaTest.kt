@@ -12,6 +12,7 @@
 
 package org.gilune.app
 
+import android.util.Log
 import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
 import org.gilune.plugins.tasks.TaskHit
 import org.gilune.plugins.tasks.tasksDeclaration
@@ -45,6 +46,9 @@ import androidx.compose.ui.text.TextRange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
+import org.junit.rules.RuleChain
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import java.io.File
 import java.time.LocalDate
 import kotlin.test.Test
@@ -57,8 +61,17 @@ class MobileAgendaTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
 
+    private val compose = createComposeRule()
+
+    // A failure during activity destruction can hide the test body's
+    // original exception. Log that exception before Compose's rule closes
+    // the activity, so the CI logcat retains both failures.
     @get:Rule
-    val compose = createComposeRule()
+    val rules: RuleChain = RuleChain.outerRule(compose).around(object : TestWatcher() {
+        override fun failed(error: Throwable, description: Description) {
+            Log.e("GiluneTest", "${description.displayName} failed before activity cleanup", error)
+        }
+    })
 
     // ------------------------------------------------------------------
     // Pure: what the bar contributes, and what it stops contributing

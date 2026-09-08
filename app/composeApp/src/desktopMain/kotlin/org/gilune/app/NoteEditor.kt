@@ -16,7 +16,6 @@ import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -51,6 +50,8 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -98,7 +99,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -295,7 +295,9 @@ fun NoteEditor(
                 Text("select a note, or capture a thought", color = colours.onSurfaceVariant)
             }
         } else {
-            OpenNote(state, editor, relPath, recorder, onRenamed, tabs, tab, onCloseTab)
+            androidx.compose.runtime.CompositionLocalProvider(LocalDocumentTextStyle provides LocalNoteAppearance.current.edit.textStyle) {
+                OpenNote(state, editor, relPath, recorder, onRenamed, tabs, tab, onCloseTab)
+            }
         }
     }
 }
@@ -313,8 +315,11 @@ private fun OpenNote(
 ) {
     val colours = MaterialTheme.colorScheme
     val file = File(state.vaultDir, relPath)
+    val appearance = LocalNoteAppearance.current
     val header = remember(editor.frontMatterRaw) { splitNote(editor.frontMatterRaw) }
     var menuOpen by remember { mutableStateOf(false) }
+    var refactoringOpen by remember { mutableStateOf(false) }
+    if (refactoringOpen) RefactoringDialog(state, relPath, editor.document()) { refactoringOpen = false }
     var propertiesOpen by remember { mutableStateOf(false) }
     LaunchedEffect(editor.openProperties) {
         if (editor.openProperties) {
@@ -333,8 +338,7 @@ private fun OpenNote(
 
     fun onDiskHash(): String? = if (file.exists()) contentHash(file.readBytes()) else null
 
-    // Where a rendered block's rows send a click (ADR 0015 § 4: rows
-    // navigate, they do not edit). A row opens its note through the pane
+    // Where a rendered block's row text sends a click. A row opens its note through the pane
     // showing this editor, which is the one rule every opener takes
     // (ADR 0014) — reuse the tab, else a new one. Without tabs, which is
     // the pre-tab editor and the tests, there is nowhere to send a click
@@ -460,8 +464,17 @@ private fun OpenNote(
                 }
             }
             DocumentLinksButton(state, editor.document(), openRow ?: {})
-            RefactoringButton(state, relPath, editor.document())
-            SegmentedToggle(editor.reading) { editor.reading = it }
+            TextButton(onClick = {
+                editor.reading = !editor.reading
+                if (!editor.reading) editor.focusBody = true
+            }) {
+                Icon(
+                    if (editor.reading) Icons.Outlined.Edit else Icons.Outlined.Visibility,
+                    contentDescription = if (editor.reading) "Edit note" else "Read note",
+                    modifier = Modifier.size(18.dp),
+                )
+                Text(if (editor.reading) "Edit" else "Read", Modifier.padding(start = 5.dp))
+            }
             Box {
                 IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
                     Icon(
@@ -472,6 +485,12 @@ private fun OpenNote(
                     )
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    if (state.gilune.value != null) {
+                        DropdownMenuItem(
+                            text = { Text("Rename references…", fontSize = 13.sp) },
+                            onClick = { menuOpen = false; refactoringOpen = true },
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Save now", fontSize = 13.sp) },
                         onClick = {
@@ -539,6 +558,8 @@ private fun OpenNote(
                     .fillMaxSize()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 18.dp, vertical = 14.dp),
+                textStyle = appearance.reading.textStyle,
+                blockSpacing = appearance.reading.blockSpacing.dp,
                 renderers = BlockRenderers(
                     listOf(
                         filterBlockRegistration(
@@ -640,8 +661,8 @@ private fun OpenNote(
             val results = evaluated.value ?: wanted.associateWith { FilterResult.Hint(evaluated.error ?: "Searching...") }
             val blockDecorations = remember(results) { listOf(filterBlockDecoration(results)) }
 
-            val transformation = remember(palette, line, decorations, blockDecorations) {
-                MarkdownEditTransformation(palette, line, decorations, blockDecorations)
+            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size) {
+                MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f)
             }
             // Where each collapsed block's placeholder landed, asked of the
             // same composition the field is showing, so what is drawn and
@@ -662,9 +683,6 @@ private fun OpenNote(
                 editor.text = replaceRange(editor.text, (start - bodyStart) until (end - bodyStart), replacement)
                 editor.dirty = true
                 bodyFocus.requestFocus()
-            }
-            Row {
-                TextButton(onClick = completions.toolbar) { Text("Insert…") }
             }
             var fieldOrigin by remember { mutableStateOf(Offset.Zero) }
 
@@ -824,9 +842,9 @@ private fun OpenNote(
                             .testTag("note-body"),
                         onTextLayout = { layout = it },
                         textStyle = TextStyle(
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            lineHeight = 20.sp,
+                            fontFamily = appearance.edit.font.family,
+                            fontSize = appearance.edit.size.sp,
+                            lineHeight = appearance.edit.lineHeight.sp,
                             color = colours.onSurface,
                         ),
                         cursorBrush = SolidColor(colours.primary),
@@ -842,7 +860,7 @@ private fun OpenNote(
                     if (laidOut != null) {
                         for (block in collapsed) {
                             val result = results[block.fence.body] ?: continue
-                            CollapsedFilterBlock(block, laidOut, result, blockDay, openRow, blockWidth)
+                            CollapsedFilterBlock(block, laidOut, result, blockDay, openRow, blockWidth) { toggleTaskResult(state, it) }
                         }
                     }
                 }
@@ -895,6 +913,7 @@ private fun CollapsedFilterBlock(
     today: LocalDate,
     onOpen: ((String) -> Unit)?,
     width: Dp,
+    onToggle: (org.gilune.plugins.tasks.TaskHit) -> Unit,
 ) {
     // The layout is one frame behind a buffer that has just changed, so
     // every read of it is asked for rather than assumed.
@@ -915,44 +934,7 @@ private fun CollapsedFilterBlock(
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        FilterBlockLines(result, today, onOpen, height / block.lines, width)
-    }
-}
-
-@Composable
-private fun SegmentedToggle(reading: Boolean, onChange: (Boolean) -> Unit) {
-    val colours = MaterialTheme.colorScheme
-    val shape = RoundedCornerShape(6.dp)
-    Row(
-        Modifier.clip(shape).border(1.dp, colours.outlineVariant, shape).height(24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Segment("Edit", !reading) { onChange(false) }
-        Box(Modifier.width(1.dp).height(24.dp).background(colours.outlineVariant))
-        Segment("Read", reading) { onChange(true) }
-    }
-}
-
-/// Both segments are the same box with the label centred in it, so
-/// neither label can sit higher than the other.
-@Composable
-private fun Segment(label: String, selected: Boolean, onClick: () -> Unit) {
-    val colours = MaterialTheme.colorScheme
-    Box(
-        Modifier
-            .height(24.dp)
-            .defaultMinSize(minWidth = 46.dp)
-            .background(if (selected) colours.surfaceVariant else colours.surface)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            label,
-            fontSize = 11.sp,
-            textAlign = TextAlign.Center,
-            color = if (selected) colours.onSurface else colours.onSurfaceVariant,
-        )
+        FilterBlockLines(result, today, onOpen, height / block.lines, width, onToggle = onToggle)
     }
 }
 
@@ -1003,7 +985,7 @@ private fun NoteTitle(
 
     BasicTextField(
         value = name,
-        onValueChange = { name = it },
+        onValueChange = { name = it; editor.reading = false },
         modifier = Modifier
             .fillMaxWidth()
             .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)

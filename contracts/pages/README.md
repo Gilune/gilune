@@ -223,6 +223,14 @@ the same enabled owner and rejects duplicate collection IDs or field keys.
 Navigation selects collections through the ordinary contribution registry on
 both desktop and Android; there is no domain-name dispatch in the renderer.
 
+An optional SDK `folderCreateLabel` adds a desktop context-menu action on the
+type's effective default folder, or the vault header when that folder is empty.
+The host resolves saved defaults on a worker, refreshes the mapping with vault
+and plugin changes, and opens the same creation form in the clicked folder.
+People opts in with **Create person**, defaulting to `People`; its **Page defaults**
+document can choose another folder. Hiding the People navigation tab retains
+this action; disabling the owner or revoking `pages.create` removes it.
+
 The generic form loads the current page definition/fingerprint, lets the user
 choose a folder, prepares exact source and publishes through scoped creation.
 Retries of an uncertain commit/publication retain the same UUID and input while

@@ -1,5 +1,5 @@
 // `filter` fences in the phone's Read view (ADR 0017 § 7's
-// `editor.blocks`, read-only; MB3).
+// `editor.blocks`; MB3).
 //
 // The evaluation is `FilterBlock.kt`'s and entirely shared — one query in
 // the search DSL, one pass over the vault, the same degenerate readings
@@ -10,8 +10,8 @@
 // tasks plugin's, so a block keeps rendering — as a hint row naming the
 // type it wanted — when every removable plugin is gone.
 //
-// Read-only, and that is the ADR's word: rows navigate, nothing here
-// writes a byte.
+// Row text navigates. A separate checkbox uses the shared guarded action
+// to update the source task and refresh the query.
 
 package org.gilune.app
 
@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -98,7 +99,7 @@ fun MobileFilterBlock(
             is FilterResult.Hint -> HintRow(result.text)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) HintRow(FILTER_NO_MATCHES)
-                for (row in result.rows) TaskRow(row, today, onOpen)
+                for (row in result.rows) TaskRow(row, today, onOpen) { toggleTaskResult(state, it) }
                 MoreRow(result.more)
             }
             is FilterResult.Notes -> {
@@ -113,7 +114,7 @@ fun MobileFilterBlock(
 /// One task line the block matched: its own words, the note it came from,
 /// and its due date coloured by what that date is asking for.
 @Composable
-private fun TaskRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?) {
+private fun TaskRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?, onToggle: (TaskHit) -> Unit) {
     val colours = MaterialTheme.colorScheme
     Row(
         Modifier
@@ -128,6 +129,7 @@ private fun TaskRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?)
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        TaskResultCheckbox(hit, onToggle, Modifier.size(TouchTarget))
         Column(Modifier.weight(1f)) {
             Text(
                 taskLabel(hit.text),

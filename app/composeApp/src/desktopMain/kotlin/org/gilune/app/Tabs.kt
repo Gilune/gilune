@@ -64,7 +64,13 @@ class Split(
 /// `TabsState`, which is the only thing that should construct one.
 class Tab(val id: Long, relPath: String) {
     var relPath by mutableStateOf(relPath)
+    var colour by mutableStateOf<TabColour?>(null)
     val editor = EditorState()
+}
+
+enum class TabColour(val argb: Long) {
+    Red(0xFFE57373), Orange(0xFFFFB74D), Yellow(0xFFFFD54F),
+    Green(0xFF81C784), Blue(0xFF64B5F6), Purple(0xFFBA68C8),
 }
 
 private const val LAYOUT_HEADER = "gilune-tabs 1"
@@ -89,6 +95,11 @@ class TabsState(val vaultDir: String) {
     val activeTab: Tab? get() = activePane.active
 
     val activeEditor: EditorState? get() = activeTab?.editor
+
+    fun openForEditing(relPath: String): Tab = open(relPath).also {
+        it.editor.reading = false
+        it.editor.focusTitle = true
+    }
 
     fun panes(): List<TabPane> = panesOf(root)
 
@@ -178,6 +189,17 @@ class TabsState(val vaultDir: String) {
     fun closeActive(): Boolean {
         val tab = activePane.active ?: return false
         return close(activePane, tab)
+    }
+
+    fun closeOthers(pane: TabPane, keep: Tab): Boolean {
+        if (keep !in pane.tabs) return false
+        return pane.tabs.filter { it !== keep }.all { close(pane, it) }
+    }
+
+    fun closeToRight(pane: TabPane, keep: Tab): Boolean {
+        val at = pane.tabs.indexOf(keep)
+        if (at < 0) return false
+        return pane.tabs.drop(at + 1).all { close(pane, it) }
     }
 
     /// Ctrl+\: the active tab moves into a new pane to the right. One
@@ -307,7 +329,10 @@ class TabsState(val vaultDir: String) {
                 is TabPane -> {
                     val active = node.active?.let { " ${it.relPath}" } ?: ""
                     nodes.append("P $at $parent $weight$active\n")
-                    node.tabs.forEach { tabs.append("T $at ${it.relPath}\n") }
+                    node.tabs.forEach {
+                        tabs.append("T $at ${it.relPath}\n")
+                        it.colour?.let { colour -> tabs.append("C $at ${colour.name} ${it.relPath}\n") }
+                    }
                 }
                 is Split -> {
                     val axis = if (node.orientation == SplitOrientation.Vertical) "V" else "H"
@@ -460,6 +485,7 @@ class TabsState(val vaultDir: String) {
             val activeRel = mutableMapOf<Int, String>()
             val order = mutableListOf<Int>()
             val tabLines = mutableListOf<Pair<Int, String>>()
+            val tabColours = mutableMapOf<Pair<Int, String>, TabColour>()
             var activePaneId = 0
             for (line in lines.drop(1)) {
                 when (line.substringBefore(' ')) {
@@ -484,6 +510,12 @@ class TabsState(val vaultDir: String) {
                         tabLines += rest.substringBefore(' ').toInt() to rest.substringAfter(' ')
                     }
                     "A" -> activePaneId = line.removePrefix("A ").trim().toInt()
+                    "C" -> {
+                        val parts = line.split(' ', limit = 4)
+                        val colour = TabColour.entries.firstOrNull { it.name == parts.getOrNull(2) }
+                        val paneId = parts.getOrNull(1)?.toIntOrNull()
+                        if (colour != null && paneId != null && parts.size == 4) tabColours[paneId to parts[3]] = colour
+                    }
                 }
             }
             for (id in order) {
@@ -497,7 +529,7 @@ class TabsState(val vaultDir: String) {
             for ((paneId, rel) in tabLines.takeLast(MAX_RESTORED_TABS)) {
                 val pane = built[paneId] as? TabPane ?: continue
                 if (!File(vaultDir, rel).isFile) continue
-                pane.tabs.add(state.newTab(rel))
+                pane.tabs.add(state.newTab(rel).also { it.colour = tabColours[paneId to rel] })
             }
             for ((id, node) in built) {
                 if (node !is TabPane) continue

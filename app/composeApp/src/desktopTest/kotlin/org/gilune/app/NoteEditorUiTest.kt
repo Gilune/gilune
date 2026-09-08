@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
@@ -37,6 +38,19 @@ import kotlin.test.assertTrue
 class NoteEditorUiTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun theEditButtonOpensAndFocusesTheBodyAndReadReturnsToTheOverview() {
+        val (vault, editor) = openPane(reading = true)
+        val before = vault.resolve("Captures/note.md").readText()
+        compose.onNodeWithContentDescription("Edit note").performClick()
+        compose.onNodeWithTag("note-body").assertIsFocused()
+        assertFalse(editor.reading)
+        compose.onNodeWithContentDescription("Read note").performClick()
+        assertTrue(editor.reading)
+        assertEquals(before, vault.resolve("Captures/note.md").readText())
+        assertFalse(editor.dirty)
+    }
 
     @Test
     fun clicking_the_empty_area_below_the_text_starts_editing() {
@@ -136,6 +150,18 @@ class NoteEditorUiTest {
             assertFalse(vault.resolve("Captures/note.md").exists())
             assertEquals("Captures/Renamed note.md", editor.openRelPath)
         }
+    }
+
+    @Test
+    fun afterNamingANoteTheMouseCanEnterItsBodyEvenIfItOpenedInReadMode() {
+        val (vault, editor) = openPane(reading = true)
+        compose.onNodeWithTag("note-title").performClick().performTextClearance()
+        compose.onNodeWithTag("note-title").performTextInput("Named with mouse")
+        compose.onNodeWithTag("note-body").performMouseInput { click(center) }
+        compose.onNodeWithTag("note-body").assertIsFocused().performTextInput("typed in body")
+        assertEquals("Captures/Named with mouse.md", editor.openRelPath)
+        assertTrue(vault.resolve("Captures/Named with mouse.md").isFile)
+        assertTrue(editor.text.text.contains("typed in body"))
     }
 
     /// The adjacent case: a note being READ has no caret to move into, so

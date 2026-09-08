@@ -17,11 +17,16 @@ import uniffi.gilune_ffi.*
  * new actions, while durable progress and generic guarded undo stay available. */
 @Composable
 internal fun RefactoringButton(state: GiluneState, path: String, source: String) {
-    val kernel = state.gilune.value ?: return
-    val scope = rememberCoroutineScope()
+    if (state.gilune.value == null) return
     var open by remember { mutableStateOf(false) }
     TextButton(onClick = { open = true }) { Text("Refactor…") }
-    if (!open) return
+    if (open) RefactoringDialog(state, path, source) { open = false }
+}
+
+@Composable
+internal fun RefactoringDialog(state: GiluneState, path: String, source: String, onClose: () -> Unit) {
+    val kernel = state.gilune.value ?: return
+    val scope = rememberCoroutineScope()
     val plugins = state.plugins.toList()
     var refresh by remember { mutableStateOf(0) }
     val actions = rememberQueryWork(source, plugins) {
@@ -53,7 +58,7 @@ internal fun RefactoringButton(state: GiluneState, path: String, source: String)
             finally { busy = false; progress = ""; refresh++ }
         }
     }
-    AlertDialog(onDismissRequest = { if (!busy) open = false }, title = { Text(plan?.label ?: "Document refactoring") }, text = {
+    AlertDialog(onDismissRequest = { if (!busy) onClose() }, title = { Text(plan?.label ?: "Rename references") }, text = {
         Column(Modifier.width(420.dp).heightIn(max = 510.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             if (busy) { LinearProgressIndicator(Modifier.fillMaxWidth()); Text(progress.ifEmpty { "Working…" }) }
@@ -123,7 +128,7 @@ internal fun RefactoringButton(state: GiluneState, path: String, source: String)
         }
     }, confirmButton = {
         if (busy) TextButton(onClick = { cancel.set(true) }) { Text("Stop after current document") }
-        else TextButton(onClick = { open = false }) { Text("Close") }
+        else TextButton(onClick = onClose) { Text("Close") }
     })
     diff?.let { entry ->
         val recovery = rememberQueryWork(kernel, entry.id, refresh) { kernel.refactoringRecoveryCopies(entry.id) }.value

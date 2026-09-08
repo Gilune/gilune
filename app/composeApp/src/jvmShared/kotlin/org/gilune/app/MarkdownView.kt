@@ -35,6 +35,11 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.material3.ProvideTextStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.isSpecified
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -59,6 +64,8 @@ import androidx.compose.ui.unit.sp
 /// and cannot change a byte — the shell owns composition, exactly as it
 /// does for `editor.decorations`.
 class BlockRegistration(val info: String, val render: @Composable (MdBlock.Code) -> Unit)
+
+internal val LocalDocumentTextStyle = staticCompositionLocalOf<TextStyle?> { null }
 
 /// The registration list, and in v1 it **is** the registry: a table keyed
 /// by info string rather than a branch in the `when`, so a contributed
@@ -93,63 +100,72 @@ fun MarkdownBody(
     renderers: BlockRenderers = BlockRenderers(),
     onToggleTask: ((line: Int) -> Unit)? = null,
     checkboxTarget: Dp = 22.dp,
+    textStyle: TextStyle = TextStyle.Default,
+    blockSpacing: Dp = 10.dp,
 ) {
     val colours = MaterialTheme.colorScheme
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        for (block in blocks) {
-            when (block) {
-                is MdBlock.Heading -> Text(
-                    annotate(block.spans, colours.primary),
-                    fontSize = headingSize(block.level),
-                    fontWeight = FontWeight.SemiBold,
-                )
-                is MdBlock.Paragraph -> Text(
-                    annotate(block.spans, colours.primary),
-                    lineHeight = 22.sp,
-                )
-                is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (block.task == null) {
-                        Text(
-                            when (block.marker) {
-                                "-", "*", "+" -> "•"
-                                else -> block.marker.ifEmpty { " " }
-                            },
-                            modifier = Modifier.width(22.dp),
-                            color = colours.onSurfaceVariant,
+    val scale = if (textStyle.fontSize.isSpecified) textStyle.fontSize.value / 14f else 1f
+    val lineHeight = if (textStyle.lineHeight.isSpecified) textStyle.lineHeight else 22.sp
+    CompositionLocalProvider(LocalDocumentTextStyle provides textStyle.takeUnless { it == TextStyle.Default }) {
+        ProvideTextStyle(textStyle) {
+            Column(modifier, verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
+                for (block in blocks) {
+                    when (block) {
+                        is MdBlock.Heading -> Text(
+                            annotate(block.spans, colours.primary),
+                            fontSize = headingSize(block.level) * scale,
+                            lineHeight = if (textStyle.lineHeight.isSpecified) (headingSize(block.level).value * lineHeight.value / 14f).sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+                            fontWeight = FontWeight.SemiBold,
                         )
-                    } else {
-                        TaskGlyph(block.task, block.line, onToggleTask, checkboxTarget)
+                        is MdBlock.Paragraph -> Text(
+                            annotate(block.spans, colours.primary),
+                            lineHeight = lineHeight,
+                        )
+                        is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (block.task == null) {
+                                Text(
+                                    when (block.marker) {
+                                        "-", "*", "+" -> "•"
+                                        else -> block.marker.ifEmpty { " " }
+                                    },
+                                    modifier = Modifier.width(22.dp * scale),
+                                    color = colours.onSurfaceVariant,
+                                )
+                            } else {
+                                TaskGlyph(block.task, block.line, onToggleTask, maxOf(checkboxTarget, 22.dp * scale))
+                            }
+                            Text(annotate(block.spans, colours.primary), lineHeight = lineHeight)
+                        }
+                        is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
+                            Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
+                            Text(
+                                annotate(block.spans, colours.primary),
+                                color = colours.onSurfaceVariant,
+                                lineHeight = lineHeight,
+                                modifier = Modifier.padding(start = 10.dp),
+                            )
+                        }
+                        // The seam (§ 5). A registered info string draws itself;
+                        // every other one — and every unfenced code block, which
+                        // carries none — is the box it has always been.
+                        is MdBlock.Code -> {
+                            val registration = renderers[block.language]
+                            if (registration == null) CodeBox(block.text, scale, textStyle.lineHeight) else registration.render(block)
+                        }
+                        is MdBlock.Embed -> Text(
+                            "▸ ${block.target}",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp * scale,
+                            color = colours.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(colours.surfaceVariant)
+                                .padding(10.dp),
+                        )
+                        is MdBlock.Rule -> HorizontalDivider()
                     }
-                    Text(annotate(block.spans, colours.primary), lineHeight = 22.sp)
                 }
-                is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
-                    Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
-                    Text(
-                        annotate(block.spans, colours.primary),
-                        color = colours.onSurfaceVariant,
-                        lineHeight = 22.sp,
-                        modifier = Modifier.padding(start = 10.dp),
-                    )
-                }
-                // The seam (§ 5). A registered info string draws itself;
-                // every other one — and every unfenced code block, which
-                // carries none — is the box it has always been.
-                is MdBlock.Code -> {
-                    val registration = renderers[block.language]
-                    if (registration == null) CodeBox(block.text) else registration.render(block)
-                }
-                is MdBlock.Embed -> Text(
-                    "▸ ${block.target}",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
-                    color = colours.onSurfaceVariant,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(colours.surfaceVariant)
-                        .padding(10.dp),
-                )
-                is MdBlock.Rule -> HorizontalDivider()
             }
         }
     }
@@ -203,12 +219,13 @@ private const val CHECKED_GLYPH = "☑" // BALLOT BOX WITH CHECK
 /// (§ 4): an info string nobody registered — including one whose plugin
 /// has gone — is a legible code block again, byte for byte.
 @Composable
-private fun CodeBox(text: String) {
+private fun CodeBox(text: String, scale: Float, lineHeight: androidx.compose.ui.unit.TextUnit) {
     val colours = MaterialTheme.colorScheme
     Text(
         text,
         fontFamily = FontFamily.Monospace,
-        fontSize = 13.sp,
+        fontSize = 13.sp * scale,
+        lineHeight = lineHeight,
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))

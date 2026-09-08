@@ -108,8 +108,12 @@ class PeopleEditorUiTest {
     @Test fun renamePreviewApplyAndUndoUseTheSharedDialog() = fixture { state, kernel ->
         val root = java.io.File(state.vaultDir)
         root.resolve("note.md").writeText("owner: @alice.smith")
-        compose.setContent { GiluneTheme(dark = false) { Box(Modifier.fillMaxSize()) { RefactoringButton(state, "alice.md", root.resolve("alice.md").readText()) } } }
-        compose.onNodeWithText("Refactor…").performClick()
+        val editor = EditorState().also { it.open(state.vaultDir, "alice.md"); it.reading = false }
+        compose.setContent { GiluneTheme(dark = false) { Box(Modifier.fillMaxSize()) { NoteEditor(state, editor, Modifier.fillMaxSize()) } } }
+        compose.onNodeWithText("Insert…").assertDoesNotExist()
+        compose.onNodeWithText("Refactor…").assertDoesNotExist()
+        compose.onNodeWithContentDescription("note actions").performClick()
+        compose.onNodeWithText("Rename references…").performClick()
         waitText("Rename handle")
         compose.onNodeWithText("Rename handle").performClick()
         compose.onNodeWithText("New name").performTextInput("alicia")

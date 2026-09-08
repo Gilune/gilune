@@ -14,6 +14,19 @@ plugins {
 // see architecture/09-engineering-conventions.md § Continuous builds.
 val releaseVersion = project.findProperty("gilune.version") as String?
 val releaseVersionCode = (project.findProperty("gilune.versionCode") as String?)?.toInt()
+val appVersionName = releaseVersion ?: "1.0.0-dev"
+val generateAppVersion by tasks.registering {
+    val destination = layout.buildDirectory.dir("generated/appVersion")
+    inputs.property("version", appVersionName)
+    outputs.dir(destination)
+    doLast {
+        val quoted = appVersionName.replace("\\", "\\\\").replace("\"", "\\\"")
+        destination.get().file("org/gilune/app/AppVersion.kt").asFile.apply {
+            parentFile.mkdirs()
+            writeText("package org.gilune.app\n\nconst val APP_VERSION = \"$quoted\"\n")
+        }
+    }
+}
 
 kotlin {
     jvm("desktop")
@@ -27,6 +40,7 @@ kotlin {
         //     --library <dll|so> --language kotlin \
         //     --out-dir app/kernelBindings/src/<target>Main/generated
         val desktopMain by getting {
+            kotlin.srcDir(generateAppVersion)
             kotlin.srcDir("src/jvmShared/kotlin")
             dependencies {
                 implementation(compose.desktop.currentOs)
@@ -50,6 +64,7 @@ kotlin {
             }
         }
         val androidMain by getting {
+            kotlin.srcDir(generateAppVersion)
             kotlin.srcDir("src/jvmShared/kotlin")
             dependencies {
                 implementation(project(":pluginSdk"))
@@ -202,7 +217,7 @@ android {
         minSdk = 29
         targetSdk = 36
         versionCode = releaseVersionCode ?: 1
-        versionName = releaseVersion ?: "0.1"
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk {
             // The two ABIs this app ships, stated so that a dependency's
@@ -371,6 +386,7 @@ tasks.withType<Test>().configureEach {
         .withPathSensitivity(PathSensitivity.NONE)
     testLogging {
         showStandardStreams = true
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         events("passed", "failed")
     }
 }

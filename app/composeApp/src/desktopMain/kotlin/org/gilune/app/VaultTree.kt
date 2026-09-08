@@ -51,6 +51,8 @@ import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.CreateNewFolder
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Extension
+import androidx.compose.material.icons.outlined.People
+import org.gilune.plugins.people.PEOPLE_PANEL
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material3.AlertDialog
@@ -84,6 +86,8 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -91,6 +95,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import java.io.File
+import org.gilune.plugin.sdk.PagePreset
 
 enum class VaultEntryKind { DIRECTORY, NOTE, ATTACHMENT }
 
@@ -226,13 +231,14 @@ fun RailPanels(
     onOpenToSide: (String) -> Unit = {},
     onRenamed: (String, String) -> Unit = { _, _ -> },
     onDeleted: (String) -> Unit = {},
+    navigation: NavigationVisibility = Prefs.navigation,
 ) {
     val colours = MaterialTheme.colorScheme
     // The rail's upper region as ADR 0011 always described it: a declared
     // navigation slot. Read per composition from the live plugin list, so
     // a tab appears and disappears with the plugin behind it and with the
     // plugin's own panel switch (ADR 0015 § 6, T3).
-    val destinations = navigationPanels(state.plugins)
+    val destinations = navigation.visible(navigationPanels(state.plugins))
     // A destination that has just gone — switched off, disabled, removed —
     // leaves the rail looking at nothing, so the rail falls back to the
     // files it always has. Held as a value rather than written back:
@@ -259,8 +265,12 @@ fun RailPanels(
                 // The label is the contribution's own, verbatim: it is
                 // what the plugin calls its destination, and the shell is
                 // not the one to reword it.
-                RailTab(navigationIcon(destination.key), destination.label, active.key == destination.key) {
-                    tree.railPanel = RailPanel(destination.key)
+                ContextMenuArea(items = { listOf(ContextMenuItem("Hide ${destination.label}") {
+                    navigation.setVisible(destination.key, false)
+                }) }) {
+                    RailTab(navigationIcon(destination.key), destination.label, active.key == destination.key) {
+                        tree.railPanel = RailPanel(destination.key)
+                    }
                 }
             }
         }
@@ -296,8 +306,9 @@ fun RailPanels(
 /// behaviour behind a slot id is Kotlin here. A key this host does not
 /// know gets the plugin glyph, so an unrecognised destination still looks
 /// like what it is.
-private fun navigationIcon(key: String): ImageVector = when (key) {
+internal fun navigationIcon(key: String): ImageVector = when (key) {
     TASKS_RAIL_PANEL -> Icons.Outlined.CheckBox
+    PEOPLE_PANEL -> Icons.Outlined.People
     else -> Icons.Outlined.Extension
 }
 
@@ -335,7 +346,13 @@ private class TreeActions(
     val newFolder: (String) -> Unit,
     val rename: (VaultEntry) -> Unit,
     val delete: (String) -> Unit,
-)
+    val pageCollections: List<FolderPageCollection>,
+    val createPage: (FolderPageCollection) -> Unit,
+) {
+    fun pageMenuItems(folder: String) = pageCollections.filter { File(it.folder) == File(folder) }.map { collection ->
+        ContextMenuItem(collection.binding.collection.folderCreateLabel!!) { createPage(collection.copy(folder = folder)) }
+    }
+}
 
 /// `onCreateNote` receives an untitled note that is already on disk;
 /// opening it is the least a caller can do, so that is the default.
@@ -355,6 +372,8 @@ fun VaultTree(
     var pending by remember { mutableStateOf<PendingName?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
     var moveRevision by remember { mutableStateOf(0) }
+    val folderCollections = rememberFolderPageCollections(state)
+    var creatingPage by remember { mutableStateOf<FolderPageCollection?>(null) }
     val drag = remember(state.vaultDir) { VaultTreeDrag() }
     val list = rememberLazyListState()
     val entries = remember(state.vaultCursor.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
@@ -381,6 +400,7 @@ fun VaultTree(
     fun newNote(parent: String = tree.selectedDir) {
         reveal(parent)
         onCreateNote(createUntitledNote(state.vaultDir, parent))
+        moveRevision++
         state.sync(announce = false)
     }
 
@@ -391,6 +411,8 @@ fun VaultTree(
         newFolder = ::newFolder,
         rename = { entry -> pending = PendingName.Rename(entry.relPath, entry.isDir) },
         delete = { relPath -> deleting = relPath },
+        pageCollections = folderCollections,
+        createPage = { creatingPage = it },
     )
 
     val dragModifier = treeDragModifier(drag, tree, list) { entry, directory ->
@@ -418,22 +440,26 @@ fun VaultTree(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 8.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Box(
-                modifier = Modifier.weight(1f).height(26.dp)
-                    .testTag("vault-root-drop")
-                    .onGloballyPositioned { drag.rootTarget = it.boundsInRoot() }
-                    .background(if (drag.destination == "") colours.primaryContainer else colours.surface)
-                    .clickable { tree.selectedDir = "" },
-                contentAlignment = Alignment.CenterStart,
-            ) {
-                Text(
-                    if (drag.source == null) "vault" else
-                        drag.destination?.let { "Move to ${it.ifEmpty { "vault" }}" } ?: "Choose another folder",
-                    fontSize = 11.sp,
-                    color = colours.onSurfaceVariant,
-                    maxLines = 1,
-                    modifier = if (drag.source != null) Modifier.testTag("vault-drag-status") else Modifier,
-                )
+            Box(Modifier.weight(1f)) {
+                ContextMenuArea(items = { actions.pageMenuItems("") }) {
+                    Box(
+                        modifier = Modifier.fillMaxWidth().height(26.dp)
+                            .testTag("vault-root-drop")
+                            .onGloballyPositioned { drag.rootTarget = it.boundsInRoot() }
+                            .background(if (drag.destination == "") colours.primaryContainer else colours.surface)
+                            .clickable { tree.selectedDir = "" },
+                        contentAlignment = Alignment.CenterStart,
+                    ) {
+                        Text(
+                            if (drag.source == null) "vault" else
+                                drag.destination?.let { "Move to ${it.ifEmpty { "vault" }}" } ?: "Choose another folder",
+                            fontSize = 11.sp,
+                            color = colours.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = if (drag.source != null) Modifier.testTag("vault-drag-status") else Modifier,
+                        )
+                    }
+                }
             }
             IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
                 Icon(
@@ -461,7 +487,7 @@ fun VaultTree(
             val atRoot = (pending as? PendingName.CreateFolder)?.takeIf { it.parent.isEmpty() }
             if (atRoot != null) {
                 item(key = "pending-root") {
-                    InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null })
+                    InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null; moveRevision++ })
                 }
             }
             items(entries, key = { it.relPath }) { entry ->
@@ -471,7 +497,7 @@ fun VaultTree(
                         state,
                         renaming,
                         depth = entry.depth,
-                        onDone = { pending = null },
+                        onDone = { pending = null; moveRevision++ },
                         onRenamed = onRenamed,
                     )
                 } else {
@@ -480,7 +506,7 @@ fun VaultTree(
                 val inside = (pending as? PendingName.CreateFolder)
                     ?.takeIf { entry.isDir && it.parent == entry.relPath }
                 if (inside != null) {
-                    InlineNameRow(state, inside, depth = entry.depth + 1, onDone = { pending = null })
+                    InlineNameRow(state, inside, depth = entry.depth + 1, onDone = { pending = null; moveRevision++ })
                 }
             }
         }
@@ -488,7 +514,21 @@ fun VaultTree(
 
     val doomed = deleting
     if (doomed != null) {
-        DeleteDialog(state, doomed, onClose = { deleting = null }, onDeleted = onDeleted)
+        DeleteDialog(state, doomed, onClose = { deleting = null; moveRevision++ }, onDeleted = onDeleted)
+    }
+    creatingPage?.let { target ->
+        val binding = target.binding
+        // An already-open form must disappear if its owner is disabled or loses
+        // creation permission. The kernel also checks permission at commit.
+        val owner = state.plugins.singleOrNull { it.pluginId == binding.pluginId }
+        if (owner?.state == "enabled" && org.gilune.plugin.sdk.PAGE_CREATE_CAPABILITY in owner.granted) {
+            PageCreationForm(binding, PagePreset(binding.collection.folderCreateLabel!!, emptyMap()), state,
+                onOpen = { path ->
+                    reveal(path.substringBeforeLast('/', ""))
+                    moveRevision++
+                    onOpen(path)
+                }, initialFolder = target.folder, dismiss = { creatingPage = null })
+        } else LaunchedEffect(target) { creatingPage = null }
     }
 }
 
@@ -509,8 +549,8 @@ private fun TreeRow(
         return
     }
     val colours = MaterialTheme.colorScheme
-    val selected =
-        if (entry.isDir) tree.selectedDir == entry.relPath else tree.selectedFile == entry.relPath
+    val selected = !entry.isDir && tree.selectedFile == entry.relPath
+    val rowFocus = remember { FocusRequester() }
     val label = entry.relPath.substringAfterLast('/')
     val parentDir = if (entry.isDir) entry.relPath else entry.relPath.substringBeforeLast('/', "")
 
@@ -521,8 +561,9 @@ private fun TreeRow(
             if (!entry.isDir) {
                 add(ContextMenuItem("Open to the side") { actions.openToSide(entry.relPath) })
             }
-            add(ContextMenuItem("New note here") { actions.newNote(parentDir) })
-            add(ContextMenuItem("New folder here") { actions.newFolder(parentDir) })
+            add(ContextMenuItem("New note") { actions.newNote(parentDir) })
+            add(ContextMenuItem("New folder") { actions.newFolder(parentDir) })
+            if (entry.isDir) addAll(actions.pageMenuItems(entry.relPath))
             add(ContextMenuItem("Rename") { actions.rename(entry) })
             add(ContextMenuItem("Delete") { actions.delete(entry.relPath) })
             add(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
@@ -530,6 +571,14 @@ private fun TreeRow(
     }) {
         Row(
             rowModifier
+                .semantics { this.selected = selected }
+                .focusRequester(rowFocus)
+                .onPreviewKeyEvent { event ->
+                    if (event.type == KeyEventType.KeyDown && event.key == Key.Delete) {
+                        actions.delete(entry.relPath)
+                        true
+                    } else false
+                }
                 .fillMaxWidth()
                 .padding(horizontal = 6.dp, vertical = 1.dp)
                 .clip(RoundedCornerShape(5.dp))
@@ -539,6 +588,7 @@ private fun TreeRow(
                     else -> colours.surface
                 })
                 .clickable {
+                    rowFocus.requestFocus()
                     if (entry.isDir) {
                         tree.selectedDir = if (tree.selectedDir == entry.relPath) "" else entry.relPath
                         tree.toggle(entry.relPath)

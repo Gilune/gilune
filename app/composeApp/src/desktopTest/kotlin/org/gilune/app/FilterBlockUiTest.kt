@@ -14,9 +14,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -70,6 +74,65 @@ class FilterBlockUiTest {
                 Box(Modifier.fillMaxSize()) { NoteEditor(state, editor, Modifier.fillMaxSize()) }
             }
         }
+    }
+
+    @Test
+    fun tickingAnOverviewTaskUpdatesItsSourceAndRemovesItFromOpenResults() {
+        val (state, _) = vaultWith(fence(FILTER_FENCE, "type:task is:open"))
+        state.plugins.add(installedTasksPlugin())
+        val overview = File(state.vaultDir, "agenda.md").readText()
+        val tabs = TabsState(state.vaultDir)
+        val tab = tabs.open("agenda.md")
+        val editor = tab.editor
+        editor.open(state.vaultDir, "agenda.md")
+        editor.reading = true
+        compose.setContent {
+            GiluneTheme(dark = false) {
+                Box(Modifier.fillMaxSize()) {
+                    NoteEditor(state, editor, Modifier.fillMaxSize(), tabs = tabs, tab = tab)
+                }
+            }
+        }
+        awaitText("buy milk")
+        compose.onNodeWithContentDescription("Complete task: buy milk").performClick()
+        awaitText(FILTER_NO_MATCHES)
+        val saved = File(state.vaultDir, "Home/kitchen.md").readText()
+        assertTrue(saved.contains("- [x] buy milk due:$soon"), saved)
+        assertTrue(saved.contains("done:${LocalDate.now()}"), saved)
+        assertEquals(overview, File(state.vaultDir, "agenda.md").readText())
+        assertEquals("agenda.md", editor.openRelPath)
+        assertEquals("agenda.md", tabs.activeTab?.relPath)
+        assertEquals(false, editor.dirty)
+    }
+
+    @Test
+    fun aCollapsedFilterCanCompleteATaskWhileTheOverviewIsInEditMode() {
+        val (state, editor) = vaultWith(fence(FILTER_FENCE, "type:task is:open"))
+        state.plugins.add(installedTasksPlugin())
+        editor.reading = false
+        show(state, editor)
+        awaitText("buy milk")
+        compose.onNodeWithContentDescription("Complete task: buy milk").performClick()
+        awaitText(FILTER_NO_MATCHES)
+        assertTrue(File(state.vaultDir, "Home/kitchen.md").readText().contains("- [x] buy milk"))
+        assertEquals(false, editor.dirty)
+    }
+
+    @Test
+    fun anUnfilteredOverviewShowsTheSavedCheckboxStateAndCanReopenTheTask() {
+        val (state, editor) = vaultWith(fence(FILTER_FENCE, "type:task"))
+        state.plugins.add(installedTasksPlugin())
+        show(state, editor)
+        awaitText("buy milk")
+        compose.onNodeWithContentDescription("Complete task: buy milk").assertIsOff().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("Reopen task: buy milk").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNodeWithContentDescription("Reopen task: buy milk").assertIsOn().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithContentDescription("Complete task: buy milk").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(File(state.vaultDir, "Home/kitchen.md").readText().contains("- [ ] buy milk"))
     }
 
     // ------------------------------------------------------------------

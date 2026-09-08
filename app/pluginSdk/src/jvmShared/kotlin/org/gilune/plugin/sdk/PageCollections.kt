@@ -23,4 +23,7 @@ class PageCollectionRegistration(
     val presets: List<PagePreset> = emptyList(),
     val identityPredicate: String? = null,
     val lookupProviderId: String? = null,
+    /** Optional desktop folder-menu action, shown on this type's effective
+     * default folder. The host uses the same creation form and capability. */
+    val folderCreateLabel: String? = null,
 )

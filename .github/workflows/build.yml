@@ -170,6 +170,16 @@ jobs:
         # Against the same release binary the installer will carry.
         run: ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
 
+      - name: Desktop test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-test-results
+          path: |
+            app/composeApp/build/test-results/desktopTest
+            app/composeApp/build/reports/tests/desktopTest
+          if-no-files-found: warn
+
       - name: Package the MSI
         shell: bash
         working-directory: app
@@ -267,6 +277,16 @@ jobs:
           # No GPU behind xvfb, and Skiko's default is to look for one.
           SKIKO_RENDER_API: SOFTWARE
         run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+
+      - name: Desktop test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop-test-results
+          path: |
+            app/composeApp/build/test-results/desktopTest
+            app/composeApp/build/reports/tests/desktopTest
+          if-no-files-found: warn
 
       - name: Package the DEB
         working-directory: app

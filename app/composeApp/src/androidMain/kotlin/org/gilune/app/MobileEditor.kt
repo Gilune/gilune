@@ -551,7 +551,6 @@ fun EditScreen(
             TextButton(onClick = { propertiesOpen = true }, modifier = Modifier.testTag("open-properties")) { Text("Properties") }
             DocumentLinksButton(state, editor.document(), onOpenNote)
             RefactoringButton(state, relPath, editor.document())
-            TextButton(onClick = completions.toolbar) { Text("Insert…") }
             NoteActions(state = state, editor = editor, transcription = transcription)
         }
         Column(

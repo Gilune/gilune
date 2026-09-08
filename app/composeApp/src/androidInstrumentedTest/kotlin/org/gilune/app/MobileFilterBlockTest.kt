@@ -14,6 +14,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -23,6 +24,8 @@ import org.junit.Rule
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+import java.io.File
 
 class MobileFilterBlockTest {
     private fun awaitText(text: String) {
@@ -33,6 +36,23 @@ class MobileFilterBlockTest {
     val compose = createComposeRule()
 
     private val fence = "```"
+
+    @Test
+    fun aCheckboxCompletesTheSourceTaskWithoutLeavingTheOverview() {
+        val state = blockVault("type:task is:open")
+        state.plugins.add(installedTasksPlugin())
+        val before = File(state.vaultDir, "board.md").readText()
+        var opened: String? = null
+        showRead(state) { opened = it }
+        awaitText("mend the gate")
+        compose.onNodeWithContentDescription("Complete task: mend the gate").performClick()
+        awaitText(FILTER_NO_MATCHES)
+        assertEquals(null, opened)
+        assertEquals(before, File(state.vaultDir, "board.md").readText())
+        val saved = File(state.vaultDir, "jobs.md").readText()
+        assertTrue(saved.contains("- [x] mend the gate"), saved)
+        assertTrue(saved.contains("done:${LocalDate.now()}"), saved)
+    }
 
     /// A vault with a note carrying a `filter` block, and a second note
     /// holding the task it should find.
@@ -85,7 +105,7 @@ class MobileFilterBlockTest {
         compose.onNodeWithText("mend the gate").performClick()
         compose.waitForIdle()
 
-        assertEquals("jobs.md", opened, "rows navigate; a block is read-only")
+        assertEquals("jobs.md", opened, "row text navigates to the source note")
     }
 
     @Test

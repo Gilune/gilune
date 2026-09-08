@@ -21,6 +21,8 @@ import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performMouseInput
+import androidx.compose.ui.test.performClick
+import kotlin.test.assertEquals
 import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -133,5 +135,19 @@ class PaneHostUiTest {
 
         compose.onNodeWithText("Split right").assertIsDisplayed()
         compose.onNodeWithText("Close").assertIsDisplayed()
+    }
+
+    @Test
+    fun theTabContextMenuCanSetAColourAndCloseTabsToItsRight() {
+        val tabs = twoTabs()
+        fun menu() = compose.onAllNodesWithTag("tab-label")[0].performMouseInput { click(button = MouseButton.Secondary) }
+        menu()
+        compose.onNodeWithText("Pick a colour…").performClick()
+        compose.onNodeWithText("Purple").performClick()
+        assertEquals(TabColour.Purple, tabs.activePane.tabs.first().colour)
+        menu()
+        compose.onNodeWithText("Close all but this").assertIsDisplayed()
+        compose.onNodeWithText("Close to the right").performClick()
+        assertEquals(listOf("alpha.md"), tabs.activePane.tabs.map { it.relPath })
     }
 }

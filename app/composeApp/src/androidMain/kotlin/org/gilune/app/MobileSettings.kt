@@ -838,6 +838,7 @@ private fun AboutSection(state: GiluneState) {
     Text("Gilune", style = MaterialTheme.typography.titleSmall)
     Text(
         buildString {
+            appendLine("app $APP_VERSION")
             appendLine("kernel ${runCatching { kernelVersion() }.getOrDefault("unknown")}")
             appendLine("vault ${state.vaultDir}")
             appendLine(state.message.value)
