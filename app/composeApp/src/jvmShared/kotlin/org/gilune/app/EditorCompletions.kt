@@ -207,7 +207,9 @@ internal fun traceCompletion(event: String, context: EditorContext? = null) {
 internal fun EditorCompletionMenu(ui: EditorCompletionUi, state: GiluneState, onOpen: (String) -> Unit = {}) {
     if (ui.visible) Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().testTag("editor-completions")) {
         Column(Modifier.heightIn(max = 210.dp).verticalScroll(rememberScrollState()).padding(6.dp)) {
-            if (ui.loading) Text("Finding suggestions…")
+            // Retained options must stay under the pointer during a refresh.
+            // Inserting a loading row above them changes their click positions.
+            if (ui.loading && ui.offers?.choices.isNullOrEmpty()) Text("Finding suggestions…")
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             ui.offers?.choices?.forEachIndexed { index, choice ->
                 Column(Modifier.fillMaxWidth().background(if (index == ui.selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)

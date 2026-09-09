@@ -41,10 +41,13 @@ class CompletionRefreshUiTest {
         compose.waitUntil(5_000) { queries.pending.isNotEmpty() }
         queries.completeNext()
         compose.waitForFirstEditorOption("Due date")
+        val beforeRefresh = compose.onNodeWithTag("completion-0").fetchSemanticsNode().boundsInRoot
         compose.runOnIdle { state.searchRefresh.value++ }
         compose.waitUntil(5_000) { queries.pending.isNotEmpty() }
         // A real save/index refresh must not remove a row under a pending click.
         compose.onNodeWithTag("completion-0").assertExists().assertHasClickAction()
+        assertEquals(beforeRefresh, compose.onNodeWithTag("completion-0").fetchSemanticsNode().boundsInRoot,
+            "A refresh must not move the option away from the pointer")
         queries.completeNext()
         compose.waitForFirstEditorOption("Due date")
     }

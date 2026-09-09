@@ -15,6 +15,12 @@ into the new context. Native acceptance validation remains mandatory. This
 establishes and fixes one disappearing-menu sequence, not proof that every
 historical Linux failure took that sequence.
 
+A follow-up geometry assertion exposed another part of that sequence: adding
+the loading notice above retained rows moved the first option down 20 pixels
+(top 6 to 26). Loading text is now shown only when there are no retained options,
+so the same-query refresh preserves both the row and its pointer position.
+The failed bounds assertion is retained under `refresh-position-baseline*`.
+
 Affected People, editor, filter and Agenda UI fixtures now use an outer owned
 resource rule. It waits for application jobs to finish cancellation before
 closing native vault handles, after Compose disposes its UI. Tests cover that
@@ -104,6 +110,27 @@ minimal Rust installation lacked Clippy. The Linux setup now explicitly
 installs and checks Clippy before compilation. Rust dependency caches are saved
 even when a later test fails, and owned `ci/**` branches can save Gradle caches;
 neither cache changes test failure outcomes.
+
+The completed baseline's Windows suite passed 706 tests (five skips) and built
+the MSI. Android's three shards covered all 900 unique cases (293/291/316),
+with one failure and 15 skips; the later two shards passed without hiding the
+first shard's failure. The slash-menu test timed out waiting for **Due date**.
+The new trace shows source caret 34 before the toolbar click, then caret 24
+after it, with two offers published. With this fixture's 23-character frontmatter,
+the slash had been inserted at body offset zero instead of 11.
+
+`EditorToolbar` captured text and selection during composition. A callback
+invoked after a buffer edit but before its next frame could apply the previous
+snapshot. `ToolbarFreshStateTest` reproduces this even on Compose 1.8.2: a
+captured slash callback inserts at the old caret, and a captured panel callback
+overwrites the new text with the old text. Both tests failed before the fix.
+Toolbar and panel commands now calculate edits from the live buffer when the
+action fires. This is an application correction, not an increased timeout or
+an assertion that waits for the wrong state to disappear.
+The two regressions plus the real mobile editor class passed all 15 tests.
+The final menu-position change also passed the full 706-test Windows suite
+(five existing skips) and 24 focused Android cases. The expanded 903-case
+Android suite and the replacement hosted candidate provide the final gate.
 
 ## v1.0.5: Android suggestion test was not waiting for its option
 

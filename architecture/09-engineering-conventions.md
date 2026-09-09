@@ -214,7 +214,7 @@ enabled by `GILUNE_CI=1` and omit document contents.
   platform, because it is the same source either side. The Compose UI
   tests run under `xvfb-run` with `SKIKO_RENDER_API=SOFTWARE`: a display
   and no GPU.
-- **Android** (`ubuntu-latest`) → **APK**. `gilune-ffi` cross-compiled
+- **Android** (`ubuntu-24.04`) → **APK**. `gilune-ffi` cross-compiled
   with whisper for `arm64-v8a` and `x86_64` by
   `.github/scripts/build-android.sh`, which is the Linux counterpart of
   `kernel/scripts/build-android.ps1` and does not replace it. The NDK is

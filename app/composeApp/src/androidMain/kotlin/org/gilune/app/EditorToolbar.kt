@@ -105,11 +105,10 @@ fun EditorToolbar(
     val keyboard = LocalSoftwareKeyboardController.current
     var panelOpen by remember { mutableStateOf(false) }
 
-    val text = state.text.toString()
-    val selection = state.selection
-
-    fun run(edit: BufferEdit?) {
-        state.applyEdit(edit)
+    // A callback may run before the next composition after a caret/text edit.
+    // Read the live buffer when the action fires, never a rendered snapshot.
+    fun run(edit: (String, TextRange) -> BufferEdit?) {
+        state.applyEdit(edit(state.text.toString(), state.selection))
         onAction()
     }
 
@@ -130,19 +129,19 @@ fun EditorToolbar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             ToolButton("checkbox", Icons.Outlined.CheckBox) {
-                run(checkboxEdit(text, selection, decorations))
+                run { text, selection -> checkboxEdit(text, selection, decorations) }
             }
-            ToolButton("bold", Icons.Outlined.FormatBold) { run(emphasisEdit(text, selection, "**")) }
-            ToolButton("italic", Icons.Outlined.FormatItalic) { run(emphasisEdit(text, selection, "*")) }
+            ToolButton("bold", Icons.Outlined.FormatBold) { run { text, selection -> emphasisEdit(text, selection, "**") } }
+            ToolButton("italic", Icons.Outlined.FormatItalic) { run { text, selection -> emphasisEdit(text, selection, "*") } }
             ToolButton("list", Icons.AutoMirrored.Outlined.FormatListBulleted) {
-                run(bulletEdit(text, selection))
+                run { text, selection -> bulletEdit(text, selection) }
             }
             // The `/` key types the trigger the shared machine listens
             // for, rather than opening a menu behind its back: on a task
             // line the session opens through exactly the same predicate a
             // typed `/` passes, and anywhere else it is one character of
             // the user's own text.
-            SlashButton { run(slashEdit(text, selection)) }
+            SlashButton { run { text, selection -> slashEdit(text, selection) } }
             ToolButton(
                 "undo",
                 Icons.AutoMirrored.Outlined.Undo,
@@ -157,8 +156,6 @@ fun EditorToolbar(
         if (panelOpen) {
             EditorPanel(
                 state = state,
-                text = text,
-                selection = selection,
                 onEdit = { run(it) },
             )
         }
@@ -171,9 +168,7 @@ fun EditorToolbar(
 @Composable
 private fun EditorPanel(
     state: TextFieldState,
-    text: String,
-    selection: TextRange,
-    onEdit: (BufferEdit?) -> Unit,
+    onEdit: ((String, TextRange) -> BufferEdit?) -> Unit,
 ) {
     val colours = MaterialTheme.colorScheme
     Column(
@@ -187,27 +182,27 @@ private fun EditorPanel(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             for (level in 1..3) {
-                HeadingButton(level) { onEdit(headingEdit(text, selection, level)) }
+                HeadingButton(level) { onEdit { text, selection -> headingEdit(text, selection, level) } }
             }
-            ToolButton("quote", Icons.Outlined.FormatQuote) { onEdit(quoteEdit(text, selection)) }
-            ToolButton("code", Icons.Outlined.Code) { onEdit(emphasisEdit(text, selection, "`")) }
-            ToolButton("link", Icons.Outlined.Link) { onEdit(linkEdit(text, selection)) }
+            ToolButton("quote", Icons.Outlined.FormatQuote) { onEdit { text, selection -> quoteEdit(text, selection) } }
+            ToolButton("code", Icons.Outlined.Code) { onEdit { text, selection -> emphasisEdit(text, selection, "`") } }
+            ToolButton("link", Icons.Outlined.Link) { onEdit { text, selection -> linkEdit(text, selection) } }
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
             ToolButton("strike", Icons.Outlined.FormatStrikethrough) {
-                onEdit(emphasisEdit(text, selection, "~~"))
+                onEdit { text, selection -> emphasisEdit(text, selection, "~~") }
             }
             ToolButton("indent", Icons.AutoMirrored.Outlined.FormatIndentIncrease) {
-                onEdit(indentEdit(text, selection, outdent = false))
+                onEdit { text, selection -> indentEdit(text, selection, outdent = false) }
             }
             ToolButton("outdent", Icons.AutoMirrored.Outlined.FormatIndentDecrease) {
-                onEdit(indentEdit(text, selection, outdent = true))
+                onEdit { text, selection -> indentEdit(text, selection, outdent = true) }
             }
             ToolButton("move-up", Icons.Outlined.ArrowUpward) {
-                onEdit(moveLineEdit(text, selection, up = true))
+                onEdit { text, selection -> moveLineEdit(text, selection, up = true) }
             }
             ToolButton("move-down", Icons.Outlined.ArrowDownward) {
-                onEdit(moveLineEdit(text, selection, up = false))
+                onEdit { text, selection -> moveLineEdit(text, selection, up = false) }
             }
             ToolButton(
                 "redo",
