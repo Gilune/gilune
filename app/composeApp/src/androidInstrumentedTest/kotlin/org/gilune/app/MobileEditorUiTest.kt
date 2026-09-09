@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
@@ -55,7 +54,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalFoundationApi::class)
 class MobileEditorUiTest {
     private val resources = UiTestResources()
-    private val rule = createComposeRule()
+    private val rule = createDeviceComposeRule()
 
     // The test drives the real InputConnection. A second keyboard must not
     // independently select a composing word while the test inserts text.

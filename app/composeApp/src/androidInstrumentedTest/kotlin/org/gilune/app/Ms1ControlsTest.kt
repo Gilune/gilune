@@ -43,7 +43,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.input.VisualTransformation
@@ -55,7 +54,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class Ms1ControlsTest {
-    private val rule: ComposeContentTestRule = createComposeRule()
+    private val rule: ComposeContentTestRule = createDeviceComposeRule()
 
     /// [Ms1InputSessionRule] must be the OUTER rule — see `Ms1ImeRig.kt`.
     /// Both rows here are annotated [WithSystemKeyboard], so what it does for

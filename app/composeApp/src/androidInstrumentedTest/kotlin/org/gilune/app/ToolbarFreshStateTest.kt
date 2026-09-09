@@ -2,7 +2,6 @@ package org.gilune.app
 
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextRange
@@ -11,7 +10,7 @@ import org.junit.Test
 import kotlin.test.assertEquals
 
 class ToolbarFreshStateTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createDeviceComposeRule()
 
     @Test fun slashUsesTheCaretAtClickTimeEvenBeforeRecomposition() {
         val body = TextFieldState("- [ ] milk \n", TextRange.Zero)

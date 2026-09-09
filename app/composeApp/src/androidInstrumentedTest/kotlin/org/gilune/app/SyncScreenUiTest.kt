@@ -17,34 +17,33 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performScrollTo
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.isDisplayed
+import androidx.compose.ui.test.performSemanticsAction
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import uniffi.gilune_ffi.FoundDevice
 import uniffi.gilune_ffi.IntegrityAlert
-import java.nio.file.Files
 import kotlin.test.assertTrue
 
 class SyncScreenUiTest {
-    @get:Rule
-    val rule = createComposeRule()
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val resources = UiTestResources()
+    private val rule = createDeviceComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(rule)
 
     /// A state that never opened a vault, so nothing overwrites the facts
     /// a test hands it.
     private fun state(): GiluneState =
-        GiluneState(Files.createTempDirectory("gilune-sync").toString(), scope)
+        resources.state(resources.directory("gilune-sync").path)
 
     private fun show(state: GiluneState) {
         rule.setContent {
@@ -147,7 +146,19 @@ class SyncScreenUiTest {
         // click on a node clipped out of the viewport lands nowhere at
         // all rather than failing — which is how it reads as the button
         // simply not working.
-        rule.onNodeWithTag("peer-address-edit").performScrollTo().performClick()
+        val edit = rule.onNodeWithTag("peer-address-edit")
+        val scrollable = rule.onNode(hasScrollAction())
+        val distance = with(rule.density) {
+            (edit.getUnclippedBoundsInRoot().top - scrollable.getUnclippedBoundsInRoot().top).toPx()
+        }
+        // In this Compose version performScrollTo loops before the queued
+        // ScrollBy coroutine runs. Issue one scroll and pump its scheduler.
+        scrollable.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+            assertTrue(scroll(0f, distance))
+        }
+        rule.mainClock.advanceTimeByFrame()
+        rule.waitUntil(5_000) { edit.isDisplayed() }
+        edit.performClick()
         rule.onNodeWithTag("peer-address-field").assertExists()
         // Nothing to save until it looks like host:port — the kernel
         // refuses an address with no colon and the button says so first.

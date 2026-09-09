@@ -130,6 +130,13 @@ had not spoken. The rules that follow from it:
   asserting that a mock was called proves nothing a contract cares
   about.
 
+Android Compose UI tests use `createDeviceComposeRule` or
+`createDeviceAndroidComposeRule`, which supply a `StandardTestDispatcher` to the
+test environment. The unconfined default can resume a UI effect on a real IO
+producer's thread, as `EffectThreadTest` demonstrates. Use Compose's idle/clock
+APIs to pump this scheduler and await actual asynchronous results before asserting.
+Do not change back to immediate dispatch to make an early assertion pass.
+
 ## Continuous builds and releases
 
 `.github/workflows/build.yml` is the only pipeline. Pushes to `main` and

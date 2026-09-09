@@ -11,24 +11,23 @@
 
 package org.gilune.app
 
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
-import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
-import java.nio.file.Files
+import org.junit.rules.RuleChain
 import kotlin.test.assertFalse
 
 class ProviderNoticeUiTest {
 
-    @get:Rule
-    val rule = createComposeRule()
+    private val resources = UiTestResources()
+    private val rule = createDeviceComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(rule)
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
@@ -37,7 +36,7 @@ class ProviderNoticeUiTest {
         runBlocking { MobilePrefs(context).dismissProviderOffNotice() }
     }
 
-    private fun show(state: GiluneState = GiluneState(scratch(), MainScope())) {
+    private fun show(state: GiluneState = resources.state(resources.directory("gilune-notice").path)) {
         rule.setContent {
             GiluneTheme(false) {
                 SettingsScreen(
@@ -54,8 +53,6 @@ class ProviderNoticeUiTest {
         }
     }
 
-    private fun scratch(): String = Files.createTempDirectory("gilune-notice").toString()
-
     @Test
     fun aPhoneWithNothingToApologiseForShowsNoNotice() {
         runBlocking { MobilePrefs(context).dismissProviderOffNotice() }
@@ -67,6 +64,9 @@ class ProviderNoticeUiTest {
     fun aStandingNoticeIsDrawnAndGoesAwayWhenItIsDismissed() {
         runBlocking { MobilePrefs(context).raiseProviderOffNotice() }
         show()
+        rule.waitUntil(5_000) {
+            rule.onAllNodesWithTag("provider-off-notice").fetchSemanticsNodes().isNotEmpty()
+        }
         rule.onNodeWithTag("provider-off-notice").assertExists()
         rule.onNodeWithTag("provider-off-dismiss").performClick()
         rule.waitUntil(5_000) {

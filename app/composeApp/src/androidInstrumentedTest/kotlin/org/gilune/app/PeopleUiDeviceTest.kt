@@ -8,7 +8,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.*
@@ -22,7 +21,7 @@ import uniffi.gilune_ffi.*
 @OptIn(ExperimentalTestApi::class)
 class PeopleUiDeviceTest {
     private val resources = UiTestResources()
-    private val compose = createComposeRule()
+    private val compose = createDeviceComposeRule()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private fun fixture(run: (GiluneState, Gilune) -> Unit) {

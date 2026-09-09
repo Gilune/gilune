@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
@@ -34,7 +33,7 @@ class MobileFilterBlockTest {
     }
 
     private val resources = UiTestResources()
-    private val compose = createComposeRule()
+    private val compose = createDeviceComposeRule()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private val fence = "```"
@@ -87,8 +86,8 @@ class MobileFilterBlockTest {
         showRead(state)
         compose.waitForIdle()
 
-        compose.onNodeWithTag("filter-block").assertIsDisplayed()
         awaitText("mend the gate")
+        compose.onNodeWithTag("filter-block").assertIsDisplayed()
         compose.onNodeWithText("mend the gate").assertIsDisplayed()
         // The fence's own text is not on screen: the block rendered, it
         // did not fall through to the monospace box.

@@ -38,7 +38,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.TextRange
 import org.junit.Rule
@@ -51,7 +50,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalFoundationApi::class)
 class Ms1TextFieldStateSpikeTest {
 
-    private val rule: ComposeContentTestRule = createComposeRule()
+    private val rule: ComposeContentTestRule = createDeviceComposeRule()
 
     /// [Ms1InputSessionRule] must be the OUTER rule — see `Ms1ImeRig.kt`.
     /// This prototype owns the input session exclusively, like the rest of

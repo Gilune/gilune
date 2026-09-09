@@ -1,3 +1,72 @@
+# Intermittent build failures — 7 September 2026
+
+## Android effect scheduling follow-up (9 September 2026)
+
+[Candidate 8fa5cc0](https://github.com/Gilune/gilune/actions/runs/34386963569)
+passed both desktop jobs: 706 cases each, zero failures/errors and five existing
+skips, with fresh execution and successful MSI/DEB packaging. Both Ubuntu jobs
+passed the restricted package setup. Android shard 1 crashed while destroying
+the activity after `ProviderNoticeUiTest.aStandingNoticeIsDrawnAndGoesAwayWhenItIsDismissed`:
+`SlotWriter.moveSlotGapTo` threw `ArrayIndexOutOfBoundsException` (length 1280,
+index -596). Shards 0 and 2 passed 294 and 316 cases; shard 1 reported only 167
+of its expected 293. This is a failed, incomplete Android gate, not 903 passing
+tests. Reports and Java thread stacks are under `8fa-android-results`.
+
+The unchanged notice class passed locally, as did a new 30-cycle notice dismissal
+and activity destruction test. The full corresponding local shard (294 cases,
+including the new lifecycle test) also passed. These attempts did not reproduce
+the hosted slot-table crash. Published runtime 1.8.3 has identical `SlotTable.kt`
+and `Composition.kt` to 1.8.2; there is no basis for claiming that patch fixes it.
+
+Source inspection found another concrete test-environment boundary: the old
+Compose test factories default to `UnconfinedTestDispatcher`. A background
+completion can resume a composition effect immediately on the producer thread.
+`EffectThreadTest` reproduced this: expected Android UI thread 2, actual worker
+102 (101 in a second unchanged-factory diagnostic attempt). The test uses a
+background-completed deferred value; no sleeps or probabilistic click retries.
+Its failing XML is retained in `effect-thread-baseline-results`.
+
+Android UI tests now share factories supplying `StandardTestDispatcher` to the
+existing supported `effectContext` argument. Compose's Android main clock pumps
+that scheduler on the UI thread. The same effect-thread probe passes, as do
+the live semantics probe and the 30-cycle notice lifecycle scenario. This follows
+Google's [test dispatcher guidance](https://developer.android.com/develop/ui/compose/testing/migrate-v2?hl=en)
+and its [standard-dispatcher lint rationale](https://android.googlesource.com/superprojects/androidx/+/c396d28dff194e399f1b9703b9aeb02a244ffbd6).
+It does not require another production framework upgrade.
+
+The first queued-dispatcher check exposed a notice-readiness assertion: the test
+checked the banner before DataStore's asynchronous result arrived. It now waits
+for that actual banner before asserting/clicking. Its scope and temporary vault
+also use owned cleanup. The initial five-case result (four pass, one fail) is
+preserved in `standard-dispatcher-initial-results`. The demonstrated effect-thread
+violation is fixed; the causal link to the historical slot-table and drawing
+crashes remains a hypothesis requiring further evidence.
+
+The first full migration run exposed five more early assertions (filter rows,
+loaded shell content, and laid-out caption text), then stalled in Sync's
+`performScrollTo`. It was stopped after capturing a SIGQUIT thread dump and
+bugreport; its partial XML reports 687 cases, six failures including that deliberate
+process termination, and 14 skips. It is not a complete suite result. Files are
+under `standard-dispatcher-full-initial-results` and `standard-dispatcher-stall*`.
+The stack is in `ActionsKt.performScrollTo`; this version's helper repeatedly
+checks its target while the queued `ScrollBy` work has not run. The test now
+issues one semantic scroll, advances the main clock, waits for visibility and
+clicks once. Exact assertions remain. Shell and Sync fixtures now own cleanup.
+
+The next focused run passed those checks but exposed one early click on the
+composer's dismiss button before its focus-driven visibility update (46 cases,
+one failure, two existing skips). The button is now awaited before one click.
+Reports are retained in `standard-dispatcher-focused-initial-results`. Caption
+visibility and loaded note/feed checks await the result they assert, rather than
+assuming a single idle call finishes real IO and every layout transition.
+
+The corrected full local Android suite then passed **905 unique tests**, zero
+failures/errors and 15 existing skips, in 4m 8s including Gradle/deployment.
+This includes the thread probe, both 30-recreation scenarios and the formerly
+stalled Sync case. XML and console output are retained under
+`standard-dispatcher-final-full*`. Hosted validation is still required; a local
+pass does not establish that every historical rendering crash is eliminated.
+
 ## Unrelated runner package repository failure (9 September 2026)
 
 [Validation run 34385921107](https://github.com/Gilune/gilune/actions/runs/34385921107)
@@ -14,8 +83,6 @@ for both update and install, using APT's documented `Dir::Etc::SourceList` and
 continuing with old indexes. No retry or ignored error was added. The source
 file must exist, so a changed runner layout fails explicitly. See the
 [Ubuntu APT documentation](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html).
-
-# Intermittent build failures — 7 September 2026
 
 ## Reliability work following v1.0.6 (9 September 2026)
 

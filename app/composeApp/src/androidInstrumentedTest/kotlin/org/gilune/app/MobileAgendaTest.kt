@@ -36,7 +36,6 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -62,7 +61,7 @@ class MobileAgendaTest {
     }
 
     private val resources = UiTestResources()
-    private val compose = createComposeRule()
+    private val compose = createDeviceComposeRule()
 
     // A failure during activity destruction can hide the test body's
     // original exception. Log that exception before Compose's rule closes

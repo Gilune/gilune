@@ -4,7 +4,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,7 +16,7 @@ import kotlin.test.Test
 
 class AgendaLifecycleTest {
     private val resources = UiTestResources()
-    private val compose = createAndroidComposeRule<ComponentActivity>()
+    private val compose = createDeviceAndroidComposeRule<ComponentActivity>()
     @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     @Test

@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -31,7 +30,7 @@ class MobileSearchTest {
     }
 
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createDeviceComposeRule()
 
     // ------------------------------------------------------------------
     // Pure: the hint, and where a tap lands

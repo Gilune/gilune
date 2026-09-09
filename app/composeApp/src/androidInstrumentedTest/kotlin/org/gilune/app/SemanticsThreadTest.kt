@@ -2,14 +2,13 @@ package org.gilune.app
 
 import androidx.compose.material3.Text
 import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.junit4.createComposeRule
 import org.junit.Rule
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class SemanticsThreadTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createDeviceComposeRule()
 
     @Test fun selectorsInspectLiveNodesOnTheUiThread() {
         compose.setContent { Text("Thread ownership probe") }
