@@ -1,14 +1,26 @@
 name: Build
 
-# Every push to main builds all three packages and runs the tests; a v* tag
-# additionally publishes a Release with the installers attached. CI branches
-# build as well, so the pipeline can be proven before it reaches main —
-# workflow_dispatch is only offered for workflows already on the default
-# branch, which makes it useless for a first validation.
+# Build changes to shipping code, tests, resources and build configuration.
+# When main and a release tag are pushed together, the tag owns the build;
+# the branch run only executes the small build-plan job. Manual runs force a
+# build. CI branches let pipeline changes be proven before reaching main.
 on:
   push:
     branches: [main, 'ci/**']
     tags: ['v*']
+    # GitHub applies paths to branch pushes only: a release tag always runs.
+    # Exclude README files, not all Markdown: vault fixtures are test inputs.
+    paths:
+      - 'app/**'
+      - 'kernel/**'
+      - 'contracts/**'
+      - '!app/**/README.md'
+      - '!kernel/**/README.md'
+      - '!contracts/**/README.md'
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+      - '.gitattributes'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
       version:
@@ -24,6 +36,12 @@ on:
 permissions:
   contents: read
 
+# New code supersedes older builds on the same branch. Releases have their
+# own groups and cannot be cancelled by a branch push; manual runs are unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+
 env:
   CARGO_TERM_COLOR: always
   # Read by gate_c's measurements: a shared runner still records its
@@ -35,18 +53,33 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: '3.5'
   # Pinned rather than "whichever the image ships": the NDK is a compiler.
   GILUNE_NDK_VERSION: '27.2.12479018'
+  GILUNE_RUST_VERSION: '1.98.0'
 
 jobs:
   # ---------------------------------------------------------------------
-  # What version the three packages carry, decided once so they agree.
+  # Whether to build and what version the three packages carry.
   version:
-    name: Version
-    runs-on: ubuntu-latest
+    name: Build plan
+    runs-on: ubuntu-24.04
     outputs:
+      build: ${{ steps.route.outputs.build }}
       version: ${{ steps.decide.outputs.version }}
       gradle_args: ${{ steps.decide.outputs.gradle_args }}
       is_release: ${{ steps.decide.outputs.is_release }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # Inspect tags on the event commit, including annotated tags.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Check build routing and watchdog
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Decide whether this run owns the build
+        id: route
+        run: python3 -B .github/scripts/build_route.py
+
       - name: Decide the version
         id: decide
         shell: bash
@@ -98,7 +131,8 @@ jobs:
   windows:
     name: Windows desktop (MSI)
     needs: version
-    runs-on: windows-latest
+    if: needs.version.outputs.build == 'true'
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
 
@@ -112,8 +146,10 @@ jobs:
       - name: Rust toolchain
         shell: bash
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          rustc -vV
+          java -version
           rustc --version
           cargo --version
 
@@ -168,7 +204,7 @@ jobs:
         shell: bash
         working-directory: app
         # Against the same release binary the installer will carry.
-        run: ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+        run: python ../.github/scripts/run_checked.py --timeout 1200 -- ./gradlew.bat --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release
 
       - name: Desktop test results
         if: always()
@@ -178,6 +214,7 @@ jobs:
           path: |
             app/composeApp/build/test-results/desktopTest
             app/composeApp/build/reports/tests/desktopTest
+            app/build/ci-diagnostics
           if-no-files-found: warn
 
       - name: Package the MSI
@@ -207,7 +244,8 @@ jobs:
   linux:
     name: Linux desktop (DEB)
     needs: version
-    runs-on: ubuntu-latest
+    if: needs.version.outputs.build == 'true'
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -220,8 +258,10 @@ jobs:
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          rustc -vV
+          java -version
           rustc --version
 
       - uses: Swatinem/rust-cache@v2
@@ -276,7 +316,7 @@ jobs:
         env:
           # No GPU behind xvfb, and Skiko's default is to look for one.
           SKIKO_RENDER_API: SOFTWARE
-        run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+        run: python3 ../.github/scripts/run_checked.py --timeout 1200 -- xvfb-run -a ./gradlew --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release
 
       - name: Desktop test results
         if: always()
@@ -286,6 +326,7 @@ jobs:
           path: |
             app/composeApp/build/test-results/desktopTest
             app/composeApp/build/reports/tests/desktopTest
+            app/build/ci-diagnostics
           if-no-files-found: warn
 
       - name: Package the DEB
@@ -313,7 +354,8 @@ jobs:
   android:
     name: Android (APK)
     needs: version
-    runs-on: ubuntu-latest
+    if: needs.version.outputs.build == 'true'
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -326,8 +368,10 @@ jobs:
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          rustc -vV
+          java -version
           rustup target add aarch64-linux-android x86_64-linux-android
           rustc --version
 
@@ -364,6 +408,12 @@ jobs:
         # Compile instrumentation before booting the emulator so compilation
         # does not consume the test step's time or compete with the guest.
         run: ./gradlew :composeApp:assembleDebug :composeApp:assembleDebugAndroidTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
+
+      - name: Record Android test dependencies
+        working-directory: app
+        run: |
+          mkdir -p build/ci-diagnostics
+          ./gradlew :composeApp:dependencies --configuration debugAndroidTestRuntimeClasspath > build/ci-diagnostics/android-test-dependencies.txt
 
       - name: Enable emulator acceleration
         run: |
@@ -402,7 +452,7 @@ jobs:
           emulator-boot-timeout: 300
           disable-animations: true
           working-directory: app
-          script: ./gradlew :composeApp:connectedDebugAndroidTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
+          script: bash ../.github/scripts/test-android.sh ${{ needs.version.outputs.gradle_args }}
 
       - name: Android test results
         if: always()
@@ -412,6 +462,8 @@ jobs:
           path: |
             app/composeApp/build/outputs/androidTest-results/connected
             app/composeApp/build/reports/androidTests/connected
+            app/build/android-shards
+            app/build/ci-diagnostics
           if-no-files-found: warn
 
       - name: Is there a release keystore?
@@ -471,7 +523,7 @@ jobs:
   bindings:
     name: Bindings parity
     needs: [windows, linux, android]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -500,7 +552,7 @@ jobs:
     name: Release
     needs: [version, windows, linux, android, bindings]
     if: needs.version.outputs.is_release == 'true' || inputs.dry_run_release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:

@@ -54,14 +54,15 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalFoundationApi::class)
 class MobileEditorUiTest {
+    private val resources = UiTestResources()
     private val rule = createComposeRule()
 
     // The test drives the real InputConnection. A second keyboard must not
     // independently select a composing word while the test inserts text.
     @get:Rule
-    val chain: RuleChain = RuleChain.outerRule(Ms1InputSessionRule()).around(rule)
+    val chain: RuleChain = RuleChain.outerRule(resources).around(Ms1InputSessionRule()).around(rule)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = resources.scope
 
     @Test
     fun theRenderingNeverReachesTheDocument() {
@@ -375,10 +376,10 @@ class MobileEditorUiTest {
     // ---------------------------------------------------------------- rig
 
     private fun vaultWith(body: String): Pair<GiluneState, File> {
-        val vault = Files.createTempDirectory("gilune-edit").toFile()
+        val vault = resources.directory("gilune-edit")
         val note = File(vault, "note.md")
         note.writeText(NOTE_HEAD + body)
-        return GiluneState(vault.absolutePath, scope) to note
+        return resources.state(vault.absolutePath) to note
     }
 
     private fun show(state: GiluneState, editor: MobileEditorState) {

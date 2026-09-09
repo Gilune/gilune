@@ -1,5 +1,42 @@
 # Intermittent build failures — 7 September 2026
 
+## Reliability work following v1.0.6 (9 September 2026)
+
+See [the review](ci-fragility-review.md) for the v1.0.6 Linux missing-row failure
+and Android `SnapshotStateObserver` process crash. The latter occurred before
+the checkbox click, and remains an unresolved cause unless reproduced.
+
+A controlled `CompletionRefreshUiTest` now holds query work pending while a
+refresh starts. On the previous implementation, the test failed because
+`completion-0` disappeared. The fixed implementation keeps the previous rows
+only for the same context/kernel/plugin set while replacement results load.
+Changed text clears them, and a callback captured before an edit cannot insert
+into the new context. Native acceptance validation remains mandatory. This
+establishes and fixes one disappearing-menu sequence, not proof that every
+historical Linux failure took that sequence.
+
+Affected People, editor, filter and Agenda UI fixtures now use an outer owned
+resource rule. It waits for application jobs to finish cancellation before
+closing native vault handles, after Compose disposes its UI. Tests cover that
+order and preservation of original failures when cleanup also fails.
+
+Android diagnostics now record Java thread IDs, the current test and exception
+stacks. Desktop CI captures owned JVM stacks before terminating a timed-out
+test process. The watchdog was exercised against a disposable real JVM and
+captured `WatchdogProbe.main` before returning deadline failure; its tests also
+check preservation of exit codes and isolation from an unrelated process.
+
+Android CI uses three distinct instrumentation shards, with no retries and
+per-shard reports. A failing shard still fails the run. A script test verifies
+that later shards execute and earlier failure reports survive. This limits
+the coverage lost to a process crash; it is not a fix for a rendering defect.
+
+Local evidence is retained in `app/build/ci-reliability/`: the unchanged People
+desktop class passed, and the unchanged Android editor/filter sequence passed
+19 tests. After the changes, 18 focused desktop and 43 focused Android tests
+passed, including 30 activity recreations within the lifecycle test. Full-suite
+and hosted validation results will be recorded when complete.
+
 ## v1.0.5: Android suggestion test was not waiting for its option
 
 [Main 34231892380](https://github.com/Gilune/gilune/actions/runs/34231892380)

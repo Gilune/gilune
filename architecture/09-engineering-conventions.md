@@ -132,12 +132,70 @@ had not spoken. The rules that follow from it:
 
 ## Continuous builds and releases
 
-`.github/workflows/build.yml` is the only pipeline. Every push to `main`
-builds the three packages the project ships, runs the native and desktop
-suites, and runs Android instrumented tests on an emulator; a `v*` tag
-additionally publishes a GitHub Release with
-those packages attached. `workflow_dispatch` exists so the pipeline can be
-driven by hand.
+`.github/workflows/build.yml` is the only pipeline. Pushes to `main` and
+`ci/**` build when they change `app/`, `kernel/`, `contracts/`, CI workflows
+or scripts, `.gitattributes`, or `LICENSE`. README-only changes and changes
+limited to architecture, documentation, source research or disposable spikes
+do not start a build. Markdown vault fixtures still count as test inputs.
+Update the workflow's path list when adding build inputs outside these roots.
+
+Each build produces all three packages, runs the native and desktop suites,
+and runs Android instrumented tests on an emulator. Valid `v*` release tags
+also publish a GitHub Release with the packages attached. Tag pushes bypass
+GitHub's branch path filters; `workflow_dispatch` explicitly forces a build,
+even for a commit already tagged or changes limited to documentation.
+
+Push a release commit and its tag **together**:
+
+```text
+git push --atomic origin main refs/tags/v<MAJOR>.<MINOR>.<PATCH>
+```
+
+GitHub creates separate branch and tag workflow runs. The small **Build plan**
+job checks tags on the event commit; a valid release tag suppresses the branch
+run's expensive jobs, leaving the tag run to build, test and publish once.
+Both annotated and lightweight tags work. A tag pushed later cannot prevent
+work that the branch run has already started. An invalid release tag fails
+version validation and does not suppress the branch build.
+
+New qualifying pushes cancel older builds on the same branch. Release tags
+and manual runs have separate concurrency groups, so branch pushes cannot
+cancel them. See GitHub's [path-filter and concurrency rules](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+
+Validate routing locally with the standard-library tests (no app build needed
+for a change confined to workflow routing):
+
+```text
+python -B -m unittest discover -s .github/scripts -p test_build_route.py -v
+```
+
+The runner OS families are explicit (`windows-2025`, `ubuntu-24.04`) and Rust
+is pinned in `GILUNE_RUST_VERSION`. Runner image patches and Android system
+images can still change: retain tool versions, device fingerprint and the
+resolved Android test dependency graph with the run.
+
+Desktop tests run through `.github/scripts/run_checked.py` with a 20-minute
+wall-clock deadline and `--no-daemon`, making their JVMs descendants of the
+watched command. On expiry the watchdog captures owned JVM thread dumps before
+stopping that process tree, and returns failure. Reports and diagnostics upload
+even on failure. Validate the watchdog with `test_run_checked.py`.
+
+Android builds its APKs once, then `.github/scripts/test-android.sh` executes
+three disjoint instrumentation shards in separate processes. It retains each
+shard's results and device log, continues to collect coverage from the other
+shards after a failure, and returns failure if any shard fails. No shard is
+retried. The activity-recreation tests remain in the suite. A full unsharded
+local run is also required when investigating lifecycle or test-order failures.
+`test_android_shards.py` verifies report preservation and failure propagation.
+
+UI test resources belong to the outer `UiTestResources` rule: the inner Compose
+rule disposes the UI first, then application jobs are cancelled and joined,
+native handles close, and temporary vaults are removed. Do not close a kernel
+while a job may still be using it. The original test error must survive cleanup
+errors. Use `LocalQueryDispatcher` to hold query work deliberately in timing
+tests rather than adding sleeps. The Android runner records Java thread IDs
+and the active test on a process exception; desktop completion diagnostics are
+enabled by `GILUNE_CI=1` and omit document contents.
 
 - **Windows** (`windows-latest`) → **MSI**. Kernel built
   `--release --features whisper`, `cargo test --workspace`, then the

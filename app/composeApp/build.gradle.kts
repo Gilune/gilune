@@ -218,7 +218,7 @@ android {
         targetSdk = 36
         versionCode = releaseVersionCode ?: 1
         versionName = appVersionName
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "org.gilune.app.GiluneTestRunner"
         ndk {
             // The two ABIs this app ships, stated so that a dependency's
             // extra ones cannot ride along (R0 condition 4). The Moonshine
@@ -373,6 +373,7 @@ tasks.matching { it.name == "run" }.configureEach {
 }
 
 tasks.withType<Test>().configureEach {
+    if (System.getenv("GILUNE_CI") == "1") systemProperty("gilune.uiDiagnostics", "true")
     val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
     val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
     systemProperty(

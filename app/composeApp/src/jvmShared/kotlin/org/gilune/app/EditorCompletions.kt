@@ -63,6 +63,7 @@ internal fun loadEditorOffers(kernel: Gilune?, registry: PluginExtensions, conte
 internal class EditorCompletionUi {
     var selected by mutableStateOf(0)
     var offers: EditorOffers? by mutableStateOf(null)
+    var offersOwner: Pair<Gilune?, List<PluginInfo>>? = null
     var loading by mutableStateOf(false)
     var error: String? by mutableStateOf(null)
     var creation: Pair<EditorChoice, EditorCreate>? by mutableStateOf(null)
@@ -114,11 +115,19 @@ internal fun rememberEditorCompletions(state: GiluneState, text: String, caret: 
         if (!enabled) EditorOffers(context, emptyList(), false)
         else loadEditorOffers(kernel, BUNDLED_PLUGIN_EXTENSIONS, context, owner, pages, kernel?.plugins() ?: plugins)
     }.value
-    LaunchedEffect(work) {
-        ui.offers = work.value
+    LaunchedEffect(work, context, enabled, kernel, plugins) {
+        // A save can refresh the index while the pointer is moving to an
+        // option. Keep that same query's rows until replacement results arrive.
+        // A changed document, query, kernel or plugin set must clear them.
+        val sameOwner = ui.offersOwner == (kernel to plugins)
+        ui.offers = if (!enabled) null else work.value ?: ui.offers?.takeIf {
+            work.loading && sameOwner && it.context == context
+        }
+        ui.offersOwner = kernel to plugins
         ui.error = work.error
         ui.loading = enabled && work.loading
         ui.selected = 0
+        traceCompletion("publish loading=${ui.loading} rows=${ui.offers?.choices?.size ?: 0}", context)
     }
     // Leaving the continuation's line or deleting its trigger ends that stage.
     LaunchedEffect(text, caret, active) {
@@ -129,10 +138,11 @@ internal fun rememberEditorCompletions(state: GiluneState, text: String, caret: 
             }
         }
     }
-    ui.dismiss = { dismissed = text to caret; continuation = null; owner = null; toolbar = false; ui.offers = null; ui.error = null }
+    ui.dismiss = { traceCompletion("dismiss", context); dismissed = text to caret; continuation = null; owner = null; toolbar = false; ui.offers = null; ui.error = null }
     ui.toolbar = { dismissed = null; continuation = null; owner = null; toolbar = true }
     ui.more = { pages++ }
     ui.choose = choose@{ index ->
+        traceCompletion("choose index=$index", latestContext)
         val offers = ui.offers ?: return@choose
         val choice = offers.choices.getOrNull(index) ?: return@choose
         if (offers.context != latestContext) return@choose
@@ -184,6 +194,13 @@ internal fun rememberEditorCompletions(state: GiluneState, text: String, caret: 
         }
     }
     return ui
+}
+
+// Opt-in CI diagnostics contain identities/counts, never document contents.
+internal fun traceCompletion(event: String, context: EditorContext? = null) {
+    if (java.lang.Boolean.getBoolean("gilune.uiDiagnostics")) {
+        println("GiluneCompletion thread=${Thread.currentThread().id} event=$event context=${context?.hashCode()} caret=${context?.caret}")
+    }
 }
 
 @Composable

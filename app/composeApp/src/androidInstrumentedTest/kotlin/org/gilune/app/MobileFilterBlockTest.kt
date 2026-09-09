@@ -21,6 +21,7 @@ import androidx.compose.ui.test.performClick
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -32,8 +33,9 @@ class MobileFilterBlockTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
 
-    @get:Rule
-    val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private val fence = "```"
 
@@ -57,14 +59,14 @@ class MobileFilterBlockTest {
     /// A vault with a note carrying a `filter` block, and a second note
     /// holding the task it should find.
     private fun blockVault(block: String): GiluneState {
-        val vault = IndexedVault("gilune-filter")
+        val vault = resources.indexed("gilune-filter")
         val now = LocalDate.now()
         vault.write("board.md", "# Board\n\n$fence" + "filter\n$block\n$fence\n")
         vault.write(
             "jobs.md",
             "---\ngilune-id: jobs\n---\n# Jobs\n\n- [ ] mend the gate due:$now\n",
         )
-        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, resources.scope)
         // A block is a query now (ADR 0020 § 2.4).
         state.gilune.value = vault.gilune
         return state

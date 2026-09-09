@@ -373,6 +373,7 @@ private fun OpenNote(
         if (!flushEditor(state.vaultDir, editor)) {
             state.message.value = "$relPath changed on disk; choose which version to keep"
         } else if (wasDirty) {
+            traceCompletion("save-index-refresh")
             state.noteSaved(relPath)
         }
     }
@@ -782,6 +783,7 @@ private fun OpenNote(
                             // A field the caret has left cannot have a menu
                             // over its caret.
                             .onFocusChanged {
+                                traceCompletion("body-focus=${it.isFocused}")
                                 bodyFocused = it.isFocused
                                 if (!it.isFocused) completions.dismiss()
                             }
@@ -871,7 +873,7 @@ private fun OpenNote(
                         .originalToTransformed(editor.text.selection.start)
                     val anchor = placed.getCursorRect(transformed.coerceIn(0, placed.layoutInput.text.length)).translate(fieldOrigin)
                     androidx.compose.ui.window.Popup(CaretPositionProvider(anchor),
-                        onDismissRequest = completions.dismiss,
+                        onDismissRequest = { traceCompletion("popup-dismiss"); completions.dismiss() },
                         properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
                         Box(Modifier.width(360.dp).testTag("suggest-popup")) {
                             EditorCompletionMenu(completions, state, openRow ?: {})

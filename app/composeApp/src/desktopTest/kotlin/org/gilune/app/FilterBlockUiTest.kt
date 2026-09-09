@@ -30,6 +30,7 @@ import androidx.compose.ui.text.TextRange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.io.File
 import java.time.LocalDate
 import kotlin.test.Test
@@ -42,8 +43,9 @@ class FilterBlockUiTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
 
-    @get:Rule
-    val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     /// Due tomorrow, so `due:week` keeps it whatever day the test runs.
     private val soon = LocalDate.now().plusDays(1)
@@ -52,10 +54,10 @@ class FilterBlockUiTest {
     /// blocks under test. The task is deliberately **not** in the note
     /// being read, so a row can only have come from the query.
     private fun vaultWith(blocks: String): Pair<GiluneState, EditorState> {
-        val indexed = IndexedVault("gilune-filter-ui")
+        val indexed = resources.indexed("gilune-filter-ui")
         indexed.write("Home/kitchen.md", "---\ngilune-id: id-kitchen\n---\n- [ ] buy milk due:$soon\n")
         indexed.write("agenda.md", "---\ngilune-id: id-agenda\n---\n# Agenda\n\n$blocks")
-        val state = GiluneState(indexed.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(indexed.dir, resources.scope)
         // A block is a query now (ADR 0020 § 2.4), so a screen showing one
         // needs the handle that answers it — the same handle the shell has
         // by the time it draws anything.
