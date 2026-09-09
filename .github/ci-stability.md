@@ -174,6 +174,14 @@ The toolbar regression's action capture also reads the live semantics
 configuration on the UI thread; both toolbar cases and the thread probe passed
 after that test-only adjustment (`toolbar-thread-fixed.log`).
 
+The upgraded hosted Android job subsequently passed and produced its APK.
+Its three preserved shards reported **294/293/316 tests**, totalling **903 unique
+cases**, zero failures/errors and 15 existing skips. The original slash-menu
+failure and the new toolbar/thread regressions passed in that full hosted run.
+Reports are retained under `d625-android-results`; Windows reports are under
+`d625-windows-results`. Only the reproduced desktop Agenda assertion prevented
+that candidate's overall build from succeeding.
+
 ## v1.0.5: Android suggestion test was not waiting for its option
 
 [Main 34231892380](https://github.com/Gilune/gilune/actions/runs/34231892380)
