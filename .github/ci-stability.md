@@ -1,5 +1,33 @@
 # Intermittent build failures — 7 September 2026
 
+## Current validation status
+
+The implemented candidate is `280fca85b5029fb9d62d116c0fe30d09c04d6383` on
+`ci/reliability-review`, in [draft PR #13](https://github.com/Gilune/gilune/pull/13).
+Its full local Android suite passed 905 cases with zero failures/errors and 15
+existing skips. The preceding candidate passed complete Windows and Linux suites
+(706 cases each, five existing skips), Clippy, kernel tests, MSI and DEB packaging.
+The follow-up changes only Android instrumentation sources and documentation.
+Three final independent repetitions of the affected Android scenarios passed
+46 cases each, zero failures/errors, with two existing skips per run (132
+executed checks across the three runs). Each attempt retained its own XML and
+log under `standard-repeat-*`; all invoked instrumentation, and the loop stopped
+on any failure. This includes another 90 notice activity destruction cycles.
+
+[Run 34394193212](https://github.com/Gilune/gilune/actions/runs/34394193212)
+**did not start any build step**. GitHub's Build plan annotation reports that
+recent account payments failed or the spending limit needs to be increased, and
+directs the owner to Billing & plans. This is an account restriction; it is not
+a test failure and the workflow cannot fix it. The annotation is preserved in
+`app/build/ci-reliability/280-job-start-annotations.json`.
+
+Keep the PR in draft until the account restriction is resolved and a full hosted
+run validates this candidate, including Android and bindings parity. Do not mark
+the incomplete prior Android run as passing, merge this as a verified release,
+or publish another release tag based solely on the local pass. The new scheduling
+probe establishes a fixed thread violation; it does not prove the captured
+SlotWriter or historical native rendering failures have been eliminated.
+
 ## Android effect scheduling follow-up (9 September 2026)
 
 [Candidate 8fa5cc0](https://github.com/Gilune/gilune/actions/runs/34386963569)
