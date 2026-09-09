@@ -1,3 +1,20 @@
+## Unrelated runner package repository failure (9 September 2026)
+
+[Validation run 34385921107](https://github.com/Gilune/gilune/actions/runs/34385921107)
+failed before compilation on both Ubuntu jobs: Google's Chrome package index
+had a `Hash Sum mismatch`. Both downloaded identical inconsistent metadata,
+on two different revisions of the Ubuntu 24.04 runner image. This was a shared
+external package setup failure, not a failing app test. The preceding run had
+completed all 903 Android tests and Windows packaging successfully.
+
+The Ubuntu dependency steps now select only the runner's `ubuntu.sources`
+for both update and install, using APT's documented `Dir::Etc::SourceList` and
+`Dir::Etc::SourceParts` options. Package signatures and hashes remain enforced;
+`APT::Update::Error-Mode=any` makes a required source failure fatal rather than
+continuing with old indexes. No retry or ignored error was added. The source
+file must exist, so a changed runner layout fails explicitly. See the
+[Ubuntu APT documentation](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html).
+
 # Intermittent build failures — 7 September 2026
 
 ## Reliability work following v1.0.6 (9 September 2026)

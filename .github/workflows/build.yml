@@ -285,8 +285,13 @@ jobs:
         # a GL stack and a font give the Compose UI tests something to draw
         # on and something to draw with.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          # Use only Ubuntu's signed sources. Unrelated runner repositories
+          # (Chrome, Microsoft, etc.) must not gate these Ubuntu packages.
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                       -o Dir::Etc::sourceparts=- -o APT::Update::Error-Mode=any)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             libclang-dev cmake fakeroot binutils desktop-file-utils \
             xvfb libgl1 fonts-dejavu-core
           libclang=$(find /usr/lib -name 'libclang.so*' -print -quit)
@@ -397,8 +402,13 @@ jobs:
 
       - name: Build dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libclang-dev cmake
+          # Use only Ubuntu's signed sources. Unrelated runner repositories
+          # (Chrome, Microsoft, etc.) must not gate these Ubuntu packages.
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                       -o Dir::Etc::sourceparts=- -o APT::Update::Error-Mode=any)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends libclang-dev cmake
           libclang=$(find /usr/lib -name 'libclang.so*' -print -quit)
           [ -n "$libclang" ] || { echo 'libclang not found after installing libclang-dev'; exit 1; }
           echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
