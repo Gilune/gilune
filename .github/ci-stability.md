@@ -170,6 +170,9 @@ zero failures, five existing skips). Failed and corrected logs are under
 `agenda-held-*`, `agenda-desktop-full*` and `query-audit-desktop-full*`.
 Three uncached repetitions of Agenda, task-editor and completion tests then
 passed **93/93 executions** (`query-audit-repeat-1` through `-3`).
+The toolbar regression's action capture also reads the live semantics
+configuration on the UI thread; both toolbar cases and the thread probe passed
+after that test-only adjustment (`toolbar-thread-fixed.log`).
 
 ## v1.0.5: Android suggestion test was not waiting for its option
 

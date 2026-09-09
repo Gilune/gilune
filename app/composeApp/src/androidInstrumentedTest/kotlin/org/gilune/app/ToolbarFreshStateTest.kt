@@ -49,7 +49,10 @@ class ToolbarFreshStateTest {
         }
     }
 
-    private fun action(tag: String): () -> Boolean = checkNotNull(
-        compose.onNodeWithTag(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action,
-    )
+    private fun action(tag: String): () -> Boolean {
+        val node = compose.onNodeWithTag(tag).fetchSemanticsNode()
+        return compose.runOnUiThread {
+            checkNotNull(node.config[SemanticsActions.OnClick].action)
+        }
+    }
 }
