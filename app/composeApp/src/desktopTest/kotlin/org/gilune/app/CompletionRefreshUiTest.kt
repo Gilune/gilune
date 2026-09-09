@@ -13,7 +13,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 /** Holds native query work until the test explicitly lets it finish. */
-private class HeldQueries : CoroutineDispatcher() {
+internal class HeldQueries : CoroutineDispatcher() {
     val pending = LinkedBlockingQueue<Runnable>()
     override fun dispatch(context: CoroutineContext, block: Runnable) { pending.add(block) }
     fun completeNext() { checkNotNull(pending.poll()) { "Expected a queued query" }.run() }

@@ -131,6 +131,45 @@ The two regressions plus the real mobile editor class passed all 15 tests.
 The final menu-position change also passed the full 706-test Windows suite
 (five existing skips) and 24 focused Android cases. The expanded 903-case
 Android suite and the replacement hosted candidate provide the final gate.
+The final full local Android run completed all **903 unique tests**, with zero
+failures/errors and 15 existing skips, in 5m 11s including Gradle/deployment
+(`toolbar-android-full*`).
+After the final production changes, three uncached desktop People/completion
+runs passed **21/21 executions**, including the bounds assertion, and three
+Android toolbar/editor runs passed **45/45 executions**. Each attempt has its
+own log and XML (`final-desktop-repeat-*`, `android-toolbar-repeat-*`); both
+loops were configured to stop on the first failure. These are the final-code
+repetition counts, separate from the earlier upgrade comparison.
+
+The baseline device log also records system-service ANRs during shard 0,
+including System UI, the phone service, Google Play services and the keyboard.
+At 16:48:44, System UI reported load 20.67 and CPU pressure `some avg10=85.94`;
+this is direct evidence of emulator resource contention, not proof that
+contention caused the historical Compose threading exception. It can expose
+timing windows, while the stale toolbar callback remains independently
+reproducible on the local emulator. Keep the complete device logs when judging
+future timeouts rather than describing every failed run as the same flake.
+
+### Follow-up from the upgraded hosted candidate
+
+[Run 34381419268](https://github.com/Gilune/gilune/actions/runs/34381419268)
+at `d625d37` passed Windows tests and MSI packaging. Linux passed Clippy and
+completed 706 desktop cases with one failure and five skips. The failure was
+`TasksPanelTest.thePluginPutsAThirdTabInTheRailAndItOpensTheAgenda`: it asserted
+`today (1)` immediately after `waitForIdle()`, while the Agenda query runs on IO.
+
+Holding that query with `LocalQueryDispatcher` reproduced the exact missing-node
+failure locally. The test now asserts the loading state, releases the query,
+waits for its result and then checks the heading. Agenda and task-editor fixtures
+also use owned resources. An audit of the other desktop `waitForIdle` usages
+found negative suggestion checks making the same assumption; they now wait for
+the query's loading notice to disappear before asserting that no menu is offered.
+Existing async save/sync checks already wait for their operation's result.
+The complete local desktop suite passed after both corrections (706 cases,
+zero failures, five existing skips). Failed and corrected logs are under
+`agenda-held-*`, `agenda-desktop-full*` and `query-audit-desktop-full*`.
+Three uncached repetitions of Agenda, task-editor and completion tests then
+passed **93/93 executions** (`query-audit-repeat-1` through `-3`).
 
 ## v1.0.5: Android suggestion test was not waiting for its option
 
