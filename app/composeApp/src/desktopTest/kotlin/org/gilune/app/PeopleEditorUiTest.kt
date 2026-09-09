@@ -126,7 +126,10 @@ class PeopleEditorUiTest {
         compose.onNodeWithText("Preview undo").performClick()
         waitText("Apply reviewed changes / resume")
         compose.onNodeWithText("Apply reviewed changes / resume").performClick()
-        compose.waitUntil(10_000) { root.resolve("note.md").readText() == "owner: @alice.smith" }
+        // Refactoring captures the old inode before publishing its replacement.
+        // Read only after the operation finishes, not inside that publication gap.
+        waitText("Preview undo")
+        assertEquals("owner: @alice.smith", root.resolve("note.md").readText())
         assertTrue(kernel.refactoringPlans().size >= 2)
     }
 }

@@ -188,7 +188,7 @@ kotlin {
                 // Compose UI tests on device, the counterpart of the desktop
                 // suite's compose.desktop.uiTestJUnit4. Android had no UI-test
                 // net before ADR 0017 MB0; MB1's tests need this.
-                implementation("androidx.compose.ui:ui-test-junit4-android:1.7.6")
+                implementation("androidx.compose.ui:ui-test-junit4-android:1.8.2")
                 // Compose's test rule syncs through Espresso's `onIdle`,
                 // which reflected on a framework method that Android 16
                 // removed: every UI test failed on the API 36 emulator
@@ -273,7 +273,7 @@ android {
 dependencies {
     // Supplies the empty activity createComposeRule launches into. It must be
     // a debug dependency: it merges an activity into the test APK's manifest.
-    debugImplementation("androidx.compose.ui:ui-test-manifest:1.7.6")
+    debugImplementation("androidx.compose.ui:ui-test-manifest:1.8.2")
 }
 
 compose.desktop {
@@ -373,7 +373,13 @@ tasks.matching { it.name == "run" }.configureEach {
 }
 
 tasks.withType<Test>().configureEach {
-    if (System.getenv("GILUNE_CI") == "1") systemProperty("gilune.uiDiagnostics", "true")
+    if (System.getenv("GILUNE_CI") == "1") {
+        systemProperty("gilune.uiDiagnostics", "true")
+        // Runtime gates must execute on this runner, even when compilation
+        // is cached. Restored XML is not evidence about its UI environment.
+        outputs.upToDateWhen { false }
+        outputs.doNotCacheIf("CI must execute its runtime tests") { true }
+    }
     val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
     val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
     systemProperty(

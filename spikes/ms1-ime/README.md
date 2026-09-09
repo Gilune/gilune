@@ -322,6 +322,16 @@ trip is kept only because it starts every row from one identical state.
 
 ## Question 2 — `TextFieldState` and `outputTransformation`
 
+**9 September 2026 compatibility note:** these original measurements used
+Compose 1.7.6. With the 1.8.2 upgrade, `InputConnection.setSelection` maps
+displayed coordinates back to source coordinates, as the text reported to
+the keyboard requires. The prototype's backspace row now sends displayed
+offset 12 and explicitly checks source offset 16 before deletion. Its exact
+result is unchanged: only the closing `]` is removed. The old row's source
+offset 16 depended on the earlier implementation's unmapped selection.
+The published [Foundation Android 1.8.2 source](https://dl.google.com/dl/android/maven2/androidx/compose/foundation/foundation-android/1.8.2/foundation-android-1.8.2-sources.jar)
+records this conversion in `ImeEditCommandScope.setSelection`.
+
 Prototyped far enough to answer, not migrated:
 `Ms1TextFieldStateSpikeTest` stands the same checkbox decoration up on
 `BasicTextField(state = …, outputTransformation = …)` and drives it through

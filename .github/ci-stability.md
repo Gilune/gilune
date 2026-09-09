@@ -34,8 +34,76 @@ the coverage lost to a process crash; it is not a fix for a rendering defect.
 Local evidence is retained in `app/build/ci-reliability/`: the unchanged People
 desktop class passed, and the unchanged Android editor/filter sequence passed
 19 tests. After the changes, 18 focused desktop and 43 focused Android tests
-passed, including 30 activity recreations within the lifecycle test. Full-suite
-and hosted validation results will be recorded when complete.
+passed, including 30 activity recreations within the lifecycle test. The full
+Windows suite passed (701 passed test events; the existing five skips), and
+Android's full unsharded XML reported 900 tests, zero failures/errors and 15
+skips in 286.447 seconds. An initial five-run People/completion loop produced
+passing reports, but inspection found runs 2–5 restored `desktopTest FROM-CACHE`.
+Those are not independent executions and the proposed 35/35 repetition count
+is withdrawn. A first upgrade repetition loop had the same problem after its
+first run. Replacement repetitions disable the build cache, and CI JVM test
+tasks now disable result caching and up-to-date reuse while retaining cached
+compilation. Full-suite logs were checked separately: those tasks executed.
+Three replacement upgrade repetitions then executed 21/21 tests successfully
+(`uncached-upgrade-repeat-1` through `-3`, no cached or up-to-date test tasks).
+A further seven-case run without cleaning or disabling the global cache
+confirmed the CI policy: Gradle logged `CI must execute its runtime tests`,
+`Task.upToDateWhen is false` and a new test worker, then passed all seven.
+
+### A concrete framework threading difference
+
+Comparing Google's published [1.7.6 UI-test sources](https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-test/1.7.6/ui-test-1.7.6-sources.jar)
+and [1.8.2 UI-test sources](https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-test/1.8.2/ui-test-1.8.2-sources.jar)
+identified a relevant change in `TestOwner` and `SemanticsNodeInteraction`:
+1.7.6 collects nodes on the UI thread, then applies selectors on the calling
+test thread. In 1.8.2, the selection runs inside the UI-thread operation too.
+Live node properties can participate in Compose observation, so this is a
+concrete cross-thread boundary to remove, rather than a general claim that
+newer libraries must fix rendering.
+
+`SemanticsThreadTest.selectorsInspectLiveNodesOnTheUiThread` fails on the existing
+1.7.6 stack: expected UI thread **2**, actual selector thread **58**. Its baseline
+log and XML are retained under `semantics-baseline*`. This demonstrates the
+threading behaviour, not the original process crash itself.
+
+The comparison candidate aligns Compose Multiplatform and Android UI tests at
+1.8.2, whose [published dependency mapping](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.8.2)
+uses Jetpack UI/runtime/foundation 1.8.2. Kotlin remains 2.1.20. The same thread
+probe, affected UI scenarios and complete suites are used to evaluate it.
+
+The upgraded thread probe and 43 affected Android cases passed. The first full
+upgrade checks exposed two other concrete problems, with failed XML retained:
+
+- Desktop undo's test polled `readText()` while the native refactoring protocol
+  temporarily moved the old file before publishing its replacement. It threw
+  `FileNotFoundException`, rather than observing operation completion. Both
+  platforms now wait for the dialog's completed-operation control before the
+  unchanged exact-file assertion. The corrected full Windows suite passed
+  706 tests with zero failures and five existing skips.
+- Android's prototype sent source offset 16 to `InputConnection.setSelection`.
+  Foundation 1.8.2's `ImeEditCommandScope.setSelection` maps displayed offsets
+  back to the source; 16 now selects inside `milk`. The test now sends displayed
+  offset 12, asserts source caret 16, then keeps the original assertion that
+  backspace removes only `]`. This is a deterministic API behaviour change,
+  not a flaky test to retry. The corrected prototype and People classes passed
+  all nine tests. The first full Android upgrade run finished 901 cases with
+  this single failure and 15 skips, without a process crash.
+
+The corrected full Android run then completed all 901 unique tests with zero
+failures/errors and the existing 15 skips (5m 36s including Gradle/deployment).
+Its console and XML are retained under `compose-upgrade-android-final*`.
+Clippy also passed locally with warnings denied. These results verify the
+changes on the local Windows/API 36 environments; they do not establish that
+the unreproduced historical `SnapshotStateObserver` crash or Skia hangs have
+been eliminated on every hosted runner.
+
+The initial hosted candidate `b9f43c5`
+([run 34377064269](https://github.com/Gilune/gilune/actions/runs/34377064269))
+also caught a configuration omission introduced by this work: Linux's pinned
+minimal Rust installation lacked Clippy. The Linux setup now explicitly
+installs and checks Clippy before compilation. Rust dependency caches are saved
+even when a later test fails, and owned `ci/**` branches can save Gradle caches;
+neither cache changes test failure outcomes.
 
 ## v1.0.5: Android suggestion test was not waiting for its option
 

@@ -106,7 +106,9 @@ class PeopleUiDeviceTest {
         compose.onNodeWithText("Preview undo").performClick()
         waitText("Apply reviewed changes / resume")
         compose.onNodeWithText("Apply reviewed changes / resume").performClick()
-        compose.waitUntil(10_000) { root.resolve("note.md").readText() == "owner: @alice.smith" }
+        // Wait for completed publication before asserting the exact file bytes.
+        waitText("Preview undo")
+        assertEquals("owner: @alice.smith", root.resolve("note.md").readText())
         assertTrue(kernel.refactoringPlans().size >= 2)
     }
 }

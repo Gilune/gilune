@@ -142,6 +142,9 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Our validation branches need reusable caches while failures are investigated.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') }}
 
       - name: Rust toolchain
         shell: bash
@@ -156,6 +159,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: kernel
+          # Keep compiled dependencies when a later UI test fails.
+          cache-on-failure: true
 
       - name: Locate LLVM and CMake
         shell: pwsh
@@ -255,11 +260,15 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Our validation branches need reusable caches while failures are investigated.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') }}
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --component clippy --no-self-update
           rustup default "$GILUNE_RUST_VERSION"
+          cargo clippy --version
           rustc -vV
           java -version
           rustc --version
@@ -267,6 +276,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: kernel
+          # Keep compiled dependencies when a later UI test fails.
+          cache-on-failure: true
 
       - name: Build dependencies
         # libclang-dev + cmake build whisper.cpp; fakeroot, binutils and
@@ -365,6 +376,9 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Our validation branches need reusable caches while failures are investigated.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') }}
 
       - name: Rust toolchain
         run: |
@@ -378,6 +392,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: kernel
+          # Keep compiled dependencies when a later UI test fails.
+          cache-on-failure: true
 
       - name: Build dependencies
         run: |

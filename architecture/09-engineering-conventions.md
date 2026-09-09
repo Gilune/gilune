@@ -180,6 +180,12 @@ watched command. On expiry the watchdog captures owned JVM thread dumps before
 stopping that process tree, and returns failure. Reports and diagnostics upload
 even on failure. Validate the watchdog with `test_run_checked.py`.
 
+With `GILUNE_CI=1`, JVM test tasks cannot reuse cached test results or be
+skipped as up to date. Dependency and compilation caches remain enabled.
+For local repetition evidence use `--no-build-cache` and clean the test task's
+outputs before each run; inspect the log for actual execution. `FROM-CACHE`
+is not another passing runtime observation.
+
 Android builds its APKs once, then `.github/scripts/test-android.sh` executes
 three disjoint instrumentation shards in separate processes. It retains each
 shard's results and device log, continues to collect coverage from the other
@@ -197,13 +203,13 @@ tests rather than adding sleeps. The Android runner records Java thread IDs
 and the active test on a process exception; desktop completion diagnostics are
 enabled by `GILUNE_CI=1` and omit document contents.
 
-- **Windows** (`windows-latest`) → **MSI**. Kernel built
+- **Windows** (`windows-2025`) → **MSI**. Kernel built
   `--release --features whisper`, `cargo test --workspace`, then the
   desktop suite against that same release binary
   (`-Pgilune.kernel.profile=release`) so the tests load what the
   installer will carry, then `packageReleaseMsi`. The Compose plugin
   fetches its own WiX 3, so nothing is assumed of the image.
-- **Linux** (`ubuntu-latest`) → **DEB**. The same, plus
+- **Linux** (`ubuntu-24.04`) → **DEB**. The same, plus
   `cargo clippy --workspace --all-targets -- -D warnings` — once, on one
   platform, because it is the same source either side. The Compose UI
   tests run under `xvfb-run` with `SKIKO_RENDER_API=SOFTWARE`: a display
