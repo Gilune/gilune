@@ -1,5 +1,41 @@
 # Intermittent build failures — 7 September 2026
 
+## CI allowance follow-up (10 September 2026)
+
+The organisation is on GitHub Free; September's reported Actions net amount was
+zero. The account error also occurs when the free allowance is exhausted without
+a payment method. Paying is not the intended remedy. Run 34386963569 consumed
+about 22 Windows, 23 Linux and 40 Android runner minutes (85 total), even though
+the jobs overlapped. Windows kernel tests took 11 minutes; Android native
+cross-compilation took 12 minutes and instrumented testing/setup took 19.5.
+
+Ordinary pushes now run Linux kernel tests, Clippy and desktop tests only.
+Windows, Android, packaging and bindings parity remain mandatory for tags and
+manual full-validation runs. Atomic branch/tag routing and path filters remain.
+Based on that prior run, excluding the other platforms and DEB packaging would
+reduce routine usage to approximately 20 runner minutes (about 75% less). This
+is an estimate, not a measured run of the new workflow. Platform-only regressions
+are caught by full validation, not by the reduced branch checks.
+
+Android caches the finished libraries for both ABIs together with their generated
+bindings. Exact source/toolchain keys exclude `kernel/target`, and no prefix
+fallback is allowed. The cache is saved before app tests, avoiding recompilation
+after unrelated failures while still running the suites afresh. On a hit, the
+temporary cross-build directories do not exist, so disk cleanup handles that
+case. GitHub's branch scope still applies: distinct release tags cannot directly
+share caches; manual full validation on main can seed a default-branch cache.
+No extra full runs are scheduled merely to populate caches.
+
+Local verification: all 15 workflow-script tests passed, including real Git
+branch/tag/manual routing and the watchdog process ownership test; actionlint
+passed. The native-output shell guard accepted complete fixtures and rejected
+each of five missing and each of five empty outputs. The initial sandboxed
+watchdog exercise timed out; with permission to inspect/stop its own child
+processes the unchanged test passed. No application code changed in this update.
+Hosted quick/full execution and cold/warm cache timings remain unverified while
+the allowance restriction prevents jobs from starting. A green quick branch run
+will not satisfy the outstanding full-validation requirement below.
+
 ## Current validation status
 
 The implemented candidate is `280fca85b5029fb9d62d116c0fe30d09c04d6383` on

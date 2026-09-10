@@ -30,16 +30,25 @@ def build_route(event, ref, sha, repository="."):
     releases = sorted(tag for tag in tags if RELEASE_TAG.fullmatch(tag))
     if releases:
         return False, f"Release tag(s) {', '.join(releases)} own this commit's build."
-    return True, "Untagged branch change: build all packages and run all tests."
+    return True, "Untagged branch change: Linux kernel, lint and desktop tests only; no packages."
+
+
+def validation_mode(event, ref, sha, repository="."):
+    build, reason = build_route(event, ref, sha, repository)
+    if not build:
+        return "skip", reason
+    full = event == "workflow_dispatch" or ref.startswith("refs/tags/")
+    return ("full" if full else "quick"), reason
 
 
 def main():
-    build, reason = build_route(
+    mode, reason = validation_mode(
         os.environ["GITHUB_EVENT_NAME"], os.environ["GITHUB_REF"],
         os.environ["GITHUB_SHA"],
     )
     with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
-        output.write(f"build={str(build).lower()}\n")
+        output.write(f"build={str(mode != 'skip').lower()}\n")
+        output.write(f"full={str(mode == 'full').lower()}\n")
     print(reason)
     if summary := os.environ.get("GITHUB_STEP_SUMMARY"):
         with Path(summary).open("a", encoding="utf-8") as output:

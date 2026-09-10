@@ -146,11 +146,32 @@ limited to architecture, documentation, source research or disposable spikes
 do not start a build. Markdown vault fixtures still count as test inputs.
 Update the workflow's path list when adding build inputs outside these roots.
 
-Each build produces all three packages, runs the native and desktop suites,
-and runs Android instrumented tests on an emulator. Valid `v*` release tags
-also publish a GitHub Release with the packages attached. Tag pushes bypass
-GitHub's branch path filters; `workflow_dispatch` explicitly forces a build,
-even for a commit already tagged or changes limited to documentation.
+Ordinary branch pushes run Linux kernel tests, Clippy and desktop tests, without
+packaging installers or starting Windows/Android jobs. This is development
+feedback, not release validation. Android-only and Windows-specific regressions
+require full validation; a green branch run does not cover those platforms.
+
+Valid `v*` release tags and every `workflow_dispatch` run perform full validation:
+native and desktop suites on Windows/Linux, all Android instrumentation shards,
+all three packages and bindings parity. Tags also publish a GitHub Release.
+Manual runs on branches do not publish a Release; `dry_run_release` checks the
+collected packages. Tag pushes bypass branch path filters, and manual runs
+force full validation even for tagged commits or documentation-only changes.
+
+Android caches both shipped ABIs and their matching generated Kotlin bindings
+as one exact entry keyed by native sources, contracts, build scripts/workflow,
+app build configuration, Rust/NDK versions and host platform. Build outputs are
+excluded from the source hash. There are no fallback keys. Missing entries
+compile normally; both ABIs and bindings must exist before saving, and saving
+happens before app compilation/testing so failures do not discard valid native
+compilation. Tests still execute on every full run. Large cross-build trees are
+deleted before the emulator starts to preserve disk space.
+
+GitHub caches are branch scoped: manual validation on `main` can seed a cache
+that later tags read; repeated manual runs on a CI branch can reuse that branch's
+cache. A cache created only on one tag is not available to another tag. Cold
+builds remain supported, and no additional full run is scheduled just to warm
+a cache. See [cache scope](https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache).
 
 Push a release commit and its tag **together**:
 
@@ -292,5 +313,5 @@ unsigned.
   still need hardware. Model/clip-dependent speech tests remain opt-in
   and report skips when their inputs are absent.
 - **No macOS**, and no Linux format but the DEB.
-- **Building is not running.** A green pipeline says the three packages
+- **Building is not running.** A green full-validation pipeline says the three packages
   build and the suites pass, not that a package installs and starts.

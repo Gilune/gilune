@@ -1,6 +1,6 @@
 name: Build
 
-# Build changes to shipping code, tests, resources and build configuration.
+# Branch pushes run Linux checks; tags and manual runs validate all platforms.
 # When main and a release tag are pushed together, the tag owns the build;
 # the branch run only executes the small build-plan job. Manual runs force a
 # build. CI branches let pipeline changes be proven before reaching main.
@@ -63,6 +63,7 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       build: ${{ steps.route.outputs.build }}
+      full: ${{ steps.route.outputs.full }}
       version: ${{ steps.decide.outputs.version }}
       gradle_args: ${{ steps.decide.outputs.gradle_args }}
       is_release: ${{ steps.decide.outputs.is_release }}
@@ -131,7 +132,7 @@ jobs:
   windows:
     name: Windows desktop (MSI)
     needs: version
-    if: needs.version.outputs.build == 'true'
+    if: needs.version.outputs.full == 'true'
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
@@ -247,7 +248,7 @@ jobs:
 
   # ---------------------------------------------------------------------
   linux:
-    name: Linux desktop (DEB)
+    name: Linux checks
     needs: version
     if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-24.04
@@ -346,21 +347,25 @@ jobs:
           if-no-files-found: warn
 
       - name: Package the DEB
+        if: needs.version.outputs.full == 'true'
         working-directory: app
         run: ./gradlew :composeApp:packageReleaseDeb ${{ needs.version.outputs.gradle_args }}
 
       - name: What was packaged
+        if: needs.version.outputs.full == 'true'
         run: |
           ls -l app/composeApp/build/compose/binaries/main-release/deb
           dpkg-deb --info app/composeApp/build/compose/binaries/main-release/deb/*.deb
 
       - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.full == 'true'
         with:
           name: gilune-linux-deb
           path: app/composeApp/build/compose/binaries/main-release/deb/*.deb
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.full == 'true'
         with:
           name: bindings-desktop-linux
           path: app/kernelBindings/src/desktopMain/generated
@@ -370,7 +375,7 @@ jobs:
   android:
     name: Android (APK)
     needs: version
-    if: needs.version.outputs.build == 'true'
+    if: needs.version.outputs.full == 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -424,8 +429,38 @@ jobs:
             "build-tools;35.0.0" \
             "ndk;${GILUNE_NDK_VERSION}"
 
+      - name: Restore Android native libraries and matching bindings
+        id: android-native
+        uses: actions/cache/restore@v4
+        with:
+          # Cache finished outputs, not multi-GB temporary cross-build trees.
+          # No fallback keys: stale binaries must never replace compilation.
+          key: android-native-v1-ubuntu24-${{ runner.arch }}-rust${{ env.GILUNE_RUST_VERSION }}-ndk${{ env.GILUNE_NDK_VERSION }}-${{ hashFiles('kernel/**', '!kernel/target/**', 'contracts/**', '.github/scripts/build-android.sh', '.github/workflows/build.yml', 'app/composeApp/build.gradle.kts') }}
+          path: |
+            app/composeApp/src/androidMain/jniLibs
+            app/kernelBindings/src/androidMain/generated
+
       - name: Cross-compile the kernel for both ABIs
+        if: steps.android-native.outputs.cache-hit != 'true'
         run: bash .github/scripts/build-android.sh
+
+      - name: Check staged Android native outputs
+        run: |
+          for abi in arm64-v8a x86_64; do
+            for library in libgilune_ffi.so libc++_shared.so; do
+              test -s "app/composeApp/src/androidMain/jniLibs/$abi/$library"
+            done
+          done
+          test -s app/kernelBindings/src/androidMain/generated/uniffi/gilune_ffi/gilune_ffi.kt
+
+      - name: Save Android native outputs before testing
+        if: steps.android-native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.android-native.outputs.cache-primary-key }}
+          path: |
+            app/composeApp/src/androidMain/jniLibs
+            app/kernelBindings/src/androidMain/generated
 
       - name: Debug-signed APK and test APK
         working-directory: app
@@ -445,8 +480,10 @@ jobs:
         run: |
           # The copied libraries and APK no longer depend on the two
           # temporary cross-build trees. Keep room for the system image.
-          du -sh "${RUNNER_TEMP:?}/gilune-android"
-          rm -rf -- "${RUNNER_TEMP:?}/gilune-android"
+          if [ -d "${RUNNER_TEMP:?}/gilune-android" ]; then
+            du -sh "$RUNNER_TEMP/gilune-android"
+            rm -rf -- "$RUNNER_TEMP/gilune-android"
+          fi
           # Bindgen has finished too; all later steps use staged outputs.
           cargo clean --manifest-path kernel/Cargo.toml
           # This disposable Android runner does not use the preinstalled
@@ -577,7 +614,7 @@ jobs:
   release:
     name: Release
     needs: [version, windows, linux, android, bindings]
-    if: needs.version.outputs.is_release == 'true' || inputs.dry_run_release
+    if: needs.version.outputs.full == 'true' && (needs.version.outputs.is_release == 'true' || inputs.dry_run_release)
     runs-on: ubuntu-24.04
     permissions:
       contents: write

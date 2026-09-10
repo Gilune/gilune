@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_route import build_route, main
+from build_route import build_route, validation_mode, main
 
 
 class BuildRouteTest(unittest.TestCase):
@@ -34,6 +34,21 @@ class BuildRouteTest(unittest.TestCase):
 
     def test_untagged_main_builds(self):
         self.assertTrue(self.route())
+
+    def test_only_tags_and_manual_runs_request_full_validation(self):
+        for event, ref, expected in (
+            ("push", "refs/heads/main", "quick"),
+            ("push", "refs/heads/ci/reliability-review", "quick"),
+            ("push", "refs/tags/v1.0.7", "full"),
+            ("workflow_dispatch", "refs/heads/main", "full"),
+            ("workflow_dispatch", "refs/heads/ci/reliability-review", "full"),
+        ):
+            with self.subTest(event=event, ref=ref):
+                self.assertEqual(expected, validation_mode(event, ref, self.sha, self.repo)[0])
+
+    def test_tagged_branch_skips_both_validation_modes(self):
+        self.git("tag", "v1.0.7")
+        self.assertEqual("skip", validation_mode("push", "refs/heads/main", self.sha, self.repo)[0])
 
     def test_lightweight_release_tag_suppresses_branch_build(self):
         self.git("tag", "v1.0.7")
@@ -83,7 +98,7 @@ class BuildRouteTest(unittest.TestCase):
             "GITHUB_STEP_SUMMARY": str(summary),
         }):
             main()
-        self.assertEqual("build=true\n", output.read_text(encoding="utf-8"))
+        self.assertEqual("build=true\nfull=true\n", output.read_text(encoding="utf-8"))
         self.assertIn("manual run", summary.read_text(encoding="utf-8"))
 
 
