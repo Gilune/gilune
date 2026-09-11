@@ -97,6 +97,14 @@ It checks clean install, exact payload and shortcut, repair, application launch,
 upgrade from the existing v1.0.3 MSI, rejection of a downgrade, a second uninstall,
 and preservation of the smoke-test vaults. These lifecycle checks remain unrun.
 
+The candidate was pushed as `adf3bdf`. The explicit
+[candidate run 34608408313](https://github.com/Gilune/gilune/actions/runs/34608408313)
+selected the new route and skipped the normal Windows/Linux/Android/release jobs,
+but GitHub refused to start its Linux job with the existing account
+billing/spending-limit restriction. It ran zero build steps. The accompanying
+[quick branch run](https://github.com/Gilune/gilune/actions/runs/34608389358) was
+blocked for the same reason. No billing settings were changed.
+
 Run **Windows build on Linux** explicitly at a candidate version greater than
 1.0.3 when Actions allowance is available. Before this new workflow reaches the
 default branch, the existing **Build** workflow can call it from the review branch:
