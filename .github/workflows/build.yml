@@ -23,6 +23,11 @@ on:
       - 'LICENSE'
   workflow_dispatch:
     inputs:
+      windows_cross_only:
+        description: 'Validate only the Linux-built Windows candidate; do not build other platforms or publish a release.'
+        type: boolean
+        required: false
+        default: false
       version:
         description: 'Version to stamp: MAJOR.MINOR.PATCH, MAJOR at least 1. Empty keeps the development defaults.'
         required: false
@@ -56,10 +61,18 @@ env:
   GILUNE_RUST_VERSION: '1.98.0'
 
 jobs:
+  windows-cross-candidate:
+    name: Linux-built Windows candidate
+    if: inputs.windows_cross_only
+    uses: ./.github/workflows/windows-cross.yml
+    with:
+      version: ${{ inputs.version || '1.0.7' }}
+
   # ---------------------------------------------------------------------
   # Whether to build and what version the three packages carry.
   version:
     name: Build plan
+    if: ${{ !inputs.windows_cross_only }}
     runs-on: ubuntu-24.04
     outputs:
       build: ${{ steps.route.outputs.build }}

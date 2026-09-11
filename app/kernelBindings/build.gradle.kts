@@ -8,7 +8,8 @@ kotlin {
     androidTarget()
     sourceSets {
         val desktopMain by getting {
-            kotlin.srcDir("src/desktopMain/generated")
+            kotlin.srcDir(project.findProperty("gilune.desktop.bindings")
+                ?: "src/desktopMain/generated")
             dependencies { api("net.java.dev.jna:jna:5.14.0") }
         }
         val androidMain by getting {

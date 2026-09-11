@@ -1,4 +1,5 @@
 import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+import java.security.MessageDigest
 
 plugins {
     kotlin("multiplatform")
@@ -15,6 +16,12 @@ plugins {
 val releaseVersion = project.findProperty("gilune.version") as String?
 val releaseVersionCode = (project.findProperty("gilune.versionCode") as String?)?.toInt()
 val appVersionName = releaseVersion ?: "1.0.0-dev"
+// Artifact export may target Windows while Gradle runs on Linux. Runtime
+// dependencies must follow the target, not the build host.
+val desktopTarget = providers.gradleProperty("gilune.desktop.target").orNull
+require(desktopTarget == null || desktopTarget == "windows-x64") {
+    "Unsupported gilune.desktop.target: $desktopTarget"
+}
 val generateAppVersion by tasks.registering {
     val destination = layout.buildDirectory.dir("generated/appVersion")
     inputs.property("version", appVersionName)
@@ -43,7 +50,8 @@ kotlin {
             kotlin.srcDir(generateAppVersion)
             kotlin.srcDir("src/jvmShared/kotlin")
             dependencies {
-                implementation(compose.desktop.currentOs)
+                implementation(if (desktopTarget == "windows-x64")
+                    compose.desktop.windows_x64 else compose.desktop.currentOs)
                 implementation(project(":pluginSdk"))
                 implementation(project(":plugins:tasks"))
                 implementation(project(":plugins:people"))
@@ -396,4 +404,44 @@ tasks.withType<Test>().configureEach {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
         events("passed", "failed")
     }
+}
+
+// A thin, explicit runtime directory consumed by Linux-hosted Windows packaging.
+// Dependency resolution brings in the SDK/domain/bindings JARs too.
+tasks.register<Sync>("exportDesktopBundle") {
+    group = "distribution"
+    val jar = tasks.named<Jar>("desktopJar")
+    dependsOn(jar)
+    into(layout.buildDirectory.dir("export/desktop/lib"))
+    from(jar.flatMap { it.archiveFile })
+    from(configurations.named("desktopRuntimeClasspath"))
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    val bindingsProject = project(":kernelBindings")
+    val bindings = bindingsProject.file(project.findProperty("gilune.desktop.bindings")
+        ?: "src/desktopMain/generated").resolve("uniffi/gilune_ffi/gilune_ffi.kt")
+    inputs.file(bindings)
+    inputs.property("exportVersion", appVersionName)
+    inputs.property("exportTarget", desktopTarget ?: "host")
+    doLast {
+        val hash = MessageDigest.getInstance("SHA-256")
+            .digest(bindings.readBytes()).joinToString("") { "%02x".format(it) }
+        destinationDir.resolve("export.properties").writeText(
+            "version=$appVersionName\ntarget=${desktopTarget ?: "host"}\nbindings.sha256=$hash\n")
+    }
+}
+
+// Compile on the build host, execute on Windows with the standalone Gradle
+// test project in .github/windows-tests. No source compiler is needed there.
+tasks.register<Sync>("exportDesktopTests") {
+    group = "verification"
+    dependsOn("desktopTestClasses", "exportDesktopBundle")
+    into(layout.buildDirectory.dir("export/tests"))
+    // A TaskProvider would also depend on running desktopTest. Only its
+    // compiled inputs belong here: the Windows test runner executes them.
+    from(kotlin.targets.getByName("desktop").compilations.getByName("test").output.allOutputs) {
+        into("classes")
+    }
+    from(configurations.named("desktopTestRuntimeClasspath")) { into("lib") }
+    from(tasks.named<Jar>("desktopJar").flatMap { it.archiveFile }) { into("lib") }
+    duplicatesStrategy = DuplicatesStrategy.FAIL
 }

@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Child, Command};
 
 fn spawn(vault: &Path, args: &[&str]) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    Command::new(support::cli())
         .arg("--vault")
         .arg(vault)
         .args(args)
@@ -93,3 +93,5 @@ impl WaitOutput for Child {
         (status.success(), err)
     }
 }
+
+mod support;

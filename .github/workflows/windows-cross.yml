@@ -1,0 +1,153 @@
+name: Windows build on Linux
+
+# Prove the replacement before switching the release workflow to it. This
+# workflow is deliberately explicit: ordinary pushes must not add build cost.
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Candidate MSI version, greater than 1.0.3 (no release is published)'
+        required: true
+        default: '1.0.7'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cross-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GILUNE_CI: '1'
+  CARGO_TERM_COLOR: always
+  GILUNE_RUST_VERSION: '1.98.0'
+
+jobs:
+  build:
+    name: Compile and package Windows on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      VERSION: ${{ inputs.version }}
+      LIBCLANG_PATH: /usr/lib/llvm-19/lib
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate candidate version
+        run: |
+          python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+          python3 - <<'PY'
+          import os, runpy
+          version = runpy.run_path('.github/scripts/package-windows-linux.py')['version'](os.environ['VERSION'])
+          assert tuple(map(int, version.split('.'))) > (1, 0, 3), 'Candidate must upgrade v1.0.3'
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Linux compiler and installer tools
+        run: |
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                       -o Dir::Etc::sourceparts=- -o APT::Update::Error-Mode=any)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+            clang-19 lld-19 llvm-19 libclang-19-dev cmake ninja-build \
+            pkg-config libssl-dev wixl unzip
+          echo /usr/lib/llvm-19/bin >> "$GITHUB_PATH"
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          rustup target add x86_64-pc-windows-msvc
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/cargo-xwin
+            ${{ runner.temp }}/gilune-windows-tools/downloads
+          key: windows-cross-tools-v1-${{ hashFiles('.github/scripts/setup-windows-cross.sh', '.github/scripts/build-windows-linux.sh') }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            kernel -> target
+            kernel -> target/windows-cross
+          key: windows-cross-llvm19-${{ hashFiles('.github/scripts/build-windows-linux.sh') }}
+          cache-on-failure: true
+      - name: Pinned cross compiler and Windows Java
+        run: bash .github/scripts/setup-windows-cross.sh
+      - name: Windows kernel and precompiled Rust tests
+        run: bash .github/scripts/build-windows-linux.sh
+      - name: Windows application and precompiled desktop tests
+        working-directory: app
+        run: |
+          ./gradlew :composeApp:exportDesktopBundle :composeApp:exportDesktopTests \
+            -Pgilune.desktop.target=windows-x64 \
+            -Pgilune.desktop.bindings="$GITHUB_WORKSPACE/app/build/windows-cross/native/bindings" \
+            "-Pgilune.version=$VERSION"
+      - name: Assemble the Windows application and MSI
+        run: |
+          python3 .github/scripts/package-windows-linux.py \
+            --libs app/composeApp/build/export/desktop/lib \
+            --native app/build/windows-cross/native --runtime "$WINDOWS_JRE_HOME" \
+            --output app/build/windows-cross/package \
+            --version "$VERSION" --commit "$GITHUB_SHA"
+          cp -r app/composeApp/build/export/tests app/build/windows-cross/tests
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-cross-candidate
+          path: app/build/windows-cross/
+          if-no-files-found: error
+          retention-days: 7
+
+  windows:
+    name: Run Windows tests and installer lifecycle
+    needs: build
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-cross-candidate
+          path: app/build/windows-cross
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Kernel suite from Linux-compiled Windows executables
+        run: >-
+          python .github/scripts/run-windows-rust-tests.py
+          --artifacts app/build/windows-cross/rust-tests --repo .
+          --results app/build/windows-cross/results/kernel
+      - name: Desktop suite against the packaged kernel
+        shell: pwsh
+        run: |
+          python .github/scripts/run_checked.py --timeout 1200 --output app/build/windows-cross/results/desktop-watchdog -- app/gradlew.bat -p .github/windows-tests test "-Partifacts=$pwd/app/build/windows-cross"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Download the existing installer for upgrade testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.0.3 --repo Gilune/gilune --pattern '*.msi' --dir app/build/windows-cross/previous
+      - name: Clean install, repair, upgrade, downgrade rejection and uninstall
+        shell: pwsh
+        run: .github/scripts/test-windows-installer.ps1 -Artifacts app/build/windows-cross
+      - name: Windows validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-cross-validation
+          path: |
+            app/build/windows-cross/results
+            .github/windows-tests/build/test-results
+            .github/windows-tests/build/reports
+          if-no-files-found: warn
+          retention-days: 7

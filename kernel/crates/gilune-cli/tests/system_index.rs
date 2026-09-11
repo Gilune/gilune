@@ -11,7 +11,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn cli(vault: &Path, args: &[&str]) -> Output {
-    let out = Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    let out = Command::new(support::cli())
         .arg("--vault")
         .arg(vault)
         .args(args)
@@ -203,3 +203,5 @@ fn a_rebuild_lands_exactly_where_keeping_up_landed() {
     assert_eq!(paths(&kept), paths(&rebuilt));
     assert_eq!(paths(&rebuilt).len(), 5);
 }
+
+mod support;
