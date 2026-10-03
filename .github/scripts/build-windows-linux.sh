@@ -5,6 +5,10 @@ set -euo pipefail
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 [[ $(uname -s) == Linux ]] || { echo 'This script requires a Linux host.' >&2; exit 1; }
 target=x86_64-pc-windows-msvc
+build_tests=${GILUNE_WINDOWS_BUILD_TESTS:-0}
+[[ $build_tests == 0 || $build_tests == 1 ]] || {
+  echo 'GILUNE_WINDOWS_BUILD_TESTS must be 0 or 1.' >&2; exit 2;
+}
 # Pin the Microsoft headers as well as Rust/LLVM: newer STL headers can reject
 # an otherwise unchanged compiler. Limit SDK downloads to the shipped target.
 export XWIN_ARCH=x86_64
@@ -56,8 +60,10 @@ cp "$build_root/$target/release/gilune_ffi.dll" "$output/gilune_ffi.dll"
 test -s "$output/bindings/uniffi/gilune_ffi/gilune_ffi.kt"
 sha256sum "$output/gilune_ffi.dll" "$output/bindings/uniffi/gilune_ffi/gilune_ffi.kt"
 
-# Compile every unit/integration executable with the same Windows toolchain.
-# Execution remains a Windows gate; no Wine approximation of filesystem/UI.
+# Production builds need only the DLL and bindings. Retain explicit test export
+# for separately requested Windows validation, without paying to compile unused
+# test executables in the Linux-only release pipeline.
+if [[ $build_tests == 0 ]]; then exit 0; fi
 test_messages="$build_root/windows-tests.jsonl"
 CARGO_TARGET_DIR="$build_root" cargo xwin test --locked --workspace --no-run \
   --target "$target" --manifest-path "$repo/kernel/Cargo.toml" \
