@@ -31,7 +31,15 @@ builds omit those unused test executables, test JARs and the large validation bu
 Local validation: all 23 CI-script tests pass, both workflows pass actionlint, and
 the regression suite checks that every hosted runner is Linux, exercises the actual
 version-selection shell step and verifies that Windows test compilation is opt-in.
-The hosted Linux-only packaging check is pending.
+[Run 37144108109](https://github.com/Gilune/gilune/actions/runs/37144108109) at
+`94d08f7` passed. GitHub reports exactly one executed job, labelled `ubuntu-24.04`,
+and the expected `gilune-windows-msi` and `bindings-desktop-windows` artifacts.
+It consumed **22m 56s of Linux runner time and zero Windows runner time**. The
+native/tool cache keys changed with the build recipe and missed; Gradle restored
+its cache and application compilation took 21s. These are first-run measurements
+for the new route, not a measured warm-build or full-release timing. The focused
+run did not repeat Linux/Android runtime suites or publish a release. This change
+is on `ci/reliability-review`; the default branch adopts it when that work is merged.
 
 ## Earlier Windows validation evidence
 
