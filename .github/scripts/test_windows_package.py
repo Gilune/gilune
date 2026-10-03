@@ -1,5 +1,10 @@
 import importlib.util
+import csv
+import io
 from pathlib import Path
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 import xml.etree.ElementTree as ET
@@ -22,7 +27,7 @@ class WindowsPackageTest(unittest.TestCase):
             root = Path(directory)
             bundle = root / "Gilune"
             (bundle / "lib").mkdir(parents=True)
-            for name in ("Gilune.exe", "gilune.ico", "lib/name & unicode-é.jar"):
+            for name in ("program.jar", "gilune.ico", "lib/name & unicode-é.jar"):
                 (bundle / name).write_text("fixture")
             def components(release):
                 path = root / (release + ".wxs")
@@ -54,5 +59,69 @@ class WindowsPackageTest(unittest.TestCase):
             self.assertIn("space & unicode-é", content)
 
 
+MSI_TOOLS = all(shutil.which(tool) for tool in ("llvm-rc-19", "lld-link-19", "wixl", "msiinfo"))
+MSI_TOOLS = MSI_TOOLS and importlib.util.find_spec("pefile") is not None
+
+
+@unittest.skipUnless(MSI_TOOLS, "Linux MSI regression needs LLVM 19, wixl, msitools and pefile")
+class WindowsFileVersionTest(unittest.TestCase):
+    def test_msi_preserves_real_pe_versions_and_only_hashes_unversioned_files(self):
+        import pefile
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "payload with spaces"
+            bundle.mkdir()
+            (bundle / "gilune.ico").write_bytes(b"test icon stream")
+            (bundle / "readme.txt").write_text("unversioned data", encoding="utf-8")
+
+            def binary(name, numbers=None):
+                resource = root / (name + ".rc")
+                content = "1 RCDATA { 1, 2, 3 }\n"
+                if numbers:
+                    content = ("1 VERSIONINFO\nFILEVERSION " + numbers +
+                               "\nPRODUCTVERSION 99,0,0,0\nBEGIN\nEND\n")
+                resource.write_text(content, encoding="utf-8")
+                compiled = root / (name + ".res")
+                subprocess.run(["llvm-rc-19", "/fo", str(compiled), str(resource)], check=True)
+                subprocess.run(["lld-link-19", "/dll", "/noentry", "/machine:x64",
+                                "/out:" + str(bundle / name), str(compiled)], check=True)
+
+            binary("Gilune.exe", "1,0,7,0")
+            binary("runtime.dll", "17,0,20,101")
+            binary("unversioned.dll")
+            self.assertEqual("1.0.7.0", package.file_version(bundle / "Gilune.exe"))
+            self.assertEqual("17.0.20.101", package.file_version(bundle / "runtime.dll"))
+            self.assertIsNone(package.file_version(bundle / "unversioned.dll"))
+            self.assertIsNone(package.file_version(bundle / "readme.txt"))
+            (bundle / "invalid.dll").write_bytes(b"not a PE file")
+            with self.assertRaises(pefile.PEFormatError):
+                package.file_version(bundle / "invalid.dll")
+            (bundle / "invalid.dll").unlink()
+
+            source = root / "installer.wxs"
+            package.write_wix(bundle, source, "1.0.7")
+            installer = root / "candidate.msi"
+            subprocess.run(["wixl", "-a", "x64", "-o", str(installer), str(source)], check=True)
+
+            def table(name):
+                content = subprocess.check_output(["msiinfo", "export", str(installer), name], text=True)
+                rows = list(csv.reader(io.StringIO(content), delimiter="\t"))
+                return [dict(zip(rows[0], row)) for row in rows[3:]]
+
+            files = {row["FileName"]: row for row in table("File")}
+            self.assertEqual("1.0.7.0", files["Gilune.exe"]["Version"])
+            self.assertEqual("17.0.20.101", files["runtime.dll"]["Version"])
+            self.assertEqual("", files["unversioned.dll"]["Version"])
+            hashes = {row["File_"] for row in table("MsiFileHash")}
+            self.assertNotIn(files["Gilune.exe"]["File"], hashes)
+            self.assertNotIn(files["runtime.dll"]["File"], hashes)
+            self.assertIn(files["unversioned.dll"]["File"], hashes)
+            self.assertIn(files["readme.txt"]["File"], hashes)
+
+
 if __name__ == "__main__":
+    if "--require-msi-tools" in sys.argv:
+        sys.argv.remove("--require-msi-tools")
+        if not MSI_TOOLS:
+            sys.exit("The MSI regression requires LLVM 19, wixl, msitools and python3-pefile")
     unittest.main()

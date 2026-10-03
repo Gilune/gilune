@@ -1,6 +1,6 @@
 """Assemble a Windows runtime and MSI on Linux from separately built artifacts.
 
-Requires cargo-xwin, LLVM 19 and wixl. Output must be new, preventing stale payloads.
+Requires cargo-xwin, LLVM 19, wixl and python3-pefile. Output must be new.
 """
 import argparse
 import hashlib
@@ -35,6 +35,28 @@ def version(value):
 
 def ident(prefix, path):
     return prefix + hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
+
+
+def file_version(path):
+    """Read the binary's numeric version, not its product/display version."""
+    if path.suffix.lower() not in (".exe", ".dll"):
+        return None
+    # wixl 0.103 does not harvest PE versions. Missing File.Version entries
+    # make MSI prefer an existing versioned file, even during a major upgrade.
+    # Import only during packaging so routing/version checks need no PE reader.
+    import pefile
+    with pefile.PE(str(path), fast_load=True) as image:
+        image.parse_data_directories(
+            directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_RESOURCE"]])
+        versions = getattr(image, "VS_FIXEDFILEINFO", [])
+        if not versions:
+            return None
+        info = versions[0]
+        if info.Signature != 0xFEEF04BD:
+            raise ValueError("Invalid fixed file version: " + str(path))
+        return ".".join(str(part) for part in (
+            info.FileVersionMS >> 16, info.FileVersionMS & 0xFFFF,
+            info.FileVersionLS >> 16, info.FileVersionLS & 0xFFFF))
 
 
 def write_launcher(bundle, destination, release):
@@ -111,8 +133,12 @@ def write_wix(bundle, destination, release):
         component_id = ident("C", rel.as_posix())
         component = node(parent, "Component", Id=component_id,
                          Guid=str(uuid.uuid5(NAMESPACE, rel.as_posix())), Win64="yes")
+        attributes = {}
+        if embedded_version := file_version(path):
+            attributes["DefaultVersion"] = embedded_version
         file_node = node(component, "File", Id=ident("F", rel.as_posix()),
-                         Source=str(path), Name=path.name, DiskId="1", KeyPath="yes")
+                         Source=str(path), Name=path.name, DiskId="1", KeyPath="yes",
+                         **attributes)
         if rel.as_posix() == "Gilune.exe":
             node(file_node, "Shortcut", Id="StartMenuShortcut", Directory="GiluneMenu",
                  Name="Gilune", WorkingDirectory="INSTALLDIR", Icon="GiluneIcon", Advertise="yes")
