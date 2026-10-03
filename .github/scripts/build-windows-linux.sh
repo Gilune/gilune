@@ -16,6 +16,7 @@ export XWIN_SDK_VERSION=10.0.26100
 # redistributable. Target-scoped flags also leave the Linux generator alone.
 export CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_RUSTFLAGS='-C target-feature=+crt-static -l advapi32'
 build_root=${GILUNE_WINDOWS_BUILD_ROOT:-$repo/kernel/target/windows-cross}
+recipe_stamp="$build_root.recipe.sha256"
 output=${GILUNE_WINDOWS_OUTPUT:-$repo/app/build/windows-cross/native}
 mkdir -p "$build_root" "$output"
 
@@ -34,14 +35,15 @@ mkdir -p "$build_root" "$output"
   # whisper-rs-sys forwards CMake variables but does not declare them as Cargo
   # inputs. Invalidate that dependency when this build recipe changes.
   recipe=$(sha256sum "${BASH_SOURCE[0]}" | cut -d' ' -f1)
-  if [[ ! -f "$build_root/windows-recipe.sha256" ]] || \
-      [[ $(cat "$build_root/windows-recipe.sha256") != "$recipe" ]]; then
+  # Keep the stamp outside this target: rust-cache prunes its loose files.
+  if [[ ! -f "$recipe_stamp" ]] || \
+      [[ $(cat "$recipe_stamp") != "$recipe" ]]; then
     cargo clean --manifest-path "$repo/kernel/Cargo.toml" -p whisper-rs-sys \
       --release --target "$target"
   fi
   cargo xwin build --locked --release --target "$target" \
     --manifest-path "$repo/kernel/Cargo.toml" -p gilune-ffi --lib --features whisper
-  printf '%s\n' "$recipe" > "$build_root/windows-recipe.sha256"
+  printf '%s\n' "$recipe" > "$recipe_stamp"
 )
 
 cp "$build_root/$target/release/gilune_ffi.dll" "$output/gilune_ffi.dll"

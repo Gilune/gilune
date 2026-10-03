@@ -106,7 +106,9 @@ for abi in "${abis[@]}"; do
     export CMAKE_C_FLAGS='-fPIC -w'
     export CMAKE_CXX_FLAGS='-fPIC -w'
 
-    cargo build \
+    # Only the shared library runs on Android. The binding generator is a
+    # host tool; cross-compiling and linking an Android CLI wastes both ABIs.
+    cargo build --locked --lib \
       --manifest-path "$repo/kernel/Cargo.toml" \
       -p gilune-ffi --release --target "$triple" --features whisper
   )
@@ -143,7 +145,7 @@ echo "Generating Kotlin bindings from $source_lib"
 # DIRECTORY, not --manifest-path, so it must run from inside the workspace.
 (
   cd "$repo/kernel"
-  cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+  cargo run --locked -p gilune-ffi --bin uniffi-bindgen -- generate \
     --library "$source_lib" --language kotlin \
     --out-dir "$repo/app/kernelBindings/src/androidMain/generated" --no-format
 )
