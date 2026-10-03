@@ -30,7 +30,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
@@ -54,14 +53,15 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalFoundationApi::class)
 class MobileEditorUiTest {
-    private val rule = createComposeRule()
+    private val resources = UiTestResources()
+    private val rule = createDeviceComposeRule()
 
     // The test drives the real InputConnection. A second keyboard must not
     // independently select a composing word while the test inserts text.
     @get:Rule
-    val chain: RuleChain = RuleChain.outerRule(Ms1InputSessionRule()).around(rule)
+    val chain: RuleChain = RuleChain.outerRule(resources).around(Ms1InputSessionRule()).around(rule)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = resources.scope
 
     @Test
     fun theRenderingNeverReachesTheDocument() {
@@ -375,10 +375,10 @@ class MobileEditorUiTest {
     // ---------------------------------------------------------------- rig
 
     private fun vaultWith(body: String): Pair<GiluneState, File> {
-        val vault = Files.createTempDirectory("gilune-edit").toFile()
+        val vault = resources.directory("gilune-edit")
         val note = File(vault, "note.md")
         note.writeText(NOTE_HEAD + body)
-        return GiluneState(vault.absolutePath, scope) to note
+        return resources.state(vault.absolutePath) to note
     }
 
     private fun show(state: GiluneState, editor: MobileEditorState) {

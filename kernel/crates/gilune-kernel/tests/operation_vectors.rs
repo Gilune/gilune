@@ -24,7 +24,9 @@ use gilune_kernel::operations::{self, Envelope, ENVELOPE_VERSION};
 use std::path::PathBuf;
 
 fn vectors() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vectors/operations-v1")
+    std::env::var_os("GILUNE_TEST_REPOSITORY")
+        .map(|root| PathBuf::from(root).join("kernel/vectors/operations-v1"))
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../vectors/operations-v1"))
 }
 
 fn manifest() -> serde_json::Value {

@@ -1,18 +1,38 @@
 name: Build
 
-# Every push to main builds all three packages and runs the tests; a v* tag
-# additionally publishes a Release with the installers attached. CI branches
-# build as well, so the pipeline can be proven before it reaches main —
-# workflow_dispatch is only offered for workflows already on the default
-# branch, which makes it useless for a first validation.
+# All hosted jobs use Linux. Tags/manual runs build Windows, Linux and Android;
+# branch pushes run the Linux kernel and desktop suites without packaging.
+# When main and a release tag are pushed together, the tag owns the build;
+# the branch run only executes the small build-plan job. Manual runs force a
+# build. CI branches let pipeline changes be proven before reaching main.
 on:
   push:
     branches: [main, 'ci/**']
     tags: ['v*']
+    # GitHub applies paths to branch pushes only: a release tag always runs.
+    # Exclude README files, not all Markdown: vault fixtures are test inputs.
+    paths:
+      - 'app/**'
+      - 'kernel/**'
+      - 'contracts/**'
+      - '!app/**/README.md'
+      - '!kernel/**/README.md'
+      - '!contracts/**/README.md'
+      - '.github/workflows/**'
+      - '.github/scripts/**'
+      - '.github/windows-launcher/**'
+      - '.github/windows-tests/**'
+      - '.gitattributes'
+      - 'LICENSE'
   workflow_dispatch:
     inputs:
+      windows_cross_only:
+        description: 'Build only the Windows MSI on Linux; skip full-platform tests and release publication.'
+        type: boolean
+        required: false
+        default: false
       version:
-        description: 'Version to stamp: MAJOR.MINOR.PATCH, MAJOR at least 1. Empty keeps the development defaults.'
+        description: 'Version to stamp: MAJOR.MINOR.PATCH, MAJOR at least 1. Empty uses 1.0.0 for a manual full build.'
         required: false
         default: ''
       dry_run_release:
@@ -23,6 +43,12 @@ on:
 
 permissions:
   contents: read
+
+# New code supersedes older builds on the same branch. Releases have their
+# own groups and cannot be cancelled by a branch push; manual runs are unique.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -35,18 +61,43 @@ env:
   CMAKE_POLICY_VERSION_MINIMUM: '3.5'
   # Pinned rather than "whichever the image ships": the NDK is a compiler.
   GILUNE_NDK_VERSION: '27.2.12479018'
+  GILUNE_RUST_VERSION: '1.98.0'
 
 jobs:
+  windows-cross-candidate:
+    name: Windows MSI only, built on Linux
+    if: inputs.windows_cross_only
+    uses: ./.github/workflows/windows-cross.yml
+    with:
+      version: ${{ inputs.version || '1.0.7' }}
+
   # ---------------------------------------------------------------------
-  # What version the three packages carry, decided once so they agree.
+  # Whether to build and what version the three packages carry.
   version:
-    name: Version
-    runs-on: ubuntu-latest
+    name: Build plan
+    if: ${{ !inputs.windows_cross_only }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
+      build: ${{ steps.route.outputs.build }}
+      full: ${{ steps.route.outputs.full }}
       version: ${{ steps.decide.outputs.version }}
       gradle_args: ${{ steps.decide.outputs.gradle_args }}
       is_release: ${{ steps.decide.outputs.is_release }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          # Inspect tags on the event commit, including annotated tags.
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Check build routing and watchdog
+        run: python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+
+      - name: Decide whether this run owns the build
+        id: route
+        run: python3 -B .github/scripts/build_route.py
+
       - name: Decide the version
         id: decide
         shell: bash
@@ -56,7 +107,7 @@ jobs:
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail
-          # jpackage on Windows will only accept MAJOR.MINOR.BUILD with
+          # Windows MSI versions use MAJOR.MINOR.BUILD with
           # MAJOR greater than 0, so a v0.x tag cannot drive the MSI and is
           # refused here rather than producing a mis-versioned installer.
           semver='^[1-9][0-9]*\.[0-9]+\.[0-9]+$'
@@ -68,14 +119,19 @@ jobs:
               tag=${REF#refs/tags/}
               version=${tag#v}
               if ! printf '%s' "$version" | grep -Eq "$semver"; then
-                echo "::error title=Unusable release tag::${tag} cannot drive an installer version. A release tag must read v<MAJOR>.<MINOR>.<PATCH> with MAJOR at least 1 and no suffix — v1.0.0, not v0.9.0 and not v1.0.0-rc1 — because jpackage on Windows requires MAJOR.MINOR.BUILD with MAJOR greater than 0."
+                echo "::error title=Unusable release tag::${tag} cannot drive an installer version. A release tag must read v<MAJOR>.<MINOR>.<PATCH> with MAJOR at least 1 and no suffix — for example v1.0.0 — to satisfy the MSI packager's numeric version requirement."
                 exit 1
               fi
               ;;
             *)
+              # The MSI packager needs a numeric version. Give every platform
+              # the same stamp on manual full builds even without an input.
+              if [ -z "$REQUESTED" ] && [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+                REQUESTED=1.0.0
+              fi
               if [ -n "$REQUESTED" ]; then
                 if ! printf '%s' "$REQUESTED" | grep -Eq "$semver"; then
-                  echo "::error title=Unusable version::${REQUESTED} is not MAJOR.MINOR.PATCH with MAJOR at least 1, which is what jpackage on Windows will accept."
+                  echo "::error title=Unusable version::${REQUESTED} must be MAJOR.MINOR.PATCH with MAJOR at least 1 for the MSI packager."
                   exit 1
                 fi
                 version=$REQUESTED
@@ -96,118 +152,20 @@ jobs:
 
   # ---------------------------------------------------------------------
   windows:
-    name: Windows desktop (MSI)
+    name: Windows MSI built on Linux
     needs: version
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Rust toolchain
-        shell: bash
-        run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
-          rustc --version
-          cargo --version
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: kernel
-
-      - name: Locate LLVM and CMake
-        shell: pwsh
-        run: |
-          # whisper-rs-sys runs bindgen on the host, which needs libclang;
-          # the image ships LLVM, and the fallback is here so a change in
-          # the image is a slow build rather than a failed one.
-          $candidates = @("$env:ProgramFiles\LLVM\bin", "${env:ProgramFiles(x86)}\LLVM\bin")
-          $llvm = $candidates | Where-Object { Test-Path (Join-Path $_ 'libclang.dll') } | Select-Object -First 1
-          if (-not $llvm) {
-            choco install llvm --no-progress -y
-            $llvm = "$env:ProgramFiles\LLVM\bin"
-          }
-          Add-Content -Path $env:GITHUB_ENV -Value "LIBCLANG_PATH=$llvm"
-          Write-Host "libclang: $llvm"
-          cmake --version
-
-      - name: Build the kernel with local transcription
-        shell: bash
-        working-directory: kernel
-        run: cargo build --release -p gilune-ffi --features whisper
-
-      - name: Kernel test suite
-        shell: bash
-        working-directory: kernel
-        run: cargo test --workspace
-
-      - name: Generate the desktop bindings
-        shell: bash
-        working-directory: kernel
-        # Per target from that target's own binary (07-compatibility), and
-        # --no-format so the output is the generator's own bytes rather
-        # than whatever formatter happens to be on the machine.
-        run: |
-          cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
-            --library target/release/gilune_ffi.dll --language kotlin \
-            --out-dir ../app/kernelBindings/src/desktopMain/generated --no-format
-
-      - name: Stage the kernel as an app resource
-        shell: bash
-        run: |
-          mkdir -p app/composeApp/resources/windows-x64
-          cp kernel/target/release/gilune_ffi.dll app/composeApp/resources/windows-x64/
-
-      - name: Desktop test suite
-        shell: bash
-        working-directory: app
-        # Against the same release binary the installer will carry.
-        run: ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
-
-      - name: Desktop test results
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-desktop-test-results
-          path: |
-            app/composeApp/build/test-results/desktopTest
-            app/composeApp/build/reports/tests/desktopTest
-          if-no-files-found: warn
-
-      - name: Package the MSI
-        shell: bash
-        working-directory: app
-        # The Compose plugin fetches its own WiX 3 toolset (tasks
-        # :downloadWix / :unzipWix), so nothing is assumed of the image.
-        run: ./gradlew :composeApp:packageReleaseMsi ${{ needs.version.outputs.gradle_args }}
-
-      - name: What was packaged
-        shell: bash
-        run: ls -l app/composeApp/build/compose/binaries/main-release/msi
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: gilune-windows-msi
-          path: app/composeApp/build/compose/binaries/main-release/msi/*.msi
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bindings-desktop-windows
-          path: app/kernelBindings/src/desktopMain/generated
-          if-no-files-found: error
+    if: needs.version.outputs.full == 'true'
+    uses: ./.github/workflows/windows-cross.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
 
   # ---------------------------------------------------------------------
   linux:
-    name: Linux desktop (DEB)
+    name: Linux checks
     needs: version
-    runs-on: ubuntu-latest
+    if: needs.version.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -217,16 +175,24 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Our validation branches need reusable caches while failures are investigated.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') }}
 
       - name: Rust toolchain
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --component clippy --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          cargo clippy --version
+          rustc -vV
+          java -version
           rustc --version
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: kernel
+          # Keep compiled dependencies when a later UI test fails.
+          cache-on-failure: true
 
       - name: Build dependencies
         # libclang-dev + cmake build whisper.cpp; fakeroot, binutils and
@@ -234,8 +200,13 @@ jobs:
         # a GL stack and a font give the Compose UI tests something to draw
         # on and something to draw with.
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          # Use only Ubuntu's signed sources. Unrelated runner repositories
+          # (Chrome, Microsoft, etc.) must not gate these Ubuntu packages.
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                       -o Dir::Etc::sourceparts=- -o APT::Update::Error-Mode=any)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             libclang-dev cmake fakeroot binutils desktop-file-utils \
             xvfb libgl1 fonts-dejavu-core
           libclang=$(find /usr/lib -name 'libclang.so*' -print -quit)
@@ -245,22 +216,23 @@ jobs:
 
       - name: Build the kernel with local transcription
         working-directory: kernel
-        run: cargo build --release -p gilune-ffi --features whisper
+        # Bindgen runs in the host debug profile below; no release CLI is shipped.
+        run: cargo build --locked --release -p gilune-ffi --lib --features whisper
 
       - name: Kernel test suite
         working-directory: kernel
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Clippy
         working-directory: kernel
         # 09-engineering-conventions: clippy clean with warnings denied in
         # CI. Once, on one platform — it is the same source either side.
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Generate the desktop bindings
         working-directory: kernel
         run: |
-          cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+          cargo run --locked -p gilune-ffi --bin uniffi-bindgen -- generate \
             --library target/release/libgilune_ffi.so --language kotlin \
             --out-dir ../app/kernelBindings/src/desktopMain/generated --no-format
 
@@ -276,7 +248,7 @@ jobs:
         env:
           # No GPU behind xvfb, and Skiko's default is to look for one.
           SKIKO_RENDER_API: SOFTWARE
-        run: xvfb-run -a ./gradlew :composeApp:desktopTest -Pgilune.kernel.profile=release
+        run: python3 ../.github/scripts/run_checked.py --timeout 1200 -- xvfb-run -a ./gradlew --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
 
       - name: Desktop test results
         if: always()
@@ -286,24 +258,29 @@ jobs:
           path: |
             app/composeApp/build/test-results/desktopTest
             app/composeApp/build/reports/tests/desktopTest
+            app/build/ci-diagnostics
           if-no-files-found: warn
 
       - name: Package the DEB
+        if: needs.version.outputs.full == 'true'
         working-directory: app
         run: ./gradlew :composeApp:packageReleaseDeb ${{ needs.version.outputs.gradle_args }}
 
       - name: What was packaged
+        if: needs.version.outputs.full == 'true'
         run: |
           ls -l app/composeApp/build/compose/binaries/main-release/deb
           dpkg-deb --info app/composeApp/build/compose/binaries/main-release/deb/*.deb
 
       - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.full == 'true'
         with:
           name: gilune-linux-deb
           path: app/composeApp/build/compose/binaries/main-release/deb/*.deb
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
+        if: needs.version.outputs.full == 'true'
         with:
           name: bindings-desktop-linux
           path: app/kernelBindings/src/desktopMain/generated
@@ -313,9 +290,22 @@ jobs:
   android:
     name: Android (APK)
     needs: version
-    runs-on: ubuntu-latest
+    if: needs.version.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore Android native libraries and matching bindings
+        id: android-native
+        uses: actions/cache/restore@v4
+        with:
+          # Check finished outputs before installing native build tools.
+          # No fallback keys: stale binaries must never replace compilation.
+          key: android-native-v1-ubuntu24-${{ runner.arch }}-rust${{ env.GILUNE_RUST_VERSION }}-ndk${{ env.GILUNE_NDK_VERSION }}-${{ hashFiles('kernel/**', '!kernel/target/**', 'contracts/**', '.github/scripts/build-android.sh', '.github/workflows/build.yml', 'app/composeApp/build.gradle.kts') }}
+          path: |
+            app/composeApp/src/androidMain/jniLibs
+            app/kernelBindings/src/androidMain/generated
 
       - uses: actions/setup-java@v4
         with:
@@ -323,22 +313,39 @@ jobs:
           java-version: '17'
 
       - uses: gradle/actions/setup-gradle@v4
+        with:
+          # Our validation branches need reusable caches while failures are investigated.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') }}
 
       - name: Rust toolchain
+        if: steps.android-native.outputs.cache-hit != 'true'
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
-          rustup target add aarch64-linux-android x86_64-linux-android
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          rustc -vV
+          java -version
+          # build-android.sh installs the targets it actually builds.
           rustc --version
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.android-native.outputs.cache-hit != 'true'
         with:
           workspaces: kernel
+          # Cross-build trees live in RUNNER_TEMP and the host target is
+          # deleted for emulator disk space. Cache registry downloads only.
+          cache-targets: false
+          cache-on-failure: true
 
       - name: Build dependencies
+        if: steps.android-native.outputs.cache-hit != 'true'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libclang-dev cmake
+          # Use only Ubuntu's signed sources. Unrelated runner repositories
+          # (Chrome, Microsoft, etc.) must not gate these Ubuntu packages.
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                       -o Dir::Etc::sourceparts=- -o APT::Update::Error-Mode=any)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends libclang-dev cmake
           libclang=$(find /usr/lib -name 'libclang.so*' -print -quit)
           [ -n "$libclang" ] || { echo 'libclang not found after installing libclang-dev'; exit 1; }
           echo "LIBCLANG_PATH=$(dirname "$libclang")" >> "$GITHUB_ENV"
@@ -355,7 +362,26 @@ jobs:
             "ndk;${GILUNE_NDK_VERSION}"
 
       - name: Cross-compile the kernel for both ABIs
+        if: steps.android-native.outputs.cache-hit != 'true'
         run: bash .github/scripts/build-android.sh
+
+      - name: Check staged Android native outputs
+        run: |
+          for abi in arm64-v8a x86_64; do
+            for library in libgilune_ffi.so libc++_shared.so; do
+              test -s "app/composeApp/src/androidMain/jniLibs/$abi/$library"
+            done
+          done
+          test -s app/kernelBindings/src/androidMain/generated/uniffi/gilune_ffi/gilune_ffi.kt
+
+      - name: Save Android native outputs before testing
+        if: steps.android-native.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          key: ${{ steps.android-native.outputs.cache-primary-key }}
+          path: |
+            app/composeApp/src/androidMain/jniLibs
+            app/kernelBindings/src/androidMain/generated
 
       - name: Debug-signed APK and test APK
         working-directory: app
@@ -365,14 +391,24 @@ jobs:
         # does not consume the test step's time or compete with the guest.
         run: ./gradlew :composeApp:assembleDebug :composeApp:assembleDebugAndroidTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
 
+      - name: Record Android test dependencies
+        working-directory: app
+        run: |
+          mkdir -p build/ci-diagnostics
+          ./gradlew :composeApp:dependencies --configuration debugAndroidTestRuntimeClasspath > build/ci-diagnostics/android-test-dependencies.txt
+
       - name: Enable emulator acceleration
         run: |
           # The copied libraries and APK no longer depend on the two
           # temporary cross-build trees. Keep room for the system image.
-          du -sh "${RUNNER_TEMP:?}/gilune-android"
-          rm -rf -- "${RUNNER_TEMP:?}/gilune-android"
-          # Bindgen has finished too; all later steps use staged outputs.
-          cargo clean --manifest-path kernel/Cargo.toml
+          if [ -d "${RUNNER_TEMP:?}/gilune-android" ]; then
+            du -sh "$RUNNER_TEMP/gilune-android"
+            rm -rf -- "$RUNNER_TEMP/gilune-android"
+          fi
+          # Bindgen has finished too; a native cache hit has no host target.
+          if [ -d kernel/target ]; then
+            cargo clean --manifest-path kernel/Cargo.toml
+          fi
           # This disposable Android runner does not use the preinstalled
           # .NET SDK. Leave room for both the system image and guest data.
           if [ -d /usr/share/dotnet ]; then
@@ -402,7 +438,7 @@ jobs:
           emulator-boot-timeout: 300
           disable-animations: true
           working-directory: app
-          script: ./gradlew :composeApp:connectedDebugAndroidTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
+          script: bash ../.github/scripts/test-android.sh ${{ needs.version.outputs.gradle_args }}
 
       - name: Android test results
         if: always()
@@ -412,6 +448,8 @@ jobs:
           path: |
             app/composeApp/build/outputs/androidTest-results/connected
             app/composeApp/build/reports/androidTests/connected
+            app/build/android-shards
+            app/build/ci-diagnostics
           if-no-files-found: warn
 
       - name: Is there a release keystore?
@@ -471,7 +509,8 @@ jobs:
   bindings:
     name: Bindings parity
     needs: [windows, linux, android]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -499,8 +538,9 @@ jobs:
   release:
     name: Release
     needs: [version, windows, linux, android, bindings]
-    if: needs.version.outputs.is_release == 'true' || inputs.dry_run_release
-    runs-on: ubuntu-latest
+    if: needs.version.outputs.full == 'true' && (needs.version.outputs.is_release == 'true' || inputs.dry_run_release)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

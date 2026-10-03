@@ -9,7 +9,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn cli(vault: &Path, crashpoint: Option<&str>, args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gilune-cli"));
+    let mut cmd = Command::new(support::cli());
     cmd.arg("--vault").arg(vault).args(args);
     match crashpoint {
         Some(point) => cmd.env("GILUNE_CRASHPOINT", point),
@@ -211,3 +211,5 @@ fn repeated_captures_accumulate_and_stay_verifiable() {
     }
     assert_recovered(dir.path(), 5);
 }
+
+mod support;

@@ -17,34 +17,40 @@ import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.RuleChain
 import java.io.File
-import java.nio.file.Files
 import java.time.LocalDate
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class MobileShellUiTest {
-    @get:Rule
-    val rule = createComposeRule()
+    private val resources = UiTestResources()
+    private val rule = createDeviceComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(rule)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private fun freshState(): GiluneState = resources.state(resources.directory("gilune-ui").path)
 
-    private fun scratchVault(): String = Files.createTempDirectory("gilune-ui").toString()
+    private fun awaitText(text: String) {
+        rule.waitUntil(WAIT) { rule.onAllNodes(hasText(text)).fetchSemanticsNodes().isNotEmpty() }
+    }
+
+    private fun dismissComposer() {
+        val dismiss = rule.onNodeWithTag("composer-dismiss")
+        rule.waitUntil(WAIT) { dismiss.isDisplayed() }
+        dismiss.performClick()
+    }
 
     private fun openedState(): GiluneState {
-        val state = GiluneState(scratchVault(), scope)
+        val state = freshState()
         state.openVault()
         return state
     }
@@ -56,6 +62,7 @@ class MobileShellUiTest {
         rule.onNodeWithTag("composer").assertIsDisplayed()
         rule.onNodeWithTag("commit").assertExists()
         // Nothing captured yet, so the feed says so rather than sitting blank.
+        awaitText("Nothing captured yet.")
         rule.onNodeWithText("Nothing captured yet.").assertExists()
     }
 
@@ -123,7 +130,7 @@ class MobileShellUiTest {
         rule.waitUntil(WAIT) { state.gilune.value != null }
 
         rule.onNodeWithTag("composer").performTextInput("half a thought")
-        rule.onNodeWithTag("composer-dismiss").performClick()
+        dismissComposer()
 
         rule.onNodeWithTag("composer").assertIsNotFocused()
         rule.onNodeWithTag("composer").assertTextContains("half a thought")
@@ -140,7 +147,7 @@ class MobileShellUiTest {
         rule.waitUntil(WAIT) { state.gilune.value != null }
 
         rule.onNodeWithTag("composer").performTextInput("half")
-        rule.onNodeWithTag("composer-dismiss").performClick()
+        dismissComposer()
         rule.onNodeWithTag("composer").assertIsNotFocused()
 
         rule.onNodeWithTag("composer").performTextInput(" a thought")
@@ -172,13 +179,14 @@ class MobileShellUiTest {
 
     @Test
     fun aTickFromReadReachesTheBytes() {
-        val state = GiluneState(scratchVault(), scope)
+        val state = freshState()
         val note = File(state.vaultDir, "list.md")
         note.parentFile?.mkdirs()
         note.writeText("---\ngilune-id: abc\n---\n# Shopping\n\n- [ ] milk\n- [ ] bread\n")
 
         rule.setContent { GiluneTheme(dark = false) { ReadScreen(state, "list.md") } }
 
+        awaitText("Shopping")
         rule.onNodeWithText("Shopping").assertExists()
         rule.onAllNodes(hasContentDescription("task not done"))[0].performClick()
 
@@ -198,7 +206,7 @@ class MobileShellUiTest {
     /// produced different bytes.
     @Test
     fun aTickFromReadStampsDoneWhenTheTasksPluginIsOn() {
-        val state = GiluneState(scratchVault(), scope)
+        val state = freshState()
         state.plugins.add(installedTasksPlugin())
         val note = File(state.vaultDir, "list.md")
         note.parentFile?.mkdirs()
@@ -206,6 +214,7 @@ class MobileShellUiTest {
 
         rule.setContent { GiluneTheme(dark = false) { ReadScreen(state, "list.md") } }
 
+        awaitText("Shopping")
         rule.onNodeWithText("Shopping").assertExists()
         rule.onAllNodes(hasContentDescription("task not done"))[0].performClick()
 

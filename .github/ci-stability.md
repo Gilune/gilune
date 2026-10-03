@@ -1,5 +1,335 @@
 # Intermittent build failures — 7 September 2026
 
+## CI allowance follow-up (10 September 2026)
+
+The organisation is on GitHub Free; September's reported Actions net amount was
+zero. The account error also occurs when the free allowance is exhausted without
+a payment method. Paying is not the intended remedy. Run 34386963569 consumed
+about 22 Windows, 23 Linux and 40 Android runner minutes (85 total), even though
+the jobs overlapped. Windows kernel tests took 11 minutes; Android native
+cross-compilation took 12 minutes and instrumented testing/setup took 19.5.
+
+Ordinary pushes now run Linux kernel tests, Clippy and desktop tests only.
+Windows, Android, packaging and bindings parity remain mandatory for tags and
+manual full-validation runs. Atomic branch/tag routing and path filters remain.
+Based on that prior run, excluding the other platforms and DEB packaging would
+reduce routine usage to approximately 20 runner minutes (about 75% less). This
+is an estimate, not a measured run of the new workflow. Platform-only regressions
+are caught by full validation, not by the reduced branch checks.
+
+Android caches the finished libraries for both ABIs together with their generated
+bindings. Exact source/toolchain keys exclude `kernel/target`, and no prefix
+fallback is allowed. The cache is saved before app tests, avoiding recompilation
+after unrelated failures while still running the suites afresh. On a hit, the
+temporary cross-build directories do not exist, so disk cleanup handles that
+case. GitHub's branch scope still applies: distinct release tags cannot directly
+share caches; manual full validation on main can seed a default-branch cache.
+No extra full runs are scheduled merely to populate caches.
+
+Local verification: all 15 workflow-script tests passed, including real Git
+branch/tag/manual routing and the watchdog process ownership test; actionlint
+passed. The native-output shell guard accepted complete fixtures and rejected
+each of five missing and each of five empty outputs. The initial sandboxed
+watchdog exercise timed out; with permission to inspect/stop its own child
+processes the unchanged test passed. No application code changed in this update.
+Hosted quick/full execution and cold/warm cache timings remain unverified while
+the allowance restriction prevents jobs from starting. A green quick branch run
+will not satisfy the outstanding full-validation requirement below.
+
+## Current validation status
+
+The implemented candidate is `280fca85b5029fb9d62d116c0fe30d09c04d6383` on
+`ci/reliability-review`, in [draft PR #13](https://github.com/Gilune/gilune/pull/13).
+Its full local Android suite passed 905 cases with zero failures/errors and 15
+existing skips. The preceding candidate passed complete Windows and Linux suites
+(706 cases each, five existing skips), Clippy, kernel tests, MSI and DEB packaging.
+The follow-up changes only Android instrumentation sources and documentation.
+Three final independent repetitions of the affected Android scenarios passed
+46 cases each, zero failures/errors, with two existing skips per run (132
+executed checks across the three runs). Each attempt retained its own XML and
+log under `standard-repeat-*`; all invoked instrumentation, and the loop stopped
+on any failure. This includes another 90 notice activity destruction cycles.
+
+[Run 34394193212](https://github.com/Gilune/gilune/actions/runs/34394193212)
+**did not start any build step**. GitHub's Build plan annotation reports that
+recent account payments failed or the spending limit needs to be increased, and
+directs the owner to Billing & plans. This is an account restriction; it is not
+a test failure and the workflow cannot fix it. The annotation is preserved in
+`app/build/ci-reliability/280-job-start-annotations.json`.
+
+Keep the PR in draft until the account restriction is resolved and a full hosted
+run validates this candidate, including Android and bindings parity. Do not mark
+the incomplete prior Android run as passing, merge this as a verified release,
+or publish another release tag based solely on the local pass. The new scheduling
+probe establishes a fixed thread violation; it does not prove the captured
+SlotWriter or historical native rendering failures have been eliminated.
+
+## Android effect scheduling follow-up (9 September 2026)
+
+[Candidate 8fa5cc0](https://github.com/Gilune/gilune/actions/runs/34386963569)
+passed both desktop jobs: 706 cases each, zero failures/errors and five existing
+skips, with fresh execution and successful MSI/DEB packaging. Both Ubuntu jobs
+passed the restricted package setup. Android shard 1 crashed while destroying
+the activity after `ProviderNoticeUiTest.aStandingNoticeIsDrawnAndGoesAwayWhenItIsDismissed`:
+`SlotWriter.moveSlotGapTo` threw `ArrayIndexOutOfBoundsException` (length 1280,
+index -596). Shards 0 and 2 passed 294 and 316 cases; shard 1 reported only 167
+of its expected 293. This is a failed, incomplete Android gate, not 903 passing
+tests. Reports and Java thread stacks are under `8fa-android-results`.
+
+The unchanged notice class passed locally, as did a new 30-cycle notice dismissal
+and activity destruction test. The full corresponding local shard (294 cases,
+including the new lifecycle test) also passed. These attempts did not reproduce
+the hosted slot-table crash. Published runtime 1.8.3 has identical `SlotTable.kt`
+and `Composition.kt` to 1.8.2; there is no basis for claiming that patch fixes it.
+
+Source inspection found another concrete test-environment boundary: the old
+Compose test factories default to `UnconfinedTestDispatcher`. A background
+completion can resume a composition effect immediately on the producer thread.
+`EffectThreadTest` reproduced this: expected Android UI thread 2, actual worker
+102 (101 in a second unchanged-factory diagnostic attempt). The test uses a
+background-completed deferred value; no sleeps or probabilistic click retries.
+Its failing XML is retained in `effect-thread-baseline-results`.
+
+Android UI tests now share factories supplying `StandardTestDispatcher` to the
+existing supported `effectContext` argument. Compose's Android main clock pumps
+that scheduler on the UI thread. The same effect-thread probe passes, as do
+the live semantics probe and the 30-cycle notice lifecycle scenario. This follows
+Google's [test dispatcher guidance](https://developer.android.com/develop/ui/compose/testing/migrate-v2?hl=en)
+and its [standard-dispatcher lint rationale](https://android.googlesource.com/superprojects/androidx/+/c396d28dff194e399f1b9703b9aeb02a244ffbd6).
+It does not require another production framework upgrade.
+
+The first queued-dispatcher check exposed a notice-readiness assertion: the test
+checked the banner before DataStore's asynchronous result arrived. It now waits
+for that actual banner before asserting/clicking. Its scope and temporary vault
+also use owned cleanup. The initial five-case result (four pass, one fail) is
+preserved in `standard-dispatcher-initial-results`. The demonstrated effect-thread
+violation is fixed; the causal link to the historical slot-table and drawing
+crashes remains a hypothesis requiring further evidence.
+
+The first full migration run exposed five more early assertions (filter rows,
+loaded shell content, and laid-out caption text), then stalled in Sync's
+`performScrollTo`. It was stopped after capturing a SIGQUIT thread dump and
+bugreport; its partial XML reports 687 cases, six failures including that deliberate
+process termination, and 14 skips. It is not a complete suite result. Files are
+under `standard-dispatcher-full-initial-results` and `standard-dispatcher-stall*`.
+The stack is in `ActionsKt.performScrollTo`; this version's helper repeatedly
+checks its target while the queued `ScrollBy` work has not run. The test now
+issues one semantic scroll, advances the main clock, waits for visibility and
+clicks once. Exact assertions remain. Shell and Sync fixtures now own cleanup.
+
+The next focused run passed those checks but exposed one early click on the
+composer's dismiss button before its focus-driven visibility update (46 cases,
+one failure, two existing skips). The button is now awaited before one click.
+Reports are retained in `standard-dispatcher-focused-initial-results`. Caption
+visibility and loaded note/feed checks await the result they assert, rather than
+assuming a single idle call finishes real IO and every layout transition.
+
+The corrected full local Android suite then passed **905 unique tests**, zero
+failures/errors and 15 existing skips, in 4m 8s including Gradle/deployment.
+This includes the thread probe, both 30-recreation scenarios and the formerly
+stalled Sync case. XML and console output are retained under
+`standard-dispatcher-final-full*`. Hosted validation is still required; a local
+pass does not establish that every historical rendering crash is eliminated.
+
+## Unrelated runner package repository failure (9 September 2026)
+
+[Validation run 34385921107](https://github.com/Gilune/gilune/actions/runs/34385921107)
+failed before compilation on both Ubuntu jobs: Google's Chrome package index
+had a `Hash Sum mismatch`. Both downloaded identical inconsistent metadata,
+on two different revisions of the Ubuntu 24.04 runner image. This was a shared
+external package setup failure, not a failing app test. The preceding run had
+completed all 903 Android tests and Windows packaging successfully.
+
+The Ubuntu dependency steps now select only the runner's `ubuntu.sources`
+for both update and install, using APT's documented `Dir::Etc::SourceList` and
+`Dir::Etc::SourceParts` options. Package signatures and hashes remain enforced;
+`APT::Update::Error-Mode=any` makes a required source failure fatal rather than
+continuing with old indexes. No retry or ignored error was added. The source
+file must exist, so a changed runner layout fails explicitly. See the
+[Ubuntu APT documentation](https://manpages.ubuntu.com/manpages/noble/man8/apt-get.8.html).
+
+## Reliability work following v1.0.6 (9 September 2026)
+
+See [the review](ci-fragility-review.md) for the v1.0.6 Linux missing-row failure
+and Android `SnapshotStateObserver` process crash. The latter occurred before
+the checkbox click, and remains an unresolved cause unless reproduced.
+
+A controlled `CompletionRefreshUiTest` now holds query work pending while a
+refresh starts. On the previous implementation, the test failed because
+`completion-0` disappeared. The fixed implementation keeps the previous rows
+only for the same context/kernel/plugin set while replacement results load.
+Changed text clears them, and a callback captured before an edit cannot insert
+into the new context. Native acceptance validation remains mandatory. This
+establishes and fixes one disappearing-menu sequence, not proof that every
+historical Linux failure took that sequence.
+
+A follow-up geometry assertion exposed another part of that sequence: adding
+the loading notice above retained rows moved the first option down 20 pixels
+(top 6 to 26). Loading text is now shown only when there are no retained options,
+so the same-query refresh preserves both the row and its pointer position.
+The failed bounds assertion is retained under `refresh-position-baseline*`.
+
+Affected People, editor, filter and Agenda UI fixtures now use an outer owned
+resource rule. It waits for application jobs to finish cancellation before
+closing native vault handles, after Compose disposes its UI. Tests cover that
+order and preservation of original failures when cleanup also fails.
+
+Android diagnostics now record Java thread IDs, the current test and exception
+stacks. Desktop CI captures owned JVM stacks before terminating a timed-out
+test process. The watchdog was exercised against a disposable real JVM and
+captured `WatchdogProbe.main` before returning deadline failure; its tests also
+check preservation of exit codes and isolation from an unrelated process.
+
+Android CI uses three distinct instrumentation shards, with no retries and
+per-shard reports. A failing shard still fails the run. A script test verifies
+that later shards execute and earlier failure reports survive. This limits
+the coverage lost to a process crash; it is not a fix for a rendering defect.
+
+Local evidence is retained in `app/build/ci-reliability/`: the unchanged People
+desktop class passed, and the unchanged Android editor/filter sequence passed
+19 tests. After the changes, 18 focused desktop and 43 focused Android tests
+passed, including 30 activity recreations within the lifecycle test. The full
+Windows suite passed (701 passed test events; the existing five skips), and
+Android's full unsharded XML reported 900 tests, zero failures/errors and 15
+skips in 286.447 seconds. An initial five-run People/completion loop produced
+passing reports, but inspection found runs 2–5 restored `desktopTest FROM-CACHE`.
+Those are not independent executions and the proposed 35/35 repetition count
+is withdrawn. A first upgrade repetition loop had the same problem after its
+first run. Replacement repetitions disable the build cache, and CI JVM test
+tasks now disable result caching and up-to-date reuse while retaining cached
+compilation. Full-suite logs were checked separately: those tasks executed.
+Three replacement upgrade repetitions then executed 21/21 tests successfully
+(`uncached-upgrade-repeat-1` through `-3`, no cached or up-to-date test tasks).
+A further seven-case run without cleaning or disabling the global cache
+confirmed the CI policy: Gradle logged `CI must execute its runtime tests`,
+`Task.upToDateWhen is false` and a new test worker, then passed all seven.
+
+### A concrete framework threading difference
+
+Comparing Google's published [1.7.6 UI-test sources](https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-test/1.7.6/ui-test-1.7.6-sources.jar)
+and [1.8.2 UI-test sources](https://dl.google.com/dl/android/maven2/androidx/compose/ui/ui-test/1.8.2/ui-test-1.8.2-sources.jar)
+identified a relevant change in `TestOwner` and `SemanticsNodeInteraction`:
+1.7.6 collects nodes on the UI thread, then applies selectors on the calling
+test thread. In 1.8.2, the selection runs inside the UI-thread operation too.
+Live node properties can participate in Compose observation, so this is a
+concrete cross-thread boundary to remove, rather than a general claim that
+newer libraries must fix rendering.
+
+`SemanticsThreadTest.selectorsInspectLiveNodesOnTheUiThread` fails on the existing
+1.7.6 stack: expected UI thread **2**, actual selector thread **58**. Its baseline
+log and XML are retained under `semantics-baseline*`. This demonstrates the
+threading behaviour, not the original process crash itself.
+
+The comparison candidate aligns Compose Multiplatform and Android UI tests at
+1.8.2, whose [published dependency mapping](https://github.com/JetBrains/compose-multiplatform/releases/tag/v1.8.2)
+uses Jetpack UI/runtime/foundation 1.8.2. Kotlin remains 2.1.20. The same thread
+probe, affected UI scenarios and complete suites are used to evaluate it.
+
+The upgraded thread probe and 43 affected Android cases passed. The first full
+upgrade checks exposed two other concrete problems, with failed XML retained:
+
+- Desktop undo's test polled `readText()` while the native refactoring protocol
+  temporarily moved the old file before publishing its replacement. It threw
+  `FileNotFoundException`, rather than observing operation completion. Both
+  platforms now wait for the dialog's completed-operation control before the
+  unchanged exact-file assertion. The corrected full Windows suite passed
+  706 tests with zero failures and five existing skips.
+- Android's prototype sent source offset 16 to `InputConnection.setSelection`.
+  Foundation 1.8.2's `ImeEditCommandScope.setSelection` maps displayed offsets
+  back to the source; 16 now selects inside `milk`. The test now sends displayed
+  offset 12, asserts source caret 16, then keeps the original assertion that
+  backspace removes only `]`. This is a deterministic API behaviour change,
+  not a flaky test to retry. The corrected prototype and People classes passed
+  all nine tests. The first full Android upgrade run finished 901 cases with
+  this single failure and 15 skips, without a process crash.
+
+The corrected full Android run then completed all 901 unique tests with zero
+failures/errors and the existing 15 skips (5m 36s including Gradle/deployment).
+Its console and XML are retained under `compose-upgrade-android-final*`.
+Clippy also passed locally with warnings denied. These results verify the
+changes on the local Windows/API 36 environments; they do not establish that
+the unreproduced historical `SnapshotStateObserver` crash or Skia hangs have
+been eliminated on every hosted runner.
+
+The initial hosted candidate `b9f43c5`
+([run 34377064269](https://github.com/Gilune/gilune/actions/runs/34377064269))
+also caught a configuration omission introduced by this work: Linux's pinned
+minimal Rust installation lacked Clippy. The Linux setup now explicitly
+installs and checks Clippy before compilation. Rust dependency caches are saved
+even when a later test fails, and owned `ci/**` branches can save Gradle caches;
+neither cache changes test failure outcomes.
+
+The completed baseline's Windows suite passed 706 tests (five skips) and built
+the MSI. Android's three shards covered all 900 unique cases (293/291/316),
+with one failure and 15 skips; the later two shards passed without hiding the
+first shard's failure. The slash-menu test timed out waiting for **Due date**.
+The new trace shows source caret 34 before the toolbar click, then caret 24
+after it, with two offers published. With this fixture's 23-character frontmatter,
+the slash had been inserted at body offset zero instead of 11.
+
+`EditorToolbar` captured text and selection during composition. A callback
+invoked after a buffer edit but before its next frame could apply the previous
+snapshot. `ToolbarFreshStateTest` reproduces this even on Compose 1.8.2: a
+captured slash callback inserts at the old caret, and a captured panel callback
+overwrites the new text with the old text. Both tests failed before the fix.
+Toolbar and panel commands now calculate edits from the live buffer when the
+action fires. This is an application correction, not an increased timeout or
+an assertion that waits for the wrong state to disappear.
+The two regressions plus the real mobile editor class passed all 15 tests.
+The final menu-position change also passed the full 706-test Windows suite
+(five existing skips) and 24 focused Android cases. The expanded 903-case
+Android suite and the replacement hosted candidate provide the final gate.
+The final full local Android run completed all **903 unique tests**, with zero
+failures/errors and 15 existing skips, in 5m 11s including Gradle/deployment
+(`toolbar-android-full*`).
+After the final production changes, three uncached desktop People/completion
+runs passed **21/21 executions**, including the bounds assertion, and three
+Android toolbar/editor runs passed **45/45 executions**. Each attempt has its
+own log and XML (`final-desktop-repeat-*`, `android-toolbar-repeat-*`); both
+loops were configured to stop on the first failure. These are the final-code
+repetition counts, separate from the earlier upgrade comparison.
+
+The baseline device log also records system-service ANRs during shard 0,
+including System UI, the phone service, Google Play services and the keyboard.
+At 16:48:44, System UI reported load 20.67 and CPU pressure `some avg10=85.94`;
+this is direct evidence of emulator resource contention, not proof that
+contention caused the historical Compose threading exception. It can expose
+timing windows, while the stale toolbar callback remains independently
+reproducible on the local emulator. Keep the complete device logs when judging
+future timeouts rather than describing every failed run as the same flake.
+
+### Follow-up from the upgraded hosted candidate
+
+[Run 34381419268](https://github.com/Gilune/gilune/actions/runs/34381419268)
+at `d625d37` passed Windows tests and MSI packaging. Linux passed Clippy and
+completed 706 desktop cases with one failure and five skips. The failure was
+`TasksPanelTest.thePluginPutsAThirdTabInTheRailAndItOpensTheAgenda`: it asserted
+`today (1)` immediately after `waitForIdle()`, while the Agenda query runs on IO.
+
+Holding that query with `LocalQueryDispatcher` reproduced the exact missing-node
+failure locally. The test now asserts the loading state, releases the query,
+waits for its result and then checks the heading. Agenda and task-editor fixtures
+also use owned resources. An audit of the other desktop `waitForIdle` usages
+found negative suggestion checks making the same assumption; they now wait for
+the query's loading notice to disappear before asserting that no menu is offered.
+Existing async save/sync checks already wait for their operation's result.
+The complete local desktop suite passed after both corrections (706 cases,
+zero failures, five existing skips). Failed and corrected logs are under
+`agenda-held-*`, `agenda-desktop-full*` and `query-audit-desktop-full*`.
+Three uncached repetitions of Agenda, task-editor and completion tests then
+passed **93/93 executions** (`query-audit-repeat-1` through `-3`).
+The toolbar regression's action capture also reads the live semantics
+configuration on the UI thread; both toolbar cases and the thread probe passed
+after that test-only adjustment (`toolbar-thread-fixed.log`).
+
+The upgraded hosted Android job subsequently passed and produced its APK.
+Its three preserved shards reported **294/293/316 tests**, totalling **903 unique
+cases**, zero failures/errors and 15 existing skips. The original slash-menu
+failure and the new toolbar/thread regressions passed in that full hosted run.
+Reports are retained under `d625-android-results`; Windows reports are under
+`d625-windows-results`. Only the reproduced desktop Agenda assertion prevented
+that candidate's overall build from succeeding.
+
 ## v1.0.5: Android suggestion test was not waiting for its option
 
 [Main 34231892380](https://github.com/Gilune/gilune/actions/runs/34231892380)

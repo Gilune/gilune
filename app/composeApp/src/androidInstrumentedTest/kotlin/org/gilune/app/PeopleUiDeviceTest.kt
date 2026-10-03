@@ -8,24 +8,26 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.*
 import org.gilune.plugins.people.*
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.nio.file.Files
 import kotlin.test.*
 import uniffi.gilune_ffi.*
 
 @OptIn(ExperimentalTestApi::class)
 class PeopleUiDeviceTest {
-    @get:Rule val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createDeviceComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private fun fixture(run: (GiluneState, Gilune) -> Unit) {
-        val root = Files.createTempDirectory("gilune-people-ui").toFile()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        Gilune.open(root.path).use { kernel ->
+        val root = resources.directory("gilune-people-ui")
+        val scope = resources.scope
+        resources.own(Gilune.open(root.path)).let { kernel ->
             BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(kernel)
             BUNDLED_PLUGIN_EXTENSIONS.registerIndexers(kernel)
             BUNDLED_PLUGIN_EXTENSIONS.initializePages(kernel)
@@ -34,7 +36,7 @@ class PeopleUiDeviceTest {
             val state = GiluneState(root.path, scope)
             state.gilune.value = kernel
             state.plugins.addAll(kernel.plugins())
-            try { run(state, kernel) } finally { compose.runOnIdle { state.gilune.value = null; state.plugins.clear() }; compose.waitForIdle(); scope.cancel() }
+            run(state, kernel)
         }
     }
 
@@ -103,7 +105,9 @@ class PeopleUiDeviceTest {
         compose.onNodeWithText("Preview undo").performClick()
         waitText("Apply reviewed changes / resume")
         compose.onNodeWithText("Apply reviewed changes / resume").performClick()
-        compose.waitUntil(10_000) { root.resolve("note.md").readText() == "owner: @alice.smith" }
+        // Wait for completed publication before asserting the exact file bytes.
+        waitText("Preview undo")
+        assertEquals("owner: @alice.smith", root.resolve("note.md").readText())
         assertTrue(kernel.refactoringPlans().size >= 2)
     }
 }

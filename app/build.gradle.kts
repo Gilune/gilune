@@ -1,7 +1,9 @@
 plugins {
     kotlin("multiplatform") version "2.1.20" apply false
     id("org.jetbrains.kotlin.plugin.compose") version "2.1.20" apply false
-    id("org.jetbrains.compose") version "1.7.3" apply false
+    // 1.8.2 moves live semantics selection onto the UI thread in UI tests.
+    // Keep Android test dependencies aligned in composeApp/build.gradle.kts.
+    id("org.jetbrains.compose") version "1.8.2" apply false
     id("com.android.application") version "8.10.1" apply false
 }
 

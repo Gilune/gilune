@@ -1,0 +1,117 @@
+name: Windows build on Linux
+
+# Reused by the release pipeline and the explicit MSI-only build. Compilation,
+# packaging and MSI metadata checks all run on Linux; no Windows runner is used.
+on:
+  workflow_call:
+    inputs:
+      version:
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'MSI version: MAJOR.MINOR.PATCH, with MAJOR at least 1 (no release is published)'
+        required: true
+        default: '1.0.7'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-cross-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
+
+env:
+  GILUNE_CI: '1'
+  CARGO_TERM_COLOR: always
+  GILUNE_RUST_VERSION: '1.98.0'
+
+jobs:
+  build:
+    name: Compile and package Windows on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      VERSION: ${{ inputs.version }}
+      LIBCLANG_PATH: /usr/lib/llvm-19/lib
+      # Separate target roots avoid uploading/cleaning the cross tree twice.
+      GILUNE_WINDOWS_BUILD_ROOT: ${{ github.workspace }}/app/build/windows-cross-target
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate scripts and MSI version
+        run: |
+          python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
+          python3 - <<'PY'
+          import os, runpy
+          runpy.run_path('.github/scripts/package-windows-linux.py')['version'](os.environ['VERSION'])
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: false
+      - name: Linux compiler and installer tools
+        run: |
+          test -s /etc/apt/sources.list.d/ubuntu.sources
+          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources
+                       -o Dir::Etc::sourceparts=- -o APT::Update::Error-Mode=any)
+          sudo apt-get "${apt_options[@]}" update
+          sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
+            clang-19 lld-19 llvm-19 libclang-19-dev cmake ninja-build \
+            pkg-config libssl-dev wixl msitools python3-pefile unzip
+          echo /usr/lib/llvm-19/bin >> "$GITHUB_PATH"
+          rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
+          rustup default "$GILUNE_RUST_VERSION"
+          rustup target add x86_64-pc-windows-msvc
+      - name: Verify native versions in a real MSI
+        run: python3 -B .github/scripts/test_windows_package.py --require-msi-tools -v
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/cargo-xwin
+            ${{ runner.temp }}/gilune-windows-tools/downloads
+          key: windows-cross-tools-v1-${{ hashFiles('.github/scripts/setup-windows-cross.sh', '.github/scripts/build-windows-linux.sh') }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            kernel -> target
+            kernel -> ../app/build/windows-cross-target
+          # rust-cache removes loose files inside target directories. Keep
+          # the recipe stamp beside the target so warm restores retain it.
+          cache-directories: ${{ env.GILUNE_WINDOWS_BUILD_ROOT }}.recipe.sha256
+          key: windows-cross-llvm19-${{ hashFiles('.github/scripts/build-windows-linux.sh') }}
+          cache-on-failure: true
+      - name: Pinned cross compiler and Windows Java
+        run: bash .github/scripts/setup-windows-cross.sh
+      - name: Windows kernel and bindings
+        run: bash .github/scripts/build-windows-linux.sh
+      - name: Windows application
+        working-directory: app
+        run: |
+          ./gradlew :composeApp:exportDesktopBundle \
+            -Pgilune.desktop.target=windows-x64 \
+            -Pgilune.desktop.bindings="$GITHUB_WORKSPACE/app/build/windows-cross/native/bindings" \
+            "-Pgilune.version=$VERSION"
+      - name: Assemble the Windows application and MSI
+        run: |
+          python3 .github/scripts/package-windows-linux.py \
+            --libs app/composeApp/build/export/desktop/lib \
+            --native app/build/windows-cross/native --runtime "$WINDOWS_JRE_HOME" \
+            --output app/build/windows-cross/package \
+            --version "$VERSION" --commit "$GITHUB_SHA"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gilune-windows-msi
+          path: app/build/windows-cross/package/*.msi
+          if-no-files-found: error
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bindings-desktop-windows
+          path: app/build/windows-cross/native/bindings
+          if-no-files-found: error
+          retention-days: 7

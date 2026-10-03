@@ -4,23 +4,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.time.LocalDate
 import kotlin.test.Test
 
 class AgendaLifecycleTest {
-    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    private val resources = UiTestResources()
+    private val compose = createDeviceAndroidComposeRule<ComponentActivity>()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     @Test
     fun loadingAndEmptyAgendasSurviveRepeatedActivityDestruction() {
-        val vault = IndexedVault("gilune-agenda-lifecycle")
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+        val vault = resources.indexed("gilune-agenda-lifecycle")
+        val scope = resources.scope
         val state = GiluneState(vault.dir, scope)
         state.gilune.value = vault.gilune
         state.plugins.add(installedTasksPlugin())
@@ -43,9 +45,6 @@ class AgendaLifecycleTest {
             }
         } finally {
             compose.activityRule.scenario.close()
-            scope.cancel()
-            vault.gilune.close()
-            vault.root.deleteRecursively()
         }
     }
 }

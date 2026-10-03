@@ -17,7 +17,7 @@ import java.io.File
 import java.nio.file.Files
 import uniffi.gilune_ffi.Gilune
 
-class IndexedVault(prefix: String = "gilune-indexed") {
+class IndexedVault(prefix: String = "gilune-indexed") : AutoCloseable {
     val root: File = Files.createTempDirectory(prefix).toFile()
     val dir: String = root.absolutePath
     val gilune: Gilune = Gilune.open(dir)
@@ -61,5 +61,10 @@ class IndexedVault(prefix: String = "gilune-indexed") {
     fun catchUp() {
         gilune.reconcile()
         gilune.advanceIndex()
+    }
+
+    override fun close() {
+        gilune.close()
+        check(root.deleteRecursively()) { "Could not remove test vault $root" }
     }
 }

@@ -7,7 +7,7 @@ use std::path::Path;
 use std::process::Command;
 
 fn cli(vault: &Path, args: &[&str]) -> serde_json::Value {
-    let out = Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    let out = Command::new(support::cli())
         .arg("--vault")
         .arg(vault)
         .args(args)
@@ -79,7 +79,7 @@ fn the_vault_projection_is_declared_by_every_host_and_cannot_be_removed() {
         .expect("the vault projection is declared on open");
     assert_eq!(vault["required"], true);
 
-    let refused = Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    let refused = Command::new(support::cli())
         .arg("--vault")
         .arg(dir.path())
         .args(["plugins", "remove", "org.memory.vault"])
@@ -108,3 +108,5 @@ fn a_removed_plugin_stays_removed_when_the_next_process_registers_it() {
         "a removed plugin does not reappear"
     );
 }
+
+mod support;
