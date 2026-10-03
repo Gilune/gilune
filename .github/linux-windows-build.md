@@ -1,9 +1,10 @@
 # Windows artifacts built on Linux
 
 Implemented as an explicit candidate workflow, `windows-cross.yml`, on 11 September
-2026. The existing `build.yml` release route is retained until a disposable Windows
-runner proves installation, upgrade from v1.0.3, downgrade rejection and uninstall.
-No candidate is published as a release, and ordinary pushes do not run this workflow.
+2026. A disposable Windows runner now proves installation, upgrade from v1.0.3,
+downgrade rejection and uninstall. Integrating the candidate into the existing
+`build.yml` release route remains a separate change. No candidate is published
+as a release, and ordinary pushes do not run this workflow.
 
 ## Build boundary
 
@@ -85,12 +86,12 @@ Validation: both workflows pass actionlint; both changed build scripts pass Bash
 syntax checks; all 20 Python CI-script checks pass. The new regression exercises
 cold compilation, simulated cache cleanup/restoration, changed recipes and failed
 compilation without marking a failed recipe reusable. Windows process-control
-checks required running outside the local sandbox. No hosted build was dispatched.
+checks required running outside the local sandbox. This local audit preceded the
+hosted runs recorded below.
 
-The next hosted validation should use the existing Windows-only candidate input
-below. Its installer lifecycle result still gates replacing the normal Windows
-release job. Compare summed job time on that cold run and a later necessary warm
-run before assigning a savings percentage; this audit does not establish one.
+Hosted validation used the existing Windows-only candidate input below, avoiding
+a duplicate full-platform run. The comparisons below separate cold compilation,
+warm compilation and runtime execution; they do not establish release billing savings.
 
 ## Installer upgrade correction, 3 October 2026
 
@@ -135,9 +136,9 @@ changed. Normal uninstall has no such property, and future products have differe
 codes. This compatibility guard covers the listed published product, while
 `MajorUpgrade` continues to reject installing the new package over newer versions.
 The real-MSI regression verifies that the guard is present and runs before
-`InstallInitialize`, including during removal. Hosted lifecycle validation remains
-required. Installer checks now precede the long runtime suites so a packaging
-failure stops earlier without weakening the successful candidate's test gates.
+`InstallInitialize`, including during removal. Installer checks now precede the
+long runtime suites so a packaging failure stops earlier without weakening the
+successful candidate's test gates.
 
 The second run restored Rust, cross-tool and Gradle caches. Compilation/packaging
 fell from 19m 25s to **4m 39s**: native compilation from 14m 42s to 1m 31s, and
@@ -146,6 +147,30 @@ including 13m 54s of kernel execution; the two jobs totalled **22m 43s**. These
 compare a cold run with a warm packaging-only revision, not an app-source change
 or a complete release. They are runner durations, not billing figures, and both
 runs still failed a lifecycle gate.
+
+[Run 37136906844](https://github.com/Gilune/gilune/actions/runs/37136906844), at
+`c17cec5`, passed both jobs. The complete hosted installer lifecycle passed in 56s,
+including rejection of the original v1.0.3 MSI's downgrade attempt, exact payload
+verification afterward, final uninstall and preserved vaults. The downgrade log
+confirms that the new launch condition stopped removal before any files changed.
+All 28 Rust executables completed: 605 tests passed, 24 ignored, none failed.
+Desktop reports contain 706 cases, five skipped, zero failures and zero errors.
+
+| Summed job duration | Cold `0500323` | Warm `4d9a1e6` | Warm `c17cec5` |
+| --- | --- | --- | --- |
+| Linux compilation/packaging | 19m 25s | 4m 39s | 4m 28s |
+| Windows runtime/installer checks | 14m 47s | 18m 04s | 24m 02s |
+| Both jobs | 34m 12s | 22m 43s | 28m 30s |
+| Outcome | Upgrade failed | Downgrade failed | Passed |
+
+The final kernel execution took 16m 25s and desktop execution 4m 48s. Runtime
+variation between these runs is substantial; caches reduce compilation but do
+not remove those tests. The earlier failures also stopped installer validation
+before its final steps, so these totals are not equivalent successful release
+benchmarks. Integrating the route into release builds still requires preserving
+artifact/bindings gates, and these measurements do not prove lower release cost.
+Downloaded evidence is under ignored `app/build/installer-final-validation/`,
+with the job metadata and complete log in `app/build/installer-final-run.*`.
 
 ## Local evidence
 
@@ -188,15 +213,15 @@ Its shipped `head_src/head.c` function `getVersionFromOutput` selects the first
 quoted text from `java -version`, including Java's options announcement. The Rust
 launcher passed the exact failing setup and removes that parser entirely.
 
-## Remaining release gate
+## Hosted installer gate
 
 Administrative extraction proves the MSI payload, not Windows Installer's product
 registration or upgrade transaction. `test-windows-installer.ps1` only runs on a
 disposable Windows Actions runner and refuses a runner already containing Gilune.
 It checks clean install, exact payload and shortcut, repair, application launch, uninstall,
 upgrade from the existing v1.0.3 MSI, rejection of a downgrade, a second uninstall,
-and preservation of the smoke-test vaults. The first hosted run reached the upgrade
-payload failure described above; the corrected package must pass the whole sequence.
+and preservation of the smoke-test vaults. After correcting the version metadata
+and legacy downgrade behavior, `c17cec5` passed the entire sequence.
 
 The candidate was pushed as `adf3bdf`. The explicit
 [candidate run 34608408313](https://github.com/Gilune/gilune/actions/runs/34608408313)
@@ -207,7 +232,7 @@ billing/spending-limit restriction. It ran zero build steps. The accompanying
 blocked for the same reason. No billing settings were changed.
 
 Run **Windows build on Linux** explicitly at a candidate version greater than
-1.0.3 when Actions allowance is available. Before this new workflow reaches the
+1.0.3 when validating packaging changes. Before this new workflow reaches the
 default branch, the existing **Build** workflow can call it from the review branch:
 
 ```sh
