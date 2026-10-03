@@ -15,17 +15,16 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.io.File
-import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -33,16 +32,17 @@ import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
 class TasksEditorUiTest {
-    @get:Rule
-    val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     /// A note holding one task line, with the caret parked at its end
     /// after a space — the word boundary § 2's trigger asks for.
     private fun editorOverTaskLine(): Pair<GiluneState, EditorState> {
-        val vault = Files.createTempDirectory("gilune-tasks").toFile()
+        val vault = resources.directory("gilune-tasks")
         vault.resolve("Captures").mkdirs()
         vault.resolve("Captures/note.md").writeText("---\ngilune-id: abc\n---\n- [ ] milk \n")
-        val state = GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.absolutePath, resources.scope)
         val editor = EditorState()
         editor.open(vault.absolutePath, "Captures/note.md")
         editor.reading = false
@@ -64,6 +64,14 @@ class TasksEditorUiTest {
     /// rather than asserted against — zero means dismissed.
     private fun menus(): Int =
         compose.onAllNodesWithTag("suggest-popup").fetchSemanticsNodes().size
+
+    // A rejected query can briefly show its loading notice. UI idleness
+    // alone cannot prove that the worker has finished deciding eligibility.
+    private fun awaitCompletionQuery() {
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithText("Finding suggestions…").fetchSemanticsNodes().isEmpty()
+        }
+    }
 
     @Test
     fun typingTheTriggerOnATaskLineOpensTheMenu() {
@@ -91,6 +99,7 @@ class TasksEditorUiTest {
         body().performKeyInput { pressKey(Key.Escape) }
         compose.waitForIdle()
 
+        awaitCompletionQuery()
         assertEquals(0, menus(), "the menu is gone")
         assertEquals("- [ ] milk /", editor.text.text, "nothing removed what the user typed")
     }
@@ -114,6 +123,7 @@ class TasksEditorUiTest {
         body().performKeyInput { pressKey(Key.Enter) }
         compose.waitUntil(5_000) { editor.text.text != beforeAcceptance }
 
+        awaitCompletionQuery()
         assertEquals(0, menus(), "accepting closes the menu")
         // The resolved date is whatever tomorrow is when the test runs, so
         // the shape is what is asserted — a phrase never reaches the file.
@@ -141,6 +151,7 @@ class TasksEditorUiTest {
         body().performTextInput("/")
         compose.waitForIdle()
 
+        awaitCompletionQuery()
         assertEquals(0, menus(), "no plugin, no menu")
         assertEquals("- [ ] milk /", editor.text.text, "and the character is simply typed")
     }
@@ -154,6 +165,7 @@ class TasksEditorUiTest {
         body().performTextInput("/")
         compose.waitForIdle()
 
+        awaitCompletionQuery()
         assertEquals(0, menus(), "a disabled publisher registers no field, so the trigger cannot fire")
     }
 
@@ -171,6 +183,7 @@ class TasksEditorUiTest {
         // The line carries no #task, so under this filter it is not a task.
         body().performTextInput("/")
         compose.waitForIdle()
+        awaitCompletionQuery()
         assertEquals(0, menus(), "the filter is honoured")
 
         // What Settings ▸ Apply does: write the settings document, refresh
@@ -196,6 +209,7 @@ class TasksEditorUiTest {
         body().performTextInput("/")
         compose.waitForIdle()
 
+        awaitCompletionQuery()
         assertEquals(0, menus(), "§ 1: a task line inside a fence is not a task")
     }
 

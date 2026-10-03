@@ -38,7 +38,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.TextRange
 import org.junit.Rule
@@ -51,7 +50,7 @@ import kotlin.test.assertTrue
 @OptIn(ExperimentalFoundationApi::class)
 class Ms1TextFieldStateSpikeTest {
 
-    private val rule: ComposeContentTestRule = createComposeRule()
+    private val rule: ComposeContentTestRule = createDeviceComposeRule()
 
     /// [Ms1InputSessionRule] must be the OUTER rule — see `Ms1ImeRig.kt`.
     /// This prototype owns the input session exclusively, like the rest of
@@ -92,7 +91,12 @@ class Ms1TextFieldStateSpikeTest {
     @Test
     fun backspaceAtADecorationBoundary_removesTheCorrectByte() {
         open()
-        ime { setSelection(16, 16) }
+        // InputConnection selection uses the decorated coordinates it reports
+        // to the keyboard. After the second glyph is output offset 12, source
+        // offset 16. Compose 1.7.6 incorrectly accepted source coordinates here;
+        // 1.8.2 maps them back, so sending 16 selects inside "milk" instead.
+        ime { setSelection(12, 12) }
+        assertEquals(TextRange(16), state.selection, "the caret is after the source checkbox")
         ime { deleteSurroundingText(1, 0) }
         assertEquals("- [x] done\n- [  milk", state.text.toString(), "the `]` went, and only the `]`")
         assertEquals(TextRange(15), state.selection)
@@ -188,7 +192,9 @@ class Ms1TextFieldStateSpikeTest {
         rule.waitForIdle()
         // The same harmless warm-up round trip the legacy rig performs, so
         // the two are driven like for like.
-        ime { setSelection(DOC.length, DOC.length) }
+        val outputEnd = renderOf(DOC).length
+        ime { setSelection(outputEnd, outputEnd) }
+        assertEquals(TextRange(DOC.length), state.selection)
     }
 
     private fun <R> ime(block: InputConnection.() -> R): R {

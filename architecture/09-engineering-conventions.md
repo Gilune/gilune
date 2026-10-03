@@ -130,27 +130,119 @@ had not spoken. The rules that follow from it:
   asserting that a mock was called proves nothing a contract cares
   about.
 
+Android Compose UI tests use `createDeviceComposeRule` or
+`createDeviceAndroidComposeRule`, which supply a `StandardTestDispatcher` to the
+test environment. The unconfined default can resume a UI effect on a real IO
+producer's thread, as `EffectThreadTest` demonstrates. Use Compose's idle/clock
+APIs to pump this scheduler and await actual asynchronous results before asserting.
+Do not change back to immediate dispatch to make an early assertion pass.
+
 ## Continuous builds and releases
 
-`.github/workflows/build.yml` is the only pipeline. Every push to `main`
-builds the three packages the project ships, runs the native and desktop
-suites, and runs Android instrumented tests on an emulator; a `v*` tag
-additionally publishes a GitHub Release with
-those packages attached. `workflow_dispatch` exists so the pipeline can be
-driven by hand.
+`.github/workflows/build.yml` is the only pipeline. Pushes to `main` and
+`ci/**` build when they change `app/`, `kernel/`, `contracts/`, CI workflows
+or scripts, `.gitattributes`, or `LICENSE`. README-only changes and changes
+limited to architecture, documentation, source research or disposable spikes
+do not start a build. Markdown vault fixtures still count as test inputs.
+Update the workflow's path list when adding build inputs outside these roots.
 
-- **Windows** (`windows-latest`) → **MSI**. Kernel built
+Ordinary branch pushes run Linux kernel tests, Clippy and desktop tests, without
+packaging installers or starting Windows/Android jobs. This is development
+feedback, not release validation. Android-only and Windows-specific regressions
+require full validation; a green branch run does not cover those platforms.
+
+Valid `v*` release tags and every `workflow_dispatch` run perform full validation:
+native and desktop suites on Windows/Linux, all Android instrumentation shards,
+all three packages and bindings parity. Tags also publish a GitHub Release.
+Manual runs on branches do not publish a Release; `dry_run_release` checks the
+collected packages. Tag pushes bypass branch path filters, and manual runs
+force full validation even for tagged commits or documentation-only changes.
+
+Android caches both shipped ABIs and their matching generated Kotlin bindings
+as one exact entry keyed by native sources, contracts, build scripts/workflow,
+app build configuration, Rust/NDK versions and host platform. Build outputs are
+excluded from the source hash. There are no fallback keys. Missing entries
+compile normally; both ABIs and bindings must exist before saving, and saving
+happens before app compilation/testing so failures do not discard valid native
+compilation. Tests still execute on every full run. Large cross-build trees are
+deleted before the emulator starts to preserve disk space.
+
+GitHub caches are branch scoped: manual validation on `main` can seed a cache
+that later tags read; repeated manual runs on a CI branch can reuse that branch's
+cache. A cache created only on one tag is not available to another tag. Cold
+builds remain supported, and no additional full run is scheduled just to warm
+a cache. See [cache scope](https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows#restrictions-for-accessing-a-cache).
+
+Push a release commit and its tag **together**:
+
+```text
+git push --atomic origin main refs/tags/v<MAJOR>.<MINOR>.<PATCH>
+```
+
+GitHub creates separate branch and tag workflow runs. The small **Build plan**
+job checks tags on the event commit; a valid release tag suppresses the branch
+run's expensive jobs, leaving the tag run to build, test and publish once.
+Both annotated and lightweight tags work. A tag pushed later cannot prevent
+work that the branch run has already started. An invalid release tag fails
+version validation and does not suppress the branch build.
+
+New qualifying pushes cancel older builds on the same branch. Release tags
+and manual runs have separate concurrency groups, so branch pushes cannot
+cancel them. See GitHub's [path-filter and concurrency rules](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+
+Validate routing locally with the standard-library tests (no app build needed
+for a change confined to workflow routing):
+
+```text
+python -B -m unittest discover -s .github/scripts -p test_build_route.py -v
+```
+
+The runner OS families are explicit (`windows-2025`, `ubuntu-24.04`) and Rust
+is pinned in `GILUNE_RUST_VERSION`. Runner image patches and Android system
+images can still change: retain tool versions, device fingerprint and the
+resolved Android test dependency graph with the run.
+
+Desktop tests run through `.github/scripts/run_checked.py` with a 20-minute
+wall-clock deadline and `--no-daemon`, making their JVMs descendants of the
+watched command. On expiry the watchdog captures owned JVM thread dumps before
+stopping that process tree, and returns failure. Reports and diagnostics upload
+even on failure. Validate the watchdog with `test_run_checked.py`.
+
+With `GILUNE_CI=1`, JVM test tasks cannot reuse cached test results or be
+skipped as up to date. Dependency and compilation caches remain enabled.
+For local repetition evidence use `--no-build-cache` and clean the test task's
+outputs before each run; inspect the log for actual execution. `FROM-CACHE`
+is not another passing runtime observation.
+
+Android builds its APKs once, then `.github/scripts/test-android.sh` executes
+three disjoint instrumentation shards in separate processes. It retains each
+shard's results and device log, continues to collect coverage from the other
+shards after a failure, and returns failure if any shard fails. No shard is
+retried. The activity-recreation tests remain in the suite. A full unsharded
+local run is also required when investigating lifecycle or test-order failures.
+`test_android_shards.py` verifies report preservation and failure propagation.
+
+UI test resources belong to the outer `UiTestResources` rule: the inner Compose
+rule disposes the UI first, then application jobs are cancelled and joined,
+native handles close, and temporary vaults are removed. Do not close a kernel
+while a job may still be using it. The original test error must survive cleanup
+errors. Use `LocalQueryDispatcher` to hold query work deliberately in timing
+tests rather than adding sleeps. The Android runner records Java thread IDs
+and the active test on a process exception; desktop completion diagnostics are
+enabled by `GILUNE_CI=1` and omit document contents.
+
+- **Windows** (`windows-2025`) → **MSI**. Kernel built
   `--release --features whisper`, `cargo test --workspace`, then the
   desktop suite against that same release binary
   (`-Pgilune.kernel.profile=release`) so the tests load what the
   installer will carry, then `packageReleaseMsi`. The Compose plugin
   fetches its own WiX 3, so nothing is assumed of the image.
-- **Linux** (`ubuntu-latest`) → **DEB**. The same, plus
+- **Linux** (`ubuntu-24.04`) → **DEB**. The same, plus
   `cargo clippy --workspace --all-targets -- -D warnings` — once, on one
   platform, because it is the same source either side. The Compose UI
   tests run under `xvfb-run` with `SKIKO_RENDER_API=SOFTWARE`: a display
   and no GPU.
-- **Android** (`ubuntu-latest`) → **APK**. `gilune-ffi` cross-compiled
+- **Android** (`ubuntu-24.04`) → **APK**. `gilune-ffi` cross-compiled
   with whisper for `arm64-v8a` and `x86_64` by
   `.github/scripts/build-android.sh`, which is the Linux counterpart of
   `kernel/scripts/build-android.ps1` and does not replace it. The NDK is
@@ -221,5 +313,5 @@ unsigned.
   still need hardware. Model/clip-dependent speech tests remain opt-in
   and report skips when their inputs are absent.
 - **No macOS**, and no Linux format but the DEB.
-- **Building is not running.** A green pipeline says the three packages
+- **Building is not running.** A green full-validation pipeline says the three packages
   build and the suites pass, not that a package installs and starts.

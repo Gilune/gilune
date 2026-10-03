@@ -24,7 +24,9 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 fn fixture_copy() -> tempfile::TempDir {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v4-vault");
+    let source = std::env::var_os("GILUNE_TEST_REPOSITORY")
+        .map(|root| PathBuf::from(root).join("kernel/crates/gilune-cli/tests/fixtures/v4-vault"))
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/v4-vault"));
     let dir = tempfile::tempdir().expect("tempdir");
     copy_tree(&source, dir.path());
     dir
@@ -43,7 +45,7 @@ fn copy_tree(from: &Path, to: &Path) {
 }
 
 fn cli(vault: &Path, crashpoint: Option<&str>, args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gilune-cli"));
+    let mut cmd = Command::new(support::cli());
     cmd.arg("--vault").arg(vault).args(args);
     match crashpoint {
         Some(point) => cmd.env("GILUNE_CRASHPOINT", point),
@@ -238,3 +240,5 @@ fn markdown_files(root: &Path) -> Vec<(String, Vec<u8>)> {
     found.sort();
     found
 }
+
+mod support;

@@ -49,7 +49,6 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.ComposeContentTestRule
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
@@ -74,7 +73,7 @@ class Ms1ImeSpikeTest(private val reveal: Reveal) {
     /// in, not the shape of the offset table this measures.
     enum class Reveal { AlwaysGlyph, CaretLineRaw }
 
-    private val rule: ComposeContentTestRule = createComposeRule()
+    private val rule: ComposeContentTestRule = createDeviceComposeRule()
 
     /// [Ms1InputSessionRule] must be the OUTER rule: the device's input
     /// methods have to be in the right state before the Compose rule launches

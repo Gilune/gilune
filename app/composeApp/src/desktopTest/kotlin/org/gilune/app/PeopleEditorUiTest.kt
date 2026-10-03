@@ -14,18 +14,21 @@ import androidx.compose.ui.text.input.TextFieldValue
 import kotlinx.coroutines.*
 import org.gilune.plugins.people.*
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.nio.file.Files
 import kotlin.test.*
 import uniffi.gilune_ffi.*
 
 @OptIn(ExperimentalTestApi::class)
 class PeopleEditorUiTest {
-    @get:Rule val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private fun fixture(run: (GiluneState, Gilune) -> Unit) {
-        val root = Files.createTempDirectory("gilune-people-ui").toFile()
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        Gilune.open(root.path).use { kernel ->
+        val root = resources.directory("gilune-people-ui")
+        val scope = resources.scope
+        resources.own(Gilune.open(root.path)).let { kernel ->
             BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(kernel)
             BUNDLED_PLUGIN_EXTENSIONS.registerIndexers(kernel)
             BUNDLED_PLUGIN_EXTENSIONS.initializePages(kernel)
@@ -34,7 +37,7 @@ class PeopleEditorUiTest {
             val state = GiluneState(root.path, scope)
             state.gilune.value = kernel
             state.plugins.addAll(kernel.plugins())
-            try { run(state, kernel) } finally { compose.setContent {}; scope.cancel() }
+            run(state, kernel)
         }
     }
 
@@ -123,7 +126,10 @@ class PeopleEditorUiTest {
         compose.onNodeWithText("Preview undo").performClick()
         waitText("Apply reviewed changes / resume")
         compose.onNodeWithText("Apply reviewed changes / resume").performClick()
-        compose.waitUntil(10_000) { root.resolve("note.md").readText() == "owner: @alice.smith" }
+        // Refactoring captures the old inode before publishing its replacement.
+        // Read only after the operation finishes, not inside that publication gap.
+        waitText("Preview undo")
+        assertEquals("owner: @alice.smith", root.resolve("note.md").readText())
         assertTrue(kernel.refactoringPlans().size >= 2)
     }
 }

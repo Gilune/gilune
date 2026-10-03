@@ -36,7 +36,6 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -61,13 +60,14 @@ class MobileAgendaTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
 
-    private val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createDeviceComposeRule()
 
     // A failure during activity destruction can hide the test body's
     // original exception. Log that exception before Compose's rule closes
     // the activity, so the CI logcat retains both failures.
     @get:Rule
-    val rules: RuleChain = RuleChain.outerRule(compose).around(object : TestWatcher() {
+    val rules: RuleChain = RuleChain.outerRule(resources).around(compose).around(object : TestWatcher() {
         override fun failed(error: Throwable, description: Description) {
             Log.e("GiluneTest", "${description.displayName} failed before activity cleanup", error)
         }
@@ -169,7 +169,7 @@ class MobileAgendaTest {
     /// show: a ticked one and one past the horizon. Dates are relative to
     /// the day the test runs, so nothing here rots.
     private fun agendaVault(): GiluneState {
-        val vault = IndexedVault("gilune-mobile-agenda")
+        val vault = resources.indexed("gilune-mobile-agenda")
         val now = LocalDate.now()
         vault.write(
             "agenda.md",
@@ -187,7 +187,7 @@ class MobileAgendaTest {
             - [ ] far away due:${now.plusDays(30)}
             """.trimIndent(),
         )
-        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, resources.scope)
         // The agenda is a query now (ADR 0020 § 2.4).
         state.gilune.value = vault.gilune
         return state
@@ -242,9 +242,9 @@ class MobileAgendaTest {
 
     /// A vault with no task line anywhere in it.
     private fun proseOnlyVault(): GiluneState {
-        val vault = IndexedVault("gilune-empty-agenda")
+        val vault = resources.indexed("gilune-empty-agenda")
         vault.write("prose.md", "# Nothing\n\njust words\n")
-        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, resources.scope)
         state.gilune.value = vault.gilune
         return state
     }
@@ -362,13 +362,13 @@ class MobileAgendaTest {
     /// here for one to fix.
     @Test
     fun anAgendaWhoseTasksAreAllDoneOrFarOffSaysSoInstead() {
-        val vault = IndexedVault("gilune-none-open")
+        val vault = resources.indexed("gilune-none-open")
         val now = LocalDate.now()
         vault.write(
             "done.md",
             "# Things\n\n- [x] already done due:$now\n- [ ] far away due:${now.plusDays(30)}\n",
         )
-        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(vault.dir, resources.scope)
         state.gilune.value = vault.gilune
         state.plugins.add(installedTasksPlugin())
         showAgenda(state)

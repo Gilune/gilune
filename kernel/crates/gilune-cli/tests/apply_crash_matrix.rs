@@ -15,7 +15,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 fn cli(vault: &Path, crashpoint: Option<&str>, args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gilune-cli"));
+    let mut cmd = Command::new(support::cli());
     cmd.arg("--vault").arg(vault).args(args);
     match crashpoint {
         Some(point) => cmd.env("GILUNE_CRASHPOINT", point),
@@ -182,3 +182,5 @@ fn recovery_refuses_to_record_promoted_bytes_that_are_not_the_declared_content()
     );
     assert_eq!(store.status().expect("status").blobs_ready, 0);
 }
+
+mod support;

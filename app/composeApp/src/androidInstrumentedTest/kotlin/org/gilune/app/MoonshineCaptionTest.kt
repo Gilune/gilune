@@ -32,8 +32,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.captureToImage
-import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.platform.app.InstrumentationRegistry
 import kotlinx.coroutines.flow.first
@@ -50,7 +50,7 @@ import kotlin.test.assertTrue
 
 class MoonshineCaptionTest {
     @get:Rule
-    val rule = createComposeRule()
+    val rule = createDeviceComposeRule()
 
     private val context = InstrumentationRegistry.getInstrumentation().targetContext
 
@@ -535,6 +535,7 @@ class MoonshineCaptionTest {
                 // A screenshot caught it; this is the assertion that
                 // would have.
                 if (state.live.isNotBlank()) {
+                    rule.waitUntil(5_000) { rule.onNodeWithTag("caption-live").isDisplayed() }
                     rule.onNodeWithTag("caption-live").assertIsDisplayed()
                 }
                 val image = rule.onNodeWithTag("caption").captureToImage()

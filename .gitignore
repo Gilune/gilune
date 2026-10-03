@@ -4,3 +4,7 @@ app/.kotlin/
 
 # Per-target UniFFI output belongs to the kernel binding module.
 app/kernelBindings/src/*Main/generated/
+
+# Standalone Windows artifact validation uses Gradle without the app project.
+.github/windows-tests/.gradle/
+.github/windows-tests/build/

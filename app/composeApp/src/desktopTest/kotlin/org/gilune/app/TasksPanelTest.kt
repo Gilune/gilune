@@ -11,6 +11,7 @@ import org.gilune.plugins.tasks.tasksSettingsDocument
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -20,9 +21,10 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
-import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import org.junit.Rule
+import org.junit.rules.RuleChain
 import java.time.LocalDate
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,8 +37,9 @@ class TasksPanelTest {
         compose.waitUntil(5_000) { compose.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
     }
 
-    @get:Rule
-    val compose = createComposeRule()
+    private val resources = UiTestResources()
+    private val compose = createComposeRule()
+    @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private val today = LocalDate.of(2026, 8, 31)
 
@@ -234,7 +237,7 @@ class TasksPanelTest {
     /// the day the test runs, so nothing here rots.
     private fun agendaVault(): GiluneState {
         val now = LocalDate.now()
-        val indexed = IndexedVault("gilune-agenda")
+        val indexed = resources.indexed("gilune-agenda")
         indexed.write(
             "agenda.md",
             """
@@ -248,7 +251,7 @@ class TasksPanelTest {
             - [ ] far away due:${now.plusDays(30)}
             """.trimIndent(),
         )
-        val state = GiluneState(indexed.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(indexed.dir, resources.scope)
         // The panel is a query now (ADR 0020 § 2.4), so it needs the
         // handle that answers it.
         state.gilune.value = indexed.gilune
@@ -301,9 +304,9 @@ class TasksPanelTest {
 
     @Test
     fun aVaultWithNothingOpenSaysSoRatherThanShowingEmptyHeadings() {
-        val indexed = IndexedVault("gilune-agenda-empty")
+        val indexed = resources.indexed("gilune-agenda-empty")
         indexed.write("prose.md", "no checkboxes here")
-        val state = GiluneState(indexed.dir, CoroutineScope(Dispatchers.Default))
+        val state = GiluneState(indexed.dir, resources.scope)
         state.gilune.value = indexed.gilune
         state.plugins.add(installedTasksPlugin())
         showPanel(state)
@@ -318,18 +321,20 @@ class TasksPanelTest {
     // The rail: the contributed tab, and what its off switch takes away
     // ------------------------------------------------------------------
 
-    private fun showRail(state: GiluneState, tree: TreeState) {
+    private fun showRail(state: GiluneState, tree: TreeState, dispatcher: CoroutineDispatcher = Dispatchers.IO) {
         compose.setContent {
-            GiluneTheme(dark = false) {
-                Box(Modifier.fillMaxSize()) {
-                    RailPanels(
-                        state = state,
-                        tree = tree,
-                        searchFocus = FocusRequester(),
-                        onOpen = {},
-                        onCreateNote = {},
-                        modifier = Modifier.fillMaxSize(),
-                    )
+            CompositionLocalProvider(LocalQueryDispatcher provides dispatcher) {
+                GiluneTheme(dark = false) {
+                    Box(Modifier.fillMaxSize()) {
+                        RailPanels(
+                            state = state,
+                            tree = tree,
+                            searchFocus = FocusRequester(),
+                            onOpen = {},
+                            onCreateNote = {},
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    }
                 }
             }
         }
@@ -340,13 +345,19 @@ class TasksPanelTest {
         val state = agendaVault()
         state.plugins.add(installedTasksPlugin())
         val tree = TreeState()
-        showRail(state, tree)
+        val queries = HeldQueries()
+        showRail(state, tree, queries)
         compose.waitForIdle()
 
         compose.onNodeWithContentDescription("Tasks").performClick()
         compose.waitForIdle()
 
         assertEquals(RailPanel(TASKS_RAIL_PANEL), tree.railPanel)
+        compose.waitUntil(5_000) { queries.pending.isNotEmpty() }
+        compose.onNodeWithText("Searching…").assertIsDisplayed()
+        compose.onNodeWithText("today (1)").assertDoesNotExist()
+        queries.completeNext()
+        awaitText("today (1)")
         compose.onNodeWithText("today (1)").assertIsDisplayed()
     }
 

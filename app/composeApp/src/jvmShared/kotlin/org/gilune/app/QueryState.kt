@@ -17,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.time.LocalDate
@@ -24,8 +25,10 @@ import uniffi.gilune_ffi.GiluneException
 
 data class QueryWork<T>(val value: T? = null, val loading: Boolean = true, val error: String? = null)
 
-internal suspend fun <T> executeQuery(load: () -> T): QueryWork<T> = try {
-    QueryWork(value = withContext(Dispatchers.IO) { load() }, loading = false)
+internal val LocalQueryDispatcher = androidx.compose.runtime.staticCompositionLocalOf<CoroutineDispatcher> { Dispatchers.IO }
+
+internal suspend fun <T> executeQuery(dispatcher: CoroutineDispatcher = Dispatchers.IO, load: () -> T): QueryWork<T> = try {
+    QueryWork(value = withContext(dispatcher) { load() }, loading = false)
 } catch (cancelled: CancellationException) {
     throw cancelled
 } catch (error: Exception) {
@@ -42,10 +45,11 @@ private fun queryFailure(error: Exception): String = when (error) {
 
 @Composable
 internal fun <T> rememberQueryWork(vararg keys: Any?, load: () -> T): State<QueryWork<T>> {
+    val dispatcher = LocalQueryDispatcher.current
     // A new key gets new state immediately: yesterday's rows cannot be shown
     // under today's query while LaunchedEffect is awaiting its first turn.
     return androidx.compose.runtime.key(keys.toList()) {
-        produceState(QueryWork<T>()) { value = executeQuery(load) }
+        produceState(QueryWork<T>()) { value = executeQuery(dispatcher, load) }
     }
 }
 

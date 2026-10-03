@@ -25,7 +25,7 @@ use std::process::{Command, Output};
 const AFTER_THE_LEASE: &str = "9999999999999";
 
 fn cli(vault: &Path, crashpoint: Option<&str>, args: &[&str]) -> Output {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gilune-cli"));
+    let mut cmd = Command::new(support::cli());
     cmd.arg("--vault").arg(vault).args(args);
     match crashpoint {
         Some(point) => cmd.env("GILUNE_CRASHPOINT", point),
@@ -337,3 +337,5 @@ fn nothing_the_route_does_can_block_a_capture() {
     while route(dir.path())["claimed"] == true {}
     assert_one_transcript_for(dir.path(), &source_id);
 }
+
+mod support;

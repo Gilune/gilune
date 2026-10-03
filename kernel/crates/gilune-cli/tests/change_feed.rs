@@ -12,7 +12,7 @@ use std::path::Path;
 use std::process::{Child, Command, Output};
 
 fn cli(vault: &Path, args: &[&str]) -> Output {
-    let out = Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    let out = Command::new(support::cli())
         .arg("--vault")
         .arg(vault)
         .args(args)
@@ -32,7 +32,7 @@ fn json(out: &Output) -> serde_json::Value {
 }
 
 fn spawn(vault: &Path, args: &[&str]) -> Child {
-    Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    Command::new(support::cli())
         .arg("--vault")
         .arg(vault)
         .args(args)
@@ -70,7 +70,7 @@ fn a_person_can_read_the_feed_and_resume_from_where_they_stopped() {
 
     // And a cursor this vault cannot answer from fails rather than
     // being answered with somebody else's history.
-    let refused = Command::new(env!("CARGO_BIN_EXE_gilune-cli"))
+    let refused = Command::new(support::cli())
         .arg("--vault")
         .arg(dir.path())
         .args(["changes", "--since", "another-vaults-epoch:1"])
@@ -166,3 +166,5 @@ fn the_sequence_is_dense_and_unique_when_processes_race_the_counter() {
         "{page}"
     );
 }
+
+mod support;
