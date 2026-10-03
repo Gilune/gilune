@@ -117,6 +117,14 @@ class WindowsFileVersionTest(unittest.TestCase):
             self.assertNotIn(files["runtime.dll"]["File"], hashes)
             self.assertIn(files["unversioned.dll"]["File"], hashes)
             self.assertIn(files["readme.txt"]["File"], hashes)
+            conditions = {row["Condition"] for row in table("LaunchCondition")}
+            self.assertIn(
+                'NOT (UPGRADINGPRODUCTCODE ~= "{AAE0D767-8197-38BD-8519-19579879B9FE}")',
+                conditions)
+            sequence = {row["Action"]: row for row in table("InstallExecuteSequence")}
+            self.assertEqual("", sequence["LaunchConditions"]["Condition"])
+            self.assertLess(int(sequence["LaunchConditions"]["Sequence"]),
+                            int(sequence["InstallInitialize"]["Sequence"]))
 
 
 if __name__ == "__main__":

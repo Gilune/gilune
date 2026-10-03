@@ -118,8 +118,34 @@ rows, including a distinct product version, a versioned DLL and an unversioned D
 The candidate workflow requires that regression after installing its tools, so it
 cannot silently skip on the packaging runner. Repacking the full existing payload
 also verified all 366 MSI file rows, including 99 versioned binaries. Evidence is
-under `app/build/installer-upgrade/`. A hosted upgrade of the corrected package
-still supplies the final lifecycle gate.
+under `app/build/installer-upgrade/`.
+
+[Run 37131500573](https://github.com/Gilune/gilune/actions/runs/37131500573), at
+`4d9a1e6`, confirmed that clean installation, repair, upgrade and both application
+launches now pass. Kernel and desktop results remained 605 passed/24 ignored and
+706 cases/five skipped, with no test failures. It then caught a separate failure:
+the published v1.0.3 MSI permits downgrades and removed the candidate successfully.
+Its log identifies the incoming product as `{AAE0D767-8197-38BD-8519-19579879B9FE}`.
+
+The candidate now refuses removal when Windows Installer's
+[`UPGRADINGPRODUCTCODE`](https://learn.microsoft.com/en-us/windows/win32/msi/upgradingproductcode)
+identifies that legacy MSI. This uses an early launch condition in the installed
+package; the incoming v1.0.3 package's downgrade policy cannot be retroactively
+changed. Normal uninstall has no such property, and future products have different
+codes. This compatibility guard covers the listed published product, while
+`MajorUpgrade` continues to reject installing the new package over newer versions.
+The real-MSI regression verifies that the guard is present and runs before
+`InstallInitialize`, including during removal. Hosted lifecycle validation remains
+required. Installer checks now precede the long runtime suites so a packaging
+failure stops earlier without weakening the successful candidate's test gates.
+
+The second run restored Rust, cross-tool and Gradle caches. Compilation/packaging
+fell from 19m 25s to **4m 39s**: native compilation from 14m 42s to 1m 31s, and
+application/test compilation from 2m 34s to 29s. Windows validation took 18m 04s,
+including 13m 54s of kernel execution; the two jobs totalled **22m 43s**. These
+compare a cold run with a warm packaging-only revision, not an app-source change
+or a complete release. They are runner durations, not billing figures, and both
+runs still failed a lifecycle gate.
 
 ## Local evidence
 

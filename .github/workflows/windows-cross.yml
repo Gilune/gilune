@@ -123,6 +123,15 @@ jobs:
         with:
           name: windows-cross-candidate
           path: app/build/windows-cross
+      # Installer checks are short and catch packaging regressions before the
+      # lengthy runtime suites. All suites still gate a successful candidate.
+      - name: Download the existing installer for upgrade testing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.0.3 --repo Gilune/gilune --pattern '*.msi' --dir app/build/windows-cross/previous
+      - name: Clean install, repair, upgrade, downgrade rejection and uninstall
+        shell: pwsh
+        run: .github/scripts/test-windows-installer.ps1 -Artifacts app/build/windows-cross
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -140,13 +149,6 @@ jobs:
         run: |
           python .github/scripts/run_checked.py --timeout 1200 --output app/build/windows-cross/results/desktop-watchdog -- app/gradlew.bat -p .github/windows-tests test "-Partifacts=$pwd/app/build/windows-cross"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Download the existing installer for upgrade testing
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download v1.0.3 --repo Gilune/gilune --pattern '*.msi' --dir app/build/windows-cross/previous
-      - name: Clean install, repair, upgrade, downgrade rejection and uninstall
-        shell: pwsh
-        run: .github/scripts/test-windows-installer.ps1 -Artifacts app/build/windows-cross
       - name: Windows validation evidence
         if: always()
         uses: actions/upload-artifact@v4
