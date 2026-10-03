@@ -36,6 +36,8 @@ jobs:
     env:
       VERSION: ${{ inputs.version }}
       LIBCLANG_PATH: /usr/lib/llvm-19/lib
+      # Separate target roots avoid uploading/cleaning the cross tree twice.
+      GILUNE_WINDOWS_BUILD_ROOT: ${{ github.workspace }}/app/build/windows-cross-target
     steps:
       - uses: actions/checkout@v4
       - name: Validate candidate version
@@ -76,7 +78,10 @@ jobs:
         with:
           workspaces: |
             kernel -> target
-            kernel -> target/windows-cross
+            kernel -> ../app/build/windows-cross-target
+          # rust-cache removes loose files inside target directories. Keep
+          # the recipe stamp beside the target so warm restores retain it.
+          cache-directories: ${{ env.GILUNE_WINDOWS_BUILD_ROOT }}.recipe.sha256
           key: windows-cross-llvm19-${{ hashFiles('.github/scripts/build-windows-linux.sh') }}
           cache-on-failure: true
       - name: Pinned cross compiler and Windows Java

@@ -19,6 +19,8 @@ on:
       - '!contracts/**/README.md'
       - '.github/workflows/**'
       - '.github/scripts/**'
+      - '.github/windows-launcher/**'
+      - '.github/windows-tests/**'
       - '.gitattributes'
       - 'LICENSE'
   workflow_dispatch:
@@ -74,6 +76,7 @@ jobs:
     name: Build plan
     if: ${{ !inputs.windows_cross_only }}
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       build: ${{ steps.route.outputs.build }}
       full: ${{ steps.route.outputs.full }}
@@ -147,6 +150,7 @@ jobs:
     needs: version
     if: needs.version.outputs.full == 'true'
     runs-on: windows-2025
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -195,12 +199,13 @@ jobs:
       - name: Build the kernel with local transcription
         shell: bash
         working-directory: kernel
-        run: cargo build --release -p gilune-ffi --features whisper
+        # Bindgen runs in the host debug profile below; no release CLI is shipped.
+        run: cargo build --locked --release -p gilune-ffi --lib --features whisper
 
       - name: Kernel test suite
         shell: bash
         working-directory: kernel
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Generate the desktop bindings
         shell: bash
@@ -209,7 +214,7 @@ jobs:
         # --no-format so the output is the generator's own bytes rather
         # than whatever formatter happens to be on the machine.
         run: |
-          cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+          cargo run --locked -p gilune-ffi --bin uniffi-bindgen -- generate \
             --library target/release/gilune_ffi.dll --language kotlin \
             --out-dir ../app/kernelBindings/src/desktopMain/generated --no-format
 
@@ -222,8 +227,9 @@ jobs:
       - name: Desktop test suite
         shell: bash
         working-directory: app
-        # Against the same release binary the installer will carry.
-        run: python ../.github/scripts/run_checked.py --timeout 1200 -- ./gradlew.bat --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release
+        # Use the package version during testing too, so packaging reuses the
+        # tested classes instead of regenerating AppVersion and recompiling.
+        run: python ../.github/scripts/run_checked.py --timeout 1200 -- ./gradlew.bat --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
 
       - name: Desktop test results
         if: always()
@@ -265,6 +271,7 @@ jobs:
     needs: version
     if: needs.version.outputs.build == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -315,22 +322,23 @@ jobs:
 
       - name: Build the kernel with local transcription
         working-directory: kernel
-        run: cargo build --release -p gilune-ffi --features whisper
+        # Bindgen runs in the host debug profile below; no release CLI is shipped.
+        run: cargo build --locked --release -p gilune-ffi --lib --features whisper
 
       - name: Kernel test suite
         working-directory: kernel
-        run: cargo test --workspace
+        run: cargo test --locked --workspace
 
       - name: Clippy
         working-directory: kernel
         # 09-engineering-conventions: clippy clean with warnings denied in
         # CI. Once, on one platform — it is the same source either side.
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
       - name: Generate the desktop bindings
         working-directory: kernel
         run: |
-          cargo run -p gilune-ffi --bin uniffi-bindgen -- generate \
+          cargo run --locked -p gilune-ffi --bin uniffi-bindgen -- generate \
             --library target/release/libgilune_ffi.so --language kotlin \
             --out-dir ../app/kernelBindings/src/desktopMain/generated --no-format
 
@@ -346,7 +354,7 @@ jobs:
         env:
           # No GPU behind xvfb, and Skiko's default is to look for one.
           SKIKO_RENDER_API: SOFTWARE
-        run: python3 ../.github/scripts/run_checked.py --timeout 1200 -- xvfb-run -a ./gradlew --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release
+        run: python3 ../.github/scripts/run_checked.py --timeout 1200 -- xvfb-run -a ./gradlew --no-daemon :composeApp:desktopTest -Pgilune.kernel.profile=release ${{ needs.version.outputs.gradle_args }}
 
       - name: Desktop test results
         if: always()
@@ -390,8 +398,20 @@ jobs:
     needs: version
     if: needs.version.outputs.full == 'true'
     runs-on: ubuntu-24.04
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
+
+      - name: Restore Android native libraries and matching bindings
+        id: android-native
+        uses: actions/cache/restore@v4
+        with:
+          # Check finished outputs before installing native build tools.
+          # No fallback keys: stale binaries must never replace compilation.
+          key: android-native-v1-ubuntu24-${{ runner.arch }}-rust${{ env.GILUNE_RUST_VERSION }}-ndk${{ env.GILUNE_NDK_VERSION }}-${{ hashFiles('kernel/**', '!kernel/target/**', 'contracts/**', '.github/scripts/build-android.sh', '.github/workflows/build.yml', 'app/composeApp/build.gradle.kts') }}
+          path: |
+            app/composeApp/src/androidMain/jniLibs
+            app/kernelBindings/src/androidMain/generated
 
       - uses: actions/setup-java@v4
         with:
@@ -404,21 +424,26 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/heads/ci/') }}
 
       - name: Rust toolchain
+        if: steps.android-native.outputs.cache-hit != 'true'
         run: |
           rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
           rustup default "$GILUNE_RUST_VERSION"
           rustc -vV
           java -version
-          rustup target add aarch64-linux-android x86_64-linux-android
+          # build-android.sh installs the targets it actually builds.
           rustc --version
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.android-native.outputs.cache-hit != 'true'
         with:
           workspaces: kernel
-          # Keep compiled dependencies when a later UI test fails.
+          # Cross-build trees live in RUNNER_TEMP and the host target is
+          # deleted for emulator disk space. Cache registry downloads only.
+          cache-targets: false
           cache-on-failure: true
 
       - name: Build dependencies
+        if: steps.android-native.outputs.cache-hit != 'true'
         run: |
           # Use only Ubuntu's signed sources. Unrelated runner repositories
           # (Chrome, Microsoft, etc.) must not gate these Ubuntu packages.
@@ -441,17 +466,6 @@ jobs:
             "build-tools;36.0.0" \
             "build-tools;35.0.0" \
             "ndk;${GILUNE_NDK_VERSION}"
-
-      - name: Restore Android native libraries and matching bindings
-        id: android-native
-        uses: actions/cache/restore@v4
-        with:
-          # Cache finished outputs, not multi-GB temporary cross-build trees.
-          # No fallback keys: stale binaries must never replace compilation.
-          key: android-native-v1-ubuntu24-${{ runner.arch }}-rust${{ env.GILUNE_RUST_VERSION }}-ndk${{ env.GILUNE_NDK_VERSION }}-${{ hashFiles('kernel/**', '!kernel/target/**', 'contracts/**', '.github/scripts/build-android.sh', '.github/workflows/build.yml', 'app/composeApp/build.gradle.kts') }}
-          path: |
-            app/composeApp/src/androidMain/jniLibs
-            app/kernelBindings/src/androidMain/generated
 
       - name: Cross-compile the kernel for both ABIs
         if: steps.android-native.outputs.cache-hit != 'true'
@@ -497,8 +511,10 @@ jobs:
             du -sh "$RUNNER_TEMP/gilune-android"
             rm -rf -- "$RUNNER_TEMP/gilune-android"
           fi
-          # Bindgen has finished too; all later steps use staged outputs.
-          cargo clean --manifest-path kernel/Cargo.toml
+          # Bindgen has finished too; a native cache hit has no host target.
+          if [ -d kernel/target ]; then
+            cargo clean --manifest-path kernel/Cargo.toml
+          fi
           # This disposable Android runner does not use the preinstalled
           # .NET SDK. Leave room for both the system image and guest data.
           if [ -d /usr/share/dotnet ]; then
@@ -600,6 +616,7 @@ jobs:
     name: Bindings parity
     needs: [windows, linux, android]
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -629,6 +646,7 @@ jobs:
     needs: [version, windows, linux, android, bindings]
     if: needs.version.outputs.full == 'true' && (needs.version.outputs.is_release == 'true' || inputs.dry_run_release)
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

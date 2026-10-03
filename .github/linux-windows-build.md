@@ -47,6 +47,51 @@ The tool's CRT selector takes the manifest ID, not the header version: a populat
 cache hid an invalid initial selector. Validation therefore includes fetching the
 pinned SDK/CRT into an empty cache. A warm local compile alone is insufficient.
 
+## Efficiency recheck, 3 October 2026
+
+The GitHub cache API returned no saved caches on this date. The first resumed run
+must therefore be budgeted as cold. Cache entries from a review branch are not
+available to subsequent release tags; entries from the default branch are shared.
+This is a [GitHub cache scope restriction](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching#restrictions-for-accessing-a-cache),
+so a successful candidate run is not evidence that a later release will be warm.
+
+Re-reading [run 34386963569](https://github.com/Gilune/gilune/actions/runs/34386963569)
+confirmed 22m 02s Windows, 22m 58s Linux and 40m 08s Android, plus seven seconds
+for routing: **85m 15s summed job time**, not elapsed time or a billing figure.
+Android failed in this reference run. Its native build took 12m 02s; Windows kernel
+tests, including compilation, took 10m 51s. These remain substantial costs that
+cannot be claimed away by moving compilation to Linux.
+
+The local recheck corrected these avoidable costs before another hosted run:
+
+- Desktop testing receives the same version as packaging. Previously a release
+  changed generated `AppVersion.kt` after testing and recompiled the application.
+- Desktop and Android release builds request only the FFI library, avoiding unused
+  release binding-generator executables (including one for each Android ABI).
+  The host binding generator and all runtime suites remain in the workflow.
+- Android restores its exact native-output cache before Rust/libclang setup.
+  A hit skips those tools and compilation. Its Cargo cache stores downloads only:
+  temporary native build trees are removed to make room for the emulator, before
+  the cache action saves. Android SDK/NDK packages remain available for APK tasks.
+- The Windows candidate uses separate host and cross target directories. Its
+  recipe stamp is cached beside the cross target, because
+  [rust-cache cleanup](https://github.com/Swatinem/rust-cache/blob/v2/src/cleanup.ts)
+  removes loose files inside target directories. Previously cleanup would remove
+  the stamp and force Whisper's C++ rebuild after a warm restore.
+- The main workflow has explicit job deadlines, and its path filters include the
+  Windows launcher and standalone test project. Rust commands enforce the lockfile.
+
+Validation: both workflows pass actionlint; both changed build scripts pass Bash
+syntax checks; all 20 Python CI-script checks pass. The new regression exercises
+cold compilation, simulated cache cleanup/restoration, changed recipes and failed
+compilation without marking a failed recipe reusable. Windows process-control
+checks required running outside the local sandbox. No hosted build was dispatched.
+
+The next hosted validation should use the existing Windows-only candidate input
+below. Its installer lifecycle result still gates replacing the normal Windows
+release job. Compare summed job time on that cold run and a later necessary warm
+run before assigning a savings percentage; this audit does not establish one.
+
 ## Local evidence
 
 All application artifacts below were built in an isolated Ubuntu WSL environment
