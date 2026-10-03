@@ -1,10 +1,43 @@
 # Windows artifacts built on Linux
 
-Implemented as an explicit candidate workflow, `windows-cross.yml`, on 11 September
-2026. A disposable Windows runner now proves installation, upgrade from v1.0.3,
-downgrade rejection and uninstall. Integrating the candidate into the existing
-`build.yml` release route remains a separate change. No candidate is published
-as a release, and ordinary pushes do not run this workflow.
+## Current pipeline: Linux runners only
+
+As of 3 October 2026, every hosted job in `build.yml` and `windows-cross.yml` runs
+on Ubuntu. The normal release pipeline calls `windows-cross.yml` to produce its
+Windows MSI; the original Windows build job and the candidate's Windows validation
+job have both been removed. This replaces the earlier migration plan that kept
+Windows runtime validation mandatory.
+
+Linux produces separate packages for the currently supported targets: a Windows
+x64 MSI, a Linux x64 DEB, and Android APKs containing arm64-v8a and x86_64 libraries.
+These are platform-specific packages built on one host OS, not a single universal
+installer. macOS packaging is not configured by these workflows.
+
+The Linux kernel/desktop suites, Clippy and Android emulator suite remain release
+gates. Windows packaging verifies native versions using a real MSI, enforces the
+application/native bindings hash and emits the same `gilune-windows-msi` and
+`bindings-desktop-windows` artifacts consumed by the existing release and bindings
+parity jobs. Manual full builds without a version use `1.0.0` consistently across
+all packages; tagged releases use their tag version. Ordinary branch pushes still
+run Linux checks without building all installers.
+
+Windows-specific execution, GUI and installer lifecycle checks are no longer
+automatic. The successful `c17cec5` run below is evidence for that exact package,
+not a guarantee for future changes. Future Windows runtime validation must be
+requested separately. The diagnostic scripts remain available; native Windows
+test export is explicitly enabled with `GILUNE_WINDOWS_BUILD_TESTS=1`. Production
+builds omit those unused test executables, test JARs and the large validation bundle.
+
+Local validation: all 23 CI-script tests pass, both workflows pass actionlint, and
+the regression suite checks that every hosted runner is Linux, exercises the actual
+version-selection shell step and verifies that Windows test compilation is opt-in.
+The hosted Linux-only packaging check is pending.
+
+## Earlier Windows validation evidence
+
+The following records describe the migration and verification runs before the
+Windows jobs were removed. Their Windows durations are historical costs, not jobs
+that remain in the current pipeline.
 
 ## Build boundary
 
@@ -167,8 +200,8 @@ The final kernel execution took 16m 25s and desktop execution 4m 48s. Runtime
 variation between these runs is substantial; caches reduce compilation but do
 not remove those tests. The earlier failures also stopped installer validation
 before its final steps, so these totals are not equivalent successful release
-benchmarks. Integrating the route into release builds still requires preserving
-artifact/bindings gates, and these measurements do not prove lower release cost.
+benchmarks. The current Linux-only integration preserves the artifact/bindings
+gates, but these historical measurements do not establish its full release cost.
 Downloaded evidence is under ignored `app/build/installer-final-validation/`,
 with the job metadata and complete log in `app/build/installer-final-run.*`.
 
@@ -231,8 +264,8 @@ billing/spending-limit restriction. It ran zero build steps. The accompanying
 [quick branch run](https://github.com/Gilune/gilune/actions/runs/34608389358) was
 blocked for the same reason. No billing settings were changed.
 
-Run **Windows build on Linux** explicitly at a candidate version greater than
-1.0.3 when validating packaging changes. Before this new workflow reaches the
+Run **Windows build on Linux** explicitly with a numeric MSI version when
+validating packaging changes. Before this new workflow reaches the
 default branch, the existing **Build** workflow can call it from the review branch:
 
 ```sh
@@ -240,13 +273,12 @@ gh workflow run build.yml --ref ci/reliability-review \
   -f windows_cross_only=true -f version=1.0.7
 ```
 
-That input bypasses the normal platform/release jobs, so validating the candidate
-does not also spend an Android/Linux/full-release run. Review both jobs' results and summed
-runner seconds before replacing the old Windows job in `build.yml`. Keep release
-gates and bindings parity dependent on the Windows validation result. No paid
-runner or spending-limit change is required or proposed.
+That input now runs only Linux compilation, packaging and MSI metadata checks.
+It bypasses the normal Linux/Android runtime and release jobs, so it is a focused
+packaging check rather than a full release validation. No Windows runner starts,
+and no release is published. The normal full pipeline retains its Linux/Android
+test gates, bindings parity and required-artifact checks.
 
-Moving compilation should reduce Windows minutes, but this candidate retains the
-full Windows runtime suites. It does not claim the earlier six-minute Windows
-target, and local timings are not hosted billing measurements. Measure a cold
-build, a warm app-only build and a release before accepting a savings figure.
+The current workflow consumes zero hosted Windows minutes. Measure its complete
+Linux release path before assigning a total savings percentage; the historical
+cold and warm candidate timings above included Windows jobs and different coverage.

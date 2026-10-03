@@ -1,7 +1,7 @@
 name: Windows build on Linux
 
-# Prove the replacement before switching the release workflow to it. This
-# workflow is deliberately explicit: ordinary pushes must not add build cost.
+# Reused by the release pipeline and the explicit MSI-only build. Compilation,
+# packaging and MSI metadata checks all run on Linux; no Windows runner is used.
 on:
   workflow_call:
     inputs:
@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Candidate MSI version, greater than 1.0.3 (no release is published)'
+        description: 'MSI version: MAJOR.MINOR.PATCH, with MAJOR at least 1 (no release is published)'
         required: true
         default: '1.0.7'
         type: string
@@ -20,8 +20,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: windows-cross-${{ github.ref }}
-  cancel-in-progress: true
+  group: windows-cross-${{ github.event_name == 'workflow_dispatch' && github.run_id || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/') }}
 
 env:
   GILUNE_CI: '1'
@@ -40,13 +40,12 @@ jobs:
       GILUNE_WINDOWS_BUILD_ROOT: ${{ github.workspace }}/app/build/windows-cross-target
     steps:
       - uses: actions/checkout@v4
-      - name: Validate candidate version
+      - name: Validate scripts and MSI version
         run: |
           python3 -B -m unittest discover -s .github/scripts -p 'test_*.py' -v
           python3 - <<'PY'
           import os, runpy
-          version = runpy.run_path('.github/scripts/package-windows-linux.py')['version'](os.environ['VERSION'])
-          assert tuple(map(int, version.split('.'))) > (1, 0, 3), 'Candidate must upgrade v1.0.3'
+          runpy.run_path('.github/scripts/package-windows-linux.py')['version'](os.environ['VERSION'])
           PY
       - uses: actions/setup-java@v4
         with:
@@ -88,12 +87,12 @@ jobs:
           cache-on-failure: true
       - name: Pinned cross compiler and Windows Java
         run: bash .github/scripts/setup-windows-cross.sh
-      - name: Windows kernel and precompiled Rust tests
+      - name: Windows kernel and bindings
         run: bash .github/scripts/build-windows-linux.sh
-      - name: Windows application and precompiled desktop tests
+      - name: Windows application
         working-directory: app
         run: |
-          ./gradlew :composeApp:exportDesktopBundle :composeApp:exportDesktopTests \
+          ./gradlew :composeApp:exportDesktopBundle \
             -Pgilune.desktop.target=windows-x64 \
             -Pgilune.desktop.bindings="$GITHUB_WORKSPACE/app/build/windows-cross/native/bindings" \
             "-Pgilune.version=$VERSION"
@@ -104,59 +103,15 @@ jobs:
             --native app/build/windows-cross/native --runtime "$WINDOWS_JRE_HOME" \
             --output app/build/windows-cross/package \
             --version "$VERSION" --commit "$GITHUB_SHA"
-          cp -r app/composeApp/build/export/tests app/build/windows-cross/tests
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-cross-candidate
-          path: app/build/windows-cross/
+          name: gilune-windows-msi
+          path: app/build/windows-cross/package/*.msi
           if-no-files-found: error
           retention-days: 7
-
-  windows:
-    name: Run Windows tests and installer lifecycle
-    needs: build
-    runs-on: windows-2025
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: windows-cross-candidate
-          path: app/build/windows-cross
-      # Installer checks are short and catch packaging regressions before the
-      # lengthy runtime suites. All suites still gate a successful candidate.
-      - name: Download the existing installer for upgrade testing
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release download v1.0.3 --repo Gilune/gilune --pattern '*.msi' --dir app/build/windows-cross/previous
-      - name: Clean install, repair, upgrade, downgrade rejection and uninstall
-        shell: pwsh
-        run: .github/scripts/test-windows-installer.ps1 -Artifacts app/build/windows-cross
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-      - uses: gradle/actions/setup-gradle@v4
-        with:
-          cache-read-only: false
-      - name: Kernel suite from Linux-compiled Windows executables
-        run: >-
-          python .github/scripts/run-windows-rust-tests.py
-          --artifacts app/build/windows-cross/rust-tests --repo .
-          --results app/build/windows-cross/results/kernel
-      - name: Desktop suite against the packaged kernel
-        shell: pwsh
-        run: |
-          python .github/scripts/run_checked.py --timeout 1200 --output app/build/windows-cross/results/desktop-watchdog -- app/gradlew.bat -p .github/windows-tests test "-Partifacts=$pwd/app/build/windows-cross"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: Windows validation evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-cross-validation
-          path: |
-            app/build/windows-cross/results
-            .github/windows-tests/build/test-results
-            .github/windows-tests/build/reports
-          if-no-files-found: warn
+          name: bindings-desktop-windows
+          path: app/build/windows-cross/native/bindings
+          if-no-files-found: error
           retention-days: 7

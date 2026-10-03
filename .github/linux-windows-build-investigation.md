@@ -1,5 +1,9 @@
 # Building Gilune for Windows primarily on Linux
 
+**Superseded runner policy, 3 October 2026:** the user requires a Linux-only hosted
+pipeline. The former recommendation below to retain mandatory Windows jobs is no
+longer the current plan. See [the current build pipeline](linux-windows-build.md).
+
 Investigation completed 10 September 2026 against `c429358`.
 Original status on 10 September: source/artifact inspection and feasibility recommendation.
 Implementation update, 11 September: the Linux-built Windows DLL, JVM artifacts,

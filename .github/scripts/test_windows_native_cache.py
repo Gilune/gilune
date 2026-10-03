@@ -31,7 +31,7 @@ class WindowsNativeCacheTest(unittest.TestCase):
 
             # Exercise the real shell orchestration without a compiler/SDK.
             stub("uname", "echo Linux\n")
-            stub("python3", ": # Test export is covered by test_rust_export.py.\n")
+            stub("python3", 'echo export >> "$BUILD_REVIEW_CALLS.tests"\n')
             stub("cargo", '''
 if [[ $1 == clean ]]; then
   echo clean >> "$BUILD_REVIEW_CALLS"
@@ -42,6 +42,8 @@ if [[ $1 == xwin && $2 == build ]]; then
   dest="$CARGO_TARGET_DIR/x86_64-pc-windows-msvc/release"
   mkdir -p "$dest"
   echo library > "$dest/gilune_ffi.dll"
+elif [[ $1 == xwin && $2 == test ]]; then
+  echo compile >> "$BUILD_REVIEW_CALLS.tests"
 elif [[ $1 == run ]]; then
   while [[ $1 != --out-dir ]]; do shift; done
   mkdir -p "$2/uniffi/gilune_ffi"
@@ -67,6 +69,9 @@ fi
 
             run()
             self.assertEqual(["clean"], calls.read_text().splitlines())
+            self.assertFalse(Path(str(calls) + ".tests").exists())
+            self.assertTrue((root / "app/build/windows-cross/native/gilune_ffi.dll").is_file())
+            self.assertTrue((root / "app/build/windows-cross/native/bindings/uniffi/gilune_ffi/gilune_ffi.kt").is_file())
             # rust-cache removes loose target-root files before saving. Model
             # that cleanup, then restore/build with the unchanged recipe.
             for path in target.iterdir():
@@ -74,6 +79,9 @@ fi
                     path.unlink()
             run()
             self.assertEqual(["clean"], calls.read_text().splitlines())
+            run(GILUNE_WINDOWS_BUILD_TESTS="1")
+            self.assertEqual(["compile", "export"], Path(str(calls) + ".tests").read_text().splitlines())
+            run(2, GILUNE_WINDOWS_BUILD_TESTS="invalid")
 
             # A changed recipe must still invalidate the C++ dependency. A
             # failed build must not mark the new recipe as successfully built.

@@ -13,7 +13,7 @@ RELEASE_TAG = re.compile(r"v[1-9][0-9]*\.[0-9]+\.[0-9]+")
 
 def build_route(event, ref, sha, repository="."):
     if event != "push" or not ref.startswith("refs/heads/"):
-        return True, "Release-tag or manual run: build all packages and run all tests."
+        return True, "Release-tag or manual run: build all packages on Linux and run Linux/Android suites."
 
     # Query the event SHA, never the current branch tip (it may have moved).
     # --points-at resolves annotated as well as lightweight tags. A failed
