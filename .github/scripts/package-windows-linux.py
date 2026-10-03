@@ -15,6 +15,9 @@ import uuid
 import xml.etree.ElementTree as ET
 
 UPGRADE_CODE = "c077b799-5193-4ce3-b93a-411c67e29e37"
+# Published jpackage MSIs that explicitly allow downgrades. Their incoming
+# RemoveExistingProducts invokes our cached MSI with this product code.
+LEGACY_DOWNGRADE_PRODUCTS = {"1.0.3": "{AAE0D767-8197-38BD-8519-19579879B9FE}"}
 NAMESPACE = uuid.UUID(UPGRADE_CODE)
 WIX = "http://schemas.microsoft.com/wix/2006/wi"
 REPO = Path(__file__).resolve().parents[2]
@@ -113,6 +116,14 @@ def write_wix(bundle, destination, release):
     node(product, "Package", InstallerVersion="500", Compressed="yes", InstallScope="perMachine")
     node(product, "Media", Id="1", Cabinet="payload.cab", EmbedCab="yes")
     node(product, "MajorUpgrade", DowngradeErrorMessage="A newer version of Gilune is installed.")
+    for legacy_version, product_code in LEGACY_DOWNGRADE_PRODUCTS.items():
+        if tuple(map(int, release.split("."))) > tuple(map(int, legacy_version.split("."))):
+            # MajorUpgrade protects installs of this MSI over newer products.
+            # Also protect this product's removal by an already-published MSI
+            # whose own upgrade table permits downgrades. Ordinary uninstall
+            # has no UPGRADINGPRODUCTCODE; future upgrades have another code.
+            node(product, "Condition", Message="A newer version of Gilune is installed.").text = (
+                f'NOT (UPGRADINGPRODUCTCODE ~= "{product_code}")')
     node(product, "Icon", Id="GiluneIcon", SourceFile=str(bundle / "gilune.ico"))
     node(product, "Property", Id="ARPPRODUCTICON", Value="GiluneIcon")
     top = node(product, "Directory", Id="TARGETDIR", Name="SourceDir")
