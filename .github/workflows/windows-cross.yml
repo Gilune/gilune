@@ -63,11 +63,13 @@ jobs:
           sudo apt-get "${apt_options[@]}" update
           sudo apt-get "${apt_options[@]}" install -y --no-install-recommends \
             clang-19 lld-19 llvm-19 libclang-19-dev cmake ninja-build \
-            pkg-config libssl-dev wixl unzip
+            pkg-config libssl-dev wixl msitools python3-pefile unzip
           echo /usr/lib/llvm-19/bin >> "$GITHUB_PATH"
           rustup toolchain install "$GILUNE_RUST_VERSION" --profile minimal --no-self-update
           rustup default "$GILUNE_RUST_VERSION"
           rustup target add x86_64-pc-windows-msvc
+      - name: Verify native versions in a real MSI
+        run: python3 -B .github/scripts/test_windows_package.py --require-msi-tools -v
       - uses: actions/cache@v4
         with:
           path: |

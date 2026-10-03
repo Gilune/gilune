@@ -30,7 +30,7 @@ in the bundled runtime.
 
 ## Toolchain and cache requirements
 
-- Ubuntu 24.04, LLVM/Clang/lld 19, CMake, Ninja and wixl 0.103.
+- Ubuntu 24.04, LLVM/Clang/lld 19, CMake, Ninja, wixl 0.103, msitools and python3-pefile.
 - Rust 1.98.0 and target `x86_64-pc-windows-msvc`.
 - cargo-xwin 0.23.1, downloaded with a pinned SHA-256.
 - Microsoft CRT manifest ID `14.44.17.14` (header build `14.44.35220`), SDK `10.0.26100`.
@@ -92,6 +92,35 @@ below. Its installer lifecycle result still gates replacing the normal Windows
 release job. Compare summed job time on that cold run and a later necessary warm
 run before assigning a savings percentage; this audit does not establish one.
 
+## Installer upgrade correction, 3 October 2026
+
+The first resumed [candidate run 37124376830](https://github.com/Gilune/gilune/actions/runs/37124376830)
+at `0500323` built the Windows payload on Linux, passed all 605 active kernel tests
+and 706 desktop cases (five skipped), and passed clean installation, repair, launch
+and uninstall. Upgrade from v1.0.3 failed exact payload verification at `Gilune.exe`.
+
+The upgrade log marked 68 components ineligible because a higher-versioned key file
+already existed. The old product was then removed, leaving those files missing.
+Reading the MSI database reproduced the metadata defect locally: `Gilune.exe`,
+`javaw.exe` and `jvm.dll` had empty `File.Version` entries despite embedded versions.
+The [wixl 0.103 implementation](https://github.com/GNOME/msitools/blob/v0.103/tools/wixl/builder.vala)
+uses `DefaultVersion` directly; it does not extract PE file versions. Windows
+Installer [prefers versioned files to unversioned files](https://learn.microsoft.com/en-us/windows/win32/msi/file-versioning-rules).
+
+Packaging now reads each EXE/DLL's numeric fixed file version with `pefile` and
+writes it into WiX `DefaultVersion`. It preserves the runtime's own version and
+leaves genuinely unversioned files unversioned. Malformed binaries fail packaging.
+No file-overwrite policy or installer assertion was relaxed.
+
+Local Linux validation passed all 21 CI-script tests. The new regression compiles
+small PE binaries and builds an MSI, then checks real `File` and `MsiFileHash`
+rows, including a distinct product version, a versioned DLL and an unversioned DLL.
+The candidate workflow requires that regression after installing its tools, so it
+cannot silently skip on the packaging runner. Repacking the full existing payload
+also verified all 366 MSI file rows, including 99 versioned binaries. Evidence is
+under `app/build/installer-upgrade/`. A hosted upgrade of the corrected package
+still supplies the final lifecycle gate.
+
 ## Local evidence
 
 All application artifacts below were built in an isolated Ubuntu WSL environment
@@ -140,7 +169,8 @@ registration or upgrade transaction. `test-windows-installer.ps1` only runs on a
 disposable Windows Actions runner and refuses a runner already containing Gilune.
 It checks clean install, exact payload and shortcut, repair, application launch, uninstall,
 upgrade from the existing v1.0.3 MSI, rejection of a downgrade, a second uninstall,
-and preservation of the smoke-test vaults. These lifecycle checks remain unrun.
+and preservation of the smoke-test vaults. The first hosted run reached the upgrade
+payload failure described above; the corrected package must pass the whole sequence.
 
 The candidate was pushed as `adf3bdf`. The explicit
 [candidate run 34608408313](https://github.com/Gilune/gilune/actions/runs/34608408313)
