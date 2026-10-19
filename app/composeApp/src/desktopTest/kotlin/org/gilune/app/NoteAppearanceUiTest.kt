@@ -48,12 +48,12 @@ class NoteAppearanceUiTest {
         assertEquals(NoteFont.Serif, appearance.edit.font)
         compose.onNodeWithTag("edit-font-preview", useUnmergedTree = true).performScrollTo()
         assertEquals(18.sp, layout(compose.onNodeWithTag("edit-font-preview", useUnmergedTree = true)).layoutInput.style.fontSize)
-        compose.onNodeWithText("Read").performScrollTo().performClick()
-        compose.onNodeWithContentDescription("Read font size").performScrollTo()
+        compose.onNodeWithText("Presentation").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Presentation font size").performScrollTo()
             .performSemanticsAction(SemanticsActions.SetProgress) { it(24f) }
-        compose.onNodeWithContentDescription("Read line height").performScrollTo()
+        compose.onNodeWithContentDescription("Presentation line height").performScrollTo()
             .performSemanticsAction(SemanticsActions.SetProgress) { it(36f) }
-        compose.onNodeWithText("Reset Read defaults").performScrollTo().performClick()
+        compose.onNodeWithText("Reset Presentation defaults").performScrollTo().performClick()
         assertEquals(NoteTypeSettings.Read, appearance.reading)
         assertEquals(18, appearance.edit.size)
         compose.onNodeWithText("Note text", useUnmergedTree = true).performScrollTo()

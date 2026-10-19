@@ -48,6 +48,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.LinkAnnotation
+import org.gilune.plugin.sdk.DocumentReference
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -86,9 +88,13 @@ class BlockRenderers(registrations: List<BlockRegistration> = emptyList()) {
 
 /// `onToggleTask` is the Read view's checkbox tap (ADR 0017 § 8): it is
 /// handed the **source line** of the item, and the surface that owns the
-/// bytes does the guarded write through `activateLine`. Null — the
-/// desktop's reading pane — draws the same glyph, inert: reading a note
-/// must never change it unless a person asks (ADR 0012).
+/// bytes does the guarded write through `activateLine`. Null draws the
+/// same glyph, inert: reading a note never changes it unless a person
+/// asks, and a click on the box is asking (ADR 0012 amendment: the
+/// desktop's presentation mode ticks).
+///
+/// `links` makes Markdown links, `[[wiki links]]` and plugin references
+/// clickable; the default draws them as text, as before.
 ///
 /// `checkboxTarget` is the tap target the glyph sits in the middle of.
 /// Android's floor is 48dp; a pointer needs no such thing, so the default
@@ -102,6 +108,7 @@ fun MarkdownBody(
     checkboxTarget: Dp = 22.dp,
     textStyle: TextStyle = TextStyle.Default,
     blockSpacing: Dp = 10.dp,
+    links: ReadLinks = ReadLinks(),
 ) {
     val colours = MaterialTheme.colorScheme
     val scale = if (textStyle.fontSize.isSpecified) textStyle.fontSize.value / 14f else 1f
@@ -112,13 +119,13 @@ fun MarkdownBody(
                 for (block in blocks) {
                     when (block) {
                         is MdBlock.Heading -> Text(
-                            annotate(block.spans, colours.primary),
+                            annotate(block.spans, colours.primary, links),
                             fontSize = headingSize(block.level) * scale,
                             lineHeight = if (textStyle.lineHeight.isSpecified) (headingSize(block.level).value * lineHeight.value / 14f).sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                             fontWeight = FontWeight.SemiBold,
                         )
                         is MdBlock.Paragraph -> Text(
-                            annotate(block.spans, colours.primary),
+                            annotate(block.spans, colours.primary, links),
                             lineHeight = lineHeight,
                         )
                         is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
@@ -134,12 +141,12 @@ fun MarkdownBody(
                             } else {
                                 TaskGlyph(block.task, block.line, onToggleTask, maxOf(checkboxTarget, 22.dp * scale))
                             }
-                            Text(annotate(block.spans, colours.primary), lineHeight = lineHeight)
+                            Text(annotate(block.spans, colours.primary, links), lineHeight = lineHeight)
                         }
                         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                             Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
                             Text(
-                                annotate(block.spans, colours.primary),
+                                annotate(block.spans, colours.primary, links),
                                 color = colours.onSurfaceVariant,
                                 lineHeight = lineHeight,
                                 modifier = Modifier.padding(start = 10.dp),
@@ -242,8 +249,41 @@ private fun headingSize(level: Int) = when (level) {
     else -> 15.sp
 }
 
-private fun annotate(spans: List<Span>, linkColour: androidx.compose.ui.graphics.Color): AnnotatedString =
+/// What a click on drawn words asks for. The surface that owns navigation
+/// answers it; this file only says which words were clicked.
+sealed interface ReadLink {
+    /// A Markdown link's destination, verbatim: a URL or a vault path.
+    data class Address(val target: String) : ReadLink
+
+    /// `[[target]]` or `[[target|shown]]`: a note named in the vault.
+    data class Wiki(val target: String) : ReadLink
+
+    /// A plugin's reference, clicked where the plugin said it is written.
+    data class Reference(val reference: DocumentReference) : ReadLink
+}
+
+/// The clickable words of one rendering. `references` pair a range of the
+/// parsed **body** with what it refers to — a plugin's recognition, so the
+/// renderer knows where a mention is without knowing what one looks like.
+/// With no `open`, nothing is clickable and the text draws exactly as it
+/// always has: wiki links stay their literal brackets.
+class ReadLinks(
+    val references: List<Pair<IntRange, DocumentReference>> = emptyList(),
+    val open: ((ReadLink) -> Unit)? = null,
+)
+
+/// `[[target]]` and `[[target|shown]]`, not the `![[…]]` of an embed.
+private val WIKI_LINK = Regex("""(?<!!)\[\[([^\]|\n]+)(?:\|([^\]\n]*))?]]""")
+
+private fun annotate(spans: List<Span>, linkColour: androidx.compose.ui.graphics.Color, links: ReadLinks): AnnotatedString =
     buildAnnotatedString {
+        val open = links.open
+        val linkStyle = SpanStyle(color = linkColour, textDecoration = TextDecoration.Underline)
+        fun clickable(target: ReadLink, start: Int, end: Int) {
+            if (open == null || start >= end) return
+            addStyle(linkStyle, start, end)
+            addLink(LinkAnnotation.Clickable("read-link") { open(target) }, start, end)
+        }
         for (span in spans) {
             withStyle(
                 SpanStyle(
@@ -257,6 +297,36 @@ private fun annotate(spans: List<Span>, linkColour: androidx.compose.ui.graphics
                         else -> null
                     },
                 ),
-            ) { append(span.text) }
+            ) {
+                // A verbatim run of the span's text, its references laid
+                // over it through the source offsets the parser kept.
+                fun verbatim(from: Int, to: Int) {
+                    if (from >= to) return
+                    val at = length
+                    append(span.text, from, to)
+                    if (span.link != null) clickable(ReadLink.Address(span.link), at, length)
+                    if (span.source < 0 || span.code) return
+                    val source = span.source + from until span.source + to
+                    for ((range, reference) in links.references) {
+                        val first = maxOf(range.first, source.first)
+                        val last = minOf(range.last, source.last)
+                        if (first > last) continue
+                        clickable(ReadLink.Reference(reference), at + (first - source.first), at + (last - source.first) + 1)
+                    }
+                }
+                var next = 0
+                if (open != null && !span.code && span.link == null) {
+                    for (match in WIKI_LINK.findAll(span.text)) {
+                        verbatim(next, match.range.first)
+                        val target = match.groupValues[1].trim()
+                        val shown = match.groupValues[2].trim().ifEmpty { target }
+                        val at = length
+                        append(shown)
+                        clickable(ReadLink.Wiki(target), at, length)
+                        next = match.range.last + 1
+                    }
+                }
+                verbatim(next, span.text.length)
+            }
         }
     }

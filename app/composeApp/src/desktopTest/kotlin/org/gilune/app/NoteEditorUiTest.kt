@@ -40,13 +40,14 @@ class NoteEditorUiTest {
     val compose = createComposeRule()
 
     @Test
-    fun theEditButtonOpensAndFocusesTheBodyAndReadReturnsToTheOverview() {
+    fun thePresentingChipReturnsToEditingAndTheMenuPresentsAgain() {
         val (vault, editor) = openPane(reading = true)
         val before = vault.resolve("Captures/note.md").readText()
-        compose.onNodeWithContentDescription("Edit note").performClick()
+        compose.onNodeWithTag("presenting").performClick()
         compose.onNodeWithTag("note-body").assertIsFocused()
         assertFalse(editor.reading)
-        compose.onNodeWithContentDescription("Read note").performClick()
+        compose.onNodeWithTag("note-actions").performClick()
+        compose.onNodeWithTag("toggle-presentation").performClick()
         assertTrue(editor.reading)
         assertEquals(before, vault.resolve("Captures/note.md").readText())
         assertFalse(editor.dirty)
