@@ -258,7 +258,7 @@ fun RailPanels(
             RailTab(Icons.Outlined.Description, "files", active == RailPanel.FILES) {
                 tree.railPanel = RailPanel.FILES
             }
-            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH) {
+            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH, shortcut = "Ctrl+F") {
                 tree.railPanel = RailPanel.SEARCH
             }
             for (destination in destinations) {
@@ -313,22 +313,31 @@ internal fun navigationIcon(key: String): ImageVector = when (key) {
 }
 
 @Composable
-private fun RailTab(icon: ImageVector, label: String, selected: Boolean, onSelect: () -> Unit) {
+private fun RailTab(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    shortcut: String? = null,
+    onSelect: () -> Unit,
+) {
     val colours = MaterialTheme.colorScheme
-    Box(
-        Modifier
-            .size(26.dp)
-            .clip(RoundedCornerShape(5.dp))
-            .background(if (selected) colours.primaryContainer else colours.surface)
-            .clickable(onClick = onSelect),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            modifier = Modifier.size(15.dp),
-            tint = if (selected) colours.onPrimaryContainer else colours.onSurfaceVariant,
-        )
+    val name = label.replaceFirstChar { it.uppercaseChar() }
+    Tooltip(if (shortcut == null) name else "$name ($shortcut)") {
+        Box(
+            Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (selected) colours.primaryContainer else colours.surface)
+                .clickable(onClick = onSelect),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                modifier = Modifier.size(15.dp),
+                tint = if (selected) colours.onPrimaryContainer else colours.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -461,21 +470,25 @@ fun VaultTree(
                     }
                 }
             }
-            IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
-                Icon(
-                    Icons.Outlined.CreateNewFolder,
-                    contentDescription = "new folder",
-                    modifier = Modifier.size(16.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("New folder") {
+                IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
+                    Icon(
+                        Icons.Outlined.CreateNewFolder,
+                        contentDescription = "new folder",
+                        modifier = Modifier.size(16.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
-            IconButton(onClick = { newNote() }, modifier = Modifier.size(26.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.NoteAdd,
-                    contentDescription = "new note",
-                    modifier = Modifier.size(16.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("New note (Ctrl+N)") {
+                IconButton(onClick = { newNote() }, modifier = Modifier.size(26.dp)) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.NoteAdd,
+                        contentDescription = "new note",
+                        modifier = Modifier.size(16.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -609,16 +622,20 @@ private fun TreeRow(
                 )
                 // A note's own chevron folds its attachments away; the
                 // name beside it still opens the note.
-                entry.hasAttachments -> Box(
-                    Modifier.size(14.dp).clickable { tree.toggle(entry.relPath) },
-                    contentAlignment = Alignment.Center,
+                entry.hasAttachments -> Tooltip(
+                    if (entry.relPath in tree.expanded) "Hide attachments" else "Show attachments",
                 ) {
-                    Icon(
-                        chevron(entry.relPath in tree.expanded),
-                        contentDescription = "attachments",
-                        modifier = Modifier.size(14.dp),
-                        tint = colours.onSurfaceVariant,
-                    )
+                    Box(
+                        Modifier.size(14.dp).clickable { tree.toggle(entry.relPath) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            chevron(entry.relPath in tree.expanded),
+                            contentDescription = "attachments",
+                            modifier = Modifier.size(14.dp),
+                            tint = colours.onSurfaceVariant,
+                        )
+                    }
                 }
                 else -> Spacer(Modifier.width(14.dp))
             }
