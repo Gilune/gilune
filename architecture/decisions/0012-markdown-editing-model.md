@@ -103,3 +103,12 @@ open in:
   angle-bracketed web addresses render as links.
 - Mobile Read is unchanged: it ticks already, and its links stay text until
   a mobile round wires the same `ReadLinks`.
+
+**2026-10-19 (owner): pure styling stays on the caret's line.** E3's rule —
+the line being written shows its raw Markdown — is narrowed to what it is
+for: on the caret's line nothing is *replaced* (a checkbox is `[ ]` again)
+and nothing answers a click, but style-only decorations still colour their
+words. A person's `@mention` and a task's `due:`/`done:` dates keep their
+highlight while their line is edited; colour hides no byte, so the
+raw-Markdown promise holds. (ADR 0017 note 3's "desktop keeps
+raw-on-the-caret-line" reads with this narrowing.)
