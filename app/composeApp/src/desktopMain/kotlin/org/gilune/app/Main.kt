@@ -497,21 +497,23 @@ private fun DesktopApp(
             // The rail's other switch: the same flip Ctrl+B makes, kept
             // where the rail is so shutting it never hides its own way
             // back (ADR 0011 amendment).
-            IconButton(
-                onClick = { setRailCollapsed(!railCollapsed) },
-                modifier = Modifier.size(30.dp),
-            ) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "toggle sidebar (ctrl+b)",
-                    modifier = Modifier.size(17.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip(if (railCollapsed) "Show sidebar (Ctrl+B)" else "Hide sidebar (Ctrl+B)") {
+                IconButton(
+                    onClick = { setRailCollapsed(!railCollapsed) },
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = "toggle sidebar (ctrl+b)",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
             Text("Gilune", style = MaterialTheme.typography.titleMedium)
             QuickOpenBox(state, ::openNote, quickOpenFocus, Modifier.width(280.dp))
             Spacer(Modifier.weight(1f))
-            if (micOffered) {
+            if (micOffered) Tooltip(if (recording) "Stop recording" else "New note from speech") {
                 IconButton(
                     onClick = {
                         if (!recording) {
@@ -537,21 +539,25 @@ private fun DesktopApp(
                     )
                 }
             }
-            IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "sync vault",
-                    modifier = Modifier.size(17.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("Sync vault") {
+                IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "sync vault",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
-            IconButton(onClick = { onSettingsOpen(true) }, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Default.Settings,
-                    contentDescription = "settings",
-                    modifier = Modifier.size(17.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("Settings") {
+                IconButton(onClick = { onSettingsOpen(true) }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "settings",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
         }
         HorizontalDivider(color = colours.outlineVariant)

@@ -136,13 +136,15 @@ fun SettingsPane(
                         tint = colours.onSurfaceVariant,
                     )
                     Text("Settings", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-                    IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "close settings",
-                            modifier = Modifier.size(16.dp),
-                            tint = colours.onSurfaceVariant,
-                        )
+                    Tooltip("Close settings (Esc)") {
+                        IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "close settings",
+                                modifier = Modifier.size(16.dp),
+                                tint = colours.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
                 HorizontalDivider(color = colours.outlineVariant)
