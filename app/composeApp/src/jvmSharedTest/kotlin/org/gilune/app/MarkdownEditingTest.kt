@@ -517,20 +517,41 @@ class MarkdownEditingTest {
     }
 
     @Test
-    fun theCaretsLineIsFilteredOutBeforeAnyRegistrationIsAsked() {
+    fun theCaretsLineKeepsPureStylingButNothingThatReplacesOrAnswersAClick() {
+        // E3's raw-on-the-caret-line rule is still the shell's to honour,
+        // not a registration's — narrowed (owner, 2026-10-19) to what it
+        // was for: nothing *replaced* on the line being written, and nothing
+        // there answers a click. A style-only registration is still asked.
         val asked = mutableListOf<String>()
-        val spy = EditorDecoration(
-            id = "spy",
-            recognise = { line ->
-                asked += line
-                emptyList()
-            },
+        val spy = EditorDecoration(id = "spy", recognise = { line -> asked += line; emptyList() })
+        val clickable = mutableListOf<String>()
+        val activating = EditorDecoration(
+            id = "clickable",
+            recognise = { line -> clickable += line; emptyList() },
+            activate = { it },
         )
-        transform("one\ntwo\nthree", caretLine = 1, decorations = listOf(spy))
-        assertEquals(
-            listOf("one", "three"),
-            asked,
-            "E3's raw-on-the-caret-line rule is the shell's to honour, not a registration's",
+        val replacing = EditorDecoration(
+            id = "replacing",
+            recognise = { line -> listOf(DecorationMatch(0 until minOf(1, line.length), DecorationRender.Replace("#"))) },
+        )
+        val result = transform("one\ntwo\nthree", caretLine = 1, decorations = listOf(spy, activating, replacing))
+
+        assertEquals(listOf("one", "two", "three"), asked, "pure styling is asked of every line")
+        assertEquals(listOf("one", "three"), clickable, "an activating registration never sees the caret's line")
+        assertEquals("#ne\ntwo\n#hree", result.text.text, "and nothing is replaced on it")
+    }
+
+    @Test
+    fun aMentionInTheTaskBeingEditedKeepsItsHighlight() {
+        // The owner's report, exactly: editing a task that names someone
+        // used to drop the person's highlight along with the checkbox glyph.
+        val source = "- [ ] ask @alice.smith about it"
+        val decorations = builtInDecorations() + org.gilune.plugins.people.peopleMentionDecoration()
+        val result = transform(source, caretLine = 0, decorations = decorations)
+        assertEquals(source, result.text.text, "the checkbox is raw `[ ]` while its line is edited")
+        assertTrue(
+            result.text.spanStyles.any { it.item.color == palette.link && source.substring(it.start, it.end) == "@alice.smith" },
+            "the mention is still drawn as a link",
         )
     }
 
@@ -884,15 +905,18 @@ class MarkdownEditingTest {
             result.offsetMapping.transformedToOriginal(transformed.indexOf(token)),
         )
 
-        // The caret's line is nobody's to decorate, the plugin's included.
+        // The caret's line shows its raw Markdown — the checkbox is `[ ]`
+        // again — but colour hides no byte, so the token keeps its colour
+        // while the line is being written (owner, 2026-10-19).
         val onTheCaretLine = transform(source, caretLine = 1, decorations = decorations)
-        assertEquals(source, onTheCaretLine.text.text)
+        assertEquals(source, onTheCaretLine.text.text, "nothing replaced on the caret's line")
         assertTrue(
-            onTheCaretLine.text.spanStyles.none {
+            onTheCaretLine.text.spanStyles.any {
                 it.item.color == palette.marker && source.substring(it.start, it.end) == token
             },
-            "the line being edited shows its raw Markdown, styled by the core rules only",
+            "the token is still coloured where the caret is",
         )
+        assertMappingIsSound(source, onTheCaretLine)
 
         // And a documented example is not somebody's agenda (§ 1): inside a
         // fence the token is text, while the opted-in checkbox still draws.

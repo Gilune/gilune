@@ -501,7 +501,11 @@ private fun decorate(
         val delimiter = line.trim().startsWith("```")
         val fenced = inFence || delimiter
         if (delimiter) inFence = !inFence
-        if (index == caretLine) continue
+        // The caret's line shows its raw Markdown: nothing is replaced and
+        // nothing answers a click there. Pure styling stays — a mention or
+        // a due date keeps its colour while the line is being written, since
+        // colour hides no byte (owner, 2026-10-19).
+        val onCaretLine = index == caretLine
         // A collapsed block's lines are not in the transformed text at
         // all: the block replaced them whole, so nothing may also claim
         // ground inside one.
@@ -511,7 +515,9 @@ private fun decorate(
         val onLine = mutableListOf<PlacedDecoration>()
         for (decoration in decorations) {
             if (fenced && !decoration.firesInsideCodeFences) continue
+            if (onCaretLine && decoration.activate != null) continue
             for (match in decoration.recognise(line)) {
+                if (onCaretLine && match.render !is DecorationRender.StyleOnly) continue
                 val range = match.range
                 if (range.isEmpty() || range.first < 0 || range.last >= line.length) continue
                 if (claimed.any { range.first <= it.last && it.first <= range.last }) continue
