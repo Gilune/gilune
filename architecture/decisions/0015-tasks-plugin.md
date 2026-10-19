@@ -681,3 +681,21 @@ edit gate, and refuses a source with unsaved editor text. A stale result is
 refreshed; it never overwrites newer source text. The overview's filter remains
 ordinary Markdown. The desktop note header also exposes a labelled pencil
 button that enters Edit mode and focuses the body.
+
+### Tasks page amendment — 2026-10-19
+
+Owner: tasks are built inside other pages, so a Tasks *folder* makes little
+sense; a Tasks *page* of example queries does. The plugin now declares one
+page type and a one-time page initializer that writes `Tasks.md` at the
+vault root: live `filter` blocks for overdue, due today, this week, not
+dated yet and done this week, plus a few lines on writing your own. The
+initializer records a receipt (`Settings/Initialization/tasks-page.md`), so
+the page is written once per vault on every device, editing it is the point,
+and deleting it keeps it deleted.
+
+This revises § 7's "no capabilities — consent is the enable switch": the
+plugin now declares `pages.create`, used for that one page. A vault that
+already had the plugin is granted it once, because the grown declaration
+asks for something never offered before (ADR 0018 § 5's rule, applied by the
+host to bundled page creation); a revoke is never undone. The plugin declares
+no `vault.folders` entry (ADR 0011 amendment of the same date).

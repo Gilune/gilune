@@ -80,13 +80,15 @@ class TasksPluginTest {
     // ------------------------------------------------------------------
 
     @Test
-    fun theDeclarationIsABundledDomainPluginThatAsksForNothing() {
+    fun theDeclarationIsABundledDomainPluginThatAsksOnlyToWriteItsPage() {
         val declaration = tasksDeclaration()
         assertEquals(TASKS_PLUGIN, declaration.pluginId)
         assertEquals("domain", declaration.`class`)
         assertEquals("bundled", declaration.profile)
         assertTrue(!declaration.required, "removable, or removability is not being proven")
-        assertEquals(emptyList(), declaration.capabilities, "§ 7: no capabilities — consent is the enable switch")
+        // § 7 said "no capabilities"; the Tasks page (owner, 2026-10-19) is
+        // the one thing it writes, once, through the page initializer.
+        assertEquals(listOf(org.gilune.plugin.sdk.PAGE_CREATE_CAPABILITY), declaration.capabilities, "only to write Tasks.md")
         assertEquals(null, declaration.processorId, "no processor")
         assertEquals(null, declaration.subscribes, "no subscription")
         assertEquals(emptyList(), declaration.emits, "no events")
@@ -94,7 +96,9 @@ class TasksPluginTest {
 
     @Test
     fun theDeclarationCoversTheExecutableProviderAndItsConsumers() {
-        val slots = tasksDeclaration().contributions.associate { it.slot to it.id }
+        val slots = tasksDeclaration().contributions
+            .filter { it.slot != org.gilune.plugin.sdk.PAGE_TYPES_SLOT && it.slot != org.gilune.plugin.sdk.PAGE_INITIALIZERS_SLOT }
+            .associate { it.slot to it.id }
         assertEquals(
             mapOf(
                 Slots.EDITOR_COMPLETIONS to "$TASKS_PLUGIN.editor",

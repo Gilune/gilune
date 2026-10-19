@@ -70,6 +70,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
@@ -117,7 +118,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
 
@@ -588,11 +592,10 @@ private fun OpenNote(
         val plugins = state.plugins.toList()
         val filter = plugins.tasksFilter()
         val decorations = remember(plugins, filter) {
-            if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
-                builtInDecorations() + tasksDecorations(filter)
-            } else {
-                builtInDecorations()
-            }
+            val tasks = if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) tasksDecorations(filter) else emptyList()
+            // Then every other enabled plugin's styling — a person's @mention
+            // drawn as a link — through the registry rather than by name.
+            builtInDecorations() + tasks + BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)
         }
 
         if (editor.reading) {
@@ -744,6 +747,38 @@ private fun OpenNote(
             // The column a run of vertical moves keeps is remembered until
             // anything else moves the caret: down through a short line and
             // on, and the caret comes back out where it went in.
+            // Go to definition (owner, 2026-10-19): each enabled plugin's
+            // registration listens for the keystroke its own settings name
+            // (F12 by default for a person's @mention). The plugin says what
+            // the caret is on; its lookup runs off the UI thread and the
+            // answer opens in a tab — or is said, never guessed.
+            val definitionBindings = remember(plugins) { BUNDLED_PLUGIN_EXTENSIONS.definitions(plugins) }
+            val definitionScope = rememberCoroutineScope()
+            fun goToDefinition(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val pressed = keystrokeOf(event) ?: return false
+                val bindings = definitionBindings.filter { keystrokeMatches(it.key, pressed) }
+                if (bindings.isEmpty()) return false
+                val document = editor.document()
+                val offset = editor.frontMatterRaw.length + editor.text.selection.end
+                val kernel = state.gilune.value
+                definitionScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        val reference = definitionAt(document, offset, bindings)
+                        when {
+                            reference == null -> DefinitionResult.Say("nothing to go to here — put the cursor on a mention")
+                            kernel == null -> DefinitionResult.Say("the vault is still opening")
+                            else -> resolveDefinition(kernel, reference)
+                        }
+                    }
+                    when (result) {
+                        is DefinitionResult.Open ->
+                            openRow?.invoke(result.relPath) ?: run { state.message.value = "found ${result.relPath}" }
+                        is DefinitionResult.Say -> state.message.value = result.words
+                    }
+                }
+                return true
+            }
+
             var verticalX by remember { mutableStateOf<Float?>(null) }
             fun moveByLines(lines: Int, extend: Boolean): Boolean {
                 val placed = layout ?: return false
@@ -881,6 +916,7 @@ private fun OpenNote(
                             .onPreviewKeyEvent { event ->
                                 when {
                                     event.type != KeyEventType.KeyDown -> false
+                                    !completions.visible && goToDefinition(event) -> true
                                     !completions.visible -> when {
                                         event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
                                         event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)

@@ -169,3 +169,31 @@ surface while a recording runs — is reserved against the day a second
 implementation wants it, with the streaming contract as its `config`. A slot
 with one producer and one consumer both written in shell code is how
 `settings.form` became decorative; this list does not grow that way.
+
+**2026-10-19 (owner): starting folders and go to definition are plugins'.**
+Two slots join the list, both read by the shell and produced only by
+plugins:
+
+- **`vault.folders`** — a folder a vault starts with because a plugin uses
+  it (`{"folder":"Name"}`). The kernel's vault plugin declares *Notes* and
+  *Captures*, People declares *People*, Tasks declares none (its tasks live
+  in other pages; it writes a root `Tasks.md` instead — ADR 0015 amendment).
+  The shell creates each enabled plugin's folders once per vault on a
+  machine, recorded per folder, so a plugin switched on later still gets its
+  own and a folder the user deletes is never put back. This replaces a fixed
+  Notes/Tasks/Captures list in the shell; a vault given that list counts as
+  having had all three.
+- **`editor.definitions`** — "go to definition". A registration is pure: from
+  the document and caret it names the reference there; the host runs that
+  reference's lookup and opens the single answer in a tab, or says why not.
+  The **plugin owns the keystroke** and its default — People's is F12, set
+  in its settings screen — and the desktop spells keystrokes one way for
+  recording and matching (`F12`, `Ctrl+Alt+G`). Window-level shortcuts
+  (Ctrl+N, Ctrl+E, …) are taken before the editor and cannot be bound. One
+  producer today; it earns its place because the binding is plugin data and
+  a second reference-owning plugin needs nothing new from the shell.
+
+`editor.decorations` is also now read through the plugin registry for every
+enabled plugin, not only by name: People's mentions are styled as links by
+the same recogniser its index uses. (The tasks plugin's decorations are
+still wired by name — debt, unchanged.)

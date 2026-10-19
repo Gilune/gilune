@@ -451,11 +451,15 @@ private fun DesktopApp(
         // switch, because UDP 5353 is a second inbound bind rather than
         // an escape from the first (§ 2).
         state.syncDiscovery = { gilune -> gilune.useBundledDiscovery() }
-        // Before the open, so the tree's first listing already has them.
-        if (!Prefs.defaultFoldersCreated(vaultDir)) {
-            runCatching { createDefaultFolders(vaultDir) }.onSuccess { Prefs.markDefaultFoldersCreated(vaultDir) }
-        }
         state.openVault { gilune ->
+            // The starting folders the enabled plugins declare, each once
+            // per vault on this machine — after the open, because only the
+            // registered plugins know them.
+            runCatching {
+                val made = createDeclaredFolders(vaultDir, declaredFolders(gilune.plugins()),
+                    given = { Prefs.folderGiven(vaultDir, it) }, remember = { Prefs.markFolderGiven(vaultDir, it) })
+                if (made.isNotEmpty()) state.refreshCount.value += 1
+            }
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
