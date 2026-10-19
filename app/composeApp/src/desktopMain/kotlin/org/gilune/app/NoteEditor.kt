@@ -545,9 +545,7 @@ private fun OpenNote(
                         text = { Text("Reveal in Explorer", fontSize = 13.sp) },
                         onClick = {
                             menuOpen = false
-                            runCatching {
-                                ProcessBuilder("explorer.exe", "/select,${file.absolutePath}").start()
-                            }
+                            revealInExplorer(file)
                         },
                     )
                     DropdownMenuItem(
