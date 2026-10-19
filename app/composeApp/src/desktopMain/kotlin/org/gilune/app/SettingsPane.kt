@@ -18,7 +18,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.border
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -57,6 +63,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uniffi.gilune_ffi.PluginInfo
@@ -387,6 +395,11 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
         TasksSettings(state, plugin)
     }
 
+    if (plugin.pluginId == org.gilune.plugins.people.PEOPLE_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        PeopleSettings(state, plugin)
+    }
+
     if (!plugin.required) {
         HorizontalDivider(color = colours.outlineVariant)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -562,6 +575,55 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
             },
         )
         Text("Show the agenda panel", fontSize = 13.sp)
+    }
+}
+
+/// The people plugin's settings: the keystroke for go to definition. The
+/// plugin owns the binding and its default (F12); this screen records the
+/// next keystroke pressed, spelled the way the editor matches it.
+@Composable
+private fun PeopleSettings(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    val current = remember(plugin.settings) { org.gilune.plugins.people.peopleDefinitionKey(plugin.settings) }
+    var listening by remember { mutableStateOf(false) }
+    val field = remember { androidx.compose.ui.focus.FocusRequester() }
+    fun save(key: String?) {
+        listening = false
+        state.pluginAction(
+            "go to definition is now ${key ?: org.gilune.plugins.people.DEFAULT_DEFINITION_KEY}",
+        ) { it.setPluginSettings(plugin.pluginId, org.gilune.plugins.people.peopleSettingsDocument(plugin.settings, key)) }
+    }
+    Text("Go to definition", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "With the cursor on an @mention, this key opens that person's page. " +
+            "Press Change, then the key or combination you want; Esc cancels.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Box(
+            Modifier
+                .width(180.dp)
+                .border(1.dp, if (listening) colours.primary else colours.outline, RoundedCornerShape(4.dp))
+                .focusRequester(field)
+                .focusable()
+                .onKeyEvent { event ->
+                    if (!listening || event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                    val pressed = keystrokeOf(event) ?: return@onKeyEvent true // a modifier on its way to a chord
+                    if (pressed == "Escape") listening = false else save(pressed)
+                    true
+                }
+                .padding(horizontal = 10.dp, vertical = 8.dp)
+                .testTag("definition-key"),
+        ) {
+            Text(if (listening) "Press a key…" else current, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+        }
+        OutlinedButton(onClick = { listening = true; runCatching { field.requestFocus() } }) { Text("Change", fontSize = 12.sp) }
+        TextButton(
+            onClick = { save(null) },
+            enabled = current != org.gilune.plugins.people.DEFAULT_DEFINITION_KEY,
+        ) { Text("Reset to ${org.gilune.plugins.people.DEFAULT_DEFINITION_KEY}", fontSize = 12.sp) }
     }
 }
 

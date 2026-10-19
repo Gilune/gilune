@@ -21,5 +21,18 @@ object Slots {
 
     /// A contributed renderer for a fenced block. Unknown fences remain text.
     const val EDITOR_BLOCKS = "editor.blocks"
+
+    /// "Go to definition" over a plugin's references: the plugin says what
+    /// the caret is on, the host runs its lookup and opens the answer.
+    const val EDITOR_DEFINITIONS = "editor.definitions"
+
+    /// A folder a vault starts with because a plugin uses it. The host
+    /// creates each one once per vault on a machine; one the user deletes
+    /// stays deleted. Config: `{"folder":"Name"}`.
+    const val VAULT_FOLDERS = "vault.folders"
 }
+
+/** A starting folder (`Slots.VAULT_FOLDERS`): a vault-relative path. */
+fun vaultFolderContribution(id: String, folder: String) =
+    uniffi.gilune_ffi.PluginContribution(Slots.VAULT_FOLDERS, id, folder, "{\"folder\":${pageJsonString(folder)}}")
 

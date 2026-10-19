@@ -63,14 +63,25 @@ object Prefs {
     private fun layoutKey(vaultDir: String): String =
         "tabs-" + Integer.toHexString(vaultDir.hashCode())
 
-    /// Whether this machine has already given the vault its starting
-    /// folders. Asked once, so a folder the user deletes is not put back.
-    fun defaultFoldersCreated(vaultDir: String): Boolean = node.getBoolean(foldersKey(vaultDir), false)
+    /// Whether this machine has already given the vault one plugin-declared
+    /// starting folder. Asked per folder, so a plugin installed later still
+    /// gets its own, and a folder the user deletes is not put back.
+    ///
+    /// A vault given the old fixed set (Notes, Tasks, Captures — one flag
+    /// for all three) counts as having had those, so none of them returns.
+    fun folderGiven(vaultDir: String, folder: String): Boolean =
+        node.getBoolean(folderKey(vaultDir, folder), false) ||
+            (node.getBoolean(legacyFoldersKey(vaultDir), false) && folder.lowercase() in LEGACY_STARTING_FOLDERS)
 
-    fun markDefaultFoldersCreated(vaultDir: String) = node.putBoolean(foldersKey(vaultDir), true)
+    fun markFolderGiven(vaultDir: String, folder: String) = node.putBoolean(folderKey(vaultDir, folder), true)
 
-    private fun foldersKey(vaultDir: String): String =
+    private fun folderKey(vaultDir: String, folder: String): String =
+        "folder-" + Integer.toHexString(vaultDir.hashCode()) + "-" + Integer.toHexString(folder.lowercase().hashCode())
+
+    private fun legacyFoldersKey(vaultDir: String): String =
         "folders-" + Integer.toHexString(vaultDir.hashCode())
+
+    private val LEGACY_STARTING_FOLDERS = setOf("notes", "tasks", "captures")
 
     private const val MAX_LAYOUT_CHARS = 7500
 

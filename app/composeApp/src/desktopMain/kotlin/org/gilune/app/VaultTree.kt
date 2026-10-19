@@ -396,7 +396,7 @@ fun VaultTree(
     var creatingPage by remember { mutableStateOf<FolderPageCollection?>(null) }
     val drag = remember(state.vaultDir) { VaultTreeDrag() }
     val list = rememberLazyListState()
-    val entries = remember(state.vaultCursor.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
+    val entries = remember(state.vaultCursor.value, state.refreshCount.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
         listVault(state.vaultDir, tree.expanded.toSet())
     }
     // The Captures folder is the inbox: the count is simply how many
@@ -895,16 +895,6 @@ fun createUntitledNote(vaultDir: String, parent: String): String {
     return file.relativeTo(File(vaultDir)).invariantSeparatorsPath
 }
 
-/// The folders a vault starts with. They are offered, not enforced:
-/// the caller creates them once per vault, so one the user deletes stays
-/// deleted. A folder already there under any casing is left alone.
-val DEFAULT_FOLDERS = listOf("Notes", "Tasks", "Captures")
-
-fun createDefaultFolders(vaultDir: String) {
-    val root = File(vaultDir)
-    val present = root.listFiles()?.filter { it.isDirectory }?.map { it.name.lowercase() }.orEmpty()
-    DEFAULT_FOLDERS.filter { it.lowercase() !in present }.forEach { File(root, it).mkdirs() }
-}
 
 private fun folderBase(vaultDir: String, parent: String): File =
     if (parent.isEmpty()) File(vaultDir) else File(vaultDir, parent)

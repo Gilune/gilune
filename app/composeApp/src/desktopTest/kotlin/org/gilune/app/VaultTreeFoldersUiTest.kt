@@ -131,16 +131,6 @@ class VaultTreeFoldersUiTest {
         assertEquals(listOf("explorer.exe", "/select,", note.absolutePath), revealCommand(note))
     }
 
-    @Test
-    fun defaultFoldersAreCreatedBesideWhatIsThere() {
-        val root = Files.createTempDirectory("gilune-defaults").toFile()
-        try {
-            root.resolve("notes").mkdirs()
-            root.resolve("People").mkdirs()
-            createDefaultFolders(root.path)
-            assertEquals(setOf("notes", "People", "Tasks", "Captures"), dirsOf(root), "an existing folder in any casing stands")
-        } finally {
-            root.deleteRecursively()
-        }
-    }
+    // The starting folders moved to the plugins that use them (owner,
+    // 2026-10-19): VaultFoldersTest.
 }

@@ -56,8 +56,9 @@ fun tasksDeclaration(): PluginDeclaration =
         processorId = null,
         subscribes = null,
         emits = emptyList(),
-        capabilities = emptyList(),
-        contributions = listOf(
+        // Only to write Tasks.md once (below); the plugin creates nothing else.
+        capabilities = listOf(org.gilune.plugin.sdk.PAGE_CREATE_CAPABILITY),
+        contributions = tasksPageContributions() + listOf(
             PluginContribution(Slots.EDITOR_COMPLETIONS, "$TASKS_PLUGIN.editor", "Task fields"),
             PluginContribution(
                 slot = Slots.SUGGEST_VALUES,

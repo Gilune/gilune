@@ -80,17 +80,11 @@ internal fun PresentedNote(
 
     fun openReference(reference: DocumentReference) {
         val kernel = state.gilune.value ?: return
+        // The same lookup go to definition runs, so a click and F12 agree.
         scope.launch {
-            val found = withContext(Dispatchers.IO) {
-                runCatching { kernel.lookup(reference.query.copy(cursor = null, pageSize = 2u)) }
-            }
-            val page = found.getOrNull()
-            when {
-                page == null -> state.message.value = "could not look up ${reference.label}: ${found.exceptionOrNull()?.message}"
-                !page.indexComplete -> state.message.value = "still indexing — try ${reference.label} again in a moment"
-                page.hits.size == 1 -> openNote?.invoke(page.hits.single().relPath)
-                page.hits.isEmpty() -> state.message.value = "no page for ${reference.label} yet"
-                else -> state.message.value = "more than one page claims ${reference.label}"
+            when (val result = withContext(Dispatchers.IO) { resolveDefinition(kernel, reference) }) {
+                is DefinitionResult.Open -> openNote?.invoke(result.relPath)
+                is DefinitionResult.Say -> state.message.value = result.words
             }
         }
     }
