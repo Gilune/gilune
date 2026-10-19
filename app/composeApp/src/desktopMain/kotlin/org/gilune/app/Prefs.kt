@@ -30,14 +30,6 @@ object Prefs {
             .getOrDefault(ThemeChoice.System)
         set(value) = node.put("theme", value.name)
 
-    /// Whether notes open reading (rendered) or editing (styled source).
-    /// A per-note toggle overrides it; the mode is never written into a
-    /// document. Editing is the default — this is a capture tool, not a
-    /// publishing tool.
-    var readingMode: Boolean
-        get() = node.getBoolean("readingMode", false)
-        set(value) = node.putBoolean("readingMode", value)
-
     /// How wide the rail stands, in dp, and whether it is shut altogether
     /// (ADR 0011 amendment). Device-local facts like the theme: a vault
     /// opened on two machines is arranged twice. The width is remembered

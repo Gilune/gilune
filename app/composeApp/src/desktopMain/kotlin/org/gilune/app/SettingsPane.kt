@@ -644,15 +644,6 @@ private fun AppearanceSection(theme: ThemeChoice, onThemeChange: (ThemeChoice) -
             Text(choice.name, fontSize = 13.sp)
         }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    Text("Notes open", style = MaterialTheme.typography.titleSmall)
-    var reading by remember { mutableStateOf(Prefs.readingMode) }
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        RadioButton(selected = !reading, onClick = { reading = false; Prefs.readingMode = false })
-        Text("editing", fontSize = 13.sp)
-        RadioButton(selected = reading, onClick = { reading = true; Prefs.readingMode = true })
-        Text("reading", fontSize = 13.sp)
-    }
 }
 
 @Composable

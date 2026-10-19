@@ -160,6 +160,9 @@ private class GestureRequests {
 
     /// Ctrl+B, which the top bar's toggle answers with the same flip.
     var toggleRail by mutableStateOf(0)
+
+    /// Ctrl+E: the note in front into presentation mode, or back to editing.
+    var togglePresentation by mutableStateOf(0)
 }
 
 /// The row above the letters only: the numeric keypad sends keys of its
@@ -240,6 +243,10 @@ fun main() {
                     }
                     event.isCtrlPressed && event.key == Key.Backslash -> {
                         gestures.splitRight++
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.E -> {
+                        gestures.togglePresentation++
                         true
                     }
                     event.key == Key.Escape && settingsOpen -> {
@@ -386,6 +393,9 @@ private fun DesktopApp(
         if (gestures.closeTab > 0 && tabs.activeTab != null && !tabs.closeActive()) {
             state.message.value = "unsaved changes over a changed file — choose which version to keep"
         }
+    }
+    LaunchedEffect(gestures.togglePresentation) {
+        if (gestures.togglePresentation > 0) tabs.activeEditor?.togglePresentation()
     }
     LaunchedEffect(gestures.splitRight) {
         if (gestures.splitRight > 0 && !tabs.splitRight()) {

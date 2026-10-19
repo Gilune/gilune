@@ -180,8 +180,25 @@ class EditorState : LiveDocumentBuffer {
     var frontMatterRaw by mutableStateOf("")
 
     var dirty by mutableStateOf(false)
-    var reading by mutableStateOf(Prefs.readingMode)
+
+    /// Presentation mode (ADR 0012 amendment, owner 2026-10-19): the
+    /// rendered note with no caret, where a click acts — ticks a task,
+    /// opens a link or a mention — instead of starting an edit. Editing is
+    /// simply what a note is, so this is a view someone asks for (the ⋯
+    /// menu, Ctrl+E) and never a preference notes open in.
+    var reading by mutableStateOf(false)
     var showProperties by mutableStateOf(false)
+
+    /// Raised when presentation mode ends, so editing resumes with the
+    /// caret where it was left rather than at the top; the body field
+    /// lowers it once it has the focus.
+    var resumeEditing by mutableStateOf(false)
+
+    /// Into presentation mode, or back out to editing at the old caret.
+    fun togglePresentation() {
+        reading = !reading
+        if (!reading) resumeEditing = true
+    }
 
     /// Raised by the shell after it creates a note, so the placeholder
     /// name arrives selected and ready to be typed over. The title field
@@ -475,16 +492,15 @@ private fun OpenNote(
                 }
             }
             DocumentLinksButton(state, editor.document(), openRow ?: {})
-            TextButton(onClick = {
-                editor.reading = !editor.reading
-                if (!editor.reading) editor.focusBody = true
-            }) {
-                Icon(
-                    if (editor.reading) Icons.Outlined.Edit else Icons.Outlined.Visibility,
-                    contentDescription = if (editor.reading) "Edit note" else "Read note",
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(if (editor.reading) "Edit" else "Read", Modifier.padding(start = 5.dp))
+            // Editing needs no switch: it is what a note is. Presenting
+            // says so, and is its own way back.
+            if (editor.reading) {
+                Tooltip("Back to editing (Esc or Ctrl+E)") {
+                    TextButton(onClick = editor::togglePresentation, modifier = Modifier.testTag("presenting")) {
+                        Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Text("Presenting", Modifier.padding(start = 5.dp), fontSize = 13.sp)
+                    }
+                }
             }
             Box {
                 Tooltip("Note actions") {
@@ -498,6 +514,12 @@ private fun OpenNote(
                     }
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (editor.reading) "Back to editing" else "Presentation mode", fontSize = 13.sp) },
+                        trailingIcon = { Text("Ctrl+E", fontSize = 11.sp, color = colours.onSurfaceVariant) },
+                        onClick = { menuOpen = false; editor.togglePresentation() },
+                        modifier = Modifier.testTag("toggle-presentation"),
+                    )
                     if (state.gilune.value != null) {
                         DropdownMenuItem(
                             text = { Text("Rename references…", fontSize = 13.sp) },
@@ -557,32 +579,26 @@ private fun OpenNote(
 
         if (header.frontMatter.isNotEmpty()) PropertiesStrip(header, editor)
 
+        // The editor seams (ADR 0015 § 5). What is composed comes from
+        // the registry: the shell's own registrations lead, and the
+        // tasks plugin's date styling and `/` menu are here only while
+        // that plugin is enabled and still declares them. Switch it off
+        // and the tokens are prose and the menu never opens — no byte
+        // changes either way, which is what removability has to mean.
+        // Both modes tick through the same list, so a task ticked while
+        // presenting is stamped `done:` exactly as one ticked in the editor.
+        val plugins = state.plugins.toList()
+        val filter = plugins.tasksFilter()
+        val decorations = remember(plugins, filter) {
+            if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
+                builtInDecorations() + tasksDecorations(filter)
+            } else {
+                builtInDecorations()
+            }
+        }
+
         if (editor.reading) {
-            // The `editor.blocks` seam (ADR 0015 § 5, T4). The Code branch
-            // resolves through a table keyed by info string; the shell's
-            // own `filter` is its only entry, and every other fence — and
-            // every fence at all with this list empty — is the code box it
-            // has always been. Reading the cursor here is what makes a
-            // block recompute when the vault moves rather than per
-            // keystroke (§ 4).
-            MarkdownBody(
-                remember(editor.text.text) { parseMarkdown(editor.text.text) },
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                textStyle = appearance.reading.textStyle,
-                blockSpacing = appearance.reading.blockSpacing.dp,
-                renderers = BlockRenderers(
-                    listOf(
-                        filterBlockRegistration(
-                            state,
-                            state.plugins.toList(),
-                            onOpen = openRow,
-                        ),
-                    ),
-                ),
-            )
+            PresentedNote(state, editor, decorations, openRow) { write() }
         } else {
             // Styled editing (E2 + the E3 checkbox slice): markers off the
             // caret's line render as checkbox glyphs; the caret's own line
@@ -597,21 +613,6 @@ private fun OpenNote(
                     link = colours.primary,
                 )
             }
-            // The editor seams (ADR 0015 § 5). What is composed comes from
-            // the registry: the shell's own registrations lead, and the
-            // tasks plugin's date styling and `/` menu are here only while
-            // that plugin is enabled and still declares them. Switch it off
-            // and the tokens are prose and the menu never opens — no byte
-            // changes either way, which is what removability has to mean.
-            val plugins = state.plugins.toList()
-            val filter = plugins.tasksFilter()
-            val decorations = remember(plugins, filter) {
-                if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
-                    builtInDecorations() + tasksDecorations(filter)
-                } else {
-                    builtInDecorations()
-                }
-            }
             // The raw-line exception follows a caret someone can see: an
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
@@ -620,9 +621,11 @@ private fun OpenNote(
             // Return in the title hands the caret to the body, at its
             // start: the first line is where a name leads. Moving the
             // caret is not an edit, so `dirty` is left alone.
-            LaunchedEffect(editor.focusBody) {
-                if (!editor.focusBody) return@LaunchedEffect
-                editor.text = editor.text.copy(selection = TextRange(0))
+            // Leaving presentation mode asks for the same focus, but keeps
+            // the caret where it was.
+            LaunchedEffect(editor.focusBody, editor.resumeEditing) {
+                if (!editor.focusBody && !editor.resumeEditing) return@LaunchedEffect
+                if (editor.focusBody) editor.text = editor.text.copy(selection = TextRange(0))
                 // The field may have been composed by the very key that
                 // raised the flag (a note being read switches to editing
                 // first), and a requester answers only once its node is
@@ -634,6 +637,7 @@ private fun OpenNote(
                     withFrameNanos { }
                 }
                 editor.focusBody = false
+                editor.resumeEditing = false
             }
             val line =
                 if (bodyFocused) caretLine(editor.text.text, editor.text.selection.start) else null
