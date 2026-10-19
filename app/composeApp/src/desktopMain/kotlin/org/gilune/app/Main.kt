@@ -441,6 +441,10 @@ private fun DesktopApp(
         // switch, because UDP 5353 is a second inbound bind rather than
         // an escape from the first (§ 2).
         state.syncDiscovery = { gilune -> gilune.useBundledDiscovery() }
+        // Before the open, so the tree's first listing already has them.
+        if (!Prefs.defaultFoldersCreated(vaultDir)) {
+            runCatching { createDefaultFolders(vaultDir) }.onSuccess { Prefs.markDefaultFoldersCreated(vaultDir) }
+        }
         state.openVault { gilune ->
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
