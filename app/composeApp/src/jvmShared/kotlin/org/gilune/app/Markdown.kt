@@ -16,6 +16,7 @@ import org.intellij.markdown.MarkdownTokenTypes
 import org.intellij.markdown.ast.ASTNode
 import org.intellij.markdown.ast.getTextInNode
 import org.intellij.markdown.flavours.gfm.GFMFlavourDescriptor
+import org.intellij.markdown.flavours.gfm.GFMTokenTypes
 import org.intellij.markdown.parser.MarkdownParser
 
 /// A note split into its machine header and its prose. `body` starts at
@@ -40,7 +41,20 @@ fun splitNote(text: String): Note {
 /// Emphasis carried on a span of text. Kept as a set of flags rather than
 /// a style object so the model stays free of Compose.
 data class Span(val text: String, val bold: Boolean = false, val italic: Boolean = false,
-                val code: Boolean = false, val strike: Boolean = false, val link: String? = null)
+                val code: Boolean = false, val strike: Boolean = false, val link: String? = null) {
+    /// Where `text` begins in the parsed body, when it is a verbatim slice
+    /// of it — character `i` of the span is body offset `source + i` — and
+    /// -1 when it is not (a code span stripped of its ticks, a run joined
+    /// across a gap). This is what lets a reading surface hand a click on
+    /// drawn words back to the source a plugin recognised them in.
+    ///
+    /// Outside the constructor on purpose: a span's *meaning* is its text
+    /// and emphasis, so equality ignores where it came from.
+    var source: Int = -1
+        internal set
+}
+
+internal fun Span.at(offset: Int): Span = also { it.source = offset }
 
 /// Every block carries the **0-based line of `body` it starts on**
 /// (ADR 0017 § 8: ticking a box from Read ships before the editor does).
@@ -184,7 +198,11 @@ private fun listItem(marker: String, spans: List<Span>, line: Int, lines: Source
     val state = TASK_LINE.find(lines.textOf(line))?.groupValues?.get(4)
         ?: return MdBlock.ListItem(marker, spans, line)
     val stripped = spans.mapIndexed { index, span ->
-        if (index == 0) span.copy(text = span.text.replaceFirst(LEADING_TASK_MARKER, "")) else span
+        if (index == 0) {
+            val kept = span.text.replaceFirst(LEADING_TASK_MARKER, "")
+            val dropped = span.text.length - kept.length
+            span.copy(text = kept).at(if (span.source >= 0) span.source + dropped else -1)
+        } else span
     }.filter { it.text.isNotEmpty() }
     return MdBlock.ListItem(marker, stripped, line, task = state != " ")
 }
@@ -211,6 +229,15 @@ private fun inlineSpans(node: ASTNode, src: String): List<Span> {
 }
 
 private fun walkInline(node: ASTNode, src: String, style: Span, out: MutableList<Span>) {
+    // `[[name]]` is not CommonMark: the parser sees the inner `[name]` as a
+    // reference link nothing defines. It is a wiki link, so it stays text
+    // and a reading surface reads it as one.
+    val reference = node.type == MarkdownElementTypes.FULL_REFERENCE_LINK ||
+        node.type == MarkdownElementTypes.SHORT_REFERENCE_LINK
+    if (reference && insideWikiBrackets(node, src)) {
+        out.add(style.copy(text = node.getTextInNode(src).toString()).at(node.startOffset))
+        return
+    }
     when (node.type) {
         MarkdownElementTypes.STRONG -> {
             emphasised(node, src, style.copy(bold = true), out, markers = 2)
@@ -232,7 +259,7 @@ private fun walkInline(node: ASTNode, src: String, style: Span, out: MutableList
             val label = node.children.firstOrNull { it.type == MarkdownElementTypes.LINK_TEXT }
             val linked = style.copy(link = destination ?: node.getTextInNode(src).toString())
             if (label == null) {
-                out.add(linked.copy(text = node.getTextInNode(src).toString()))
+                out.add(linked.copy(text = node.getTextInNode(src).toString()).at(node.startOffset))
             } else {
                 // The label's bracket tokens are syntax, not text.
                 val inner = label.children.filter {
@@ -242,17 +269,38 @@ private fun walkInline(node: ASTNode, src: String, style: Span, out: MutableList
             }
             return
         }
+        // A bare `https://…` (GFM) or `<https://…>` is its own address.
+        GFMTokenTypes.GFM_AUTOLINK -> {
+            val address = node.getTextInNode(src).toString()
+            out.add(style.copy(text = address, link = address).at(node.startOffset))
+            return
+        }
+        MarkdownElementTypes.AUTOLINK -> {
+            val address = node.getTextInNode(src).toString().removePrefix("<").removeSuffix(">")
+            out.add(style.copy(text = address, link = address).at(node.startOffset + 1))
+            return
+        }
         MarkdownTokenTypes.EOL -> {
-            out.add(style.copy(text = " "))
+            // One character for one: the newline it stands for keeps the
+            // offsets after it honest.
+            out.add(style.copy(text = " ").at(node.startOffset))
             return
         }
         MarkdownTokenTypes.BLOCK_QUOTE, MarkdownTokenTypes.ATX_HEADER -> return
     }
     if (node.children.isEmpty()) {
-        out.add(style.copy(text = node.getTextInNode(src).toString()))
+        out.add(style.copy(text = node.getTextInNode(src).toString()).at(node.startOffset))
     } else {
         for (child in node.children) walkInline(child, src, style, out)
     }
+}
+
+/// A reference link written as the inside of `[[…]]`: one more bracket
+/// either side of it in the source.
+private fun insideWikiBrackets(node: ASTNode, src: String): Boolean {
+    val before = node.startOffset - 1
+    val after = node.endOffset
+    return before >= 0 && after < src.length && src[before] == '[' && src[after] == ']'
 }
 
 /// Emphasis nodes carry their own `*`/`_` delimiters as child tokens.
@@ -269,14 +317,17 @@ private fun merge(spans: List<Span>): List<Span> {
         if (span.text.isEmpty()) continue
         val last = merged.lastOrNull()
         if (last != null && last.copy(text = "") == span.copy(text = "")) {
-            merged[merged.size - 1] = last.copy(text = last.text + span.text)
+            // Still a slice only when the two runs touch in the source.
+            val contiguous = last.source >= 0 && span.source == last.source + last.text.length
+            merged[merged.size - 1] = last.copy(text = last.text + span.text).at(if (contiguous) last.source else -1)
         } else {
             merged.add(span)
         }
     }
     if (merged.size == 1) {
         val only = merged[0]
-        return listOf(only.copy(text = only.text.trim()))
+        val lead = only.text.length - only.text.trimStart().length
+        return listOf(only.copy(text = only.text.trim()).at(if (only.source >= 0) only.source + lead else -1))
     }
     return merged
 }

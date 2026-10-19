@@ -71,3 +71,35 @@ Insufficient: the requirement is editing in both modes.
 - Reconcile must run before project in any cycle the app triggers. The
   reverse order re-creates a moved note at its old path and the move is
   then quarantined as a duplicate.
+
+## Amendments
+
+**2026-10-19 (owner): Read becomes presentation mode.** Since E2/E3 the
+editing view is a live preview, so a separate Read *mode* stopped earning
+its place: editing is simply what a note is. The rendered view stays, as
+**presentation mode** — a view someone asks for, never a preference notes
+open in:
+
+- Reached from the note's ⋯ menu or **Ctrl+E**; left with **Esc**, Ctrl+E
+  or the header's *Presenting* label, which returns the caret to where it
+  was. The always-visible Edit/Read switch and the "Notes open: editing /
+  reading" setting are removed.
+- **No caret, and a click acts** instead of starting an edit. A checkbox
+  ticks through the same activation chain as the editor (so `done:` is
+  stamped identically) and writes at once; a Markdown link opens a vault
+  note in a tab or a web address in the browser; a `[[wiki link]]` opens
+  the note of that name (a path names it exactly, a bare name finds it
+  anywhere, shortest path first); a plugin reference — a person's
+  `@mention` — opens what the plugin's own lookup answers. This replaces
+  the earlier rule that the desktop reading pane's checkboxes are inert: a
+  click on the box is a person asking.
+- **The shell still knows no reference syntax.** `DocumentReference`
+  gains `written`, the character ranges where the plugin recognised each
+  reference; parsed spans carry their body offset (`Span.source`, outside
+  equality), and the renderer makes the overlap clickable. A reference with
+  no ranges is listed, as before, but not drawn as a link.
+- `[[name]]` is no longer parsed as an undefined reference link (it had
+  been drawn as a broken link in the rendered view), and bare or
+  angle-bracketed web addresses render as links.
+- Mobile Read is unchanged: it ticks already, and its links stay text until
+  a mobile round wires the same `ReadLinks`.

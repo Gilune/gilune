@@ -158,7 +158,20 @@ pub fn plugin_descriptor() -> crate::plugins::PluginDescriptor {
         subscribes: None,
         emits: Vec::new(),
         capabilities: Vec::new(),
-        contributions: Vec::new(),
+        // The folders a vault starts with because the vault itself uses
+        // them (`vault.folders`, owner 2026-10-19): captures land in
+        // Captures, and Notes is the home for everything written by hand.
+        // Shells create each once per vault and never put back one the
+        // user deleted; the kernel only declares them.
+        contributions: [("notes", "Notes"), ("captures", "Captures")]
+            .into_iter()
+            .map(|(id, folder)| crate::plugins::Contribution {
+                slot: "vault.folders".to_string(),
+                id: format!("org.memory.vault/{id}"),
+                label: folder.to_string(),
+                config: format!("{{\"folder\":\"{folder}\"}}"),
+            })
+            .collect(),
     }
 }
 

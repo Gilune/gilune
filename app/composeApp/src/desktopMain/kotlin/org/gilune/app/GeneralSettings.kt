@@ -17,13 +17,13 @@ import kotlin.math.roundToInt
 internal fun GeneralSettings() {
     val appearance = LocalNoteAppearance.current
     var reading by remember { mutableStateOf(false) }
-    val mode = if (reading) "Read" else "Edit"
+    val mode = if (reading) "Presentation" else "Edit"
     val settings = if (reading) appearance.reading else appearance.edit
     Text("Note text", style = MaterialTheme.typography.titleMedium)
     Text("Changes apply immediately and are saved on this device.", style = MaterialTheme.typography.bodySmall)
     TabRow(selectedTabIndex = if (reading) 1 else 0) {
         Tab(selected = !reading, onClick = { reading = false }, text = { Text("Edit") })
-        Tab(selected = reading, onClick = { reading = true }, text = { Text("Read") })
+        Tab(selected = reading, onClick = { reading = true }, text = { Text("Presentation") })
     }
     var fontsOpen by remember { mutableStateOf(false) }
     Text("Font", style = MaterialTheme.typography.titleSmall)

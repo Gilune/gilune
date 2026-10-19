@@ -36,14 +36,22 @@
 
   <p>Press <kbd>Ctrl</kbd> + <kbd>N</kbd>. A note called <em>Untitled</em> appears with
   its name already selected, so you can simply type the real name over it and carry on
-  into the body. If a folder is selected in the sidebar, the note is made there;
-  otherwise it goes to the top of the vault.</p>
+  into the body. If a folder is selected in the sidebar (it is shaded), the note is
+  made there; otherwise it goes to the top of the vault. Click the empty space below
+  your folders to go back to the top.</p>
+
+  <p>A new vault starts with the folders its plugins use: <em>Notes</em> and
+  <em>Captures</em> for your own writing and what you capture, and <em>People</em> when
+  the people plugin is on. A plugin you switch on later adds its own folder then. You
+  are free to rename or delete any of them; they are not put back.</p>
 
   <p>You can also use the <strong>new note</strong> button at the top of the sidebar,
-  or right-click a folder and choose <strong>New note here</strong>. To make a folder,
-  use the <strong>new folder</strong> button beside it or <strong>New folder
-  here</strong>; you then type the name straight into the tree, with
-  <kbd>Enter</kbd> to confirm and <kbd>Esc</kbd> to back out.</p>
+  or right-click a folder and choose <strong>New note</strong>. To make a folder,
+  use the <strong>new folder</strong> button beside it, or right-click a folder (or
+  the empty space below your folders, for the top of the vault) and choose
+  <strong>New folder</strong>. You then type the name straight into the tree:
+  <kbd>Enter</kbd> or clicking away confirms it, <kbd>Esc</kbd> backs out, and a
+  folder you never named is not made.</p>
 
   <h2>Naming and renaming</h2>
 
@@ -61,10 +69,9 @@
     <img src="../assets/simple-note.png" alt="A note open for editing, with a heading, body text and a checklist styled in place.">
   </figure>
 
-  <p>At the top of the page is a two-way switch, <strong>Edit</strong> and
-  <strong>Read</strong>. Notes open in Edit, where Gilune styles your Markdown as you
-  type — headings look like headings, emphasis is emphasised, checkboxes are drawn as
-  boxes. Read shows the same note fully laid out, without a cursor in it.</p>
+  <p>A note is always ready to write in. Gilune styles your Markdown as you type —
+  headings look like headings, emphasis is emphasised, checkboxes are drawn as
+  boxes.</p>
 
   <div class="note">
     <p>Styling never changes a single byte. What you are editing is the literal text of
@@ -72,8 +79,24 @@
     a plain text editor in any order and always get the same file back.</p>
   </div>
 
-  <p>You can set which mode notes open in under <strong>Settings ▸ Appearance ▸ Notes
-  open</strong>.</p>
+  <h3>Presentation mode</h3>
+
+  <p>When you want to read a note, or show it to someone, rather than write in it,
+  press <kbd>Ctrl</kbd> + <kbd>E</kbd> or choose <strong>Presentation mode</strong> from
+  the note's <strong>⋯</strong> menu. The note is laid out in full, with no cursor and
+  no Markdown showing, and a click does the thing you clicked on instead of starting an
+  edit:</p>
+  <ul>
+    <li>a checkbox ticks or unticks, exactly as it does while writing;</li>
+    <li>a link opens — a note in a new tab, a web address in your browser;</li>
+    <li>a <code>[[wiki link]]</code> opens the note of that name;</li>
+    <li>an <code>@mention</code> opens that person's page.</li>
+  </ul>
+
+  <p>Typing can't change anything while you present. Press <kbd>Esc</kbd>,
+  <kbd>Ctrl</kbd> + <kbd>E</kbd>, or the <strong>Presenting</strong> label at the top of
+  the page to go back to writing, with the cursor where you left it. Presentation mode
+  has its own font and spacing under <strong>Settings ▸ General ▸ Note text</strong>.</p>
 
   <h3>Checkboxes</h3>
 

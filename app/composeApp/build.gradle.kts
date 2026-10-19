@@ -374,10 +374,15 @@ tasks.matching { it.name == "run" }.configureEach {
     // escape (observed 2026-08-30) — and stays the habit here.
     val profile = (project.findProperty("gilune.kernel.profile") as String?) ?: "debug"
     val kernelDir = rootProject.projectDir.resolve("../kernel/target/$profile").normalize()
-    run.jvmArgs("-Djna.library.path=${kernelDir.invariantSeparatorsPath}")
-    listOf("gilune.vault", "gilune.probe").forEach { key ->
-        (project.findProperty(key) as String?)?.let { run.jvmArgs("-D$key=$it") }
-    }
+    val devArgs = listOf("-Djna.library.path=${kernelDir.invariantSeparatorsPath}") +
+        listOf("gilune.vault", "gilune.probe").mapNotNull { key ->
+            (project.findProperty(key) as String?)?.let { "-D$key=$it" }
+        }
+    // A provider rather than `jvmArgs(...)`: the Compose plugin assigns the
+    // task's jvmArgs wholesale when it configures `run`, which silently
+    // dropped these — a dev run then could not load the kernel and opened
+    // whatever vault the installed app last used (2026-10-19).
+    run.jvmArgumentProviders.add(CommandLineArgumentProvider { devArgs })
 }
 
 tasks.withType<Test>().configureEach {
