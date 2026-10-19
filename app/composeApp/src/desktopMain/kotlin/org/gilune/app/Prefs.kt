@@ -71,6 +71,15 @@ object Prefs {
     private fun layoutKey(vaultDir: String): String =
         "tabs-" + Integer.toHexString(vaultDir.hashCode())
 
+    /// Whether this machine has already given the vault its starting
+    /// folders. Asked once, so a folder the user deletes is not put back.
+    fun defaultFoldersCreated(vaultDir: String): Boolean = node.getBoolean(foldersKey(vaultDir), false)
+
+    fun markDefaultFoldersCreated(vaultDir: String) = node.putBoolean(foldersKey(vaultDir), true)
+
+    private fun foldersKey(vaultDir: String): String =
+        "folders-" + Integer.toHexString(vaultDir.hashCode())
+
     private const val MAX_LAYOUT_CHARS = 7500
 
     private const val DEFAULT_RAIL_WIDTH = 240
