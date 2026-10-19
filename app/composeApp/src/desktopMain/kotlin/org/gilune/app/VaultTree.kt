@@ -30,7 +30,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -76,6 +78,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.key.Key
@@ -83,6 +87,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
@@ -258,7 +263,7 @@ fun RailPanels(
             RailTab(Icons.Outlined.Description, "files", active == RailPanel.FILES) {
                 tree.railPanel = RailPanel.FILES
             }
-            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH) {
+            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH, shortcut = "Ctrl+F") {
                 tree.railPanel = RailPanel.SEARCH
             }
             for (destination in destinations) {
@@ -313,22 +318,31 @@ internal fun navigationIcon(key: String): ImageVector = when (key) {
 }
 
 @Composable
-private fun RailTab(icon: ImageVector, label: String, selected: Boolean, onSelect: () -> Unit) {
+private fun RailTab(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    shortcut: String? = null,
+    onSelect: () -> Unit,
+) {
     val colours = MaterialTheme.colorScheme
-    Box(
-        Modifier
-            .size(26.dp)
-            .clip(RoundedCornerShape(5.dp))
-            .background(if (selected) colours.primaryContainer else colours.surface)
-            .clickable(onClick = onSelect),
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(
-            icon,
-            contentDescription = label,
-            modifier = Modifier.size(15.dp),
-            tint = if (selected) colours.onPrimaryContainer else colours.onSurfaceVariant,
-        )
+    val name = label.replaceFirstChar { it.uppercaseChar() }
+    Tooltip(if (shortcut == null) name else "$name ($shortcut)") {
+        Box(
+            Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (selected) colours.primaryContainer else colours.surface)
+                .clickable(onClick = onSelect),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                icon,
+                contentDescription = label,
+                modifier = Modifier.size(15.dp),
+                tint = if (selected) colours.onPrimaryContainer else colours.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -352,6 +366,12 @@ private class TreeActions(
     fun pageMenuItems(folder: String) = pageCollections.filter { File(it.folder) == File(folder) }.map { collection ->
         ContextMenuItem(collection.binding.collection.folderCreateLabel!!) { createPage(collection.copy(folder = folder)) }
     }
+
+    /// What the vault root offers: the same creation a folder's menu has.
+    fun rootMenuItems() = listOf(
+        ContextMenuItem("New note") { newNote("") },
+        ContextMenuItem("New folder") { newFolder("") },
+    ) + pageMenuItems("")
 }
 
 /// `onCreateNote` receives an untitled note that is already on disk;
@@ -376,7 +396,7 @@ fun VaultTree(
     var creatingPage by remember { mutableStateOf<FolderPageCollection?>(null) }
     val drag = remember(state.vaultDir) { VaultTreeDrag() }
     val list = rememberLazyListState()
-    val entries = remember(state.vaultCursor.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
+    val entries = remember(state.vaultCursor.value, state.refreshCount.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
         listVault(state.vaultDir, tree.expanded.toSet())
     }
     // The Captures folder is the inbox: the count is simply how many
@@ -388,6 +408,13 @@ fun VaultTree(
 
     fun reveal(parent: String) {
         if (parent.isNotEmpty() && parent !in tree.expanded) tree.expanded.add(parent)
+    }
+
+    // Focus leaves any naming row too, which answers it.
+    val focusManager = LocalFocusManager.current
+    fun chooseRoot() {
+        tree.selectedDir = ""
+        focusManager.clearFocus()
     }
 
     fun newFolder(parent: String = tree.selectedDir) {
@@ -441,13 +468,13 @@ fun VaultTree(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.weight(1f)) {
-                ContextMenuArea(items = { actions.pageMenuItems("") }) {
+                ContextMenuArea(items = { actions.rootMenuItems() }) {
                     Box(
                         modifier = Modifier.fillMaxWidth().height(26.dp)
                             .testTag("vault-root-drop")
                             .onGloballyPositioned { drag.rootTarget = it.boundsInRoot() }
                             .background(if (drag.destination == "") colours.primaryContainer else colours.surface)
-                            .clickable { tree.selectedDir = "" },
+                            .clickable(onClick = ::chooseRoot),
                         contentAlignment = Alignment.CenterStart,
                     ) {
                         Text(
@@ -461,52 +488,64 @@ fun VaultTree(
                     }
                 }
             }
-            IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
-                Icon(
-                    Icons.Outlined.CreateNewFolder,
-                    contentDescription = "new folder",
-                    modifier = Modifier.size(16.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("New folder") {
+                IconButton(onClick = { newFolder() }, modifier = Modifier.size(26.dp)) {
+                    Icon(
+                        Icons.Outlined.CreateNewFolder,
+                        contentDescription = "new folder",
+                        modifier = Modifier.size(16.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
-            IconButton(onClick = { newNote() }, modifier = Modifier.size(26.dp)) {
-                Icon(
-                    Icons.AutoMirrored.Outlined.NoteAdd,
-                    contentDescription = "new note",
-                    modifier = Modifier.size(16.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("New note (Ctrl+N)") {
+                IconButton(onClick = { newNote() }, modifier = Modifier.size(26.dp)) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.NoteAdd,
+                        contentDescription = "new note",
+                        modifier = Modifier.size(16.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
         }
 
-        LazyColumn(
-            Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp).testTag("vault-tree-list")
-                .onGloballyPositioned { drag.viewport = it.boundsInRoot() },
-            state = list,
-        ) {
-            val atRoot = (pending as? PendingName.CreateFolder)?.takeIf { it.parent.isEmpty() }
-            if (atRoot != null) {
-                item(key = "pending-root") {
-                    InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null; moveRevision++ })
-                }
-            }
-            items(entries, key = { it.relPath }) { entry ->
-                val renaming = (pending as? PendingName.Rename)?.takeIf { it.relPath == entry.relPath }
-                if (renaming != null) {
-                    InlineNameRow(
-                        state,
-                        renaming,
-                        depth = entry.depth,
-                        onDone = { pending = null; moveRevision++ },
-                        onRenamed = onRenamed,
-                    )
-                } else {
-                    TreeRow(entry, tree, state.vaultDir, capturesCount, actions, drag)
-                }
-                val inside = (pending as? PendingName.CreateFolder)
-                    ?.takeIf { entry.isDir && it.parent == entry.relPath }
-                if (inside != null) {
-                    InlineNameRow(state, inside, depth = entry.depth + 1, onDone = { pending = null; moveRevision++ })
+        // The space the rows leave is the vault itself: a click there makes
+        // the root the folder new things go into, and its menu creates
+        // there — otherwise a folder once clicked keeps every creation.
+        Box(Modifier.fillMaxWidth().weight(1f)) {
+            ContextMenuArea(items = { actions.rootMenuItems() }) {
+                LazyColumn(
+                    Modifier.fillMaxSize().padding(bottom = 6.dp).testTag("vault-tree-list")
+                        .onGloballyPositioned { drag.viewport = it.boundsInRoot() }
+                        .pointerInput(Unit) { detectTapGestures { chooseRoot() } },
+                    state = list,
+                ) {
+                    val atRoot = (pending as? PendingName.CreateFolder)?.takeIf { it.parent.isEmpty() }
+                    if (atRoot != null) {
+                        item(key = "pending-root") {
+                            InlineNameRow(state, atRoot, depth = 0, onDone = { pending = null; moveRevision++ })
+                        }
+                    }
+                    items(entries, key = { it.relPath }) { entry ->
+                        val renaming = (pending as? PendingName.Rename)?.takeIf { it.relPath == entry.relPath }
+                        if (renaming != null) {
+                            InlineNameRow(
+                                state,
+                                renaming,
+                                depth = entry.depth,
+                                onDone = { pending = null; moveRevision++ },
+                                onRenamed = onRenamed,
+                            )
+                        } else {
+                            TreeRow(entry, tree, state.vaultDir, capturesCount, actions, drag)
+                        }
+                        val inside = (pending as? PendingName.CreateFolder)
+                            ?.takeIf { entry.isDir && it.parent == entry.relPath }
+                        if (inside != null) {
+                            InlineNameRow(state, inside, depth = entry.depth + 1, onDone = { pending = null; moveRevision++ })
+                        }
+                    }
                 }
             }
         }
@@ -585,6 +624,8 @@ private fun TreeRow(
                 .background(when {
                     entry.isDir && drag.destination == entry.relPath -> colours.secondaryContainer
                     selected || drag.source == entry -> colours.primaryContainer
+                    // The folder new notes and folders go into, quietly.
+                    entry.isDir && tree.selectedDir == entry.relPath -> colours.surfaceVariant
                     else -> colours.surface
                 })
                 .clickable {
@@ -609,16 +650,20 @@ private fun TreeRow(
                 )
                 // A note's own chevron folds its attachments away; the
                 // name beside it still opens the note.
-                entry.hasAttachments -> Box(
-                    Modifier.size(14.dp).clickable { tree.toggle(entry.relPath) },
-                    contentAlignment = Alignment.Center,
+                entry.hasAttachments -> Tooltip(
+                    if (entry.relPath in tree.expanded) "Hide attachments" else "Show attachments",
                 ) {
-                    Icon(
-                        chevron(entry.relPath in tree.expanded),
-                        contentDescription = "attachments",
-                        modifier = Modifier.size(14.dp),
-                        tint = colours.onSurfaceVariant,
-                    )
+                    Box(
+                        Modifier.size(14.dp).clickable { tree.toggle(entry.relPath) },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            chevron(entry.relPath in tree.expanded),
+                            contentDescription = "attachments",
+                            modifier = Modifier.size(14.dp),
+                            tint = colours.onSurfaceVariant,
+                        )
+                    }
                 }
                 else -> Spacer(Modifier.width(14.dp))
             }
@@ -714,8 +759,18 @@ private fun InlineNameRow(
         mutableStateOf(TextFieldValue(start, TextRange(0, start.length)))
     }
     val focus = remember { FocusRequester() }
+    // Each gesture ends the row once: Enter, then the blur its removal
+    // causes, must not commit twice.
+    val ended = remember { booleanArrayOf(false) }
+    var hadFocus by remember { mutableStateOf(false) }
+
+    fun end() {
+        ended[0] = true
+        onDone()
+    }
 
     fun commit() {
+        if (ended[0]) return
         val trimmed = field.text.trim().trimEnd('/')
         if (isSegment(trimmed)) {
             when (pending) {
@@ -726,7 +781,7 @@ private fun InlineNameRow(
                 is PendingName.Rename -> renameEntry(state, pending, trimmed, onRenamed)
             }
         }
-        onDone()
+        end()
     }
 
     Row(
@@ -750,6 +805,12 @@ private fun InlineNameRow(
             modifier = Modifier
                 .weight(1f)
                 .focusRequester(focus)
+                // Clicking away answers like Enter: a name is kept, and
+                // no name means nothing is created.
+                .onFocusChanged {
+                    if (hadFocus && !it.isFocused) commit()
+                    hadFocus = it.isFocused
+                }
                 .onPreviewKeyEvent { event ->
                     when {
                         event.type != KeyEventType.KeyDown -> false
@@ -758,7 +819,7 @@ private fun InlineNameRow(
                             true
                         }
                         event.key == Key.Escape -> {
-                            onDone()
+                            if (!ended[0]) end()
                             true
                         }
                         else -> false
@@ -834,6 +895,7 @@ fun createUntitledNote(vaultDir: String, parent: String): String {
     return file.relativeTo(File(vaultDir)).invariantSeparatorsPath
 }
 
+
 private fun folderBase(vaultDir: String, parent: String): File =
     if (parent.isEmpty()) File(vaultDir) else File(vaultDir, parent)
 
@@ -877,16 +939,25 @@ private fun reportMovedNotes(
     }
 }
 
-private fun revealInExplorer(vaultDir: String, entry: VaultEntry) {
-    val target = File(vaultDir, entry.relPath)
+private fun revealInExplorer(vaultDir: String, entry: VaultEntry) = revealInExplorer(File(vaultDir, entry.relPath))
+
+/// Show `target` selected in the platform's file manager. Explorer takes
+/// the path as an argument of its own after `/select,`: Java quotes an
+/// argument holding a space, and a quoted `"/select,C:\…\My note.md"` is
+/// one Explorer cannot read, so it opened Documents instead.
+fun revealInExplorer(target: File) {
     runCatching {
-        if (entry.isDir) {
-            ProcessBuilder("explorer.exe", target.absolutePath).start()
+        if (System.getProperty("os.name").startsWith("Windows")) {
+            ProcessBuilder(revealCommand(target)).start()
         } else {
-            ProcessBuilder("explorer.exe", "/select,${target.absolutePath}").start()
+            val desktop = java.awt.Desktop.getDesktop()
+            if (desktop.isSupported(java.awt.Desktop.Action.BROWSE_FILE_DIR)) desktop.browseFileDirectory(target)
+            else desktop.open(target.absoluteFile.parentFile)
         }
     }
 }
+
+internal fun revealCommand(target: File): List<String> = listOf("explorer.exe", "/select,", target.absolutePath)
 
 @Composable
 private fun DeleteDialog(

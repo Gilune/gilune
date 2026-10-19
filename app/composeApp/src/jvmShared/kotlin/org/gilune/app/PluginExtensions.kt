@@ -83,13 +83,17 @@ class PluginExtensions(implementations: List<BundledPluginExtensions>) {
     }
 
     fun registerPlugins(gilune: Gilune) {
-        val previous = gilune.plugins().map { it.pluginId }.toSet()
+        val previous = gilune.plugins().associateBy { it.pluginId }
         implementations.forEach {
+            val installed = previous[it.declaration.pluginId]
             val state = gilune.registerPlugin(it.declaration)
             // Bundled local page creation follows the host's installation-consent
-            // policy. Never restore a revoked grant or resurrect a removed plugin.
-            if (state == "enabled" && it.declaration.pluginId !in previous &&
-                PAGE_CREATE_CAPABILITY in it.declaration.capabilities) {
+            // policy: granted on first install, or when a grown declaration first
+            // asks for it (never offered, so never refused — ADR 0018 § 5). Never
+            // restore a revoked grant or resurrect a removed plugin.
+            val newly = installed == null ||
+                PAGE_CREATE_CAPABILITY in newlyDeclaredLocalCapabilities(installed, it.declaration.capabilities, listOf(PAGE_CREATE_CAPABILITY))
+            if (state == "enabled" && newly && PAGE_CREATE_CAPABILITY in it.declaration.capabilities) {
                 gilune.grantCapability(it.declaration.pluginId, PAGE_CREATE_CAPABILITY)
             }
         }
@@ -171,6 +175,22 @@ class PluginExtensions(implementations: List<BundledPluginExtensions>) {
     internal fun documentViews(plugins: List<PluginInfo>): List<org.gilune.plugin.sdk.DocumentViewRegistration> = implementations.flatMap { implementation ->
         val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
         implementation.documentViews.filter { owner.declares(Slots.DOCUMENT_VIEWS, it.id) }
+    }
+
+    /** Editor styling contributed by enabled plugins (`editor.decorations`),
+     * after the shell's own and the tasks plugin's. Style-only by convention:
+     * a plugin's recogniser names words, it never rewrites them. */
+    internal fun editorDecorations(plugins: List<PluginInfo>): List<org.gilune.plugin.sdk.EditorDecoration> = implementations.flatMap { implementation ->
+        val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
+        implementation.editorDecorations.filter { owner.declares(Slots.EDITOR_DECORATIONS, it.id) }
+    }
+
+    /** Go-to-definition registrations of enabled plugins, each with the
+     * keystroke its owner's settings ask for. */
+    internal fun definitions(plugins: List<PluginInfo>): List<BoundDefinition> = implementations.flatMap { implementation ->
+        val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
+        implementation.definitions.filter { owner.declares(Slots.EDITOR_DEFINITIONS, it.id) }
+            .map { BoundDefinition(owner.pluginId, it.key(owner.settings), it) }
     }
 
     internal fun refactorings(plugins: List<PluginInfo>): List<BoundRefactoring> = implementations.flatMap { implementation ->

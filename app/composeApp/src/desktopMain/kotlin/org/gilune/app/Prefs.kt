@@ -30,14 +30,6 @@ object Prefs {
             .getOrDefault(ThemeChoice.System)
         set(value) = node.put("theme", value.name)
 
-    /// Whether notes open reading (rendered) or editing (styled source).
-    /// A per-note toggle overrides it; the mode is never written into a
-    /// document. Editing is the default — this is a capture tool, not a
-    /// publishing tool.
-    var readingMode: Boolean
-        get() = node.getBoolean("readingMode", false)
-        set(value) = node.putBoolean("readingMode", value)
-
     /// How wide the rail stands, in dp, and whether it is shut altogether
     /// (ADR 0011 amendment). Device-local facts like the theme: a vault
     /// opened on two machines is arranged twice. The width is remembered
@@ -70,6 +62,26 @@ object Prefs {
     /// layout; the restore is defensive by contract.
     private fun layoutKey(vaultDir: String): String =
         "tabs-" + Integer.toHexString(vaultDir.hashCode())
+
+    /// Whether this machine has already given the vault one plugin-declared
+    /// starting folder. Asked per folder, so a plugin installed later still
+    /// gets its own, and a folder the user deletes is not put back.
+    ///
+    /// A vault given the old fixed set (Notes, Tasks, Captures — one flag
+    /// for all three) counts as having had those, so none of them returns.
+    fun folderGiven(vaultDir: String, folder: String): Boolean =
+        node.getBoolean(folderKey(vaultDir, folder), false) ||
+            (node.getBoolean(legacyFoldersKey(vaultDir), false) && folder.lowercase() in LEGACY_STARTING_FOLDERS)
+
+    fun markFolderGiven(vaultDir: String, folder: String) = node.putBoolean(folderKey(vaultDir, folder), true)
+
+    private fun folderKey(vaultDir: String, folder: String): String =
+        "folder-" + Integer.toHexString(vaultDir.hashCode()) + "-" + Integer.toHexString(folder.lowercase().hashCode())
+
+    private fun legacyFoldersKey(vaultDir: String): String =
+        "folders-" + Integer.toHexString(vaultDir.hashCode())
+
+    private val LEGACY_STARTING_FOLDERS = setOf("notes", "tasks", "captures")
 
     private const val MAX_LAYOUT_CHARS = 7500
 

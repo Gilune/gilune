@@ -85,6 +85,9 @@ fun peopleExtensions(): BundledPluginExtensions {
             PluginContribution(Slots.DOCUMENT_VIEWS, PEOPLE_VIEW, "People links"),
             PluginContribution(Slots.DOCUMENT_REFACTORINGS, PEOPLE_REFACTORING, "Rename people and connections"),
             PluginContribution(Slots.SEARCH_TYPES, "person-connection", "People connections"),
+            PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_MENTION_STYLE, "Mentions styled as links"),
+            PluginContribution(Slots.EDITOR_DEFINITIONS, PEOPLE_DEFINITION, "Go to a person's page"),
+            vaultFolderContribution(PEOPLE_FOLDER, "People"),
         ) + operators.map { PluginContribution(Slots.SEARCH_OPERATORS, it.contributionId, it.name) } + collections.flatMap { c ->
             listOf(PluginContribution(PAGE_COLLECTIONS_SLOT, c.id, c.title)) +
                 if (c.id == PEOPLE_PANEL) listOf(PluginContribution(Slots.NAVIGATION, c.id, c.title, "{\"panel\":${pageJsonString(c.id)}}"))
@@ -95,6 +98,8 @@ fun peopleExtensions(): BundledPluginExtensions {
         editorCompletions = listOf(peopleEditorRegistration()),
         documentViews = listOf(peopleViewRegistration()),
         refactorings = listOf(peopleRefactoringRegistration()),
+        editorDecorations = listOf(peopleMentionDecoration()),
+        definitions = listOf(peopleDefinitionRegistration()),
         searchOperators = operators,
         searchTypes = listOf(
             SearchTypeRegistration("person", "person") { personSearchType() },

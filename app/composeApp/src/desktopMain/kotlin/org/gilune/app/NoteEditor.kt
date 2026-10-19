@@ -21,6 +21,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -68,6 +70,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -84,6 +88,10 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -110,7 +118,10 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
 import androidx.compose.ui.window.PopupProperties
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
 
@@ -173,8 +184,25 @@ class EditorState : LiveDocumentBuffer {
     var frontMatterRaw by mutableStateOf("")
 
     var dirty by mutableStateOf(false)
-    var reading by mutableStateOf(Prefs.readingMode)
+
+    /// Presentation mode (ADR 0012 amendment, owner 2026-10-19): the
+    /// rendered note with no caret, where a click acts — ticks a task,
+    /// opens a link or a mention — instead of starting an edit. Editing is
+    /// simply what a note is, so this is a view someone asks for (the ⋯
+    /// menu, Ctrl+E) and never a preference notes open in.
+    var reading by mutableStateOf(false)
     var showProperties by mutableStateOf(false)
+
+    /// Raised when presentation mode ends, so editing resumes with the
+    /// caret where it was left rather than at the top; the body field
+    /// lowers it once it has the focus.
+    var resumeEditing by mutableStateOf(false)
+
+    /// Into presentation mode, or back out to editing at the old caret.
+    fun togglePresentation() {
+        reading = !reading
+        if (!reading) resumeEditing = true
+    }
 
     /// Raised by the shell after it creates a note, so the placeholder
     /// name arrives selected and ready to be typed over. The title field
@@ -436,56 +464,66 @@ private fun OpenNote(
                     }
                 }
 
-                IconButton(
-                    onClick = {
-                        when {
-                            // One session at a time: the other note's
-                            // microphone is still live.
-                            dictatingElsewhere -> state.message.value = "already dictating in another note"
-                            dictatingHere -> end()
-                            else -> begin()
-                        }
-                    },
-                    modifier = Modifier.size(28.dp),
-                ) {
-                    Icon(
-                        Icons.Outlined.Mic,
-                        contentDescription = when {
-                            dictatingElsewhere -> "dictating in another note"
-                            dictatingHere -> "stop dictating"
-                            else -> "dictate at the cursor"
+                val dictationWords = when {
+                    dictatingElsewhere -> "Dictating in another note"
+                    dictatingHere -> "Stop dictating"
+                    else -> "Dictate at the cursor"
+                }
+                Tooltip(dictationWords) {
+                    IconButton(
+                        onClick = {
+                            when {
+                                // One session at a time: the other note's
+                                // microphone is still live.
+                                dictatingElsewhere -> state.message.value = "already dictating in another note"
+                                dictatingHere -> end()
+                                else -> begin()
+                            }
                         },
-                        modifier = Modifier.size(16.dp),
-                        tint = when {
-                            dictatingHere -> colours.error
-                            dictatingElsewhere -> colours.outline
-                            else -> colours.onSurfaceVariant
-                        },
-                    )
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Outlined.Mic,
+                            contentDescription = dictationWords.lowercase(),
+                            modifier = Modifier.size(16.dp),
+                            tint = when {
+                                dictatingHere -> colours.error
+                                dictatingElsewhere -> colours.outline
+                                else -> colours.onSurfaceVariant
+                            },
+                        )
+                    }
                 }
             }
             DocumentLinksButton(state, editor.document(), openRow ?: {})
-            TextButton(onClick = {
-                editor.reading = !editor.reading
-                if (!editor.reading) editor.focusBody = true
-            }) {
-                Icon(
-                    if (editor.reading) Icons.Outlined.Edit else Icons.Outlined.Visibility,
-                    contentDescription = if (editor.reading) "Edit note" else "Read note",
-                    modifier = Modifier.size(18.dp),
-                )
-                Text(if (editor.reading) "Edit" else "Read", Modifier.padding(start = 5.dp))
+            // Editing needs no switch: it is what a note is. Presenting
+            // says so, and is its own way back.
+            if (editor.reading) {
+                Tooltip("Back to editing (Esc or Ctrl+E)") {
+                    TextButton(onClick = editor::togglePresentation, modifier = Modifier.testTag("presenting")) {
+                        Icon(Icons.Outlined.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Text("Presenting", Modifier.padding(start = 5.dp), fontSize = 13.sp)
+                    }
+                }
             }
             Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "note actions",
-                        modifier = Modifier.size(16.dp),
-                        tint = colours.onSurfaceVariant,
-                    )
+                Tooltip("Note actions") {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(28.dp).testTag("note-actions")) {
+                        Icon(
+                            Icons.Default.MoreVert,
+                            contentDescription = "note actions",
+                            modifier = Modifier.size(16.dp),
+                            tint = colours.onSurfaceVariant,
+                        )
+                    }
                 }
                 DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text(if (editor.reading) "Back to editing" else "Presentation mode", fontSize = 13.sp) },
+                        trailingIcon = { Text("Ctrl+E", fontSize = 11.sp, color = colours.onSurfaceVariant) },
+                        onClick = { menuOpen = false; editor.togglePresentation() },
+                        modifier = Modifier.testTag("toggle-presentation"),
+                    )
                     if (state.gilune.value != null) {
                         DropdownMenuItem(
                             text = { Text("Rename references…", fontSize = 13.sp) },
@@ -511,9 +549,7 @@ private fun OpenNote(
                         text = { Text("Reveal in Explorer", fontSize = 13.sp) },
                         onClick = {
                             menuOpen = false
-                            runCatching {
-                                ProcessBuilder("explorer.exe", "/select,${file.absolutePath}").start()
-                            }
+                            revealInExplorer(file)
                         },
                     )
                     DropdownMenuItem(
@@ -545,32 +581,25 @@ private fun OpenNote(
 
         if (header.frontMatter.isNotEmpty()) PropertiesStrip(header, editor)
 
+        // The editor seams (ADR 0015 § 5). What is composed comes from
+        // the registry: the shell's own registrations lead, and the
+        // tasks plugin's date styling and `/` menu are here only while
+        // that plugin is enabled and still declares them. Switch it off
+        // and the tokens are prose and the menu never opens — no byte
+        // changes either way, which is what removability has to mean.
+        // Both modes tick through the same list, so a task ticked while
+        // presenting is stamped `done:` exactly as one ticked in the editor.
+        val plugins = state.plugins.toList()
+        val filter = plugins.tasksFilter()
+        val decorations = remember(plugins, filter) {
+            val tasks = if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) tasksDecorations(filter) else emptyList()
+            // Then every other enabled plugin's styling — a person's @mention
+            // drawn as a link — through the registry rather than by name.
+            builtInDecorations() + tasks + BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)
+        }
+
         if (editor.reading) {
-            // The `editor.blocks` seam (ADR 0015 § 5, T4). The Code branch
-            // resolves through a table keyed by info string; the shell's
-            // own `filter` is its only entry, and every other fence — and
-            // every fence at all with this list empty — is the code box it
-            // has always been. Reading the cursor here is what makes a
-            // block recompute when the vault moves rather than per
-            // keystroke (§ 4).
-            MarkdownBody(
-                remember(editor.text.text) { parseMarkdown(editor.text.text) },
-                Modifier
-                    .fillMaxSize()
-                    .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp, vertical = 14.dp),
-                textStyle = appearance.reading.textStyle,
-                blockSpacing = appearance.reading.blockSpacing.dp,
-                renderers = BlockRenderers(
-                    listOf(
-                        filterBlockRegistration(
-                            state,
-                            state.plugins.toList(),
-                            onOpen = openRow,
-                        ),
-                    ),
-                ),
-            )
+            PresentedNote(state, editor, decorations, openRow) { write() }
         } else {
             // Styled editing (E2 + the E3 checkbox slice): markers off the
             // caret's line render as checkbox glyphs; the caret's own line
@@ -585,21 +614,6 @@ private fun OpenNote(
                     link = colours.primary,
                 )
             }
-            // The editor seams (ADR 0015 § 5). What is composed comes from
-            // the registry: the shell's own registrations lead, and the
-            // tasks plugin's date styling and `/` menu are here only while
-            // that plugin is enabled and still declares them. Switch it off
-            // and the tokens are prose and the menu never opens — no byte
-            // changes either way, which is what removability has to mean.
-            val plugins = state.plugins.toList()
-            val filter = plugins.tasksFilter()
-            val decorations = remember(plugins, filter) {
-                if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
-                    builtInDecorations() + tasksDecorations(filter)
-                } else {
-                    builtInDecorations()
-                }
-            }
             // The raw-line exception follows a caret someone can see: an
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
@@ -608,9 +622,11 @@ private fun OpenNote(
             // Return in the title hands the caret to the body, at its
             // start: the first line is where a name leads. Moving the
             // caret is not an edit, so `dirty` is left alone.
-            LaunchedEffect(editor.focusBody) {
-                if (!editor.focusBody) return@LaunchedEffect
-                editor.text = editor.text.copy(selection = TextRange(0))
+            // Leaving presentation mode asks for the same focus, but keeps
+            // the caret where it was.
+            LaunchedEffect(editor.focusBody, editor.resumeEditing) {
+                if (!editor.focusBody && !editor.resumeEditing) return@LaunchedEffect
+                if (editor.focusBody) editor.text = editor.text.copy(selection = TextRange(0))
                 // The field may have been composed by the very key that
                 // raised the flag (a note being read switches to editing
                 // first), and a requester answers only once its node is
@@ -622,6 +638,7 @@ private fun OpenNote(
                     withFrameNanos { }
                 }
                 editor.focusBody = false
+                editor.resumeEditing = false
             }
             val line =
                 if (bodyFocused) caretLine(editor.text.text, editor.text.selection.start) else null
@@ -674,18 +691,115 @@ private fun OpenNote(
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
             var hoveringActivation by remember { mutableStateOf(false) }
 
+            // The page follows the caret (owner, 2026-10-19). The body
+            // scrolls in a container of its own, so a Return at the foot
+            // of the pane put the caret out of sight. Only a change the
+            // field itself made asks: a ticked checkbox or dictation
+            // landing replaces the buffer from outside, and must leave the
+            // page where the person was reading — as must the wheel.
+            val caretView = remember { BringIntoViewRequester() }
+            var caretMoves by remember { mutableStateOf(0) }
+            val currentTransformation by rememberUpdatedState(transformation)
+            val density = LocalDensity.current
+            LaunchedEffect(caretMoves) {
+                if (caretMoves == 0) return@LaunchedEffect
+                // The layout of the change arrives with the next frame.
+                withFrameNanos { }
+                val placed = layout ?: return@LaunchedEffect
+                val caret = currentTransformation.filter(AnnotatedString(editor.text.text)).offsetMapping
+                    .originalToTransformed(editor.text.selection.end)
+                    .coerceIn(0, placed.layoutInput.text.length)
+                // A margin below the caret's line, so it never sits flush
+                // against the pane's edge.
+                val margin = with(density) { EDITOR_PADDING.toPx() }
+                val rect = placed.getCursorRect(caret)
+                caretView.bringIntoView(rect.copy(top = rect.top - margin, bottom = rect.bottom + margin))
+            }
+
             // The `/` menu belongs to this note and this mode; leaving
             // either drops it. Dismissal costs the buffer nothing, because
             // a session never wrote to it (ADR 0015 § 2).
+            //
+            // And only from typing (owner report, 2026-10-19): the menu
+            // answers Up and Down while it is up, so a menu that opened
+            // wherever the caret *landed* beside a trigger — walking down a
+            // note through an @mention — took the next arrow key and the
+            // caret seemed stuck. An edit opens it; moving the caret
+            // without one closes it, as in any other editor.
+            var typedHere by remember(relPath) { mutableStateOf(false) }
             val bodyStart = editor.frontMatterRaw.length
             val completions = rememberEditorCompletions(state, editor.document(), bodyStart + editor.text.selection.start,
-                editor.text.selection.collapsed, documentKey = editor.openRelPath.orEmpty()) { start, end, replacement ->
+                editor.text.selection.collapsed && typedHere, documentKey = editor.openRelPath.orEmpty()) { start, end, replacement ->
                 require(start >= bodyStart) { "Insertion must stay in the editable body." }
                 editor.text = replaceRange(editor.text, (start - bodyStart) until (end - bodyStart), replacement)
                 editor.dirty = true
                 bodyFocus.requestFocus()
             }
             var fieldOrigin by remember { mutableStateOf(Offset.Zero) }
+
+            // Up and Down are the editor's own (owner report, 2026-10-19).
+            // The field's line jump returns a *displayed* offset unmapped
+            // whenever the caret lands past a line's end — an empty line, a
+            // short one — so with decorations shortening the lines above,
+            // Down at the foot of a note fell back into the task above it.
+            // The same jump is made here through the one offset table.
+            //
+            // The column a run of vertical moves keeps is remembered until
+            // anything else moves the caret: down through a short line and
+            // on, and the caret comes back out where it went in.
+            // Go to definition (owner, 2026-10-19): each enabled plugin's
+            // registration listens for the keystroke its own settings name
+            // (F12 by default for a person's @mention). The plugin says what
+            // the caret is on; its lookup runs off the UI thread and the
+            // answer opens in a tab — or is said, never guessed.
+            val definitionBindings = remember(plugins) { BUNDLED_PLUGIN_EXTENSIONS.definitions(plugins) }
+            val definitionScope = rememberCoroutineScope()
+            fun goToDefinition(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val pressed = keystrokeOf(event) ?: return false
+                val bindings = definitionBindings.filter { keystrokeMatches(it.key, pressed) }
+                if (bindings.isEmpty()) return false
+                val document = editor.document()
+                val offset = editor.frontMatterRaw.length + editor.text.selection.end
+                val kernel = state.gilune.value
+                definitionScope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        val reference = definitionAt(document, offset, bindings)
+                        when {
+                            reference == null -> DefinitionResult.Say("nothing to go to here — put the cursor on a mention")
+                            kernel == null -> DefinitionResult.Say("the vault is still opening")
+                            else -> resolveDefinition(kernel, reference)
+                        }
+                    }
+                    when (result) {
+                        is DefinitionResult.Open ->
+                            openRow?.invoke(result.relPath) ?: run { state.message.value = "found ${result.relPath}" }
+                        is DefinitionResult.Say -> state.message.value = result.words
+                    }
+                }
+                return true
+            }
+
+            var verticalX by remember { mutableStateOf<Float?>(null) }
+            fun moveByLines(lines: Int, extend: Boolean): Boolean {
+                val placed = layout ?: return false
+                val value = editor.text
+                val mapping = transformation.filter(AnnotatedString(value.text)).offsetMapping
+                val from = mapping.originalToTransformed(value.selection.end).coerceIn(0, placed.layoutInput.text.length)
+                val x = verticalX ?: placed.getCursorRect(from).left
+                val line = placed.getLineForOffset(from) + lines
+                val target = when {
+                    line < 0 -> 0
+                    line >= placed.lineCount -> value.text.length
+                    else -> mapping.transformedToOriginal(
+                        placed.getOffsetForPosition(Offset(x, (placed.getLineTop(line) + placed.getLineBottom(line)) / 2)),
+                    ).coerceIn(0, value.text.length)
+                }
+                editor.text = value.copy(selection = if (extend) TextRange(value.selection.start, target) else TextRange(target))
+                verticalX = x
+                caretMoves++
+                typedHere = false
+                return true
+            }
 
             /// The one question both the tap and the pointer ask of the
             /// same machinery: which activation-bearing decoration is
@@ -747,7 +861,7 @@ private fun OpenNote(
                 // only thing in it: a collapsed block draws over the lines
                 // the field reserved for it, and being its sibling here is
                 // what makes it scroll with the text it covers.
-                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("note-scroll")) {
                     BasicTextField(
                         value = editor.text,
                         onValueChange = { typed ->
@@ -768,6 +882,10 @@ private fun OpenNote(
                             // text may mark the buffer unsaved, or a note
                             // nobody typed into would sit dirty for ever.
                             editor.dirty = editor.dirty || changed.text != editor.text.text
+                            if (changed.text != editor.text.text || changed.selection != editor.text.selection) caretMoves++
+                            if (changed.text != editor.text.text || changed.selection != editor.text.selection) verticalX = null
+                            if (changed.text != editor.text.text) typedHere = true
+                            else if (changed.selection != editor.text.selection) typedHere = false
                             editor.text = changed
 
                         },
@@ -775,6 +893,9 @@ private fun OpenNote(
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = paneHeight)
                             .padding(EDITOR_PADDING)
+                            // Inside the padding, so its space is the text
+                            // layout's and a cursor rect needs no shifting.
+                            .bringIntoViewRequester(caretView)
                             // Window coordinates for the caret popup: the
                             // layout gives a rectangle in the field's own
                             // space, and this is what puts it on screen.
@@ -794,8 +915,14 @@ private fun OpenNote(
                             // keyboard lives (§ 2).
                             .onPreviewKeyEvent { event ->
                                 when {
-                                    !completions.visible -> false
                                     event.type != KeyEventType.KeyDown -> false
+                                    !completions.visible && goToDefinition(event) -> true
+                                    !completions.visible -> when {
+                                        event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
+                                        event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
+                                        event.key == Key.DirectionUp -> moveByLines(-1, event.isShiftPressed)
+                                        else -> false
+                                    }
                                     event.key == Key.DirectionDown -> { completions.move(1); true }
                                     event.key == Key.DirectionUp -> { completions.move(-1); true }
                                     event.key == Key.Enter -> { completions.choose(completions.selected); true }

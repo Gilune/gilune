@@ -572,13 +572,15 @@ private fun TabStrip(state: GiluneState, tabs: TabsState, pane: TabPane, drag: T
         }
         if (overflowing) {
             Box {
-                IconButton(onClick = { overflowMenu = true }, modifier = Modifier.size(28.dp)) {
-                    Icon(
-                        Icons.Default.KeyboardArrowDown,
-                        contentDescription = "open tabs",
-                        modifier = Modifier.size(16.dp),
-                        tint = colours.onSurfaceVariant,
-                    )
+                Tooltip("All open tabs") {
+                    IconButton(onClick = { overflowMenu = true }, modifier = Modifier.size(28.dp)) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = "open tabs",
+                            modifier = Modifier.size(16.dp),
+                            tint = colours.onSurfaceVariant,
+                        )
+                    }
                 }
                 // Scrolling alone would let a tab hide off the end; the
                 // menu keeps every one of them reachable.
@@ -764,16 +766,18 @@ private fun TabAffordance(
         contentAlignment = Alignment.Center,
     ) {
         when {
-            hovered -> Box(
-                Modifier.size(TAB_AFFORDANCE).clip(CircleShape).clickable(onClick = onClose),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = "close $label",
-                    modifier = Modifier.size(11.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            hovered -> Tooltip("Close (Ctrl+W)") {
+                Box(
+                    Modifier.size(TAB_AFFORDANCE).clip(CircleShape).clickable(onClick = onClose),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "close $label",
+                        modifier = Modifier.size(11.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
             stale -> Box(Modifier.size(7.dp).clip(CircleShape).background(colours.error))
             dirty -> Box(Modifier.size(7.dp).clip(CircleShape).background(colours.primary))

@@ -160,6 +160,9 @@ private class GestureRequests {
 
     /// Ctrl+B, which the top bar's toggle answers with the same flip.
     var toggleRail by mutableStateOf(0)
+
+    /// Ctrl+E: the note in front into presentation mode, or back to editing.
+    var togglePresentation by mutableStateOf(0)
 }
 
 /// The row above the letters only: the numeric keypad sends keys of its
@@ -240,6 +243,10 @@ fun main() {
                     }
                     event.isCtrlPressed && event.key == Key.Backslash -> {
                         gestures.splitRight++
+                        true
+                    }
+                    event.isCtrlPressed && event.key == Key.E -> {
+                        gestures.togglePresentation++
                         true
                     }
                     event.key == Key.Escape && settingsOpen -> {
@@ -387,6 +394,9 @@ private fun DesktopApp(
             state.message.value = "unsaved changes over a changed file — choose which version to keep"
         }
     }
+    LaunchedEffect(gestures.togglePresentation) {
+        if (gestures.togglePresentation > 0) tabs.activeEditor?.togglePresentation()
+    }
     LaunchedEffect(gestures.splitRight) {
         if (gestures.splitRight > 0 && !tabs.splitRight()) {
             state.message.value = "a pane needs a second tab before it can split"
@@ -442,6 +452,14 @@ private fun DesktopApp(
         // an escape from the first (§ 2).
         state.syncDiscovery = { gilune -> gilune.useBundledDiscovery() }
         state.openVault { gilune ->
+            // The starting folders the enabled plugins declare, each once
+            // per vault on this machine — after the open, because only the
+            // registered plugins know them.
+            runCatching {
+                val made = createDeclaredFolders(vaultDir, declaredFolders(gilune.plugins()),
+                    given = { Prefs.folderGiven(vaultDir, it) }, remember = { Prefs.markFolderGiven(vaultDir, it) })
+                if (made.isNotEmpty()) state.refreshCount.value += 1
+            }
             scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
@@ -497,21 +515,23 @@ private fun DesktopApp(
             // The rail's other switch: the same flip Ctrl+B makes, kept
             // where the rail is so shutting it never hides its own way
             // back (ADR 0011 amendment).
-            IconButton(
-                onClick = { setRailCollapsed(!railCollapsed) },
-                modifier = Modifier.size(30.dp),
-            ) {
-                Icon(
-                    Icons.Default.Menu,
-                    contentDescription = "toggle sidebar (ctrl+b)",
-                    modifier = Modifier.size(17.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip(if (railCollapsed) "Show sidebar (Ctrl+B)" else "Hide sidebar (Ctrl+B)") {
+                IconButton(
+                    onClick = { setRailCollapsed(!railCollapsed) },
+                    modifier = Modifier.size(30.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = "toggle sidebar (ctrl+b)",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
             Text("Gilune", style = MaterialTheme.typography.titleMedium)
             QuickOpenBox(state, ::openNote, quickOpenFocus, Modifier.width(280.dp))
             Spacer(Modifier.weight(1f))
-            if (micOffered) {
+            if (micOffered) Tooltip(if (recording) "Stop recording" else "New note from speech") {
                 IconButton(
                     onClick = {
                         if (!recording) {
@@ -537,21 +557,25 @@ private fun DesktopApp(
                     )
                 }
             }
-            IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "sync vault",
-                    modifier = Modifier.size(17.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("Sync vault") {
+                IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "sync vault",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
-            IconButton(onClick = { onSettingsOpen(true) }, modifier = Modifier.size(30.dp)) {
-                Icon(
-                    Icons.Default.Settings,
-                    contentDescription = "settings",
-                    modifier = Modifier.size(17.dp),
-                    tint = colours.onSurfaceVariant,
-                )
+            Tooltip("Settings") {
+                IconButton(onClick = { onSettingsOpen(true) }, modifier = Modifier.size(30.dp)) {
+                    Icon(
+                        Icons.Default.Settings,
+                        contentDescription = "settings",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
             }
         }
         HorizontalDivider(color = colours.outlineVariant)

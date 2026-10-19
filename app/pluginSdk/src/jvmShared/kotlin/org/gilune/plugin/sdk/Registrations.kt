@@ -24,6 +24,21 @@ class BundledPluginExtensions(
     val editorCompletions: List<EditorCompletionRegistration> = emptyList(),
     val documentViews: List<DocumentViewRegistration> = emptyList(),
     val refactorings: List<RefactoringRegistration> = emptyList(),
+    val editorDecorations: List<EditorDecoration> = emptyList(),
+    val definitions: List<DefinitionRegistration> = emptyList(),
+)
+
+/** "Go to definition" (`Slots.EDITOR_DEFINITIONS`). `definitionAt` is pure:
+ * given the document and a caret (a character offset into the snapshot's
+ * text) it names the reference there, or null; the host runs the lookup and
+ * opens what it finds. `key` reads the plugin's own settings for the
+ * keystroke that asks — the plugin owns the binding and its default, the
+ * host only spells keystrokes (for example `F12`, `Ctrl+Alt+G`). */
+class DefinitionRegistration(
+    val id: String,
+    val label: String,
+    val key: (settings: String) -> String,
+    val definitionAt: (source: uniffi.gilune_ffi.SourceTextSnapshot, offset: Int) -> DocumentReference?,
 )
 
 class SearchTypeRegistration(

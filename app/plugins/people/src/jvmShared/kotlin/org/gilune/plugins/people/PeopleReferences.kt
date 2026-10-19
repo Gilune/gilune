@@ -42,6 +42,50 @@ data class PersonReference(
 
 fun recognisePeople(view: SourceView): List<PersonReference> = recognisePeople(view, CanonicalTokens())
 
+private fun escapedAt(text: String, at: Int): Boolean {
+    var start = at
+    while (start > 0 && text[start - 1] == '\\') start--
+    return (at - start) % 2 == 1
+}
+
+private fun boundaryAt(text: String, at: Int): Boolean = at == 0 || text[at - 1].isWhitespace() || text[at - 1] in "([{,;:!?=*\"'"
+
+private fun urlAt(text: String, at: Int): Boolean {
+    var start = at
+    while (start > 0 && !text[start - 1].isWhitespace() && text[start - 1] !in "([{\"'") start--
+    val prefix = text.substring(start, at)
+    return "://" in prefix || prefix.startsWith("mailto:", true) || prefix.startsWith("www.", true)
+}
+
+/** Every `@handle` within `range` of `text`, `@` included, by the one rule
+ * the index and the editor share: at a word boundary, not escaped, not part
+ * of a URL or an email address, sentence-final dots left off, the handle a
+ * valid token wholly inside the range. */
+internal fun mentionTokens(text: String, range: IntRange): List<IntRange> = buildList {
+    var at = text.indexOf('@', range.first)
+    while (at >= 0 && at <= range.last) {
+        val start = at
+        at = text.indexOf('@', at + 1)
+        if (!boundaryAt(text, start) || escapedAt(text, start) || urlAt(text, start)) continue
+        var end = start + 1
+        while (end < text.length && peopleTokenChar(text[end])) end++
+        if (end < text.length && text[end] == '@') continue // email-shaped input
+        while (end > start + 1 && text[end - 1] == '.') end-- // sentence punctuation
+        if (!validToken(text.substring(start + 1, end)) || end - 1 > range.last) continue
+        add(start until end)
+    }
+}
+
+/** The mentions in one line of Markdown as the editor draws them: the same
+ * tokens the index records, less any inside an inline code span (the index
+ * never sees those; fenced blocks the editor already leaves alone). */
+fun mentionsInLine(line: String): List<IntRange> {
+    val code = INLINE_CODE.findAll(line).map { it.range }.toList()
+    return mentionTokens(line, line.indices).filter { token -> code.none { token.first in it } }
+}
+
+private val INLINE_CODE = Regex("`[^`\n]+`")
+
 private fun recognisePeople(view: SourceView, canonical: (String) -> String): List<PersonReference> {
     val text = view.snapshot.text
     // Adjacent ordinary-text events may be split by the Markdown parser (for
@@ -56,31 +100,14 @@ private fun recognisePeople(view: SourceView, canonical: (String) -> String): Li
             else allowed += start until end
         }
     }
-    fun escaped(at: Int): Boolean {
-        var start = at
-        while (start > 0 && text[start - 1] == '\\') start--
-        return (at - start) % 2 == 1
-    }
-    fun boundary(at: Int): Boolean = at == 0 || text[at - 1].isWhitespace() || text[at - 1] in "([{,;:!?=*\"'"
-    fun url(at: Int): Boolean {
-        var start = at
-        while (start > 0 && !text[start - 1].isWhitespace() && text[start - 1] !in "([{\"'") start--
-        val prefix = text.substring(start, at)
-        return "://" in prefix || prefix.startsWith("mailto:", true) || prefix.startsWith("www.", true)
-    }
+    fun escaped(at: Int): Boolean = escapedAt(text, at)
+    fun boundary(at: Int): Boolean = boundaryAt(text, at)
     return buildList {
         for (range in allowed) {
-            var at = text.indexOf('@', range.first)
-            while (at >= 0 && at <= range.last) {
-                val start = at
-                at = text.indexOf('@', at + 1)
-                if (!boundary(start) || escaped(start) || url(start)) continue
-                var end = start + 1
-                while (end < text.length && peopleTokenChar(text[end])) end++
-                if (end < text.length && text[end] == '@') continue // email-shaped input
-                while (end > start + 1 && text[end - 1] == '.') end-- // sentence punctuation
+            for (token in mentionTokens(text, range)) {
+                val start = token.first
+                val end = token.last + 1
                 val handle = text.substring(start + 1, end)
-                if (!validToken(handle) || end - 1 > range.last) continue
                 var colon = start
                 while (colon > range.first && text[colon - 1] in " \t") colon--
                 var keyword: String? = null
