@@ -259,15 +259,39 @@ fun List<PluginInfo>.tasksFilter(): String =
 fun List<PluginInfo>.tasksPanelEnabled(): Boolean =
     firstOrNull { it.pluginId == TASKS_PLUGIN }?.let { jsonBoolean(it.settings, TASK_PANEL_KEY) } ?: true
 
+/// The keystroke that turns the caret's line into a task, or ticks the
+/// task it already is, as the host spells keystrokes. Ctrl+L is Obsidian's
+/// "toggle checkbox status"; the plugin owns the binding and its default,
+/// as People owns go to definition.
+const val DEFAULT_TASK_SHORTCUT = "Ctrl+L"
+
+/// The task shortcut as the settings hold it: null when none is stored,
+/// which means [DEFAULT_TASK_SHORTCUT]. Kept apart from the effective key
+/// so a write that carries it through never pins today's default.
+fun tasksShortcutSetting(settings: String): String? =
+    jsonString(settings, TASK_SHORTCUT_KEY)?.trim()?.takeIf { it.isNotEmpty() }
+
+/// The keystroke the editor listens for.
+fun tasksShortcutKey(settings: String): String = tasksShortcutSetting(settings) ?: DEFAULT_TASK_SHORTCUT
+
+/// Not gated on the plugin's state, for [tasksFilter]'s reason; the editor
+/// gates on the plugin being switched on.
+fun List<PluginInfo>.tasksShortcut(): String =
+    tasksShortcutKey(firstOrNull { it.pluginId == TASKS_PLUGIN }?.settings.orEmpty())
+
 /// The settings document the tasks plugin stores, written here so the
-/// writer, [tasksFilter] and [tasksPanelEnabled] cannot drift apart. Both
-/// keys are written every time: a caller changing one holds the other,
-/// so toggling the panel can never drop the filter someone set.
-fun tasksSettingsDocument(filter: String, panel: Boolean = true): String =
-    """{"$TASK_FILTER_KEY":"${escapeJsonString(filter)}","$TASK_PANEL_KEY":$panel}"""
+/// writer, [tasksFilter], [tasksPanelEnabled] and [tasksShortcut] cannot
+/// drift apart. Every key is written every time: a caller changing one
+/// holds the others, so toggling the panel can never drop the filter or
+/// the shortcut someone set. A null `shortcut` is the default, and is left
+/// out rather than written down.
+fun tasksSettingsDocument(filter: String, panel: Boolean = true, shortcut: String? = null): String =
+    """{"$TASK_FILTER_KEY":"${escapeJsonString(filter)}","$TASK_PANEL_KEY":$panel""" +
+        (shortcut?.let { ""","$TASK_SHORTCUT_KEY":"${escapeJsonString(it)}"""" } ?: "") + "}"
 
 private const val TASK_FILTER_KEY = "filter"
 private const val TASK_PANEL_KEY = "panel"
+private const val TASK_SHORTCUT_KEY = "taskShortcut"
 
 
 /** All executable search/field/index registrations belong to the domain module.

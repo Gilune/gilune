@@ -501,6 +501,115 @@ private fun String.leadingLevelWidth(): Int = when {
 /// An indentation one level shallower.
 private fun String.dropLevel(): String = substring(leadingLevelWidth())
 
+// ------------------------------------------------------- task shortcut
+
+/// One line of a buffer rewritten: [before] at [start] becomes [after].
+/// [activated] says the rewrite went through the activation chain — a tick
+/// or untick, which is an action and is written at once, as a click is —
+/// rather than a marker typed onto the line, which then goes in at column
+/// [insertAt].
+data class TaskLineEdit(
+    val start: Int,
+    val before: String,
+    val after: String,
+    val activated: Boolean,
+    val insertAt: Int = 0,
+) {
+    fun applyTo(text: CharSequence): String =
+        text.substring(0, start) + after + text.substring(start + before.length, text.length)
+
+    /// Where an offset in the old buffer stands in the new one, keeping its
+    /// place relative to the text: ahead of the line it is untouched, past
+    /// it it moves by the line's change in length, and on it it follows
+    /// the characters it sat beside.
+    fun map(offset: Int): Int {
+        val end = start + before.length
+        val delta = after.length - before.length
+        return when {
+            offset < start -> offset
+            offset > end -> offset + delta
+            // A typed marker goes in ahead of the text, so a caret at the
+            // insertion point stays with the text and lands behind it.
+            !activated -> if (offset - start >= insertAt) offset + delta else offset
+            else -> start + followActivation(offset - start)
+        }
+    }
+
+    /// The chain flips the marker in place (same length) and then stamps or
+    /// strips one token somewhere after it. Past the marker the two lines
+    /// differ in one region with untouched text either side; a column
+    /// before that region stays — so a caret at the end of the words stays
+    /// there while `done:` is appended — and one after it moves with it.
+    private fun followActivation(column: Int): Int {
+        val marker = TASK_MARKER.find(before)?.range?.last?.plus(1) ?: 0
+        var prefix = minOf(marker, before.length, after.length)
+        while (prefix < before.length && prefix < after.length && before[prefix] == after[prefix]) prefix++
+        var suffix = 0
+        while (suffix < before.length - prefix && suffix < after.length - prefix &&
+            before[before.length - 1 - suffix] == after[after.length - 1 - suffix]
+        ) suffix++
+        return when {
+            column <= prefix -> column
+            column >= before.length - suffix -> column + after.length - before.length
+            else -> minOf(column, after.length - suffix)
+        }
+    }
+}
+
+/// The task shortcut (Obsidian's "toggle checkbox status", Ctrl+L by
+/// default) asked of the line holding `caret`:
+///
+/// - a task ticks or unticks through [activateLine] with the editor's own
+///   registrations, so `done:` is stamped or taken away exactly as a click
+///   does it;
+/// - a bullet (`-`, `*`, `+`) gains a marker after it and keeps its bullet;
+/// - any other line — an empty one included — becomes `- [ ] ` plus its
+///   text, behind its own indentation.
+///
+/// Null inside a fenced block (delimiters counted in, as [listContinuation]
+/// counts them: writing a marker into somebody's example would be real
+/// bytes in the wrong place) and on an ordered-list item, which is out of
+/// scope for the checkbox exactly as [TASK_MARKER] says — turning `1. milk`
+/// into `- [ ] 1. milk` would wreck the numbering, so it is left alone.
+fun taskLineShortcut(
+    text: CharSequence,
+    caret: Int,
+    decorations: List<EditorDecoration> = builtInDecorations(),
+): TaskLineEdit? {
+    val bounded = caret.coerceIn(0, text.length)
+    val lineStart = lineStartFor(text, bounded)
+    val lineEnd = lineEndFor(text, bounded)
+
+    var start = 0
+    var inFence = false
+    while (start <= lineStart) {
+        val end = lineEndFor(text, start)
+        if (fenceDelimiter(text, start, end)) {
+            if (start == lineStart) return null
+            inFence = !inFence
+        }
+        if (end >= lineStart) break
+        start = end + 1
+    }
+    if (inFence) return null
+
+    val line = text.substring(lineStart, lineEnd)
+    if (TASK_MARKER.containsMatchIn(line)) {
+        val activated = activateLine(line, decorations) ?: return null
+        return TaskLineEdit(lineStart, line, activated, activated = true)
+    }
+    val bullet = LIST_ITEM.find(line)
+    if (bullet != null) {
+        val at = bullet.value.length
+        return TaskLineEdit(lineStart, line, line.substring(0, at) + "[ ] " + line.substring(at), activated = false, insertAt = at)
+    }
+    if (ORDERED_ITEM.containsMatchIn(line)) return null
+    val indent = line.takeWhile { it == ' ' || it == '\t' }
+    return TaskLineEdit(lineStart, line, indent + "- [ ] " + line.substring(indent.length), activated = false, insertAt = indent.length)
+}
+
+private val ORDERED_ITEM = Regex("""^[ \t]*\d+[.)][ \t]""")
+
 /// Whether the step from one buffer to the next was **one newline typed**:
 /// nothing else inserted, nothing else removed, and the caret left
 /// standing just past it.
