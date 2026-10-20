@@ -14,6 +14,7 @@ import org.gilune.plugin.sdk.Slots
 import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
+import org.gilune.plugins.tasks.tasksShortcut
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -862,6 +863,35 @@ private fun OpenNote(
             }
 
             var verticalX by remember { mutableStateOf<Float?>(null) }
+
+            // The task shortcut (user ask, 2026-10-20): Ctrl+L by default,
+            // Obsidian's "toggle checkbox status", and the tasks plugin's to
+            // change. The caret's line becomes a task, or the task it is
+            // ticks through the same chain a click does — and, being an
+            // action like the click, is written at once. A line it has
+            // nothing to say about (inside a fence, an ordered item) lets
+            // the key through.
+            val taskShortcut = remember(plugins) {
+                if (plugins.any { it.pluginId == TASKS_PLUGIN && it.state == "enabled" }) plugins.tasksShortcut() else null
+            }
+            fun toggleTask(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val binding = taskShortcut ?: return false
+                val pressed = keystrokeOf(event) ?: return false
+                if (!keystrokeMatches(binding, pressed)) return false
+                val value = editor.text
+                val edit = taskLineShortcut(value.text, value.selection.end, decorations) ?: return false
+                editor.text = value.copy(
+                    text = edit.applyTo(value.text),
+                    selection = TextRange(edit.map(value.selection.start), edit.map(value.selection.end)),
+                )
+                editor.dirty = true
+                verticalX = null
+                typedHere = false
+                caretMoves++
+                if (edit.activated) write()
+                return true
+            }
+
             fun moveByLines(lines: Int, extend: Boolean): Boolean {
                 val placed = layout ?: return false
                 val value = editor.text
@@ -1024,6 +1054,7 @@ private fun OpenNote(
                                 when {
                                     event.type != KeyEventType.KeyDown -> false
                                     !completions.visible && goToDefinition(event) -> true
+                                    !completions.visible && toggleTask(event) -> true
                                     !completions.visible -> when {
                                         event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
                                         event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)

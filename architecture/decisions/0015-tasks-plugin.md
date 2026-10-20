@@ -700,6 +700,31 @@ asks for something never offered before (ADR 0018 § 5's rule, applied by the
 host to bundled page creation); a revoke is never undone. The plugin declares
 no `vault.folders` entry (ADR 0011 amendment of the same date).
 
+### Task shortcut amendment — 2026-10-20
+
+A user asked for a key to add a task in a document. The desktop editor now
+has one: **Ctrl+L** by default, Obsidian's "toggle checkbox status", acting
+on the caret's line. A plain line becomes `- [ ] ` plus its text behind its
+own indentation; a bullet (`-`, `*`, `+`) gains a marker and keeps its
+bullet; an empty line takes `- [ ] ` with the caret after it; a task ticks
+or unticks through `activateLine` with the editor's own registrations, so
+`done:` is stamped or taken away exactly as on click, and — being an action
+like the click — the note is written at once. The caret keeps its place in
+the text. Nothing happens inside a fence (delimiters included, as list
+continuation counts them), on an ordered-list item (out of the checkbox's
+scope, and `- [ ] 1. milk` would wreck the numbering), or while the `/`
+menu is up.
+
+The keystroke is the plugin's, as go to definition is People's (ADR 0011
+amendment of 2026-10-19): it is stored as `taskShortcut` in the plugin's
+settings document beside `filter` and `panel`, changed or reset on its
+settings screen, absent means the default (so the default is never pinned
+by a write), and every write carries all three keys. The key does nothing
+while the plugin is switched off. The rule is a pure function in shared
+code (`taskLineShortcut`) so the phone can bind it later; only the desktop
+wires it today. The global filter is not typed onto a new task: a filtered
+vault's new checkbox is an ordinary one until its line carries the filter.
+
 ### Filter rows open, and lead to their line — 2026-10-21
 
 Owner: `+N more` should expand the list, and a task clicked in a list

@@ -22,6 +22,10 @@ import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
 import org.gilune.plugins.tasks.tasksPanelEnabled
 import org.gilune.plugins.tasks.tasksSettingsDocument
+import org.gilune.plugins.tasks.DEFAULT_TASK_SHORTCUT
+import org.gilune.plugins.tasks.tasksShortcut
+import org.gilune.plugins.tasks.tasksShortcutKey
+import org.gilune.plugins.tasks.tasksShortcutSetting
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -169,6 +173,30 @@ class TasksPluginTest {
         assertEquals("#task", listOf(installedTasksPlugin(settings = panelToggledBackOn)).tasksFilter())
         val filterCleared = tasksSettingsDocument("", panel = false)
         assertTrue(!listOf(installedTasksPlugin(settings = filterCleared)).tasksPanelEnabled())
+    }
+
+    @Test
+    fun theTaskShortcutRidesInTheSameDocumentAndSurvivesTheOtherWrites() {
+        assertEquals(DEFAULT_TASK_SHORTCUT, tasksShortcutKey(""), "absent means Ctrl+L")
+        assertEquals(DEFAULT_TASK_SHORTCUT, tasksShortcutKey(tasksSettingsDocument("#task")))
+        assertNull(tasksShortcutSetting(tasksSettingsDocument("#task")), "the default is not written down")
+
+        val bound = tasksSettingsDocument("#task", panel = false, shortcut = "Ctrl+Alt+T")
+        val plugins = listOf(installedTasksPlugin(settings = bound))
+        assertEquals("Ctrl+Alt+T", plugins.tasksShortcut())
+        assertEquals("#task", plugins.tasksFilter())
+        assertTrue(!plugins.tasksPanelEnabled())
+
+        // What the filter and panel controls write: their own value, and the
+        // stored shortcut carried through.
+        val stored = tasksShortcutSetting(bound)
+        assertEquals("Ctrl+Alt+T", tasksShortcutKey(tasksSettingsDocument("", panel = false, shortcut = stored)))
+        assertEquals("Ctrl+Alt+T", tasksShortcutKey(tasksSettingsDocument("#task", panel = true, shortcut = stored)))
+        // And Reset takes it out again without touching the others.
+        val reset = tasksSettingsDocument("#task", panel = false, shortcut = null)
+        assertEquals(DEFAULT_TASK_SHORTCUT, tasksShortcutKey(reset))
+        assertEquals("#task", listOf(installedTasksPlugin(settings = reset)).tasksFilter())
+        assertEquals("Ctrl+\"Q\"", tasksShortcutKey(tasksSettingsDocument("", shortcut = "Ctrl+\"Q\"")), "escaped, not broken")
     }
 
     @Test

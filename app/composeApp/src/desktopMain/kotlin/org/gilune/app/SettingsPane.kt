@@ -13,6 +13,9 @@ import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksFilter
 import org.gilune.plugins.tasks.tasksPanelEnabled
 import org.gilune.plugins.tasks.tasksSettingsDocument
+import org.gilune.plugins.tasks.DEFAULT_TASK_SHORTCUT
+import org.gilune.plugins.tasks.tasksShortcutKey
+import org.gilune.plugins.tasks.tasksShortcutSetting
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -506,13 +509,15 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
 /// vault can never disagree with itself about what a task is — and § 6's
 /// switch over the agenda panel itself.
 ///
-/// Both are keys of one settings document, so every write here sends both
-/// (`tasksSettingsDocument`): changing one must never drop the other.
+/// All three — and the task shortcut below them — are keys of one settings
+/// document, so every write here sends every one (`tasksSettingsDocument`):
+/// changing one must never drop another.
 @Composable
 private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
     val saved = remember(plugin.settings) { listOf(plugin).tasksFilter() }
     val panelOn = remember(plugin.settings) { listOf(plugin).tasksPanelEnabled() }
+    val shortcut = remember(plugin.settings) { tasksShortcutSetting(plugin.settings) }
     var filter by remember(plugin.settings) { mutableStateOf(saved) }
     Text("Global filter", style = MaterialTheme.typography.titleSmall)
     Text(
@@ -544,7 +549,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
                     } else {
                         "only checkbox lines containing $wanted are tasks"
                     },
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn, shortcut)) }
             },
             // An empty filter is a legitimate value — the shipped default
             // — so only "no change" disables the button.
@@ -571,10 +576,27 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
             onCheckedChange = { show ->
                 state.pluginAction(
                     if (show) "the agenda panel is in the rail" else "the agenda panel is off",
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show, shortcut)) }
             },
         )
         Text("Show the agenda panel", fontSize = 13.sp)
+    }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Task shortcut", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Turns the line the cursor is on into a task, or ticks the task it " +
+            "already is — the same as clicking its checkbox. " +
+            "Press Change, then the key or combination you want; Esc cancels.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    // The filter and the panel switch travel with the write, as above.
+    KeystrokeSetting(tasksShortcutKey(plugin.settings), DEFAULT_TASK_SHORTCUT, "task-shortcut-key") { key ->
+        state.pluginAction("the task shortcut is now ${key ?: DEFAULT_TASK_SHORTCUT}") {
+            it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, key))
+        }
     }
 }
 
@@ -585,14 +607,6 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
 private fun PeopleSettings(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
     val current = remember(plugin.settings) { org.gilune.plugins.people.peopleDefinitionKey(plugin.settings) }
-    var listening by remember { mutableStateOf(false) }
-    val field = remember { androidx.compose.ui.focus.FocusRequester() }
-    fun save(key: String?) {
-        listening = false
-        state.pluginAction(
-            "go to definition is now ${key ?: org.gilune.plugins.people.DEFAULT_DEFINITION_KEY}",
-        ) { it.setPluginSettings(plugin.pluginId, org.gilune.plugins.people.peopleSettingsDocument(plugin.settings, key)) }
-    }
     Text("Go to definition", style = MaterialTheme.typography.titleSmall)
     Text(
         "With the cursor on an @mention, this key opens that person's page. " +
@@ -601,6 +615,21 @@ private fun PeopleSettings(state: GiluneState, plugin: PluginInfo) {
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
     )
+    KeystrokeSetting(current, org.gilune.plugins.people.DEFAULT_DEFINITION_KEY, "definition-key") { key ->
+        state.pluginAction(
+            "go to definition is now ${key ?: org.gilune.plugins.people.DEFAULT_DEFINITION_KEY}",
+        ) { it.setPluginSettings(plugin.pluginId, org.gilune.plugins.people.peopleSettingsDocument(plugin.settings, key)) }
+    }
+}
+
+/// A plugin-owned keystroke: the binding as it stands, Change to record the
+/// next keystroke pressed (spelled the way the editor matches it, Esc
+/// cancels), and Reset back to the plugin's default — `save(null)`.
+@Composable
+private fun KeystrokeSetting(current: String, default: String, tag: String, save: (String?) -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    var listening by remember { mutableStateOf(false) }
+    val field = remember { androidx.compose.ui.focus.FocusRequester() }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             Modifier
@@ -611,19 +640,20 @@ private fun PeopleSettings(state: GiluneState, plugin: PluginInfo) {
                 .onKeyEvent { event ->
                     if (!listening || event.type != KeyEventType.KeyDown) return@onKeyEvent false
                     val pressed = keystrokeOf(event) ?: return@onKeyEvent true // a modifier on its way to a chord
-                    if (pressed == "Escape") listening = false else save(pressed)
+                    listening = false
+                    if (pressed != "Escape") save(pressed)
                     true
                 }
                 .padding(horizontal = 10.dp, vertical = 8.dp)
-                .testTag("definition-key"),
+                .testTag(tag),
         ) {
             Text(if (listening) "Press a key…" else current, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
         }
         OutlinedButton(onClick = { listening = true; runCatching { field.requestFocus() } }) { Text("Change", fontSize = 12.sp) }
         TextButton(
-            onClick = { save(null) },
-            enabled = current != org.gilune.plugins.people.DEFAULT_DEFINITION_KEY,
-        ) { Text("Reset to ${org.gilune.plugins.people.DEFAULT_DEFINITION_KEY}", fontSize = 12.sp) }
+            onClick = { listening = false; save(null) },
+            enabled = current != default,
+        ) { Text("Reset to $default", fontSize = 12.sp) }
     }
 }
 
