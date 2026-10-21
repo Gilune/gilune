@@ -1,8 +1,9 @@
 # ADR 0027: Realtime inline dictation on the desktop
 
 Date: 2026-10-21
-Status: **Accepted in part** (owner, 2026-10-21) — engine B and the § 1 rule; see
-Ratification record. Build not started.
+Status: **Accepted** (owner, 2026-10-21) — the § 1 rule, engine B first, and
+the engine-choice amendment at the end (A and C as options in their own
+plugin). Build not started.
 
 ## Context
 
@@ -212,3 +213,63 @@ Following ADR 0018 rather than inventing a new route:
 2. **Provisional words: grey, outside the file** (§ 1 as recommended).
 3. Question 3 (automatic final-pass replacement) was not asked; S4 stays
    optional and unscheduled.
+
+## Amendment (owner, 2026-10-21): engines are choices, live is a switch
+
+Same day, after the ratification above. The owner: rather than one engine,
+offer a couple as options — Nemotron suits more machines, whisper base suits
+faster hardware. This supersedes point 1 of the Ratification record (B alone)
+and restores option A, with C beside it.
+
+**What the measurements say each option is for.** Whisper base live
+re-decodes the recent audio every second, so it needs CPU headroom and uses
+almost no extra memory or disk. Nemotron does little work per 160 ms chunk
+and keeps up easily, but costs ~460 MiB to download and ~0.6 GB while
+dictating. FastConformer is for weak machines: light and fast, less
+accurate, no capitals or punctuation. Each model's settings carry one
+sentence saying this.
+
+### Plugins and names
+
+Each engine family stays its own plugin (ADR 0018 § 3: provenance names the
+engine; download, licence and consent belong to the engine). A plugin's
+**id names its runtime** — ids are permanent and its model list may grow — and
+its **display name follows one pattern, *Transcription (engine)***. "Live" or
+"Realtime" is not in any name: live is a switch inside each plugin, not a
+kind of plugin.
+
+| Plugin id (permanent) | Display name | Processor id | Models | Shell |
+|---|---|---|---|---|
+| `org.memory.transcription` (exists) | **Transcription (Whisper)** — was "Local transcription" | `transcribe` | the existing whisper catalogue | desktop, Android |
+| `org.memory.moonshine` (exists) | **Transcription (Moonshine)** — was "Realtime transcription (Moonshine)" | `moonshine-transcribe` | tiny streaming | Android |
+| `org.memory.sherpa` (new) | **Transcription (NVIDIA NeMo)** | `sherpa-transcribe` | Nemotron speech streaming 0.6B (default), NeMo FastConformer 480 ms | desktop |
+
+- The two renames change display names only. Ids, stored settings, grants and
+  provenance are untouched, so no vault changes.
+- `org.memory.sherpa` runs sherpa-onnx through its JVM jar (§ 4). If it later
+  hosts a non-NVIDIA model family, only the display name changes.
+- One active transcriber (ADR 0018 § 3) still holds: enabling one of these
+  disables the others, and the confirmation says so.
+
+### "Show words as I dictate"
+
+- Every transcription plugin whose engine can stream gets a setting **Show
+  words as I dictate** (default on). On: § 1's grey words, settled phrases
+  inserted as they settle. Off: today's behaviour — the words arrive at the
+  caret when the microphone stops.
+- **Keeping up is measured, not promised.** During a live session the shell
+  compares engine time against audio time. If the engine falls behind (over
+  real time for several consecutive seconds), the session drops to settling
+  at pauses only, and the status line says the engine could not keep up on
+  this machine and suggests a lighter model. The recording is unaffected.
+
+### Staging, revised
+
+- **S0** shared fold (unchanged).
+- **S1** editor grey text, anchor, settled insertion (unchanged).
+- **S2** whisper base live in `org.memory.transcription`, plus the "Show words
+  as I dictate" setting and the keeping-up fallback; the two renames.
+- **S3** `org.memory.sherpa` — Nemotron and FastConformer, consented
+  downloads with the NVIDIA Open Model License shown at the Nemotron consent
+  point, idle unload, committed transcript via the external processor route.
+- **S4** unchanged (optional).
