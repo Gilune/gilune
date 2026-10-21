@@ -107,6 +107,7 @@ fun SettingsPane(
     onThemeChange: (ThemeChoice) -> Unit,
     onClose: () -> Unit,
     initialSection: String? = null,
+    updater: Updater? = null,
 ) {
     var pane by remember { mutableStateOf(initialPane(initialSection)) }
     val colours = MaterialTheme.colorScheme
@@ -173,7 +174,7 @@ fun SettingsPane(
                                 Section.Plugins -> PluginsManager(state) { pane = Pane.Plugin(it) }
                                 Section.Sync -> SyncSection(state)
                                 Section.Appearance -> AppearanceSection(theme, onThemeChange)
-                                Section.About -> AboutSection(state, vaultDir)
+                                Section.About -> AboutSection(state, vaultDir, updater)
                             }
                             is Pane.Plugin -> {
                                 val plugin = state.plugins.firstOrNull { it.pluginId == open.pluginId }
@@ -753,7 +754,7 @@ internal fun PluginNavigationSettings(plugin: PluginInfo, navigation: Navigation
 }
 
 @Composable
-private fun AboutSection(state: GiluneState, vaultDir: String) {
+private fun AboutSection(state: GiluneState, vaultDir: String, updater: Updater?) {
     Text("Gilune", style = MaterialTheme.typography.titleSmall)
     Text(
         buildString {
@@ -767,4 +768,5 @@ private fun AboutSection(state: GiluneState, vaultDir: String) {
         lineHeight = 18.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    if (updater != null) UpdatesSection(updater)
 }
