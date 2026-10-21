@@ -110,6 +110,27 @@
   first recording and lets it go again after ten quiet minutes. The recording that
   wakes it takes about a tenth of a second longer than the ones after it.</p>
 
+  <h3>Choosing a transcriber (desktop)</h3>
+
+  <p>The desktop app comes with two transcription plugins, and one of them writes your notes
+  at a time: switching one on in <strong>Settings ▸ Plugins</strong> switches the other off, and
+  Gilune says so.</p>
+
+  <ul>
+    <li><strong>Transcription (Whisper)</strong> is the one that is on to begin with. Its models
+    are small (57 MiB for the recommended one). Live words need a reasonably fast processor.</li>
+    <li><strong>Transcription (NVIDIA NeMo)</strong> runs NVIDIA's speech models. Choose one on
+    its settings screen: <strong>Nemotron 0.6B</strong> (the most accurate live model, words about
+    a second after you say them, 464 MB to download and about 0.6 GB of memory while you
+    dictate), <strong>FastConformer</strong> (light and fast for slower machines, but no capitals
+    or punctuation) or <strong>Parakeet TDT 0.6B v2</strong> (very accurate, but its words arrive
+    when you stop). Each model's licence is shown beside it. With NeMo, words settle when you
+    pause rather than every second or two.</li>
+  </ul>
+
+  <p>Either way the model downloads once, after you allow the plugin network access, and is
+  checked against its published checksum before it is used.</p>
+
   <h3>Setting the spoken language</h3>
 
   <p>On the transcription plugin's own settings screen there is a <strong>Spoken

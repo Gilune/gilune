@@ -214,30 +214,52 @@ class LiveDictationTest {
         }
     }
 
+    /// An engine whose first decode stays open until the test lets it go —
+    /// a cold start (model load, language detection) of whatever length
+    /// the test needs, with no clock in it.
+    private class ColdStartEngine : LiveTranscriptionInterface {
+        val accepted = AtomicInteger()
+        val heardAtUpdate = java.util.Collections.synchronizedList(mutableListOf<Int>())
+        val firstDecodeStarted = CountDownLatch(1)
+        val releaseFirstDecode = CountDownLatch(1)
+        override fun accept(pcm: ByteArray) { accepted.addAndGet(pcm.size) }
+        override fun update(): List<LiveLine> {
+            heardAtUpdate += accepted.get()
+            if (heardAtUpdate.size == 1) {
+                firstDecodeStarted.countDown()
+                releaseFirstDecode.await(10, TimeUnit.SECONDS)
+            }
+            return listOf(LiveLine(heardAtUpdate.size.toULong(), "words", false))
+        }
+        override fun finish(): List<LiveLine> = emptyList()
+    }
+
     @Test
-    fun aSlowColdStartAndDecodesSlowerThanASecondStillShowWords() {
+    fun aSlowColdStartIsNotJudgedAndTheNextDecodeHearsEverythingThatWaited() {
         // The owner's run (2026-10-21): the first decode loads the model and
-        // detects the language, later ones take a little over a second. The
-        // old loop decoded on every second that arrived, left the rest
-        // queued, judged that queue after the cold decode, and hid the grey
-        // words for the whole dictation.
-        val engine = SlowEngine(decodeMs = 1_300, script = emptyList(), firstDecodeMs = 3_000)
+        // detects the language. The old loop decoded on every second that
+        // arrived, left the rest queued, judged that queue after the cold
+        // decode, and hid the grey words for the whole dictation.
+        val engine = ColdStartEngine()
         val warnings = mutableListOf<String>()
         val delivered = AtomicInteger()
         val run = LiveDictationRun(engine, deliver = { delivered.incrementAndGet() },
             fellBehind = { synchronized(warnings) { warnings += it } })
         run.start()
-        speak(run, 9)
+        run.offer(second)
+        assertTrue(engine.firstDecodeStarted.await(5, TimeUnit.SECONDS))
+        // Four seconds of speech arrive while the cold decode is running.
+        repeat(4) { run.offer(second) }
+        engine.releaseFirstDecode.countDown()
         val done = CountDownLatch(1)
+        Thread.sleep(500)
         run.stop { done.countDown() }
         assertTrue(done.await(10, TimeUnit.SECONDS))
-        assertEquals(emptyList(), synchronized(warnings) { warnings.toList() }, "this engine keeps up")
-        assertTrue(delivered.get() >= 3, "words kept arriving: ${delivered.get()} updates")
-        // Each decode after the first heard everything that had arrived:
-        // the gap between updates is the decode time, not a growing queue.
+        assertEquals(emptyList(), synchronized(warnings) { warnings.toList() }, "a cold start is not falling behind")
+        assertTrue(delivered.get() >= 2, "words kept arriving: ${delivered.get()} updates")
         val heard = synchronized(engine.heardAtUpdate) { engine.heardAtUpdate.toList() }
-        val steps = heard.zipWithNext { a, b -> (b - a) / 32_000.0 }
-        assertTrue(steps.drop(1).all { it >= 1.2 }, "each step took in the audio that queued during the decode: $steps")
+        assertEquals(listOf(32_000, 5 * 32_000), heard.take(2),
+            "the second decode heard all four seconds that queued behind the first, not just one")
     }
 
     @Test

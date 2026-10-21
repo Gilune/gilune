@@ -3,7 +3,7 @@
 Date: 2026-10-21
 Status: **Accepted** (owner, 2026-10-21) — the § 1 rule, engine B first, and
 the engine-choice amendment (A and C as options in their own
-plugin). S0–S2 delivered 2026-10-21 (see Delivery); S3 not started.
+plugin). S0–S3 delivered 2026-10-21 (see the Delivery sections).
 
 ## Context
 
@@ -364,3 +364,60 @@ the rest of the dictation. Regression row
 `aSlowColdStartAndDecodesSlowerThanASecondStillShowWords` fails with the
 drain removed. Real-time rerun with language on auto: grey 2.7 s, all
 settled 1.5 s after speech, words identical.
+
+## Delivery: S3 (2026-10-21)
+
+Owner, after trying S2: "The quality of the transcription isn't great …
+shall we now create the plugin for the other model?" — and asked why the
+Parakeet models were absent. Answer recorded: Parakeet unified (streaming)
+ran at 2.6× real time here; Parakeet TDT is whole-recording only. TDT is now
+offered as the plugin's "words when you stop" model.
+
+- **Dependencies.** sherpa-onnx 1.13.8 (`sherpa-onnx-jvm` + the target's
+  native jar) resolves from its GitHub release assets through an Ivy pattern
+  scoped to `com.k2fsa.sherpa.onnx` (settings.gradle.kts); `verifySherpaJars`
+  checks each jar against the SHA-256 the release publishes and gates
+  `compileKotlinDesktop` (falsified: one wrong digest fails the build).
+  `commons-compress` unpacks the `.tar.bz2` models; `org.json` lets the
+  provider's decisions be shared (`providerAction`/`transcriptDocument` moved
+  from the Android provider to `jvmShared/Provider.kt`, unchanged).
+- **Plugin.** `org.memory.sherpa`, "Transcription (NVIDIA NeMo)", processor
+  `sherpa-transcribe`, joining `TRANSCRIPTION_PROVIDERS` after whisper and
+  Moonshine. Registered by the desktop on open with
+  `registerProviderRespectingTheRule` (installed switched **off** while
+  whisper writes the notes); desktop plugin switches now go through
+  `providerSwitch`, so switching it on switches whisper off and says so.
+  Models: Nemotron 0.6B (default, streaming), FastConformer (streaming),
+  Parakeet TDT 0.6B v2 (whole recording). Settings: model with guidance and
+  licence, "Show words as I dictate" (disabled for TDT).
+- **Download.** One release archive per model, streamed through SHA-256 and
+  size checks, unpacked to a staging folder with a path-escape guard, renamed
+  into place with a `.ready` marker written last; only after the plugin's
+  `network.request` grant. Real FastConformer download: 106 MB in 39 s,
+  verified, unpacked, loaded.
+- **Engines.** `NemoEngines` loads on first use (warmed at bring-up), holds a
+  lock around every native call, unloads after ten idle minutes.
+  `SherpaLiveSession` implements the same `LiveTranscriptionInterface` the
+  kernel's whisper session does, so the editor is engine-blind; settling is
+  the model's endpoint (a pause). Updates every 0.2 s of audio (whisper: 1 s).
+- **Committed transcript.** `runNemoJobs` claims and submits through the
+  external processor route with the phone provider's compare-and-set rule;
+  hooked into `GiluneState.externalProcessing`, so a dictation's attached
+  capture and a top-bar voice note are transcribed by the active model.
+
+**Measured** (this laptop, the 22.9 s clip): Nemotron live — first words
+**1.3 s**, words with capitals and punctuation, "surveyor" heard; cold load
+6.0 s (paid at bring-up, not at the mic). Parakeet TDT whole clip 5.4 s incl.
+load. Gaps: Nemotron settled only once before the stop on a clip with almost
+no pauses (real speech pauses more; not yet measured with a person);
+`androidMain` not compiled (Android's provider file lost two functions to
+shared code, same package); no Android NeMo; the model choice is not yet
+pre-flighted against free memory.
+
+**Tests.** `NemoTest` 13 (desktop suite 811/0/10 skipped): verified unpack; checksum mismatch never unpacked
+and nothing left behind; an archive entry escaping its folder refused; the
+provider writing a recording's words through a real kernel; a note edited
+while being heard keeping the person's words; defaults; the switch turning
+whisper off; registration installing NeMo switched off beside whisper; the
+re-ask key hearing NeMo; and, opt-in, Nemotron live in real time, Parakeet
+whole-recording, a real download. Four rules broken at once ⇒ 4 rows red.

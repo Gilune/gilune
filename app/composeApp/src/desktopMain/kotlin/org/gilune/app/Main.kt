@@ -324,8 +324,9 @@ private fun DesktopApp(
     val dictation = remember { DesktopAudioRecorder() }
     var recording by remember { mutableStateOf(false) }
     val transcription = remember { TranscriptionRuntime() }
+    val nemo = remember { NemoHost() }
     KeepTranscriptionAsked(state) { gilune ->
-        withContext(Dispatchers.IO) { startTranscription(state, gilune, transcription) }
+        withContext(Dispatchers.IO) { startTranscription(state, gilune, transcription, nemo) }
     }
     val colours = MaterialTheme.colorScheme
     val density = LocalDensity.current
@@ -449,6 +450,10 @@ private fun DesktopApp(
         // the device the vault believes it belongs to. Set before the
         // open, never after. Nothing here binds a socket — that waits for
         // the switch in Settings ▸ Sync.
+        // Transcription (NVIDIA NeMo) writes saved transcripts app-side
+        // (ADR 0027 S3): every processing pass on this handle gives it the
+        // jobs queued for it, when its model is loaded.
+        state.externalProcessing = { gilune -> nemo.engines?.let { runNemoJobs(gilune, it::transcribe) } ?: ProviderPass() }
         state.syncSetup = { gilune ->
             val identity = identityDir()
             identity.mkdirs()
@@ -462,6 +467,11 @@ private fun DesktopApp(
         // an escape from the first (§ 2).
         state.syncDiscovery = { gilune -> gilune.useBundledDiscovery() }
         state.openVault { gilune ->
+            // The desktop's second transcriber (ADR 0027 S3): installed
+            // switched off when whisper is already writing the notes, and
+            // never switched on except by a person.
+            registerNemoOnHandle(gilune)
+            state.refresh()
             // The starting folders the enabled plugins declare, each once
             // per vault on this machine — after the open, because only the
             // registered plugins know them.
@@ -650,7 +660,7 @@ private fun DesktopApp(
                 if (railCollapsed && railRaw >= RAIL_SHUT_AT) setRailCollapsed(false)
                 if (!railCollapsed) railWidth = railRaw.coerceIn(RAIL_MIN, RAIL_MAX)
             }
-            CompositionLocalProvider(LocalTranscription provides transcription) {
+            CompositionLocalProvider(LocalTranscription provides transcription, LocalNemo provides nemo) {
                 PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
             }
         }
