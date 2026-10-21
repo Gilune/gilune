@@ -1,8 +1,8 @@
 # ADR 0027: Realtime inline dictation on the desktop
 
 Date: 2026-10-21
-Status: **Proposed** — the engine (§ 3) and the provisional-text rule (§ 1)
-are the owner's decisions and are not taken.
+Status: **Accepted in part** (owner, 2026-10-21) — engine B and the § 1 rule; see
+Ratification record. Build not started.
 
 ## Context
 
@@ -201,3 +201,14 @@ Following ADR 0018 rather than inventing a new route:
    or settle-only with nothing provisional shown?
 3. After stop, should a final, more accurate pass ever replace dictated
    words automatically, never, or only on request (S4)?
+
+## Ratification record (owner, 2026-10-21)
+
+1. **Engine: B — whisper base, live** (LocalAgreement in the kernel's
+   transcription plugin). No new download or licence. Option A (Nemotron)
+   is not taken; the provider-plugin shape in § 4 stays recorded for a later
+   round should accuracy need it. Staging therefore ends at S2 (S3 not
+   scheduled).
+2. **Provisional words: grey, outside the file** (§ 1 as recommended).
+3. Question 3 (automatic final-pass replacement) was not asked; S4 stays
+   optional and unscheduled.
