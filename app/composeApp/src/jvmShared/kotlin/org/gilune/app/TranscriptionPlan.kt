@@ -60,13 +60,15 @@ fun transcriptionPlan(
     return TranscriptionPlan.Download(model)
 }
 
-/// Exactly the inputs [transcriptionPlan] reads from the registry, as one
-/// value. A shell keys its single bring-up call site on this, so allowing
-/// `network.request`, switching the plugin on or choosing another model
+/// Exactly the inputs a shell's bring-up reads from the registry, as one
+/// value: every transcription provider's state, grants and settings. A
+/// shell keys its single bring-up call site on this, so allowing
+/// `network.request`, switching a provider on or choosing another model
 /// asks again at once rather than at the next launch.
 fun transcriptionPlanKey(plugins: List<PluginInfo>): String? =
-    plugins.firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }
-        ?.let { "${it.state}|${it.granted.sorted().joinToString(",")}|${it.settings}" }
+    TRANSCRIPTION_PROVIDERS.mapNotNull { id -> plugins.firstOrNull { it.pluginId == id } }
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString("\n") { "${it.pluginId}|${it.state}|${it.granted.sorted().joinToString(",")}|${it.settings}" }
 
 /// Where this device actually is, which is the only thing the UI is
 /// allowed to claim (§ 4: "the pending state is shown and is never

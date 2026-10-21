@@ -51,10 +51,18 @@ fun KeepTranscriptionAsked(state: GiluneState, ask: suspend (Gilune) -> Unit) {
 /// is not on disk yet. Idempotent: an already-loaded model re-enables
 /// harmlessly, and a changed language takes effect because enabling
 /// re-reads it.
-fun startTranscription(state: GiluneState, gilune: Gilune, runtime: TranscriptionRuntime) {
+fun startTranscription(state: GiluneState, gilune: Gilune, runtime: TranscriptionRuntime, nemo: NemoHost) {
     if (!runtime.working.compareAndSet(false, true)) return
     try {
-        bringUpTranscription(state, gilune, runtime)
+        // One transcriber writes the notes (ADR 0018 § 3), so only the
+        // active one is brought up, and a model it replaced is let go.
+        val active = gilune.plugins().activeTranscriber()
+        if (active == NEMO_PLUGIN) {
+            bringUpNemo(state, gilune, runtime, nemo)
+        } else {
+            nemo.replace(null)
+            bringUpTranscription(state, gilune, runtime)
+        }
     } catch (e: Throwable) {
         // This runs in the window's composition; nothing here may take
         // the window down with it.
@@ -132,3 +140,89 @@ private fun enable(state: GiluneState, gilune: Gilune, runtime: TranscriptionRun
     // this is what runs it.
     state.sync(announce = false)
 }
+
+/// The NeMo models this window has loaded, if NeMo is the active
+/// transcriber. Held outside composition: a dictation, a saved transcript
+/// and the settings screen all reach the same engines.
+class NemoHost {
+    @Volatile
+    var engines: NemoEngines? = null
+        private set
+
+    fun replace(next: NemoEngines?) {
+        val previous = engines
+        engines = next
+        if (previous !== next) runCatching { previous?.close() }
+    }
+}
+
+val LocalNemo = staticCompositionLocalOf { NemoHost() }
+
+/// Bring up Transcription (NVIDIA NeMo): the chosen model downloaded with
+/// consent and verified, then loaded once here, off the capture path, so
+/// the first dictation does not wait for it.
+private fun bringUpNemo(state: GiluneState, gilune: Gilune, runtime: TranscriptionRuntime, nemo: NemoHost) {
+    val plugins = gilune.plugins()
+    val installed = plugins.first { it.pluginId == NEMO_PLUGIN }
+    val model = plugins.nemoModel()
+    registerNemoProcessor(gilune)
+    runtime.failure = null
+    runtime.needsConsent = false
+    runtime.model = null
+    if (!nemoModelPresent(model)) {
+        if (NETWORK_CAPABILITY !in installed.granted) {
+            runtime.phase = TranscriptionPhase.Absent
+            runtime.needsConsent = true
+            state.message.value = "${installed.name} needs permission to download ${model.name} " +
+                "(${model.size}) — Settings ▸ Plugins ▸ ${installed.name}"
+            return
+        }
+        runtime.phase = TranscriptionPhase.Downloading
+        runtime.percent = 0
+        state.message.value = "downloading ${model.name} (${model.size}, one time)…"
+        val fetched = runCatching {
+            installNemoModel(model, onProgress = { done ->
+                val percent = (done * 100 / model.bytes).toInt()
+                runtime.percent = percent
+                state.message.value = "downloading ${model.name} — $percent% of ${model.size}"
+            })
+        }
+        if (fetched.isFailure) {
+            runtime.phase = TranscriptionPhase.Failed
+            runtime.failure = fetched.exceptionOrNull()?.message
+            state.message.value = "could not download ${model.name} (${runtime.failure}); your recordings are safe"
+            return
+        }
+    }
+    val current = nemo.engines
+    val engines = if (current != null && current.model == model) current else NemoEngines(model, File(nemoModelsRoot(), model.archive))
+    nemo.replace(engines)
+    val loaded = runCatching {
+        if (model.kind == NemoKind.STREAMING) engines.withOnline { } else engines.withOffline { }
+    }
+    if (loaded.isFailure) {
+        runtime.phase = TranscriptionPhase.Failed
+        runtime.failure = loaded.exceptionOrNull()?.message
+        state.message.value = "${model.name} could not be loaded (${runtime.failure}); captures still work"
+        return
+    }
+    runtime.phase = TranscriptionPhase.Ready
+    state.message.value = "vault: ${gilune.vaultPath()} — ${model.name} ready"
+    // Recordings that waited for the model have jobs queued; this runs them.
+    state.sync(announce = false)
+}
+
+/// The live engine for a dictation starting now, with how much new audio
+/// each update should wait for — or null, when the words arrive at the
+/// stop: the setting is off, the model hears only whole recordings, or
+/// the engine would not start. Whisper re-decodes its window every
+/// update, so it asks once a second; a streaming NeMo model costs only
+/// the new audio, so it asks five times a second.
+fun liveEngineFor(state: GiluneState, nemo: NemoHost): Pair<uniffi.gilune_ffi.LiveTranscriptionInterface, Double>? =
+    when (state.plugins.activeTranscriber()) {
+        TRANSCRIPTION_PLUGIN -> if (!state.plugins.transcriptionLive()) null else
+            state.gilune.value?.let { g -> runCatching { g.beginLiveTranscription() }.getOrNull() }?.let { it to 1.0 }
+        NEMO_PLUGIN -> if (!state.plugins.nemoLive()) null else
+            nemo.engines?.let { e -> runCatching { e.liveSession() }.getOrNull() }?.let { it to 0.2 }
+        else -> null
+    }

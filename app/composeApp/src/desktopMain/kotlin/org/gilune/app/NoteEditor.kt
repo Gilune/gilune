@@ -380,6 +380,7 @@ private fun OpenNote(
     }
     var dictating by remember { mutableStateOf(false) }
     val transcription = LocalTranscription.current
+    val nemo = LocalNemo.current
     val dictationOffered =
         recorder != null && state.plugins.contributes(Slots.NOTE_ACTIONS, DICTATE_ACTION)
     // Dictation outlives the tab it was started from being in front, so
@@ -480,16 +481,13 @@ private fun OpenNote(
                         state.message.value = "can't dictate yet: $unready"
                         return
                     }
-                    // Words as they are spoken when the plugin's setting asks
-                    // for them and the engine will start (ADR 0027); otherwise
-                    // the words arrive at the stop, as they always have.
-                    val engine = if (state.plugins.transcriptionLive()) {
-                        state.gilune.value?.let { g -> runCatching { g.beginLiveTranscription() }.getOrNull() }
-                    } else {
-                        null
-                    }
+                    // Words as they are spoken when the active transcriber's
+                    // setting asks for them and its engine will start (ADR
+                    // 0027); otherwise the words arrive at the stop.
+                    val live = liveEngineFor(state, nemo)
+                    val engine = live?.first
                     try {
-                        if (engine != null) startLiveDictation(state, editor, recorder, engine)
+                        if (live != null) startLiveDictation(state, editor, recorder, live.first, live.second)
                         recorder.start()
                         if (tabs != null && tab != null) tabs.dictationTabId = tab.id else dictating = true
                         state.message.value = if (engine != null) {

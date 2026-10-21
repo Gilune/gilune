@@ -22,6 +22,18 @@ val desktopTarget = providers.gradleProperty("gilune.desktop.target").orNull
 require(desktopTarget == null || desktopTarget == "windows-x64") {
     "Unsupported gilune.desktop.target: $desktopTarget"
 }
+// sherpa-onnx (ADR 0027 S3): the JVM API and one native library, the one for
+// the desktop target. They come from the project's GitHub releases (see
+// settings.gradle.kts), so each is checked against the SHA-256 the release
+// publishes before anything compiles or packages against it.
+val sherpaVersion = "1.13.8"
+val sherpaNative =
+    if (desktopTarget == "windows-x64" || System.getProperty("os.name").startsWith("Windows")) "win-x64" else "linux-x64"
+val sherpaDigests = mapOf(
+    "sherpa-onnx-jvm-$sherpaVersion.jar" to "77b7b047fade4eadada96b568eb92615049aaf1dc317c7244e46c1ea38b9a63b",
+    "sherpa-onnx-native-lib-win-x64-$sherpaVersion.jar" to "33fbdbd5410e9ba9bdda94aa164ec8f7825bb49246420d8ce9bdd88219d97039",
+    "sherpa-onnx-native-lib-linux-x64-$sherpaVersion.jar" to "30c93b59381113f9c20aedbbf9fc1ad399158f6bc03dddc0f8934a6e28e069ba",
+)
 val generateAppVersion by tasks.registering {
     val destination = layout.buildDirectory.dir("generated/appVersion")
     inputs.property("version", appVersionName)
@@ -61,6 +73,14 @@ kotlin {
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
                 implementation("org.jetbrains:markdown:0.7.3")
                 implementation("net.java.dev.jna:jna:5.14.0")
+                // Transcription (NVIDIA NeMo) — ADR 0027 S3. Its models ship
+                // as .tar.bz2 archives, hence compress; org.json is the same
+                // JSON the Android provider reads with, so the provider's
+                // decisions can live in shared code.
+                implementation("com.k2fsa.sherpa.onnx:sherpa-onnx-jvm:$sherpaVersion")
+                runtimeOnly("com.k2fsa.sherpa.onnx:sherpa-onnx-native-lib-$sherpaNative:$sherpaVersion")
+                implementation("org.apache.commons:commons-compress:1.27.1")
+                implementation("org.json:json:20240303")
             }
         }
         val desktopTest by getting {
@@ -450,3 +470,23 @@ tasks.register<Sync>("exportDesktopTests") {
     from(tasks.named<Jar>("desktopJar").flatMap { it.archiveFile }) { into("lib") }
     duplicatesStrategy = DuplicatesStrategy.FAIL
 }
+
+// The sherpa-onnx jars come from GitHub release assets, which Gradle does
+// not verify on its own. Every one on the desktop runtime classpath must
+// match the SHA-256 its release publishes, or nothing compiles against it.
+val verifySherpaJars by tasks.registering {
+    group = "verification"
+    val runtime = configurations.named("desktopRuntimeClasspath")
+    inputs.files(runtime)
+    doLast {
+        val jars = runtime.get().files.filter { it.name.startsWith("sherpa-onnx-") }
+        require(jars.isNotEmpty()) { "no sherpa-onnx jar resolved" }
+        for (jar in jars) {
+            val expected = sherpaDigests[jar.name] ?: error("no published digest recorded for ${jar.name}")
+            val actual = MessageDigest.getInstance("SHA-256")
+                .digest(jar.readBytes()).joinToString("") { "%02x".format(it) }
+            require(actual == expected) { "${jar.name}: SHA-256 $actual, the release publishes $expected" }
+        }
+    }
+}
+tasks.matching { it.name == "compileKotlinDesktop" }.configureEach { dependsOn(verifySherpaJars) }

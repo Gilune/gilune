@@ -31,7 +31,7 @@ private const val PCM_BYTES_PER_SECOND = 32_000
 /// How often the engine is asked for an update, in seconds of new audio.
 /// Whisper re-decodes its whole window each time, so asking more often
 /// buys little and costs a full decode.
-private const val LIVE_STEP_SECONDS = 1.0
+const val LIVE_STEP_SECONDS = 1.0
 
 /// How long one decode may take, in seconds, before the words are judged
 /// to be lagging too far behind the speaker (ADR 0027 amendment: measured,
@@ -216,6 +216,7 @@ class LiveDictationRun(
     private val deliver: (List<LiveLine>) -> Unit,
     private val fellBehind: (String) -> Unit,
     private val maxLagSeconds: Double = LIVE_MAX_LAG_SECONDS,
+    private val stepSeconds: Double = LIVE_STEP_SECONDS,
 ) {
     private val queue = LinkedBlockingQueue<ByteArray>()
 
@@ -256,7 +257,7 @@ class LiveDictationRun(
                 engine.accept(more)
                 fresh += more.size
             }
-            if (behind || stopping != null || fresh < LIVE_STEP_SECONDS * PCM_BYTES_PER_SECOND) continue
+            if (behind || stopping != null || fresh < stepSeconds * PCM_BYTES_PER_SECOND) continue
             fresh = 0
             val started = System.nanoTime()
             val update = runCatching { engine.update() }
@@ -293,12 +294,14 @@ fun startLiveDictation(
     editor: EditorState,
     recorder: AudioRecorder,
     engine: LiveTranscriptionInterface,
+    stepSeconds: Double = LIVE_STEP_SECONDS,
 ) {
     val session = editor.beginLive()
     val run = LiveDictationRun(
         engine,
         deliver = { update -> onUi { landLive(state, editor, session, update) } },
         fellBehind = { why -> onUi { session.paused = true; state.message.value = why } },
+        stepSeconds = stepSeconds,
     )
     session.run = run
     recorder.listen(run::offer)
