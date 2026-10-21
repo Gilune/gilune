@@ -732,7 +732,8 @@ own boxes; a click folds it. A block line `show:notes` opens every row by
 default (a click then folds one); it is a display line, removed before the
 query runs. The detail is read from the note file, not the index, so a
 subtask the query did not match (ticked, under `is:open`) still shows and
-counts; a subtask that does match is also listed as its own row. The agenda
+counts; a subtask that does match is listed only under its parent when the
+parent is listed (in the agenda, within the same group), and as its own row
+otherwise. The agenda
 panel shows the same marker and opens rows, but still never edits. Task row
-labels now use the task's own line only. Not decided: hiding a matching
-subtask's own row when its parent is listed.
+labels now use the task's own line only.

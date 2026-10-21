@@ -213,9 +213,12 @@ fun evaluateFilterBlock(
         ?: return FilterResult.Hint(FILTER_NO_MATCHES)
     val page = compiled.page(gilune).requireComplete()
     if (task) {
-        val rows = kernelTaskRows(page.hits).take(cap.coerceAtLeast(0))
-        return FilterResult.Tasks(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
-            details = taskDetails(vaultDir, rows), showDetails = filterShowsNotes(block))
+        val found = kernelTaskRows(page.hits).take(cap.coerceAtLeast(0))
+        val details = taskDetails(vaultDir, found)
+        // A subtask under a listed parent is shown there, not as a row too.
+        val rows = withoutListedSubtasks(found, details)
+        return FilterResult.Tasks(rows, (page.totalHits - found.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
+            details = details, showDetails = filterShowsNotes(block))
     }
     val rows = page.hits.take(cap.coerceAtLeast(0)).map { NoteRow(it.name, it.relPath) }
     return FilterResult.Notes(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())

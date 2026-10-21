@@ -43,6 +43,19 @@ class TaskDetailsTest {
     }
 
     @Test
+    fun aSubtaskUnderAListedParentIsListedOnceAndOnlyThere() {
+        val parent = TaskHit("n.md", "n", 3, "- [ ] parent task", null, null)
+        val child = TaskHit("n.md", "n", 6, "  - [ ] child one", null, null)
+        val sibling = TaskHit("n.md", "n", 10, "- [ ] sibling", null, null)
+        val elsewhere = TaskHit("m.md", "m", 6, "  - [ ] child one", null, null)
+        val details = mapOf(parent.detailKey() to taskDetailAt(body, 3))
+        assertEquals(listOf(parent, sibling, elsewhere), withoutListedSubtasks(listOf(parent, child, sibling, elsewhere), details),
+            "the child goes; a task at the same line in another note does not")
+        assertEquals(listOf(child, sibling), withoutListedSubtasks(listOf(child, sibling), details),
+            "with its parent not listed, a subtask keeps its own row")
+    }
+
+    @Test
     fun theSummaryReadsNaturally() {
         assertEquals("1 note", TaskDetail(listOf("x"), emptyList()).summary)
         assertEquals("0/1 done", TaskDetail(emptyList(), listOf(SubtaskLine(2, "  - [ ] a", false))).summary)

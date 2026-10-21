@@ -129,7 +129,8 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
                     }
                 }
                 if (!open) continue
-                items(section.rows, key = { "${section.group.name}:${it.relPath}:${it.line}" }) { hit ->
+                // Within a group, a subtask under a listed parent shows there only.
+                items(withoutListedSubtasks(section.rows, details), key = { "${section.group.name}:${it.relPath}:${it.line}" }) { hit ->
                     val key = hit.detailKey()
                     TaskHitRow(hit, today, onOpen, reveal = state::revealNext,
                         detail = details[key], open = key in flipped && key in details,
