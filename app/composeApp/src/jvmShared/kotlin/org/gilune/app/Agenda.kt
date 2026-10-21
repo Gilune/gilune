@@ -94,6 +94,9 @@ fun isCheckedTaskLine(line: String): Boolean =
 /// come off, because a row draws both of those itself — presentation
 /// only, over a copy, and reading a line never writes one.
 fun taskLabel(text: String): String {
-    val body = AGENDA_TASK_LINE.find(text)?.let { text.substring(it.range.last + 1) } ?: text
-    return AGENDA_DATE_TOKEN.replace(body, "").trim().ifBlank { text.trim() }
+    // The task's own line: what is indented under it is its detail, shown
+    // folded beneath the row (owner, 2026-10-21), never run into its label.
+    val line = text.substringBefore('\n')
+    val body = AGENDA_TASK_LINE.find(line)?.let { line.substring(it.range.last + 1) } ?: line
+    return AGENDA_DATE_TOKEN.replace(body, "").trim().ifBlank { line.trim() }
 }

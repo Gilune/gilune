@@ -25,6 +25,7 @@ import org.gilune.plugins.tasks.tasksFilter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -85,9 +86,13 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
     val open = state.gilune.value
     val today = rememberQueryDay()
     val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, open, state.plugins.toList(), today) {
-        loadAgenda(open, types, today)
+        val agenda = loadAgenda(open, types, today)
+        agenda to taskDetails(state.vaultDir, agenda.sections.flatMap { it.rows })
     }.value
-    val sections = computed.value?.sections.orEmpty()
+    val sections = computed.value?.first?.sections.orEmpty()
+    val details = computed.value?.second.orEmpty()
+    // Rows opened to show their notes and subtasks.
+    var flipped by remember { mutableStateOf(setOf<String>()) }
 
     // Undated is folded away to begin with: it is the view least likely
     // to be about today, and the one most likely to be long.
@@ -125,7 +130,10 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
                 }
                 if (!open) continue
                 items(section.rows, key = { "${section.group.name}:${it.relPath}:${it.line}" }) { hit ->
-                    TaskHitRow(hit, today, onOpen, reveal = state::revealNext)
+                    val key = hit.detailKey()
+                    TaskHitRow(hit, today, onOpen, reveal = state::revealNext,
+                        detail = details[key], open = key in flipped && key in details,
+                        onFlip = { flipped = if (key in flipped) flipped - key else flipped + key })
                 }
                 if (section.more > 0) {
                     item(key = "more-${section.group.name}") {
@@ -192,10 +200,14 @@ fun TaskHitRow(
     modifier: Modifier = Modifier,
     onToggle: ((TaskHit) -> Unit)? = null,
     reveal: ((NoteLine) -> Unit)? = null,
+    detail: TaskDetail? = null,
+    open: Boolean = false,
+    onFlip: (() -> Unit)? = null,
 ) {
     val colours = MaterialTheme.colorScheme
+    Column(modifier.fillMaxWidth()) {
     Row(
-        modifier
+        Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
             .clip(RoundedCornerShape(5.dp))
@@ -233,6 +245,9 @@ fun TaskHitRow(
                 modifier = Modifier.padding(top = 1.dp),
             )
         }
+        if (detail != null) Box(Modifier.padding(top = 1.dp)) { TaskDetailMarker(detail, open, onFlip) }
+    }
+    if (open && detail != null) TaskDetailRows(hit, detail, onToggle)
     }
 }
 
@@ -274,9 +289,14 @@ const val FILTER_BLOCK_DECORATION = "gilune.filter"
 /// block's text, which is what keeps the reservation honest: a block
 /// nobody has evaluated yet reserves nothing and shows its raw fence, and
 /// the lines it does reserve are the rows it is about to draw.
-fun filterBlockDecoration(results: Map<String, FilterResult>, expanded: Set<String> = emptySet()): EditorBlockDecoration =
+fun filterBlockDecoration(
+    results: Map<String, FilterResult>,
+    expanded: Set<String> = emptySet(),
+    flipped: Map<String, Set<String>> = emptyMap(),
+): EditorBlockDecoration =
     EditorBlockDecoration(FILTER_BLOCK_DECORATION) { info, body ->
-        if (!info.equals(FILTER_FENCE, ignoreCase = true)) null else results[body]?.let { filterBlockLines(it, body in expanded) }
+        if (!info.equals(FILTER_FENCE, ignoreCase = true)) null
+        else results[body]?.let { filterBlockLines(it, body in expanded, flipped[body].orEmpty()) }
     }
 
 /// A collapsed block's rows, **one editor line each** — the Edit-mode face
@@ -302,13 +322,21 @@ fun FilterBlockLines(
     onMore: (() -> Unit)? = null,
     onFewer: (() -> Unit)? = null,
     reveal: ((NoteLine) -> Unit)? = null,
+    flipped: Set<String> = emptySet(),
+    onFlip: ((String) -> Unit)? = null,
 ) {
     Column(modifier) {
         when (result) {
             is FilterResult.Hint -> FilterTextLine(result.text, rowHeight, italic = true)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
-                for (row in result.rows) TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle, reveal)
+                for (row in result.rows) {
+                    val detail = result.details[row.detailKey()]
+                    val open = result.detailOpen(row, flipped)
+                    TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle, reveal,
+                        detail, open, onFlip?.let { flip -> { flip(row.detailKey()) } })
+                    if (open && detail != null) TaskDetailGridLines(row, detail, rowHeight, maxRowWidth, onToggle)
+                }
                 FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
             }
             is FilterResult.Notes -> {
@@ -366,6 +394,9 @@ private fun TaskHitLine(
     maxWidth: Dp,
     onToggle: ((TaskHit) -> Unit)?,
     reveal: ((NoteLine) -> Unit)? = null,
+    detail: TaskDetail? = null,
+    open: Boolean = false,
+    onFlip: (() -> Unit)? = null,
 ) {
     val colours = MaterialTheme.colorScheme
     Row(
@@ -397,6 +428,7 @@ private fun TaskHitLine(
                 color = dueColour(due, today),
             )
         }
+        if (detail != null) TaskDetailMarker(detail, open, onFlip)
     }
 }
 
@@ -477,6 +509,8 @@ fun FilterBlockView(
     val today = rememberQueryDay()
     // How far this block has been opened: a page more per `+N more`.
     var cap by remember(block) { mutableStateOf(FILTER_ROW_CAP) }
+    // The rows a person has opened or folded against the block's default.
+    var flipped by remember(block) { mutableStateOf(setOf<String>()) }
     val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today, cap) {
         if (open == null) FilterResult.Hint("Opening vault...")
         else evaluateFilterBlock(open, state.vaultDir, block, types, today, cap, searchOperatorsFor(plugins, today))
@@ -501,7 +535,11 @@ fun FilterBlockView(
             is FilterResult.Hint -> FilterNoteRow(result.text)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
-                for (row in result.rows) TaskHitRow(row, today, onOpen, onToggle = { toggleTaskResult(state, it) }, reveal = state::revealNext)
+                for (row in result.rows) {
+                    val key = row.detailKey()
+                    TaskHitRow(row, today, onOpen, onToggle = { toggleTaskResult(state, it) }, reveal = state::revealNext,
+                        detail = result.details[key], open = result.detailOpen(row, flipped), onFlip = { flipped = if (key in flipped) flipped - key else flipped + key })
+                }
                 FilterFooter(result.more, cap > FILTER_ROW_CAP, onMore = readMore, onFewer = { cap = FILTER_ROW_CAP }, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp))
             }
             is FilterResult.Notes -> {
@@ -565,3 +603,76 @@ private fun FilterNoteRow(text: String) {
 /// so.
 /// Where a task row's click lands: its own line, met by its text.
 internal fun TaskHit.noteLine() = NoteLine(relPath, line, checkboxLine)
+
+// ---------------------------------------------------------------------
+// What sits under a task (owner, 2026-10-21): folded behind a marker on
+// its row, one click to open. Notes are quiet text; subtasks tick like
+// any task, through the same guarded write.
+// ---------------------------------------------------------------------
+
+/// The marker on a row with notes or subtasks under it: `▸ 2 notes · 1/3
+/// done`, clickable to open or fold. Without `onFlip` it is a summary only.
+@Composable
+private fun TaskDetailMarker(detail: TaskDetail, open: Boolean, onFlip: (() -> Unit)?) {
+    NoteResultText(
+        (if (open) "▾ " else "▸ ") + detail.summary,
+        fontSize = 11.sp,
+        maxLines = 1,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = if (onFlip == null) Modifier else Modifier
+            .clickable(onClick = onFlip)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .testTag("task-detail-toggle"),
+    )
+}
+
+/// The task a subtask line is, for the checkbox and its guarded tick.
+private fun TaskHit.subtask(line: SubtaskLine) = TaskHit(relPath, name, line.line, line.text, null, null)
+
+/// An opened row's detail in the editor's line grid: **one line each**,
+/// as [filterBlockLines] counts them.
+@Composable
+private fun TaskDetailGridLines(
+    row: TaskHit,
+    detail: TaskDetail,
+    rowHeight: Dp,
+    maxWidth: Dp,
+    onToggle: ((TaskHit) -> Unit)?,
+) {
+    val colours = MaterialTheme.colorScheme
+    for (note in detail.notes) {
+        Row(Modifier.height(rowHeight).widthIn(max = maxWidth).padding(start = 40.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            NoteResultText(note, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, color = colours.onSurfaceVariant)
+        }
+    }
+    for (line in detail.subtasks) {
+        Row(
+            Modifier.height(rowHeight).widthIn(max = maxWidth).padding(start = 28.dp, end = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            if (onToggle != null) TaskResultCheckbox(row.subtask(line), onToggle, Modifier.size(rowHeight))
+            NoteResultText(taskLabel(line.text), fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                color = if (line.done) colours.outline else colours.onSurface)
+        }
+    }
+}
+
+/// An opened row's detail where rows are free to size themselves — a
+/// block in presentation mode, the agenda panel.
+@Composable
+private fun TaskDetailRows(row: TaskHit, detail: TaskDetail, onToggle: ((TaskHit) -> Unit)?) {
+    val colours = MaterialTheme.colorScheme
+    Column(Modifier.fillMaxWidth().padding(start = 44.dp, end = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        for (note in detail.notes) {
+            NoteResultText(note, fontSize = 12.sp, color = colours.onSurfaceVariant)
+        }
+        for (line in detail.subtasks) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (onToggle != null) TaskResultCheckbox(row.subtask(line), onToggle)
+                NoteResultText(taskLabel(line.text), fontSize = 12.sp,
+                    color = if (line.done) colours.outline else colours.onSurface)
+            }
+        }
+    }
+}

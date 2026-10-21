@@ -682,6 +682,8 @@ private fun OpenNote(
             // adds a page of rows, `Show fewer` folds it back (owner,
             // 2026-10-21). Kept for as long as the note is open.
             var blockCaps by remember(relPath) { mutableStateOf(mapOf<String, Int>()) }
+            // Per block, the task rows opened or folded against its default.
+            var blockFlips by remember(relPath) { mutableStateOf(mapOf<String, Set<String>>()) }
             val evaluated = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, wanted, plugins, open, blockDay, blockCaps) {
                 val types = searchTypesFor(plugins)
                 wanted.associateWith { body ->
@@ -694,7 +696,7 @@ private fun OpenNote(
                 androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { Text("Retry search") }
             }
             val results = evaluated.value ?: wanted.associateWith { FilterResult.Hint(evaluated.error ?: "Searching...") }
-            val blockDecorations = remember(results, blockCaps) { listOf(filterBlockDecoration(results, blockCaps.keys)) }
+            val blockDecorations = remember(results, blockCaps, blockFlips) { listOf(filterBlockDecoration(results, blockCaps.keys, blockFlips)) }
             fun openMore(body: String) {
                 val next = ((blockCaps[body] ?: FILTER_EDIT_ROW_CAP) + FILTER_EXPAND_STEP).coerceAtMost(FILTER_MAX_ROWS)
                 blockCaps = blockCaps + (body to next)
@@ -1103,6 +1105,11 @@ private fun OpenNote(
                                 expanded = body in blockCaps,
                                 onMore = if (cap < FILTER_MAX_ROWS) ({ openMore(body) }) else null,
                                 onFewer = { blockCaps = blockCaps - body },
+                                flipped = blockFlips[body].orEmpty(),
+                                onFlip = { key ->
+                                    val now = blockFlips[body].orEmpty()
+                                    blockFlips = blockFlips + (body to if (key in now) now - key else now + key)
+                                },
                                 reveal = state::revealNext,
                             ) { toggleTaskResult(state, it) }
                         }
@@ -1161,6 +1168,8 @@ private fun CollapsedFilterBlock(
     onMore: (() -> Unit)? = null,
     onFewer: (() -> Unit)? = null,
     reveal: ((NoteLine) -> Unit)? = null,
+    flipped: Set<String> = emptySet(),
+    onFlip: ((String) -> Unit)? = null,
     onToggle: (org.gilune.plugins.tasks.TaskHit) -> Unit,
 ) {
     // The layout is one frame behind a buffer that has just changed, so
@@ -1183,7 +1192,7 @@ private fun CollapsedFilterBlock(
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         FilterBlockLines(result, today, onOpen, height / block.lines, width, onToggle = onToggle,
-            expanded = expanded, onMore = onMore, onFewer = onFewer, reveal = reveal)
+            expanded = expanded, onMore = onMore, onFewer = onFewer, reveal = reveal, flipped = flipped, onFlip = onFlip)
     }
 }
 
