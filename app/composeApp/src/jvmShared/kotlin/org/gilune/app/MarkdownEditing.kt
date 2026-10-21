@@ -461,6 +461,36 @@ fun indentEdit(text: String, selectionStart: Int, selectionEnd: Int, outdent: Bo
     return IndentEdit(written, map(selectionStart.coerceIn(0, text.length)), map(selectionEnd.coerceIn(0, text.length)))
 }
 
+/// Shift+Return (owner, 2026-10-21): a new line inside the same item —
+/// a note under a task rather than another task. On a list line the new
+/// line is indented under the item's text (its own indentation plus one
+/// level) with no marker; on an indented line that is not a list item — a
+/// note already under one — it keeps that line's indentation, so a note
+/// can run to several lines; anywhere else, and inside a code fence, it is
+/// a plain line break. A selection is replaced, and the text after the
+/// caret moves down with the break.
+fun softBreak(text: String, selectionStart: Int, selectionEnd: Int): IndentEdit {
+    val low = minOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+    val high = maxOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+    val lineStart = lineStartFor(text, low)
+    val line = text.substring(lineStart, lineEndFor(text, lineStart))
+    var inFence = false
+    var at = 0
+    while (at < lineStart) {
+        val end = lineEndFor(text, at)
+        if (fenceDelimiter(text, at, end)) inFence = !inFence
+        at = end + 1
+    }
+    val indent = when {
+        inFence || line.trim().startsWith("```") -> ""
+        LIST_ITEM.containsMatchIn(line) -> LIST_ITEM.find(line)!!.groupValues[1] + LIST_INDENT
+        else -> line.takeWhile { it == ' ' || it == '\t' }
+    }
+    val inserted = "\n" + indent
+    val written = text.substring(0, low) + inserted + text.substring(high)
+    return IndentEdit(written, low + inserted.length, low + inserted.length)
+}
+
 /// How much one level out takes from a line's start: a tab, or up to two
 /// spaces.
 private fun String.leadingLevelWidth(): Int = when {

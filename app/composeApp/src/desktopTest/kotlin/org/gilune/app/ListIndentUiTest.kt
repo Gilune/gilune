@@ -106,6 +106,19 @@ class ListIndentUiTest {
     }
 
     @Test
+    fun shiftReturnOnATaskStartsANoteUnderItAndReturnAfterTheNoteIsPlain() {
+        val editor = editorOver("- [ ] Prepare the show", caret = 22)
+
+        press(Key.ShiftLeft.keyCode, Key.Enter.keyCode)
+        body().performTextInput("Need the samples.")
+        assertEquals("- [ ] Prepare the show\n  Need the samples.", editor.text.text, "a note under the task, no checkbox")
+
+        press(Key.ShiftLeft.keyCode, Key.Enter.keyCode)
+        body().performTextInput("And the build.")
+        assertEquals("- [ ] Prepare the show\n  Need the samples.\n  And the build.", editor.text.text, "the note runs on")
+    }
+
+    @Test
     fun tabOutsideAListStillTypesIndentation() {
         val editor = editorOver("plain", caret = 0)
         press(Key.Tab.keyCode)

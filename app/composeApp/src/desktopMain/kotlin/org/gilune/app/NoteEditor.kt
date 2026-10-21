@@ -847,6 +847,18 @@ private fun OpenNote(
                 return true
             }
 
+            // Shift+Return: a note under the item rather than another item
+            // (owner, 2026-10-21). The field did nothing with it before.
+            fun softBreakAtCaret(): Boolean {
+                val value = editor.text
+                val edit = softBreak(value.text, value.selection.start, value.selection.end)
+                editor.dirty = true
+                editor.text = value.copy(text = edit.text, selection = TextRange(edit.selectionStart, edit.selectionEnd))
+                caretMoves++
+                typedHere = false
+                return true
+            }
+
             var verticalX by remember { mutableStateOf<Float?>(null) }
             fun moveByLines(lines: Int, extend: Boolean): Boolean {
                 val placed = layout ?: return false
@@ -1015,6 +1027,7 @@ private fun OpenNote(
                                         event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
                                         event.key == Key.DirectionUp -> moveByLines(-1, event.isShiftPressed)
                                         event.key == Key.Tab -> indentLines(event.isShiftPressed)
+                                        event.key == Key.Enter && event.isShiftPressed -> softBreakAtCaret()
                                         else -> false
                                     }
                                     event.key == Key.DirectionDown -> { completions.move(1); true }
