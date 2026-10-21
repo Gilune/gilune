@@ -452,7 +452,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 val wanted = language.trim()
                 // The model travels with the write, so setting a language
                 // cannot quietly revert the model somebody chose.
-                state.pluginAction("transcription language set to $wanted — takes effect next launch") {
+                state.pluginAction("transcription language set to $wanted") {
                     it.setPluginSettings(
                         plugin.pluginId,
                         transcriptionSettingsDocument(wanted, savedModel.key),
@@ -484,7 +484,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 // the model does above — and the stored one, not whatever
                 // is half-typed in the field.
                 onClick = {
-                    state.pluginAction("transcription model set to ${option.key} — takes effect next launch") {
+                    state.pluginAction("transcription model set to ${option.key}") {
                         it.setPluginSettings(
                             plugin.pluginId,
                             transcriptionSettingsDocument(saved, option.key),
@@ -496,7 +496,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
         }
     }
     Text(
-        "A model you have not used before is downloaded on the next launch " +
+        "A model you have not used before is downloaded when you choose it " +
             "(one time, with the network permission above). Models already " +
             "downloaded are kept, so switching back is instant.",
         fontSize = 12.sp,

@@ -362,6 +362,7 @@ private fun OpenNote(
         }
     }
     var dictating by remember { mutableStateOf(false) }
+    val transcription = LocalTranscription.current
     val dictationOffered =
         recorder != null && state.plugins.contributes(Slots.NOTE_ACTIONS, DICTATE_ACTION)
     // Dictation outlives the tab it was started from being in front, so
@@ -449,7 +450,19 @@ private fun OpenNote(
                 Box(Modifier.size(7.dp).clip(CircleShape).background(colours.primary))
             }
             if (dictationOffered) {
+                // Dictation is only words at the caret. An attached capture
+                // never becomes a note of its own, so speech recorded with
+                // no transcriber able to run would be kept and never seen —
+                // it used to end in "no words recognised" (owner report,
+                // 2026-10-21). The voice capture adapter offers the mic; the
+                // transcription plugin decides whether it can be used.
+                val unready = transcription.unreadyReason()
+
                 fun begin() {
+                    if (unready != null) {
+                        state.message.value = "can't dictate yet: $unready"
+                        return
+                    }
                     try {
                         recorder.start()
                         if (tabs != null && tab != null) tabs.dictationTabId = tab.id else dictating = true
@@ -473,6 +486,7 @@ private fun OpenNote(
                 val dictationWords = when {
                     dictatingElsewhere -> "Dictating in another note"
                     dictatingHere -> "Stop dictating"
+                    unready != null -> "Dictate at the cursor (unavailable: $unready)"
                     else -> "Dictate at the cursor"
                 }
                 Tooltip(dictationWords) {
@@ -494,7 +508,7 @@ private fun OpenNote(
                             modifier = Modifier.size(16.dp),
                             tint = when {
                                 dictatingHere -> colours.error
-                                dictatingElsewhere -> colours.outline
+                                dictatingElsewhere || unready != null -> colours.outline
                                 else -> colours.onSurfaceVariant
                             },
                         )
