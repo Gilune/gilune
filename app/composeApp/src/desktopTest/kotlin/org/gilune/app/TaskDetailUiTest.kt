@@ -18,6 +18,7 @@ import org.junit.Rule
 import org.junit.rules.RuleChain
 import java.io.File
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalTestApi::class)
@@ -27,24 +28,47 @@ class TaskDetailUiTest {
     @get:Rule val rules: RuleChain = RuleChain.outerRule(resources).around(compose)
 
     private lateinit var dir: String
+    private lateinit var state: GiluneState
+    private lateinit var tabs: TabsState
 
     private fun show(block: String, reading: Boolean) {
         val indexed = resources.indexed("gilune-task-detail")
         dir = indexed.dir
         indexed.write("Home/show.md", "---\ngilune-id: id-show\n---\n- [ ] prepare the show\n  need the samples\n  - [ ] book the room\n  - [x] tell the team\n")
         indexed.write("agenda.md", "---\ngilune-id: id-agenda\n---\n# Agenda\n\n```$FILTER_FENCE\n$block\n```\n")
-        val state = GiluneState(indexed.dir, resources.scope)
+        state = GiluneState(indexed.dir, resources.scope)
         state.gilune.value = indexed.gilune
         state.plugins.add(installedTasksPlugin())
-        val editor = EditorState()
+        // In tabs, so a row has somewhere to send its click.
+        tabs = TabsState(indexed.dir)
+        val tab = tabs.open("agenda.md")
+        val editor = tab.editor
         editor.open(indexed.dir, "agenda.md")
         editor.reading = reading
         compose.setContent {
             GiluneTheme(dark = false) {
-                Box(Modifier.fillMaxSize()) { NoteEditor(state, editor, Modifier.fillMaxSize()) }
+                Box(Modifier.fillMaxSize()) { NoteEditor(state, editor, Modifier.fillMaxSize(), tabs = tabs, tab = tab) }
             }
         }
     }
+
+    /// Owner report, 2026-10-21: a subtask, once ticked, could not be
+    /// clicked to go to it. Ticked, it leaves an `is:open` list as a row of
+    /// its own and is shown only under its parent — and the lines under a
+    /// parent had a checkbox but no way through to the note.
+    private fun clickingASubtaskOpensItsNoteAtItsLine(reading: Boolean) {
+        show("type:task\nis:open\nshow:notes", reading)
+        compose.waitUntil(10_000) { shown("tell the team") }
+        compose.onAllNodesWithText("tell the team", substring = true)[0].performScrollTo().performClick()
+        compose.waitUntil(10_000) { tabs.activeTab?.relPath == "Home/show.md" }
+        assertEquals(NoteLine("Home/show.md", 4, "  - [x] tell the team"), state.reveal.value, "it lands on the subtask's own line")
+    }
+
+    @Test
+    fun aTickedSubtaskStillOpensItsNoteFromTheEditor() = clickingASubtaskOpensItsNoteAtItsLine(reading = false)
+
+    @Test
+    fun aTickedSubtaskStillOpensItsNoteFromPresentation() = clickingASubtaskOpensItsNoteAtItsLine(reading = true)
 
     private fun shown(text: String) = compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isNotEmpty()
 
@@ -78,5 +102,6 @@ class TaskDetailUiTest {
         assertTrue(boxes.fetchSemanticsNodes().size == 1, "listed once, under its parent")
         boxes[0].performScrollTo().performClick()
         compose.waitUntil(10_000) { File(dir, "Home/show.md").readText().contains("  - [x] book the room") }
+        assertEquals("agenda.md", tabs.activeTab?.relPath, "the box ticks; it does not take you away")
     }
 }

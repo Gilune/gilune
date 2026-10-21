@@ -248,7 +248,7 @@ fun TaskHitRow(
         }
         if (detail != null) Box(Modifier.padding(top = 1.dp)) { TaskDetailMarker(detail, open, onFlip) }
     }
-    if (open && detail != null) TaskDetailRows(hit, detail, onToggle)
+    if (open && detail != null) TaskDetailRows(hit, detail, onToggle, onOpen, reveal)
     }
 }
 
@@ -336,7 +336,7 @@ fun FilterBlockLines(
                     val open = result.detailOpen(row, flipped)
                     TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle, reveal,
                         detail, open, onFlip?.let { flip -> { flip(row.detailKey()) } })
-                    if (open && detail != null) TaskDetailGridLines(row, detail, rowHeight, maxRowWidth, onToggle)
+                    if (open && detail != null) TaskDetailGridLines(row, detail, rowHeight, maxRowWidth, onToggle, onOpen, reveal)
                 }
                 FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
             }
@@ -630,6 +630,19 @@ private fun TaskDetailMarker(detail: TaskDetail, open: Boolean, onFlip: (() -> U
 /// The task a subtask line is, for the checkbox and its guarded tick.
 private fun TaskHit.subtask(line: SubtaskLine) = TaskHit(relPath, name, line.line, line.text, null, null)
 
+/// A subtask line goes where a task row goes: its note, at its own line
+/// (owner report, 2026-10-21 — a ticked subtask is listed only here, under
+/// its parent, so a line with no way through left it unreachable). The
+/// checkbox keeps its own action.
+private fun Modifier.opensSubtask(
+    row: TaskHit,
+    line: SubtaskLine,
+    onOpen: ((String) -> Unit)?,
+    reveal: ((NoteLine) -> Unit)?,
+): Modifier = if (onOpen == null) this else this
+    .clickable { reveal?.invoke(row.subtask(line).noteLine()); onOpen(row.relPath) }
+    .pointerHoverIcon(PointerIcon.Hand)
+
 /// An opened row's detail in the editor's line grid: **one line each**,
 /// as [filterBlockLines] counts them.
 @Composable
@@ -639,6 +652,8 @@ private fun TaskDetailGridLines(
     rowHeight: Dp,
     maxWidth: Dp,
     onToggle: ((TaskHit) -> Unit)?,
+    onOpen: ((String) -> Unit)?,
+    reveal: ((NoteLine) -> Unit)?,
 ) {
     val colours = MaterialTheme.colorScheme
     for (note in detail.notes) {
@@ -648,7 +663,10 @@ private fun TaskDetailGridLines(
     }
     for (line in detail.subtasks) {
         Row(
-            Modifier.height(rowHeight).widthIn(max = maxWidth).padding(start = 28.dp, end = 8.dp),
+            Modifier.height(rowHeight).widthIn(max = maxWidth).padding(start = 28.dp)
+                .clip(RoundedCornerShape(4.dp))
+                .opensSubtask(row, line, onOpen, reveal)
+                .padding(end = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
@@ -662,14 +680,24 @@ private fun TaskDetailGridLines(
 /// An opened row's detail where rows are free to size themselves — a
 /// block in presentation mode, the agenda panel.
 @Composable
-private fun TaskDetailRows(row: TaskHit, detail: TaskDetail, onToggle: ((TaskHit) -> Unit)?) {
+private fun TaskDetailRows(
+    row: TaskHit,
+    detail: TaskDetail,
+    onToggle: ((TaskHit) -> Unit)?,
+    onOpen: ((String) -> Unit)?,
+    reveal: ((NoteLine) -> Unit)?,
+) {
     val colours = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().padding(start = 44.dp, end = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         for (note in detail.notes) {
             NoteResultText(note, fontSize = 12.sp, color = colours.onSurfaceVariant)
         }
         for (line in detail.subtasks) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.clip(RoundedCornerShape(4.dp)).opensSubtask(row, line, onOpen, reveal),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 if (onToggle != null) TaskResultCheckbox(row.subtask(line), onToggle)
                 NoteResultText(taskLabel(line.text), fontSize = 12.sp,
                     color = if (line.done) colours.outline else colours.onSurface)
