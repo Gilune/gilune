@@ -1126,6 +1126,7 @@ pub struct TombstoneProposal {
     pub object_id: String,
 }
 
+mod live;
 #[cfg(feature = "whisper")]
 mod whisper;
 
@@ -1555,6 +1556,42 @@ impl Gilune {
         #[cfg(not(feature = "whisper"))]
         {
             let _ = model_path;
+            Err(GiluneError::Invalid {
+                detail: "this build has no local transcription".into(),
+            })
+        }
+    }
+
+    /// Start a live dictation session (ADR 0027): words while someone is
+    /// still speaking, settled and provisional, from the transcription
+    /// plugin's engine. Needs `enable_whisper` to have succeeded on this
+    /// handle — the same readiness a committed transcription needs — and
+    /// is refused otherwise, or in a build with no local transcription.
+    ///
+    /// The session is display and input only. The recording it hears
+    /// still commits as an attached capture through the ordinary path.
+    pub fn begin_live_transcription(&self) -> FfiResult<Arc<live::LiveTranscription>> {
+        #[cfg(feature = "whisper")]
+        {
+            let engine = self
+                .whisper
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .upgrade()
+                .ok_or_else(|| GiluneError::Invalid {
+                    detail: "transcription is not ready on this handle".into(),
+                })?;
+            let language = self
+                .store()
+                .plugin(whisper::PLUGIN_ID)?
+                .and_then(|p| serde_json::from_str::<serde_json::Value>(&p.settings).ok())
+                .and_then(|s| s.get("language").and_then(|v| v.as_str()).map(str::to_string))
+                .unwrap_or_else(|| "auto".to_string());
+            let decoder = whisper::WhisperDecoder::new(engine, &language);
+            Ok(live::LiveTranscription::new(Box::new(live::Session::new(decoder))))
+        }
+        #[cfg(not(feature = "whisper"))]
+        {
             Err(GiluneError::Invalid {
                 detail: "this build has no local transcription".into(),
             })

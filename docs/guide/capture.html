@@ -55,15 +55,33 @@
   <strong>⋯</strong> menu: there is a second microphone there. This one types for
   you.</p>
 
-  <p>Put your cursor where the words should go, click the microphone, speak, and click
-  it again. The text is inserted at the cursor — with a space in front of it if one is
-  needed — and the cursor ends up after it, ready for you to keep typing. If you had
-  text selected, the dictated words replace it.</p>
+  <p>Put your cursor where the words should go, click the microphone and speak. The
+  words appear at the cursor as you talk. Words Gilune is still unsure of are shown
+  grey and may change as you carry on; once it is sure, they turn into ordinary text in
+  your note. Grey words are never saved: if you close the app mid-sentence, the file
+  holds only the words that had settled, and the recording itself is kept either way.
+  Click the microphone again to stop, and the last words settle within a second or two.
+  If you had text selected, the dictated words replace it. You can keep typing
+  elsewhere in the note while you dictate; the words keep arriving where you started.</p>
+
+  <p>Live words are a setting: <strong>Settings ▸ Plugins ▸ Transcription (Whisper) ▸
+  Show words as I dictate</strong>. With it off, the words all arrive when you stop. Live
+  words ask a lot of the processor; if your computer cannot keep up, Gilune says so in
+  the status bar and the rest of the words arrive when you stop.</p>
+
+  <p>While either microphone is recording, a few small bars beside it move with your
+  voice, so you can see it is hearing you before any words appear. If they stay flat for
+  a few seconds, Gilune tells you the microphone is not hearing anything: check it is not
+  muted and that the right input device is chosen.</p>
 
   <p>You can only dictate into one note at a time; if you try to start a second one,
   Gilune says so and leaves the first alone. And if you close the note before the
   transcription comes back, the words are not lost — they appear in the status bar so
   you can copy them.</p>
+
+  <p>Dictation needs the speech model to be in place (see below). Until it is, the
+  microphone is greyed and won't start: hover over it, or click it, and it says what
+  is missing — usually permission to download the model.</p>
 
   <div class="note">
     <p><strong>The recording is always saved before anything else happens.</strong>
@@ -88,13 +106,35 @@
 
   <p>That model is about 57 MiB on the desktop and smaller on the phone, and it is
   <strong>not</strong> fetched behind your back. Nothing downloads until you open <strong>Settings ▸ Plugins</strong>, open the
-  transcription plugin, and allow it network access. Until you do, the status bar tells
-  you plainly that transcription is waiting for permission — and everything else in the
+  transcription plugin, and allow it network access. The download starts as soon as you
+  allow it. Until you do, the status bar tells you plainly that transcription is
+  waiting for permission, and both microphones say so when you hover over them — and everything else in the
   app carries on working. Once the model is there, the download never happens again.</p>
 
   <p>The model only takes up memory while it is being used: Gilune loads it for the
   first recording and lets it go again after ten quiet minutes. The recording that
   wakes it takes about a tenth of a second longer than the ones after it.</p>
+
+  <h3>Choosing a transcriber (desktop)</h3>
+
+  <p>The desktop app comes with two transcription plugins, and one of them writes your notes
+  at a time: switching one on in <strong>Settings ▸ Plugins</strong> switches the other off, and
+  Gilune says so.</p>
+
+  <ul>
+    <li><strong>Transcription (Whisper)</strong> is the one that is on to begin with. Its models
+    are small (57 MiB for the recommended one). Live words need a reasonably fast processor.</li>
+    <li><strong>Transcription (NVIDIA NeMo)</strong> runs NVIDIA's speech models. Choose one on
+    its settings screen: <strong>Nemotron 0.6B</strong> (the most accurate live model, words about
+    a second after you say them, 464 MB to download and about 0.6 GB of memory while you
+    dictate), <strong>FastConformer</strong> (light and fast for slower machines, but no capitals
+    or punctuation) or <strong>Parakeet TDT 0.6B v2</strong> (very accurate, but its words arrive
+    when you stop). Each model's licence is shown beside it. With NeMo, words settle when you
+    pause rather than every second or two.</li>
+  </ul>
+
+  <p>Either way the model downloads once, after you allow the plugin network access, and is
+  checked against its published checksum before it is used.</p>
 
   <h3>Setting the spoken language</h3>
 

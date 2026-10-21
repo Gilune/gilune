@@ -276,9 +276,7 @@ private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {
                 Switch(
                     checked = on,
                     onCheckedChange = { enable ->
-                        state.pluginAction(
-                            if (enable) "${plugin.name} switched on" else "${plugin.name} switched off",
-                        ) { it.setPluginEnabled(plugin.pluginId, enable) }
+                        setPluginSwitch(state, plugin, enable)
                     },
                 )
             }
@@ -319,9 +317,7 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
             Switch(
                 checked = on,
                 onCheckedChange = { enable ->
-                    state.pluginAction(
-                        if (enable) "${plugin.name} switched on" else "${plugin.name} switched off",
-                    ) { it.setPluginEnabled(plugin.pluginId, enable) }
+                    setPluginSwitch(state, plugin, enable)
                 },
             )
         }
@@ -394,6 +390,11 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
         TranscriptionSettings(state, plugin)
     }
 
+    if (plugin.pluginId == NEMO_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        NemoSettings(state, plugin)
+    }
+
     if (plugin.pluginId == TASKS_PLUGIN) {
         HorizontalDivider(color = colours.outlineVariant)
         TasksSettings(state, plugin)
@@ -452,10 +453,10 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 val wanted = language.trim()
                 // The model travels with the write, so setting a language
                 // cannot quietly revert the model somebody chose.
-                state.pluginAction("transcription language set to $wanted — takes effect next launch") {
+                state.pluginAction("transcription language set to $wanted") {
                     it.setPluginSettings(
                         plugin.pluginId,
-                        transcriptionSettingsDocument(wanted, savedModel.key),
+                        transcriptionSettingsDocument(wanted, savedModel.key, listOf(plugin).transcriptionLive()),
                     )
                 }
             },
@@ -484,10 +485,10 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 // the model does above — and the stored one, not whatever
                 // is half-typed in the field.
                 onClick = {
-                    state.pluginAction("transcription model set to ${option.key} — takes effect next launch") {
+                    state.pluginAction("transcription model set to ${option.key}") {
                         it.setPluginSettings(
                             plugin.pluginId,
-                            transcriptionSettingsDocument(saved, option.key),
+                            transcriptionSettingsDocument(saved, option.key, listOf(plugin).transcriptionLive()),
                         )
                     }
                 },
@@ -496,13 +497,42 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
         }
     }
     Text(
-        "A model you have not used before is downloaded on the next launch " +
+        "A model you have not used before is downloaded when you choose it " +
             "(one time, with the network permission above). Models already " +
             "downloaded are kept, so switching back is instant.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
     )
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Dictation", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "With this on, dictated words appear in the note as you speak: words " +
+            "Whisper may still change are shown grey and are not saved until " +
+            "they settle. Whisper re-reads the last few seconds every second, so " +
+            "it needs a reasonably fast processor; if it cannot keep up, the " +
+            "words arrive when you stop instead, and the status line says so. " +
+            "Off, the words always arrive when you stop.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    val live = remember(plugin.settings) { listOf(plugin).transcriptionLive() }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Switch(
+            checked = live,
+            // The language and model travel with the write, so this switch
+            // cannot quietly reset either.
+            onCheckedChange = { on ->
+                state.pluginAction(
+                    if (on) "dictated words now appear as you speak" else "dictated words now arrive when you stop",
+                ) { it.setPluginSettings(plugin.pluginId, transcriptionSettingsDocument(saved, savedModel.key, on)) }
+            },
+            modifier = Modifier.testTag("transcription-live"),
+        )
+        Text("Show words as I dictate", fontSize = 13.sp)
+    }
 }
 
 /// The tasks plugin's settings: § 1's global filter, the one setting the
@@ -769,4 +799,89 @@ private fun AboutSection(state: GiluneState, vaultDir: String, updater: Updater?
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
     if (updater != null) UpdatesSection(updater)
+}
+
+/// A plugin's switch. Switching a transcriber on switches any other one
+/// off — one transcriber writes your notes (ADR 0018 § 3) — and the line
+/// says so; every other plugin just switches.
+private fun setPluginSwitch(state: GiluneState, plugin: PluginInfo, enable: Boolean) {
+    val switch = providerSwitch(state.plugins.toList(), plugin.pluginId, enable)
+    state.pluginAction(switch.message) { g ->
+        for (other in switch.disable) g.setPluginEnabled(other, false)
+        g.setPluginEnabled(plugin.pluginId, enable)
+    }
+}
+
+/// Transcription (NVIDIA NeMo)'s screen (ADR 0027 S3): which model, what
+/// each one is for, its licence, and whether words show as you dictate.
+/// The model and the switch are one settings document, so every write here
+/// sends both.
+@Composable
+private fun NemoSettings(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    val chosen = remember(plugin.settings) { listOf(plugin).nemoModel() }
+    val live = remember(plugin.settings) { listOf(plugin).nemoLive() }
+    providerSwitchWarning(state.plugins.toList(), plugin.pluginId)?.takeIf { plugin.state != "enabled" }?.let {
+        Text(it, fontSize = 12.sp, lineHeight = 18.sp, color = colours.onSurfaceVariant)
+    }
+    Text("Model", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "NVIDIA's speech models, run on this computer. A model is downloaded the first time " +
+            "it is used, once you have allowed network access above, and checked against its " +
+            "published checksum before it is used.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    for (option in NEMO_MODELS) {
+        val present = remember(option, state.vaultCursor.value) { nemoModelPresent(option) }
+        Row(verticalAlignment = Alignment.Top) {
+            RadioButton(
+                selected = option.key == chosen.key,
+                onClick = {
+                    state.pluginAction("${plugin.name} will use ${option.name}") {
+                        it.setPluginSettings(plugin.pluginId, nemoSettingsDocument(option.key, live))
+                    }
+                },
+                modifier = Modifier.testTag("nemo-model-${option.key}"),
+            )
+            Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    option.name + if (present) " — downloaded" else " — ${option.size} download",
+                    fontSize = 13.sp,
+                )
+                Text(option.guidance, fontSize = 12.sp, lineHeight = 17.sp, color = colours.onSurfaceVariant)
+                Text("Licence: ${option.licence}", fontSize = 11.sp, color = colours.onSurfaceVariant)
+            }
+        }
+    }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Dictation", style = MaterialTheme.typography.titleSmall)
+    Text(
+        if (chosen.kind == NemoKind.STREAMING) {
+            "With this on, dictated words appear in the note as you speak: words the model may " +
+                "still change are shown grey and are not saved until they settle at a pause. " +
+                "Off, the words arrive when you stop."
+        } else {
+            "${chosen.name} hears a recording once it has finished, so dictated words always " +
+                "arrive when you stop. Choose a live model above to see words as you speak."
+        },
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Switch(
+            checked = live && chosen.kind == NemoKind.STREAMING,
+            enabled = chosen.kind == NemoKind.STREAMING,
+            onCheckedChange = { on ->
+                state.pluginAction(
+                    if (on) "dictated words now appear as you speak" else "dictated words now arrive when you stop",
+                ) { it.setPluginSettings(plugin.pluginId, nemoSettingsDocument(chosen.key, on)) }
+            },
+            modifier = Modifier.testTag("nemo-live"),
+        )
+        Text("Show words as I dictate", fontSize = 13.sp)
+    }
 }

@@ -7,6 +7,10 @@
 // `CaptureScreen.kt` renders [CaptionDisplay]. That split is what lets the
 // semantics below be tested without a 45 MB download.
 //
+// Shared since ADR 0027 S0: the desktop's live dictation folds whisper's
+// streaming lines through the same rules, because "a settled line never
+// changes again" is exactly when dictated words may enter the buffer.
+//
 // The five findings this fold exists to honour, all from
 // `spikes/r0-moonshine/README.md` § Question 5:
 //

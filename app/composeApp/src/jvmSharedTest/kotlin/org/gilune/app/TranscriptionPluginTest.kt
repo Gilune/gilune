@@ -9,6 +9,7 @@ package org.gilune.app
 import uniffi.gilune_ffi.PluginInfo
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /// The transcription plugin as the kernel reports it back, with whatever
@@ -138,7 +139,7 @@ class TranscriptionPluginTest {
     @Test
     fun theModelIsReadBackFromTheSettingsDocumentItWasWrittenTo() {
         for (wanted in WHISPER_MODELS.map { it.key }) {
-            val plugin = installedTranscriptionPlugin(settings = transcriptionSettingsDocument("auto", wanted))
+            val plugin = installedTranscriptionPlugin(settings = transcriptionSettingsDocument("auto", wanted, true))
             assertEquals(wanted, listOf(plugin).transcriptionModel().key, "round trip of <$wanted>")
         }
     }
@@ -146,7 +147,7 @@ class TranscriptionPluginTest {
     @Test
     fun theLanguageIsReadBackFromTheSameDocument() {
         for (wanted in listOf("auto", "en", "sv", """a "quoted" \ one""")) {
-            val plugin = installedTranscriptionPlugin(settings = transcriptionSettingsDocument(wanted, "tiny"))
+            val plugin = installedTranscriptionPlugin(settings = transcriptionSettingsDocument(wanted, "tiny", true))
             assertEquals(wanted, listOf(plugin).transcriptionLanguage(), "round trip of <$wanted>")
         }
     }
@@ -155,14 +156,14 @@ class TranscriptionPluginTest {
     fun theTwoSettingsAreOneDocumentAndNeitherWriteDropsTheOther() {
         // What each control in the settings screen writes: the value it
         // owns, and the stored value of the one it does not.
-        val languageApplied = transcriptionSettingsDocument("sv", "base")
+        val languageApplied = transcriptionSettingsDocument("sv", "base", true)
         assertEquals("sv", listOf(installedTranscriptionPlugin(settings = languageApplied)).transcriptionLanguage())
         assertEquals(
             "base",
             listOf(installedTranscriptionPlugin(settings = languageApplied)).transcriptionModel().key,
             "setting a language must not revert the model somebody chose",
         )
-        val modelPicked = transcriptionSettingsDocument("sv", "tiny-q5_1")
+        val modelPicked = transcriptionSettingsDocument("sv", "tiny-q5_1", true)
         assertEquals(
             "sv",
             listOf(installedTranscriptionPlugin(settings = modelPicked)).transcriptionLanguage(),
@@ -172,11 +173,25 @@ class TranscriptionPluginTest {
     }
 
     @Test
+    fun wordsAsYouDictateAreOnUnlessSomebodyTurnedThemOff() {
+        // ADR 0027 amendment: absent means on, so a vault written before
+        // the switch existed dictates live.
+        assertTrue(listOf(installedTranscriptionPlugin(settings = "")).transcriptionLive())
+        assertTrue(listOf(installedTranscriptionPlugin(settings = """{"language":"en","model":"base"}""")).transcriptionLive())
+        val off = listOf(installedTranscriptionPlugin(settings = transcriptionSettingsDocument("en", "base", false)))
+        assertFalse(off.transcriptionLive())
+        // The step past: changing the language or the model afterwards must
+        // carry the switch as stored, not reset it to the default.
+        val relanguaged = transcriptionSettingsDocument("sv", off.transcriptionModel().key, off.transcriptionLive())
+        assertFalse(listOf(installedTranscriptionPlugin(settings = relanguaged)).transcriptionLive())
+    }
+
+    @Test
     fun theDocumentKeepsTheKeyNameTheKernelReadsLanguageFrom() {
         // `enableWhisper` picks "language" out of this document itself,
         // so the shell may add keys beside it but never rename it.
         assertTrue(
-            transcriptionSettingsDocument("en", "base-q5_1").contains(""""language":"en""""),
+            transcriptionSettingsDocument("en", "base-q5_1", true).contains(""""language":"en""""),
             "the kernel's read is part of this contract",
         )
     }
@@ -185,7 +200,7 @@ class TranscriptionPluginTest {
     fun bothSettingsAreReadableWhileThePluginIsOff() {
         val off = installedTranscriptionPlugin(
             state = "disabled",
-            settings = transcriptionSettingsDocument("en", "tiny"),
+            settings = transcriptionSettingsDocument("en", "tiny", true),
         )
         assertEquals("tiny", listOf(off).transcriptionModel().key, "its own screen shows what is stored")
         assertEquals("en", listOf(off).transcriptionLanguage())
@@ -197,7 +212,7 @@ class TranscriptionPluginTest {
         assertEquals(DEFAULT_WHISPER_MODEL, listOf(tasks).transcriptionModel().key)
         assertEquals(DEFAULT_TRANSCRIPTION_LANGUAGE, listOf(tasks).transcriptionLanguage())
         // …and with both installed, each reads its own document.
-        val both = listOf(tasks, installedTranscriptionPlugin(settings = transcriptionSettingsDocument("en", "base")))
+        val both = listOf(tasks, installedTranscriptionPlugin(settings = transcriptionSettingsDocument("en", "base", true)))
         assertEquals("base", both.transcriptionModel().key)
         assertEquals("en", both.transcriptionLanguage())
     }

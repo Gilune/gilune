@@ -47,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -83,6 +84,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -96,13 +98,6 @@ import kotlin.math.roundToInt
 /// anywhere else.
 internal fun localGiluneDir(name: String): File =
     File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"), "Gilune/$name")
-
-/// Where a downloaded model lands. One file per catalogue entry, so
-/// changing the setting downloads the new model beside the old one rather
-/// than over it: the previous file is left alone, and switching back is
-/// not another download.
-private fun modelFile(model: WhisperModel): File =
-    File(localGiluneDir("models"), model.fileName)
 
 /// This device's identity keypair and the roster of devices it has
 /// paired with. **Outside the vault, and that is the whole point**
@@ -328,6 +323,11 @@ private fun DesktopApp(
     val recorder = remember { DesktopAudioRecorder() }
     val dictation = remember { DesktopAudioRecorder() }
     var recording by remember { mutableStateOf(false) }
+    val transcription = remember { TranscriptionRuntime() }
+    val nemo = remember { NemoHost() }
+    KeepTranscriptionAsked(state) { gilune ->
+        withContext(Dispatchers.IO) { startTranscription(state, gilune, transcription, nemo) }
+    }
     val colours = MaterialTheme.colorScheme
     val density = LocalDensity.current
 
@@ -450,6 +450,10 @@ private fun DesktopApp(
         // the device the vault believes it belongs to. Set before the
         // open, never after. Nothing here binds a socket — that waits for
         // the switch in Settings ▸ Sync.
+        // Transcription (NVIDIA NeMo) writes saved transcripts app-side
+        // (ADR 0027 S3): every processing pass on this handle gives it the
+        // jobs queued for it, when its model is loaded.
+        state.externalProcessing = { gilune -> nemo.engines?.let { runNemoJobs(gilune, it::transcribe) } ?: ProviderPass() }
         state.syncSetup = { gilune ->
             val identity = identityDir()
             identity.mkdirs()
@@ -463,6 +467,11 @@ private fun DesktopApp(
         // an escape from the first (§ 2).
         state.syncDiscovery = { gilune -> gilune.useBundledDiscovery() }
         state.openVault { gilune ->
+            // The desktop's second transcriber (ADR 0027 S3): installed
+            // switched off when whisper is already writing the notes, and
+            // never switched on except by a person.
+            registerNemoOnHandle(gilune)
+            state.refresh()
             // The starting folders the enabled plugins declare, each once
             // per vault on this machine — after the open, because only the
             // registered plugins know them.
@@ -471,7 +480,6 @@ private fun DesktopApp(
                     given = { Prefs.folderGiven(vaultDir, it) }, remember = { Prefs.markFolderGiven(vaultDir, it) })
                 if (made.isNotEmpty()) state.refreshCount.value += 1
             }
-            scope.launch(Dispatchers.IO) { startTranscription(state, gilune) }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
             // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>,
@@ -542,7 +550,18 @@ private fun DesktopApp(
             Text("Gilune", style = MaterialTheme.typography.titleMedium)
             QuickOpenBox(state, ::openNote, quickOpenFocus, Modifier.width(280.dp))
             Spacer(Modifier.weight(1f))
-            if (micOffered) Tooltip(if (recording) "Stop recording" else "New note from speech") {
+            // A voice note is worth keeping without its words, so this
+            // microphone records regardless — but it says so first.
+            val untranscribed = transcription.unreadyReason()
+            val micWords = when {
+                recording -> "Stop recording"
+                untranscribed != null -> "New note from speech (not transcribed: $untranscribed)"
+                else -> "New note from speech"
+            }
+            if (micOffered && recording) {
+                MicLevelBars({ recorder.level }, onSilence = { state.message.value = QUIET_WARNING })
+            }
+            if (micOffered) Tooltip(micWords) {
                 IconButton(
                     onClick = {
                         if (!recording) {
@@ -644,7 +663,9 @@ private fun DesktopApp(
                 if (railCollapsed && railRaw >= RAIL_SHUT_AT) setRailCollapsed(false)
                 if (!railCollapsed) railWidth = railRaw.coerceIn(RAIL_MIN, RAIL_MAX)
             }
-            PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
+            CompositionLocalProvider(LocalTranscription provides transcription, LocalNemo provides nemo) {
+                PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
+            }
         }
 
         // One window, one status line: it sat inside the editor while
@@ -825,45 +846,4 @@ private fun ProposalsBanner(state: GiluneState) {
         }) { Text("Delete", fontSize = 12.sp) }
     }
     HorizontalDivider(color = colours.outlineVariant)
-}
-
-/// Bring up local transcription, off the capture path by design. Which
-/// model is a plugin setting (owner decision, 2026-09-01), so this reads
-/// the choice back and downloads that one; a key nobody recognises falls
-/// back to the shipped default rather than leaving speech untranscribed.
-///
-/// The download is a declared capability either way, so it waits for
-/// consent rather than fetching tens of megabytes on someone's first
-/// launch (ADR 0011) — including when the setting changes to a model that
-/// is not on disk yet.
-private fun startTranscription(state: GiluneState, gilune: Gilune) {
-    try {
-        val installed = gilune.plugins().firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }
-        if (installed == null || installed.state != "enabled") {
-            state.message.value = "vault: ${gilune.vaultPath()}"
-            return
-        }
-        val chosen = listOf(installed).transcriptionModel()
-        val model = modelFile(chosen)
-        if (!model.exists()) {
-            if (!gilune.isGranted(TRANSCRIPTION_PLUGIN, NETWORK_CAPABILITY)) {
-                state.message.value =
-                    "transcription needs permission to download its model — Settings ▸ Plugins"
-                return
-            }
-            state.message.value =
-                "downloading the ${chosen.key} transcription model (~${chosen.size}, one-time)…"
-            model.parentFile.mkdirs()
-            val partial = File(model.parentFile, "${model.name}.part")
-            java.net.URI(chosen.url).toURL().openStream().use { input ->
-                partial.outputStream().use { output -> input.copyTo(output) }
-            }
-            partial.renameTo(model)
-        }
-        gilune.enableWhisper(model.absolutePath)
-        state.message.value = "vault: ${gilune.vaultPath()} — transcription ready"
-        state.sync(announce = false)
-    } catch (e: Throwable) {
-        state.message.value = "transcription unavailable (${e.message}); captures still work"
-    }
 }

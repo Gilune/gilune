@@ -48,7 +48,7 @@ private fun whisperRow(state: String = "enabled") =
     plugin(TRANSCRIPTION_PLUGIN, state, "Local transcription", "transcribe")
 
 private fun moonshineRow(state: String = "enabled") =
-    plugin(MOONSHINE_PLUGIN, state, "Realtime transcription (Moonshine)", MOONSHINE_PROCESSOR)
+    plugin(MOONSHINE_PLUGIN, state, "Transcription (Moonshine)", MOONSHINE_PROCESSOR)
 
 class ProviderRegistrationTest {
 
@@ -152,7 +152,7 @@ class ProviderRegistrationTest {
         // exactly those, and a bare number reads as work to clear.
         val note = waitingJobsNote(listOf(whisperRow(), moonshineRow("disabled")), 4L, 3L)
         assertTrue(note != null && note.contains("parked"), "'$note'")
-        assertTrue(note.contains("Realtime transcription (Moonshine)"), "name it: '$note'")
+        assertTrue(note.contains("Transcription (Moonshine)"), "name it: '$note'")
         assertTrue(note.contains("nothing is waiting on you"), "'$note'")
     }
 
