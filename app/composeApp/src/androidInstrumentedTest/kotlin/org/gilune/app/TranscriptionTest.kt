@@ -88,12 +88,12 @@ class TranscriptionTest {
 
     @Test
     fun theStoredKeyIsReadThroughThePluginRegistry() {
-        val chosen = listOf(plugin(settings = transcriptionSettingsDocument("en", "base")))
+        val chosen = listOf(plugin(settings = transcriptionSettingsDocument("en", "base", true)))
         assertEquals("base", chosen.androidTranscriptionModel().key)
         assertEquals("en", chosen.transcriptionLanguage())
         assertEquals(
             "tiny-q5_1",
-            listOf(plugin(settings = transcriptionSettingsDocument("en", ""))).androidTranscriptionModel().key,
+            listOf(plugin(settings = transcriptionSettingsDocument("en", "", true))).androidTranscriptionModel().key,
             "a blank stored model is the phone default, not an error",
         )
     }
@@ -185,7 +185,7 @@ class TranscriptionTest {
         // The bug this rules out: checking for the default's file while
         // downloading the chosen one, so a non-default choice re-downloads
         // on every launch.
-        val chosen = listOf(plugin(settings = transcriptionSettingsDocument("auto", "base")))
+        val chosen = listOf(plugin(settings = transcriptionSettingsDocument("auto", "base", true)))
         val asked = mutableListOf<String>()
         val plan = transcriptionPlan(chosen) { model ->
             asked += model.key

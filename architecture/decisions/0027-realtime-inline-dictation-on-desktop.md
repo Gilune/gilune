@@ -2,8 +2,8 @@
 
 Date: 2026-10-21
 Status: **Accepted** (owner, 2026-10-21) — the § 1 rule, engine B first, and
-the engine-choice amendment at the end (A and C as options in their own
-plugin). Build not started.
+the engine-choice amendment (A and C as options in their own
+plugin). S0–S2 delivered 2026-10-21 (see Delivery); S3 not started.
 
 ## Context
 
@@ -273,3 +273,78 @@ kind of plugin.
   downloads with the NVIDIA Open Model License shown at the Nemotron consent
   point, idle unload, committed transcript via the external processor route.
 - **S4** unchanged (optional).
+
+## Delivery: S0–S2 (2026-10-21)
+
+- **S0.** `Caption.kt` (`foldCaption`, `CaptionEvent`, `CaptionLine`,
+  `captionDisplay`, `captionOffered`) moved unchanged from `androidMain` to
+  `jvmShared`; its pure rows moved to `jvmSharedTest/CaptionFoldTest.kt`
+  (13), so they now run on desktop too. The Moonshine-planning rows stay in
+  `CaptionTest`.
+- **Kernel.** `gilune-ffi/src/live.rs`: the LocalAgreement-2 session, pure
+  over a `Decoder` trait. Settled words are found after the already-settled
+  text by **spelling** (letters, not word count), so a re-decode that joins
+  or splits a settled word ("ring main" / "ringmain") neither repeats nor
+  drops one. Audio behind a fully settled segment is dropped; a window over
+  20 s settles all but its last segment; near-silence (peak < 0.01) is never
+  decoded. `whisper.rs` adds `WhisperDecoder` over the existing on-demand
+  engine (same parameters, `no_context`). FFI: `Gilune.begin_live_transcription()`
+  → `LiveTranscription { accept(pcm), update(), finish() }` and
+  `LiveLine { id, text, complete }` — the caption fold's shape. The surface
+  is identical with and without the `whisper` feature (a non-whisper build
+  refuses), so bindings do not diverge.
+- **Shell.** `LiveDictation.kt`: the anchor lives on the tab's `EditorState`
+  and is carried through **every** buffer change by the `text` setter;
+  settled lines land once each at the anchor (caret at the anchor moves with
+  them, a caret elsewhere stays); the grey run is `DictationTransformation`
+  wrapping `MarkdownEditTransformation`, inserting display-only characters
+  with an offset table. The recorder only enqueues PCM (`AudioRecorder.listen`,
+  a default no-op so Android is unchanged); a worker thread feeds the
+  kernel, updates once per second of audio, and lands results on the EDT.
+  Backlog over 3 s after an update ⇒ no more updates, one status-line
+  sentence, every byte still fed so the stop settles everything.
+  `GiluneState.dictate(audio, null)` keeps and transcribes the recording
+  without inserting (no double words). Setting **Show words as I dictate**
+  (`live` key, absent = on, carried by every settings write) on the
+  Whisper plugin's screen. Renames: "Transcription (Whisper)" (kernel
+  descriptor; the upsert updates existing vaults) and "Transcription
+  (Moonshine)".
+
+**Measured** (this laptop, base-q5_1, the 22.9 s clip played at real-time
+pace through the real kernel into a real editor —
+`DictationEndToEndTest.wordsAppearInTheNoteWhileTheyAreBeingSpoken`):
+first grey words **2.8 s**, first settled phrase 5.9 s, all words settled
+**2.0 s after the speech ended**; the note's words equal the whole-clip
+transcript; no doubled word.
+
+**Against the S2 gate.** First words ≤ 2 s: **missed (2.8 s).** The cost is
+whisper encoding a fixed 30 s window per decode (~1 s on base, whatever the
+audio). Shrinking it (`audio_ctx`) was tried at margins of 64/256/512 frames
+and **rejected**: decodes got ~40% faster but words went wrong ("Ask
+Marcus" → "markers") and phrases repeated ("send me to send me"). Settled
+≤ 3.5 s after speaking: met at the stop (2.0 s); mid-speech a phrase settles
+on the second agreeing decode, ~2–3 s after it is said. The recording is
+unaffected when the session throws (it is a separate queue and thread).
+
+**Deviations, recorded.** (1) Falling behind does not "settle at pauses":
+whisper has no cheap pause signal, so the grey words stop and the rest
+arrives at the stop. (2) The desktop still commits the attached capture at
+the stop (as before), not chunk by chunk; the tee feeds only the engine.
+(3) Settled insertions are programmatic changes to the legacy text field;
+that each is one undo step is **not verified**.
+
+**Tests.** Kernel: 10 `live::tests` rows (scripted decoder; the join/split
+row falsified by counting words) + `tests/live_dictation.rs` (real model,
+opt-in). Desktop: `LiveDictationTest` 15 (anchor mapping, landing, a person
+typing above the dictation point between settles, selection replacement,
+offset table incl. composition with checkbox glyphs, the queue never
+blocking the microphone, fall-behind told once and asked no more, the stop
+hearing every byte), `LiveDictationUiTest` (autosave writes settled words,
+never grey ones; the grey words are in the field's displayed text),
+`TranscriptionPluginTest` +1 (switch default and carried through writes),
+`DictationEndToEndTest` +1 (opt-in, real time). Falsified: four rules broken
+at once ⇒ 7 rows red. Suites: cargo workspace 593/1/24 — the one is
+`gate_c`'s 5 s sync budget, failing alone on this laptop (3.2 s exchange vs
+1.21 s on the old machine) in crates this change does not touch; desktop
+798/0/7 skipped (--rerun-tasks). Not compiled: `androidMain` (no Android
+SDK on this machine). Not done: a person speaking into a real microphone.

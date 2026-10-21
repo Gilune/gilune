@@ -24,7 +24,7 @@ pub const PLUGIN_ID: &str = "org.memory.transcription";
 pub fn descriptor() -> PluginDescriptor {
     PluginDescriptor {
         plugin_id: PLUGIN_ID.to_string(),
-        name: "Local transcription".to_string(),
+        name: "Transcription (Whisper)".to_string(),
         class: PluginClass::Provider,
         profile: PluginProfile::Bundled,
         required: false,
@@ -520,6 +520,69 @@ fn canonical_wav_samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
         .iter()
         .map(|sample| i16::from_le_bytes(*sample) as f32 / 32768.0)
         .collect())
+}
+
+/// Whisper as the engine under a live dictation session (ADR 0027 S2).
+///
+/// It decodes the session's window with the same parameters a committed
+/// transcription uses, through the same on-demand model: a live session
+/// keeps the model resident while it runs, and the idle sweep drops it
+/// afterwards exactly as it does after a job.
+pub(crate) struct WhisperDecoder {
+    engine: Arc<WhisperEngine>,
+    language: String,
+}
+
+impl WhisperDecoder {
+    pub(crate) fn new(engine: Arc<WhisperEngine>, language: &str) -> Self {
+        Self { engine, language: language.to_string() }
+    }
+}
+
+impl crate::live::Decoder for WhisperDecoder {
+    fn decode(&self, samples: &[f32]) -> Result<Vec<crate::live::Segment>, String> {
+        // whisper refuses less than a second of audio; a short window is
+        // padded with silence rather than skipped.
+        let minimum = crate::live::SAMPLE_RATE + crate::live::SAMPLE_RATE / 10;
+        let mut padded;
+        let samples = if samples.len() < minimum {
+            padded = samples.to_vec();
+            padded.resize(minimum, 0.0);
+            &padded[..]
+        } else {
+            samples
+        };
+        let lease = self.engine.lease()?;
+        let mut state = lease.ctx.create_state().map_err(|e| e.to_string())?;
+        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+        params.set_print_special(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_timestamps(false);
+        params.set_language(Some(&self.language));
+        // Each decode stands alone: carrying the previous decode's text in
+        // as a prompt is how whisper repeats itself.
+        params.set_no_context(true);
+        let threads = std::thread::available_parallelism()
+            .map(|n| n.get().min(8))
+            .unwrap_or(4);
+        params.set_n_threads(threads as std::os::raw::c_int);
+        state.full(params, samples).map_err(|e| e.to_string())?;
+        let mut segments = Vec::new();
+        for i in 0..state.full_n_segments() {
+            if let Some(segment) = state.get_segment(i) {
+                let text = clean_transcript(&segment.to_str_lossy().map_err(|e| e.to_string())?);
+                if text.is_empty() {
+                    continue;
+                }
+                segments.push(crate::live::Segment {
+                    end_s: segment.end_timestamp() as f32 / 100.0,
+                    text,
+                });
+            }
+        }
+        Ok(segments)
+    }
 }
 
 impl Processor for WhisperTranscriber {

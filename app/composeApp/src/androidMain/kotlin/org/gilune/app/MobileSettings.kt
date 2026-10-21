@@ -566,7 +566,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 state.pluginAction("spoken language set to $wanted — takes effect next launch") {
                     it.setPluginSettings(
                         plugin.pluginId,
-                        transcriptionSettingsDocument(wanted, savedModel.key),
+                        transcriptionSettingsDocument(wanted, savedModel.key, listOf(plugin).transcriptionLive()),
                     )
                 }
             },
@@ -601,7 +601,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                     state.pluginAction("transcription model set to ${option.key}") {
                         it.setPluginSettings(
                             plugin.pluginId,
-                            transcriptionSettingsDocument(saved, option.key),
+                            transcriptionSettingsDocument(saved, option.key, listOf(plugin).transcriptionLive()),
                         )
                     }
                 }
