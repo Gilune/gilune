@@ -47,6 +47,25 @@
   <p>The space inside the brackets matters: <code>- [ ]</code> is a task and
   <code>- []</code> is not. This is the same rule Obsidian uses.</p>
 
+  <h3>Subtasks and notes on a task</h3>
+
+  <p>A task nested under another is its subtask, and anything else indented under a
+  task belongs to it — a line of detail, a link, a person:</p>
+
+<pre><code>- [ ] Prepare the show and tell due:2026-10-30
+  owner: @alice.smith
+  Need the latest build and the samples.
+  - [ ] Fill gaps on the inputs
+  - [ ] Book the room</code></pre>
+
+  <p>You don't need to count spaces. Press <kbd>Return</kbd> at the end of a task for
+  the next one, then <kbd>Tab</kbd> to nest it under the task above;
+  <kbd>Shift</kbd> + <kbd>Tab</kbd> lifts it back out. Each <kbd>Return</kbd> after a
+  subtask starts another at the same level, and <kbd>Return</kbd> on an empty one steps
+  back out to the level above — so a second <kbd>Return</kbd> takes you from the last
+  subtask to the next main task. Select several lines and <kbd>Tab</kbd> nests them
+  all.</p>
+
   <h2 id="due-dates">Giving a task a due date</h2>
 
   <p>You do not have to remember a date format. Type <code>/</code> on the task line

@@ -285,8 +285,10 @@ object ListContinuationTransformation : InputTransformation {
                 selection = TextRange(caret + decision.prefix.length)
             }
             is ListContinuation.Unwrap -> {
-                replace(decision.range.first, decision.range.last + 1, "")
-                selection = TextRange(decision.range.first)
+                // `keep` is empty when the list lets go, and the item one
+                // level out when an empty nested item steps back.
+                replace(decision.range.first, decision.range.last + 1, decision.keep)
+                selection = TextRange(decision.range.first + decision.keep.length)
             }
             null -> {}
         }
