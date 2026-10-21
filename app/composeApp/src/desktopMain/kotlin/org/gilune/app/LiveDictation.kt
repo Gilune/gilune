@@ -33,10 +33,14 @@ private const val PCM_BYTES_PER_SECOND = 32_000
 /// buys little and costs a full decode.
 private const val LIVE_STEP_SECONDS = 1.0
 
-/// Audio waiting behind a decode, in seconds, beyond which the engine is
-/// not keeping up on this machine (ADR 0027 amendment: measured, not
-/// promised). Past it the grey words stop and the rest arrives on stop.
-const val LIVE_MAX_BACKLOG_SECONDS = 3.0
+/// How long one decode may take, in seconds, before the words are judged
+/// to be lagging too far behind the speaker (ADR 0027 amendment: measured,
+/// not promised). Each decode hears everything that arrived during the
+/// last one, so a slow decode makes the next step longer rather than
+/// leaving audio queued; the lag *is* the decode time. Two consecutive
+/// decodes over this, not counting the first — it loads the model — and
+/// the grey words stop; the rest arrives on stop.
+const val LIVE_MAX_LAG_SECONDS = 4.0
 
 /// One dictation landing in one note.
 class LiveDictation(anchor: Int) {
@@ -193,18 +197,25 @@ class DictationTransformation(
 
 /// The thread between the microphone and the engine. The recorder only
 /// ever puts bytes in a queue — it must never wait on a decode, or the
-/// recording would drop audio. This thread hands them to the engine, asks
-/// for an update once a second's worth has arrived, and passes what comes
-/// back to `deliver` (which the caller routes onto the UI thread).
+/// recording would drop audio. This thread hands them to the engine —
+/// **all** of what is waiting, before every decode — asks for an update
+/// once at least a second's worth is new, and passes what comes back to
+/// `deliver` (which the caller routes onto the UI thread).
 ///
-/// Whether it keeps up is measured: when more than
-/// [LIVE_MAX_BACKLOG_SECONDS] of audio is waiting after an update, it
-/// stops asking, says so once through `fellBehind`, and keeps feeding the
-/// engine so the stop can still settle everything.
+/// Whether it keeps up is measured: when decodes keep taking longer than
+/// [LIVE_MAX_LAG_SECONDS], it stops asking, says so once through
+/// `fellBehind`, and keeps feeding the engine so the stop can still settle
+/// everything.
+///
+/// It used to decode as soon as one second had arrived, leaving the rest
+/// queued. A decode slower than a second then left more behind it each
+/// time, the first one (which loads the model) tripped the check at once,
+/// and the grey words never showed (owner, 2026-10-21).
 class LiveDictationRun(
     private val engine: LiveTranscriptionInterface,
     private val deliver: (List<LiveLine>) -> Unit,
     private val fellBehind: (String) -> Unit,
+    private val maxLagSeconds: Double = LIVE_MAX_LAG_SECONDS,
 ) {
     private val queue = LinkedBlockingQueue<ByteArray>()
 
@@ -226,10 +237,10 @@ class LiveDictationRun(
         stopping = done
     }
 
-    private fun waitingSeconds(): Double = queue.sumOf { it.size }.toDouble() / PCM_BYTES_PER_SECOND
-
     private fun loop() {
         var fresh = 0
+        var decodes = 0
+        var slow = 0
         while (true) {
             val done = stopping
             if (done != null && queue.isEmpty()) {
@@ -239,9 +250,17 @@ class LiveDictationRun(
             val chunk = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
             engine.accept(chunk)
             fresh += chunk.size
+            // Whatever arrived during the last decode is heard by this one.
+            while (true) {
+                val more = queue.poll() ?: break
+                engine.accept(more)
+                fresh += more.size
+            }
             if (behind || stopping != null || fresh < LIVE_STEP_SECONDS * PCM_BYTES_PER_SECOND) continue
             fresh = 0
+            val started = System.nanoTime()
             val update = runCatching { engine.update() }
+            val took = (System.nanoTime() - started) / 1e9
             val failure = update.exceptionOrNull()
             if (failure != null) {
                 behind = true
@@ -249,7 +268,9 @@ class LiveDictationRun(
                 continue
             }
             deliver(update.getOrThrow())
-            if (waitingSeconds() > LIVE_MAX_BACKLOG_SECONDS) {
+            if (decodes++ == 0) continue
+            slow = if (took > maxLagSeconds) slow + 1 else 0
+            if (slow >= 2) {
                 behind = true
                 fellBehind(
                     "transcription could not keep up on this machine, so the words will arrive " +

@@ -150,15 +150,23 @@ class LiveDictationTest {
 
     // ------------------------------------------------------------- thread
 
-    private class SlowEngine(private val decodeMs: Long, private val script: List<List<LiveLine>>) : LiveTranscriptionInterface {
+    private class SlowEngine(
+        private val decodeMs: Long,
+        private val script: List<List<LiveLine>>,
+        private val firstDecodeMs: Long = decodeMs,
+    ) : LiveTranscriptionInterface {
         val accepted = AtomicInteger()
         val updates = AtomicInteger()
         val finished = CountDownLatch(1)
+
+        /// How much audio the engine had been given at each update.
+        val heardAtUpdate = java.util.Collections.synchronizedList(mutableListOf<Int>())
         override fun accept(pcm: ByteArray) { accepted.addAndGet(pcm.size) }
         override fun update(): List<LiveLine> {
             val n = updates.getAndIncrement()
-            Thread.sleep(decodeMs)
-            return script.getOrElse(n) { emptyList() }
+            heardAtUpdate += accepted.get()
+            Thread.sleep(if (n == 0) firstDecodeMs else decodeMs)
+            return script.getOrElse(n) { listOf(LiveLine(n.toULong(), "words $n", false)) }
         }
         override fun finish(): List<LiveLine> {
             finished.countDown()
@@ -198,24 +206,54 @@ class LiveDictationTest {
         assertEquals(40_000, engine.accepted.get(), "every byte heard, including what came after the last update")
     }
 
+    /// Plays `seconds` of audio into the run at the pace a microphone would.
+    private fun speak(run: LiveDictationRun, seconds: Int) {
+        repeat(seconds * 10) {
+            run.offer(ByteArray(3_200))
+            Thread.sleep(100)
+        }
+    }
+
     @Test
-    fun anEngineThatFallsBehindIsToldOnceAndAskedNoMore() {
-        val engine = SlowEngine(decodeMs = 1_500, script = emptyList())
+    fun aSlowColdStartAndDecodesSlowerThanASecondStillShowWords() {
+        // The owner's run (2026-10-21): the first decode loads the model and
+        // detects the language, later ones take a little over a second. The
+        // old loop decoded on every second that arrived, left the rest
+        // queued, judged that queue after the cold decode, and hid the grey
+        // words for the whole dictation.
+        val engine = SlowEngine(decodeMs = 1_300, script = emptyList(), firstDecodeMs = 3_000)
         val warnings = mutableListOf<String>()
-        val run = LiveDictationRun(engine, deliver = {}, fellBehind = { synchronized(warnings) { warnings += it } })
+        val delivered = AtomicInteger()
+        val run = LiveDictationRun(engine, deliver = { delivered.incrementAndGet() },
+            fellBehind = { synchronized(warnings) { warnings += it } })
         run.start()
-        // Five seconds of speech arrive while the first decode is running.
-        run.offer(second)
-        Thread.sleep(100)
-        repeat(5) { run.offer(second) }
-        Thread.sleep(2_500)
-        repeat(3) { run.offer(second) }
+        speak(run, 9)
+        val done = CountDownLatch(1)
+        run.stop { done.countDown() }
+        assertTrue(done.await(10, TimeUnit.SECONDS))
+        assertEquals(emptyList(), synchronized(warnings) { warnings.toList() }, "this engine keeps up")
+        assertTrue(delivered.get() >= 3, "words kept arriving: ${delivered.get()} updates")
+        // Each decode after the first heard everything that had arrived:
+        // the gap between updates is the decode time, not a growing queue.
+        val heard = synchronized(engine.heardAtUpdate) { engine.heardAtUpdate.toList() }
+        val steps = heard.zipWithNext { a, b -> (b - a) / 32_000.0 }
+        assertTrue(steps.drop(1).all { it >= 1.2 }, "each step took in the audio that queued during the decode: $steps")
+    }
+
+    @Test
+    fun anEngineThatKeepsLaggingIsToldOnceAndAskedNoMore() {
+        val engine = SlowEngine(decodeMs = 1_000, script = emptyList())
+        val warnings = mutableListOf<String>()
+        val run = LiveDictationRun(engine, deliver = {}, fellBehind = { synchronized(warnings) { warnings += it } },
+            maxLagSeconds = 0.5)
+        run.start()
+        speak(run, 8)
         val done = CountDownLatch(1)
         run.stop { done.countDown() }
         assertTrue(done.await(10, TimeUnit.SECONDS))
         assertEquals(1, synchronized(warnings) { warnings.size }, "said once: $warnings")
         assertTrue("keep up" in warnings.single())
-        assertEquals(1, engine.updates.get(), "no more decodes once it has fallen behind")
-        assertEquals(9 * 32_000, engine.accepted.get(), "but every byte still reaches the engine for the stop")
+        assertEquals(3, engine.updates.get(), "the cold first decode is not judged; two slow ones after it are")
+        assertEquals(8 * 32_000, engine.accepted.get(), "but every byte still reaches the engine for the stop")
     }
 }

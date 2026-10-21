@@ -530,12 +530,17 @@ fn canonical_wav_samples(bytes: &[u8]) -> Result<Vec<f32>, String> {
 /// afterwards exactly as it does after a job.
 pub(crate) struct WhisperDecoder {
     engine: Arc<WhisperEngine>,
-    language: String,
+    /// The language each decode is told. "auto" until the first decode
+    /// that hears speech has detected one; that answer then holds for the
+    /// rest of the dictation, because detection is a whole extra pass
+    /// (~40% of a short decode) and a person does not change language
+    /// mid-sentence. A fixed language from the settings is used as given.
+    language: Mutex<String>,
 }
 
 impl WhisperDecoder {
     pub(crate) fn new(engine: Arc<WhisperEngine>, language: &str) -> Self {
-        Self { engine, language: language.to_string() }
+        Self { engine, language: Mutex::new(language.to_string()) }
     }
 }
 
@@ -559,7 +564,8 @@ impl crate::live::Decoder for WhisperDecoder {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
-        params.set_language(Some(&self.language));
+        let language = self.language.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        params.set_language(Some(&language));
         // Each decode stands alone: carrying the previous decode's text in
         // as a prompt is how whisper repeats itself.
         params.set_no_context(true);
@@ -568,6 +574,13 @@ impl crate::live::Decoder for WhisperDecoder {
             .unwrap_or(4);
         params.set_n_threads(threads as std::os::raw::c_int);
         state.full(params, samples).map_err(|e| e.to_string())?;
+        // Not from the first second, though: detection on that little
+        // speech is a guess (p ~0.55 measured); three seconds settle it.
+        if language == "auto" && samples.len() >= 3 * crate::live::SAMPLE_RATE && state.full_n_segments() > 0 {
+            if let Some(heard) = whisper_rs::get_lang_str(state.full_lang_id_from_state()) {
+                *self.language.lock().unwrap_or_else(|e| e.into_inner()) = heard.to_string();
+            }
+        }
         let mut segments = Vec::new();
         for i in 0..state.full_n_segments() {
             if let Some(segment) = state.get_segment(i) {
