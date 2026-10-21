@@ -532,6 +532,10 @@ private fun OpenNote(
                     unready != null -> "Dictate at the cursor (unavailable: $unready)"
                     else -> "Dictate at the cursor"
                 }
+                // The microphone hearing you, before any words arrive.
+                if (dictatingHere) {
+                    MicLevelBars({ recorder.level }, onSilence = { state.message.value = QUIET_WARNING })
+                }
                 Tooltip(dictationWords) {
                     IconButton(
                         onClick = {

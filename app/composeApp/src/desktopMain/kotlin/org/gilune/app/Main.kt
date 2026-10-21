@@ -558,6 +558,9 @@ private fun DesktopApp(
                 untranscribed != null -> "New note from speech (not transcribed: $untranscribed)"
                 else -> "New note from speech"
             }
+            if (micOffered && recording) {
+                MicLevelBars({ recorder.level }, onSilence = { state.message.value = QUIET_WARNING })
+            }
             if (micOffered) Tooltip(micWords) {
                 IconButton(
                     onClick = {
