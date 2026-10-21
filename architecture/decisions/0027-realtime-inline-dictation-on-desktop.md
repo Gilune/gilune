@@ -348,3 +348,19 @@ at once ⇒ 7 rows red. Suites: cargo workspace 593/1/24 — the one is
 1.21 s on the old machine) in crates this change does not touch; desktop
 798/0/7 skipped (--rerun-tasks). Not compiled: `androidMain` (no Android
 SDK on this machine). Not done: a person speaking into a real microphone.
+
+**Owner-found defect, same evening.** The first try at a real microphone
+showed no grey words; everything arrived at the stop. The worker decoded
+whenever one second of new audio arrived and left the rest queued, and
+judged "falling behind" by that queue after the very first decode, which
+loads the model and (in a vault with no language set) also detects the
+language. It tripped at once, hid the grey run and stopped updating. Fixed:
+every decode first takes in everything waiting (a slow decode lengthens
+the next step instead of leaving audio behind it); keeping up is judged by
+decode time (lag), two consecutive decodes over 4 s, never counting the
+first. And a live session detects the language once — after at least 3 s
+of audio, since on 1 s whisper guessed French at p 0.28 — then fixes it for
+the rest of the dictation. Regression row
+`aSlowColdStartAndDecodesSlowerThanASecondStillShowWords` fails with the
+drain removed. Real-time rerun with language on auto: grey 2.7 s, all
+settled 1.5 s after speech, words identical.
