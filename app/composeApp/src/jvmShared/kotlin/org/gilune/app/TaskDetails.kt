@@ -85,7 +85,17 @@ fun taskDetails(vaultDir: String, rows: List<TaskHit>): Map<String, TaskDetail> 
         hits.mapNotNull { hit -> taskDetailAt(body, hit.line).takeIf { !it.isEmpty }?.let { hit.detailKey() to it } }
     }.toMap()
 
-private val DETAIL_TASK_LINE = Regex("""^[ \t]*[-*+][ \t]+\[([ xX])]""")
+/** The rows to list, leaving out each subtask whose parent is also listed:
+ * it is shown under its parent's marker instead, not twice (owner,
+ * 2026-10-21). A subtask whose parent is not listed keeps its own row. */
+fun withoutListedSubtasks(rows: List<TaskHit>, details: Map<String, TaskDetail>): List<TaskHit> {
+    val underAListedParent = rows.flatMap { parent ->
+        details[parent.detailKey()]?.subtasks.orEmpty().map { "${parent.relPath}:${it.line}" }
+    }.toSet()
+    return rows.filterNot { it.detailKey() in underAListedParent }
+}
+
+private val DETAIL_TASK_LINE =Regex("""^[ \t]*[-*+][ \t]+\[([ xX])]""")
 private val DETAIL_BULLET = Regex("""^[-*+][ \t]+""")
 
 /** Indentation in columns, a tab counting as four as CommonMark has it. */

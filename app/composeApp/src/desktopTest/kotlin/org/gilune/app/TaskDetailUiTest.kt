@@ -53,6 +53,7 @@ class TaskDetailUiTest {
         show("type:task\nis:open", reading = false)
         compose.waitUntil(10_000) { shown("1 note · 1/2 done") }
         assertTrue(!shown("need the samples"), "folded by default")
+        assertTrue(!shown("book the room"), "its subtask is not listed again as a row of its own")
 
         compose.onNodeWithTag("task-detail-toggle").performClick()
         compose.waitUntil(10_000) { shown("need the samples") }
@@ -71,9 +72,11 @@ class TaskDetailUiTest {
     fun tickingASubtaskFromTheListWritesTheNote() {
         show("type:task\nis:open\nshow:notes", reading = true)
         compose.waitUntil(10_000) { shown("need the samples") }
-        // It matches is:open too, so it is listed twice: as its own row and
-        // under its parent. The one under the parent is the second.
-        compose.onAllNodesWithContentDescription("Complete task: book the room")[1].performScrollTo().performClick()
+        // It matches is:open too, but its parent is listed, so it appears
+        // once: under the parent.
+        val boxes = compose.onAllNodesWithContentDescription("Complete task: book the room")
+        assertTrue(boxes.fetchSemanticsNodes().size == 1, "listed once, under its parent")
+        boxes[0].performScrollTo().performClick()
         compose.waitUntil(10_000) { File(dir, "Home/show.md").readText().contains("  - [x] book the room") }
     }
 }
