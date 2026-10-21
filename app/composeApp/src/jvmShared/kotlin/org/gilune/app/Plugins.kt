@@ -130,6 +130,7 @@ fun navigationPanels(plugins: List<PluginInfo>): List<NavigationPanel> =
 
 private const val LANGUAGE_KEY = "language"
 private const val MODEL_KEY = "model"
+private const val LIVE_KEY = "live"
 
 /// Whisper's own detection pass — what the field means when nobody has
 /// set a language.
@@ -215,12 +216,19 @@ fun List<PluginInfo>.transcriptionLanguage(): String =
     firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonString(it.settings, LANGUAGE_KEY) }
         ?: DEFAULT_TRANSCRIPTION_LANGUAGE
 
+/// "Show words as I dictate" (ADR 0027 amendment). **Absent means on**,
+/// the caption's precedent: a document written before the key existed
+/// must read as the shipped behaviour.
+fun List<PluginInfo>.transcriptionLive(): Boolean =
+    firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonBoolean(it.settings, LIVE_KEY) } ?: true
+
 /// The settings document the transcription plugin stores, written here so
-/// the writer, [transcriptionLanguage] and [transcriptionModel] cannot
-/// drift apart. Both keys go every time: whichever control a person
-/// touched, the other's stored value travels with the write.
-fun transcriptionSettingsDocument(language: String, model: String): String =
-    """{"$LANGUAGE_KEY":"${escapeJsonString(language)}","$MODEL_KEY":"${escapeJsonString(model)}"}"""
+/// the writer, [transcriptionLanguage], [transcriptionModel] and
+/// [transcriptionLive] cannot drift apart. Every key goes every time:
+/// whichever control a person touched, the others' stored values travel
+/// with the write.
+fun transcriptionSettingsDocument(language: String, model: String, live: Boolean): String =
+    """{"$LANGUAGE_KEY":"${escapeJsonString(language)}","$MODEL_KEY":"${escapeJsonString(model)}","$LIVE_KEY":$live}"""
 
 // ---------------------------------------------------------------------
 // The realtime provider (ADR 0018 § 5). Declared here beside the other
@@ -299,7 +307,7 @@ const val REVISION_ADDED_EVENT = "org.memory.revision-added"
 fun moonshineDeclaration(): PluginDeclaration =
     PluginDeclaration(
         pluginId = MOONSHINE_PLUGIN,
-        name = "Realtime transcription (Moonshine)",
+        name = "Transcription (Moonshine)",
         `class` = "provider",
         profile = "bundled",
         required = false,
@@ -312,6 +320,126 @@ fun moonshineDeclaration(): PluginDeclaration =
                 slot = Slots.SETTINGS_FORM,
                 id = "moonshine-settings",
                 label = "Live caption, model and downloads",
+            ),
+        ),
+    )
+
+// ---------------------------------------------------------------------
+// Transcription (NVIDIA NeMo) — ADR 0027 S3. NVIDIA's speech models run
+// through sherpa-onnx's JVM library, app-side like Moonshine, and write the
+// committed transcript through the same external processor route.
+// Declared here beside the other bundled declarations and **registered by
+// the desktop shell only**: the native library this build carries is the
+// desktop's.
+//
+// The id names the runtime, not a model family (ADR 0027 amendment): ids
+// are permanent and the model list may grow.
+// ---------------------------------------------------------------------
+
+const val NEMO_PLUGIN = "org.memory.sherpa"
+
+/// Distinct from whisper's and Moonshine's, for ADR 0018 § 3's reason: the
+/// vault must be able to say which engine wrote a note's words.
+const val NEMO_PROCESSOR = "sherpa-transcribe"
+
+/// Whether a model can show words while someone is still speaking.
+enum class NemoKind { STREAMING, WHOLE_RECORDING }
+
+/// One downloadable model as data. Each is one release archive of
+/// sherpa-onnx's model collection, verified against the SHA-256 the release
+/// publishes before it is unpacked; `archive` is also the folder it unpacks
+/// to. The guidance sentence is the measured one (ADR 0027 research note).
+data class NemoModel(
+    val key: String,
+    val name: String,
+    val archive: String,
+    val sha256: String,
+    val bytes: Long,
+    val size: String,
+    val kind: NemoKind,
+    val licence: String,
+    val guidance: String,
+) {
+    val url: String get() = "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/$archive.tar.bz2"
+    val label: String get() = "$name — $size download"
+}
+
+val NEMO_MODELS: List<NemoModel> = listOf(
+    NemoModel(
+        key = "nemotron-0.6b",
+        name = "Nemotron 0.6B",
+        archive = "sherpa-onnx-nemotron-speech-streaming-en-0.6b-160ms-int8-2026-04-25",
+        sha256 = "0ae73a41cd51599dc7cac9ac083d9d35de53d762ca45923505fde47a3751814b",
+        bytes = 463_945_198,
+        size = "464 MB",
+        kind = NemoKind.STREAMING,
+        licence = "NVIDIA Open Model License",
+        guidance = "The most accurate live model measured: words appear about a second after you " +
+            "say them and keep up easily. Uses about 0.6 GB of memory while you dictate.",
+    ),
+    NemoModel(
+        key = "fastconformer",
+        name = "FastConformer",
+        archive = "sherpa-onnx-nemo-streaming-fast-conformer-transducer-en-480ms-int8",
+        sha256 = "da93061cbf7b708b6b65976f70b29f519be29df750d8cdcabf98c65645930f13",
+        bytes = 105_913_204,
+        size = "106 MB",
+        kind = NemoKind.STREAMING,
+        licence = "CC-BY-4.0",
+        guidance = "Light and fast, for slower machines. Less accurate, and writes no capitals " +
+            "or punctuation.",
+    ),
+    NemoModel(
+        key = "parakeet-tdt-0.6b-v2",
+        name = "Parakeet TDT 0.6B v2",
+        archive = "sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8",
+        sha256 = "157c157bc51155e03e37d2466522a3a737dd9c72bb25f36eb18912964161e1ad",
+        bytes = 482_468_385,
+        size = "482 MB",
+        kind = NemoKind.WHOLE_RECORDING,
+        licence = "CC-BY-4.0",
+        guidance = "Very accurate, with capitals and punctuation, but it hears a recording " +
+            "once it has finished: dictated words arrive when you stop, never as you speak.",
+    ),
+)
+
+const val DEFAULT_NEMO_MODEL = "nemotron-0.6b"
+
+/// The stored key resolved against the catalogue, on the whisper rule.
+fun nemoModel(key: String?): NemoModel =
+    NEMO_MODELS.firstOrNull { it.key == key?.trim() } ?: NEMO_MODELS.first { it.key == DEFAULT_NEMO_MODEL }
+
+fun List<PluginInfo>.nemoModel(): NemoModel =
+    nemoModel(firstOrNull { it.pluginId == NEMO_PLUGIN }?.let { jsonString(it.settings, MODEL_KEY) })
+
+/// "Show words as I dictate" for this plugin. Absent means on, as for
+/// whisper; a model that cannot stream ignores it.
+fun List<PluginInfo>.nemoLive(): Boolean =
+    firstOrNull { it.pluginId == NEMO_PLUGIN }?.let { jsonBoolean(it.settings, LIVE_KEY) } ?: true
+
+/// Both keys every time, on the transcription document's rule.
+fun nemoSettingsDocument(model: String, live: Boolean): String =
+    """{"$MODEL_KEY":"${escapeJsonString(model)}","$LIVE_KEY":$live}"""
+
+/// Capabilities as Moonshine's (ADR 0018 § 5): `blobs.read` and
+/// `objects.write` are local and granted once on first install;
+/// `network.request` is the model download and always waits for a yes.
+fun nemoDeclaration(): PluginDeclaration =
+    PluginDeclaration(
+        pluginId = NEMO_PLUGIN,
+        name = "Transcription (NVIDIA NeMo)",
+        `class` = "provider",
+        profile = "bundled",
+        required = false,
+        processorId = NEMO_PROCESSOR,
+        subscribes = SOURCE_READY_EVENT,
+        emits = listOf(REVISION_ADDED_EVENT),
+        capabilities = PROVIDER_LOCAL_CAPABILITIES + NETWORK_CAPABILITY,
+        contributions = listOf(
+            PluginContribution(
+                slot = Slots.SETTINGS_FORM,
+                id = "nemo-settings",
+                label = "Model and dictation",
             ),
         ),
     )
@@ -334,7 +462,7 @@ fun moonshineDeclaration(): PluginDeclaration =
 /// the active one and the second claims nothing, which narrows the hole to
 /// a race rather than closing it; only the kernel field § 7 Q4 defers can
 /// close it.
-val TRANSCRIPTION_PROVIDERS = listOf(TRANSCRIPTION_PLUGIN, MOONSHINE_PLUGIN)
+val TRANSCRIPTION_PROVIDERS = listOf(TRANSCRIPTION_PLUGIN, MOONSHINE_PLUGIN, NEMO_PLUGIN)
 
 /// The one provider writing committed transcripts right now, or null when
 /// none is enabled — which is a legal state, not a fault: recordings still
