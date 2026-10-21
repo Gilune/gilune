@@ -266,3 +266,34 @@ class IndentEditTest {
         assertEquals(9, edit.selectionStart)
     }
 }
+
+class SoftBreakTest {
+    private fun after(text: String, caret: Int = text.length): String {
+        val edit = softBreak(text, caret, caret)
+        return edit.text.substring(0, edit.selectionStart) + "|" + edit.text.substring(edit.selectionStart)
+    }
+
+    @Test
+    fun onATaskItOpensANoteUnderTheTaskWithNoCheckbox() {
+        assertEquals("- [ ] task\n  |", after("- [ ] task"))
+        assertEquals("  - [ ] sub\n    |", after("  - [ ] sub"), "under a subtask, one level deeper")
+        assertEquals("* bullet\n  |", after("* bullet"))
+    }
+
+    @Test
+    fun aNoteLineKeepsItsIndentationSoANoteCanRunOn() {
+        assertEquals("- [ ] task\n  first line\n  |", after("- [ ] task\n  first line"))
+    }
+
+    @Test
+    fun theTextAfterTheCaretMovesDownIntoTheNote() {
+        val text = "- [ ] task more words"
+        assertEquals("- [ ] task\n  | more words", after(text, text.indexOf(" more")))
+    }
+
+    @Test
+    fun proseAndFencesGetAPlainLineBreak() {
+        assertEquals("plain\n|", after("plain"))
+        assertEquals("```\n- [ ] quoted\n|\n```", after("```\n- [ ] quoted\n```", "```\n- [ ] quoted".length))
+    }
+}
