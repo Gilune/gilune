@@ -65,6 +65,10 @@
   transcription comes back, the words are not lost — they appear in the status bar so
   you can copy them.</p>
 
+  <p>Dictation needs the speech model to be in place (see below). Until it is, the
+  microphone is greyed and won't start: hover over it, or click it, and it says what
+  is missing — usually permission to download the model.</p>
+
   <div class="note">
     <p><strong>The recording is always saved before anything else happens.</strong>
     Transcription is a convenience laid on top. If the microphone fails, or the
@@ -88,8 +92,9 @@
 
   <p>That model is about 57 MiB on the desktop and smaller on the phone, and it is
   <strong>not</strong> fetched behind your back. Nothing downloads until you open <strong>Settings ▸ Plugins</strong>, open the
-  transcription plugin, and allow it network access. Until you do, the status bar tells
-  you plainly that transcription is waiting for permission — and everything else in the
+  transcription plugin, and allow it network access. The download starts as soon as you
+  allow it. Until you do, the status bar tells you plainly that transcription is
+  waiting for permission, and both microphones say so when you hover over them — and everything else in the
   app carries on working. Once the model is there, the download never happens again.</p>
 
   <p>The model only takes up memory while it is being used: Gilune loads it for the
