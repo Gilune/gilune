@@ -94,7 +94,7 @@ import kotlin.math.roundToInt
 /// Named once, because there are two of these now and they must never
 /// drift apart: `%LOCALAPPDATA%\Gilune` on Windows, the home directory
 /// anywhere else.
-private fun localGiluneDir(name: String): File =
+internal fun localGiluneDir(name: String): File =
     File(System.getenv("LOCALAPPDATA") ?: System.getProperty("user.home"), "Gilune/$name")
 
 /// Where a downloaded model lands. One file per catalogue entry, so
@@ -199,6 +199,15 @@ fun main() {
         val gestures = remember { GestureRequests() }
         val shutdown = remember { Shutdown() }
         val probe = System.getProperty("gilune.probe")
+        // Updates belong to the installation, not to a vault, so they live
+        // out here and survive a vault switch. A probe window never looks.
+        val updateScope = rememberCoroutineScope()
+        val updater = remember { Updater(updateScope) }
+        updater.quit = {
+            shutdown.run()
+            exitApplication()
+        }
+        LaunchedEffect(Unit) { if (probe == null) updater.checkPeriodically() }
         val dark = when (theme) {
             ThemeChoice.System -> isSystemInDarkTheme()
             ThemeChoice.Light -> false
@@ -284,6 +293,7 @@ fun main() {
                             onSettingsOpen = { settingsOpen = it },
                             gestures = gestures,
                             shutdown = shutdown,
+                            updater = updater.takeIf { probe == null },
                             onThemeChange = { theme = it; Prefs.theme = it },
                             onVaultChange = { Prefs.vaultDir = it; vaultDir = it },
                         )
@@ -303,6 +313,7 @@ private fun DesktopApp(
     onSettingsOpen: (Boolean) -> Unit,
     gestures: GestureRequests,
     shutdown: Shutdown,
+    updater: Updater?,
     onThemeChange: (ThemeChoice) -> Unit,
     onVaultChange: (String) -> Unit,
 ) {
@@ -580,6 +591,7 @@ private fun DesktopApp(
         }
         HorizontalDivider(color = colours.outlineVariant)
 
+        if (updater != null) UpdateBanner(updater)
         if (state.proposals.isNotEmpty()) ProposalsBanner(state)
 
         Row(Modifier.fillMaxWidth().weight(1f)) {
@@ -674,6 +686,7 @@ private fun DesktopApp(
             onThemeChange = onThemeChange,
             onClose = { onSettingsOpen(false) },
             initialSection = probe?.removePrefix("settings:")?.takeIf { probe.startsWith("settings:") },
+            updater = updater,
         )
     }
 }

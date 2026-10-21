@@ -315,3 +315,35 @@ unsigned.
 - **No macOS**, and no Linux format but the DEB.
 - **Building is not running.** A green full-validation pipeline says the three packages
   build and the suites pass, not that a package installs and starts.
+
+### In-app updates read the release
+
+The installed Windows app updates itself from GitHub Releases
+(`app/composeApp/src/desktopMain/kotlin/org/gilune/app/Updates.kt`), so the
+release job's output is a contract, not just a download:
+
+- **Tags** stay `v<MAJOR>.<MINOR>.<PATCH>`, and the release they publish is
+  neither a draft nor a pre-release — the app asks `releases/latest`, which
+  answers only such a release, and compares versions numerically.
+- **The installer** stays named `Gilune-<version>.msi` and is uploaded to this
+  repository's release. The app offers only an asset with exactly that name,
+  downloaded from `https://github.com/Gilune/gilune/releases/download/`, and
+  installs it only if it matches the SHA-256 GitHub publishes for the asset.
+  Renaming the MSI, or publishing it elsewhere, silently stops every
+  installed copy from updating.
+- **The MSI** keeps its fixed UpgradeCode and per-machine scope, so
+  `msiexec /i` of a newer one replaces the installed one in place (the
+  installer lifecycle test proves the upgrade). Per-machine means Windows
+  asks for permission on each update; moving to a per-user install would
+  remove the prompt but cannot upgrade an existing per-machine install.
+- **The launcher** stays `Gilune.exe` beside `resources/` and starts the
+  runtime as its child: the app finds the executable to restart from
+  `compose.application.resources.dir`, and waits for itself and that
+  parent to exit before the installer runs.
+
+The app looks only after the person has said yes once (asked in a strip
+under the top bar; changeable in Settings ▸ About, where Check now is a yes
+for one look). A dev build or a build that is not an installed Windows
+release is never asked and never installs; it is offered the release page.
+The packages are unsigned, so the check is integrity against what GitHub
+holds, not authenticity of who built it.

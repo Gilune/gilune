@@ -39,6 +39,14 @@ object Prefs {
         get() = node.getInt("railWidth", DEFAULT_RAIL_WIDTH)
         set(value) = node.putInt("railWidth", value)
 
+    /// Whether this machine may ask GitHub for new versions of Gilune:
+    /// null until the person has answered the one-time question, so the
+    /// app never reaches the network on its own before then. A machine
+    /// fact, not a vault one — it is this installation that updates.
+    var updateChecks: Boolean?
+        get() = node.get("updateChecks", null)?.toBooleanStrictOrNull()
+        set(value) = if (value == null) node.remove("updateChecks") else node.put("updateChecks", value.toString())
+
     var railCollapsed: Boolean
         get() = node.getBoolean("railCollapsed", false)
         set(value) = node.putBoolean("railCollapsed", value)

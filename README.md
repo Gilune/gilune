@@ -64,6 +64,12 @@ to sideload. Windows is the platform Gilune is developed and used on; the Linux
 and Android packages are built by the same pipeline but are not yet anybody's
 daily driver. Building from this repository works too, and is described below.
 
+Once installed, the Windows app keeps itself up to date: it asks once whether
+it may check GitHub for new versions, then offers **Update now** when one is
+out — it downloads the installer, checks it against the checksum GitHub
+publishes, closes, installs and reopens. Windows asks for permission to
+install. Settings ▸ About has the switch and a **Check now** button.
+
 ## Building from source
 
 You will need **JDK 17+**, a **Rust toolchain** (1.98+), and — because the
