@@ -157,7 +157,8 @@
     it tends to be the longest and the least urgent.</li>
   </ul>
 
-  <p>Click a heading to fold or unfold a list. Each row shows the task, the note it
+  <p>Click a heading to fold or unfold a list. A task with notes or subtasks shows the
+  same summary as in a filter block, and a click on it opens the row. Each row shows the task, the note it
   came from, and its date, coloured by how close it is. <strong>Clicking a row opens
   that note with the cursor on the task</strong> — the agenda only ever reads your
   notes, it never edits them, so you tick things off where you wrote them.</p>
@@ -194,6 +195,21 @@ path:Projects/Kitchen
   <p>Gilune renders that as a live list of everything matching, right there in the
   note. Clicking a row opens the note the task lives in, with the cursor on the task
   and the line flashing briefly so your eye finds it.</p>
+
+  <p>A task with notes or subtasks under it shows a small summary at the end of its
+  row — <em>▸ 1 note · 1/2 done</em>. Click it to open that row and see the notes and
+  subtasks beneath it; the subtasks have their own boxes to tick. Click again to fold
+  it. To have a list open every row from the start, add a line saying
+  <code>show:notes</code> to the block:</p>
+
+<pre><code>```filter
+type:task
+is:open
+show:notes
+```</code></pre>
+
+  <p>A subtask that matches the query is also listed on its own, as well as under its
+  parent.</p>
 
   <p>A new vault comes with a page called <strong>Tasks</strong> at the top of the
   vault, full of lists like this one — overdue, due today, this week, not dated yet and

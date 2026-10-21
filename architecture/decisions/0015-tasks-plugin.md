@@ -723,3 +723,16 @@ the field's literal tab, and code fences are left alone. Return on an empty
 (`ListContinuation.Unwrap.keep`; the phone's editor applies the same
 decision). How lists, the agenda and filter blocks *show* parent and child
 tasks is not decided yet.
+
+Same date, owner — **notes and subtasks in lists.** A row whose task has
+notes (lines indented under it that are not list items) or subtasks (task
+lines nested under it) carries a summary marker (`▸ 1 note · 1/2 done`);
+a click opens the row, showing the notes and the direct subtasks with their
+own boxes; a click folds it. A block line `show:notes` opens every row by
+default (a click then folds one); it is a display line, removed before the
+query runs. The detail is read from the note file, not the index, so a
+subtask the query did not match (ticked, under `is:open`) still shows and
+counts; a subtask that does match is also listed as its own row. The agenda
+panel shows the same marker and opens rows, but still never edits. Task row
+labels now use the task's own line only. Not decided: hiding a matching
+subtask's own row when its parent is listed.

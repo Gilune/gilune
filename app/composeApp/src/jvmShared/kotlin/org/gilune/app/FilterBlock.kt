@@ -58,11 +58,18 @@ const val FILTER_MAX_ROWS = 500
 /// matches still says so. The transformation reserves exactly this many
 /// blank lines and the overlay draws exactly this many rows into them, so
 /// the two cannot disagree and nothing below the block mis-sits.
-fun filterBlockLines(result: FilterResult, expanded: Boolean = false): Int = when (result) {
+fun filterBlockLines(result: FilterResult, expanded: Boolean = false, flipped: Set<String> = emptySet()): Int = when (result) {
     is FilterResult.Hint -> 1
-    is FilterResult.Tasks -> maxOf(result.rows.size, 1) + if (result.more > 0 || expanded) 1 else 0
+    is FilterResult.Tasks -> maxOf(result.rows.size, 1) + (if (result.more > 0 || expanded) 1 else 0) +
+        result.rows.sumOf { row -> if (result.detailOpen(row, flipped)) result.details[row.detailKey()]?.lineCount ?: 0 else 0 }
     is FilterResult.Notes -> maxOf(result.rows.size, 1) + if (result.more > 0 || expanded) 1 else 0
 }
+
+/// Whether a row's detail is showing: open by default under `show:notes`,
+/// closed otherwise, and `flipped` holds the rows a person has turned the
+/// other way. A row with nothing under it is never open.
+fun FilterResult.Tasks.detailOpen(row: TaskHit, flipped: Set<String>): Boolean =
+    details.containsKey(row.detailKey()) && (showDetails != (row.detailKey() in flipped))
 
 /// How many candidate lines one note may contribute before the engine
 /// stops quoting them. A block wants every task in a note, not the five a
@@ -105,7 +112,15 @@ sealed interface FilterResult {
     /// The single inline row a degenerate block renders (§ 4).
     data class Hint(val text: String) : FilterResult
 
-    data class Tasks(val rows: List<TaskHit>, val more: Int) : FilterResult
+    /// `details` holds what sits under each row that has any, by
+    /// [detailKey]; `showDetails` is the block's `show:notes` — every row
+    /// opens unless a person folds it.
+    data class Tasks(
+        val rows: List<TaskHit>,
+        val more: Int,
+        val details: Map<String, TaskDetail> = emptyMap(),
+        val showDetails: Boolean = false,
+    ) : FilterResult
 
     data class Notes(val rows: List<NoteRow>, val more: Int) : FilterResult
 }
@@ -116,7 +131,16 @@ sealed interface FilterResult {
 /// no second parser. Blank lines are ignored; there is no comment syntax,
 /// because `#` opens a plausible term.
 fun filterQuery(block: String): String =
-    block.lines().map { it.trim() }.filter { it.isNotEmpty() }.joinToString(" ")
+    block.lines().map { it.trim() }.filter { it.isNotEmpty() && !isShowDirective(it) }.joinToString(" ")
+
+/// `show:notes` (owner, 2026-10-21): a block that opens every task's notes
+/// and subtasks. A line of its own, read before the query runs and never
+/// part of it, so it filters nothing.
+const val SHOW_NOTES = "show:notes"
+
+fun filterShowsNotes(block: String): Boolean = block.lines().any { isShowDirective(it.trim()) }
+
+private fun isShowDirective(line: String) = line.equals(SHOW_NOTES, ignoreCase = true)
 
 /// Reads the block, and only reads it: which of the four it is.
 ///
@@ -190,7 +214,8 @@ fun evaluateFilterBlock(
     val page = compiled.page(gilune).requireComplete()
     if (task) {
         val rows = kernelTaskRows(page.hits).take(cap.coerceAtLeast(0))
-        return FilterResult.Tasks(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())
+        return FilterResult.Tasks(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
+            details = taskDetails(vaultDir, rows), showDetails = filterShowsNotes(block))
     }
     val rows = page.hits.take(cap.coerceAtLeast(0)).map { NoteRow(it.name, it.relPath) }
     return FilterResult.Notes(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())
