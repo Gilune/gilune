@@ -31,7 +31,7 @@ technologies can be rejected without weakening the product principles.
 | [0024](0024-typed-page-creation.md) | Scoped typed-page declarations, durable creation and first publication without replacement | Implemented with collection forms, properties and defaults |
 | [0025](0025-compact-index-targets.md) | Private source-qualified target/predicate IDs shared by independent fact producers | Implemented; query/update measurements recorded |
 | [0026](0026-shared-editor-and-document-refactoring.md) | Independent editor/view contributions and durable reviewed document refactoring | Implemented; validation in People delivery plan |
-| [0027](0027-realtime-inline-dictation-on-desktop.md) | Realtime inline dictation on the desktop: provisional words outside the buffer, engine choice | Accepted (grey outside the file; Whisper, NVIDIA NeMo engines as plugin choices); build not started |
+| [0027](0027-realtime-inline-dictation-on-desktop.md) | Realtime inline dictation on the desktop: provisional words outside the buffer, engine choice | Accepted; S0–S2 delivered (live Whisper dictation), S3 (NVIDIA NeMo plugin) not started |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

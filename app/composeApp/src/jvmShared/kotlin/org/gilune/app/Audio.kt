@@ -15,6 +15,13 @@ class RecordedAudio(
 interface AudioRecorder {
     fun start()
     fun stop(): RecordedAudio
+
+    /// Also hand each chunk of PCM to `listener` as it is read, or stop
+    /// with null — a tee, never a second recording (ADR 0027 § 2). The
+    /// listener runs on the recorder's thread and must not block; one that
+    /// throws is ignored so the recording never pays for it. A recorder
+    /// with no tee keeps this default and records exactly as before.
+    fun listen(listener: ((ByteArray) -> Unit)?) {}
 }
 
 /// The canonical shape every Gilune recording takes, on every shell:

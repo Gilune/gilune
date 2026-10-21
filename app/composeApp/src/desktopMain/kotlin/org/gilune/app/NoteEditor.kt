@@ -104,6 +104,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -180,9 +181,21 @@ class EditorState : LiveDocumentBuffer {
     override val hasUnsavedText: Boolean get() = dirty
     var openRelPath by mutableStateOf<String?>(null)
 
+    private var textState by mutableStateOf(TextFieldValue(""))
+
     /// The editable buffer: the note's body only, with its selection, so
-    /// the caret survives every recomposition.
-    var text by mutableStateOf(TextFieldValue(""))
+    /// the caret survives every recomposition. Every change, whoever makes
+    /// it, carries a live dictation's anchor along with the words around
+    /// it (ADR 0027 § 1).
+    var text: TextFieldValue
+        get() = textState
+        set(value) {
+            live?.let { it.anchor = mapAnchor(textState.text, value.text, it.anchor) }
+            textState = value
+        }
+
+    /// The dictation landing in this note as it is spoken, or null.
+    var live by mutableStateOf<LiveDictation?>(null)
 
     /// The note's front-matter block exactly as it was read, fences
     /// included. Written back untouched unless the properties editor
@@ -244,6 +257,9 @@ class EditorState : LiveDocumentBuffer {
         val file = File(vaultDir, relPath)
         val content = if (file.exists()) file.readText() else ""
         val (header, body) = splitNoteRaw(content)
+        // A dictation belongs to the note it started in; a different note
+        // opening in this tab ends its words here.
+        if (openRelPath != relPath) live = null
         openRelPath = relPath
         frontMatterRaw = header
         text = TextFieldValue(body)
@@ -259,6 +275,7 @@ class EditorState : LiveDocumentBuffer {
     }
 
     fun close() {
+        live = null
         bufferVault = null
         openRelPath = null
         text = TextFieldValue("")
@@ -463,11 +480,27 @@ private fun OpenNote(
                         state.message.value = "can't dictate yet: $unready"
                         return
                     }
+                    // Words as they are spoken when the plugin's setting asks
+                    // for them and the engine will start (ADR 0027); otherwise
+                    // the words arrive at the stop, as they always have.
+                    val engine = if (state.plugins.transcriptionLive()) {
+                        state.gilune.value?.let { g -> runCatching { g.beginLiveTranscription() }.getOrNull() }
+                    } else {
+                        null
+                    }
                     try {
+                        if (engine != null) startLiveDictation(state, editor, recorder, engine)
                         recorder.start()
                         if (tabs != null && tab != null) tabs.dictationTabId = tab.id else dictating = true
-                        state.message.value = "dictating… click the microphone to stop"
+                        state.message.value = if (engine != null) {
+                            "dictating… words appear as you speak; click the microphone to stop"
+                        } else {
+                            "dictating… click the microphone to stop"
+                        }
                     } catch (e: Throwable) {
+                        recorder.listen(null)
+                        editor.live?.run?.stop { }
+                        editor.live = null
                         state.message.value = "microphone unavailable: ${e.message}"
                     }
                 }
@@ -476,7 +509,19 @@ private fun OpenNote(
                     val target = if (tabs != null && tab != null) tab.id else null
                     if (tabs != null) tabs.dictationTabId = null else dictating = false
                     val audio = recorder.stop()
-                    if (tabs != null && target != null) {
+                    recorder.listen(null)
+                    val session = editor.live
+                    if (session?.run != null) {
+                        // The words are already in the note, or on their way;
+                        // the recording is kept and transcribed for the record.
+                        stopLiveDictation(state, editor, session) {
+                            // A tab that is not in front has no autosave loop.
+                            val front = tabs?.panes()?.any { it.active === tab } ?: true
+                            if (tabs != null && !front) flushEditor(tabs.vaultDir, editor, tabs.onNoteSaved)
+                            state.message.value = "dictated"
+                        }
+                        state.dictate(audio, null)
+                    } else if (tabs != null && target != null) {
                         state.dictate(audio) { words -> deliverDictation(state, tabs, target, words) }
                     } else {
                         state.dictate(audio) { words -> insertAtCaret(editor, words) }
@@ -717,8 +762,14 @@ private fun OpenNote(
                 blockCaps = blockCaps + (body to next)
             }
 
-            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size) {
-                MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f)
+            // A live dictation's grey words, drawn at its anchor and never
+            // written (ADR 0027 § 1).
+            val live = editor.live
+            val ghost = live?.ghost(editor.text.text)
+            val ghostStyle = SpanStyle(color = colours.onSurfaceVariant.copy(alpha = 0.7f))
+            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size, live?.anchor, ghost, ghostStyle) {
+                val base = MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f)
+                if (live == null || ghost == null) base else DictationTransformation(base, live.anchor, ghost, ghostStyle)
             }
             // Where each collapsed block's placeholder landed, asked of the
             // same composition the field is showing, so what is drawn and

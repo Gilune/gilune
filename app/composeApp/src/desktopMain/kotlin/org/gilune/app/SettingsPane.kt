@@ -455,7 +455,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                 state.pluginAction("transcription language set to $wanted") {
                     it.setPluginSettings(
                         plugin.pluginId,
-                        transcriptionSettingsDocument(wanted, savedModel.key),
+                        transcriptionSettingsDocument(wanted, savedModel.key, listOf(plugin).transcriptionLive()),
                     )
                 }
             },
@@ -487,7 +487,7 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
                     state.pluginAction("transcription model set to ${option.key}") {
                         it.setPluginSettings(
                             plugin.pluginId,
-                            transcriptionSettingsDocument(saved, option.key),
+                            transcriptionSettingsDocument(saved, option.key, listOf(plugin).transcriptionLive()),
                         )
                     }
                 },
@@ -503,6 +503,35 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
     )
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Dictation", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "With this on, dictated words appear in the note as you speak: words " +
+            "Whisper may still change are shown grey and are not saved until " +
+            "they settle. Whisper re-reads the last few seconds every second, so " +
+            "it needs a reasonably fast processor; if it cannot keep up, the " +
+            "words arrive when you stop instead, and the status line says so. " +
+            "Off, the words always arrive when you stop.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    val live = remember(plugin.settings) { listOf(plugin).transcriptionLive() }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Switch(
+            checked = live,
+            // The language and model travel with the write, so this switch
+            // cannot quietly reset either.
+            onCheckedChange = { on ->
+                state.pluginAction(
+                    if (on) "dictated words now appear as you speak" else "dictated words now arrive when you stop",
+                ) { it.setPluginSettings(plugin.pluginId, transcriptionSettingsDocument(saved, savedModel.key, on)) }
+            },
+            modifier = Modifier.testTag("transcription-live"),
+        )
+        Text("Show words as I dictate", fontSize = 13.sp)
+    }
 }
 
 /// The tasks plugin's settings: § 1's global filter, the one setting the

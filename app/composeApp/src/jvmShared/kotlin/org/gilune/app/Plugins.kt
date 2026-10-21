@@ -130,6 +130,7 @@ fun navigationPanels(plugins: List<PluginInfo>): List<NavigationPanel> =
 
 private const val LANGUAGE_KEY = "language"
 private const val MODEL_KEY = "model"
+private const val LIVE_KEY = "live"
 
 /// Whisper's own detection pass — what the field means when nobody has
 /// set a language.
@@ -215,12 +216,19 @@ fun List<PluginInfo>.transcriptionLanguage(): String =
     firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonString(it.settings, LANGUAGE_KEY) }
         ?: DEFAULT_TRANSCRIPTION_LANGUAGE
 
+/// "Show words as I dictate" (ADR 0027 amendment). **Absent means on**,
+/// the caption's precedent: a document written before the key existed
+/// must read as the shipped behaviour.
+fun List<PluginInfo>.transcriptionLive(): Boolean =
+    firstOrNull { it.pluginId == TRANSCRIPTION_PLUGIN }?.let { jsonBoolean(it.settings, LIVE_KEY) } ?: true
+
 /// The settings document the transcription plugin stores, written here so
-/// the writer, [transcriptionLanguage] and [transcriptionModel] cannot
-/// drift apart. Both keys go every time: whichever control a person
-/// touched, the other's stored value travels with the write.
-fun transcriptionSettingsDocument(language: String, model: String): String =
-    """{"$LANGUAGE_KEY":"${escapeJsonString(language)}","$MODEL_KEY":"${escapeJsonString(model)}"}"""
+/// the writer, [transcriptionLanguage], [transcriptionModel] and
+/// [transcriptionLive] cannot drift apart. Every key goes every time:
+/// whichever control a person touched, the others' stored values travel
+/// with the write.
+fun transcriptionSettingsDocument(language: String, model: String, live: Boolean): String =
+    """{"$LANGUAGE_KEY":"${escapeJsonString(language)}","$MODEL_KEY":"${escapeJsonString(model)}","$LIVE_KEY":$live}"""
 
 // ---------------------------------------------------------------------
 // The realtime provider (ADR 0018 § 5). Declared here beside the other
@@ -299,7 +307,7 @@ const val REVISION_ADDED_EVENT = "org.memory.revision-added"
 fun moonshineDeclaration(): PluginDeclaration =
     PluginDeclaration(
         pluginId = MOONSHINE_PLUGIN,
-        name = "Realtime transcription (Moonshine)",
+        name = "Transcription (Moonshine)",
         `class` = "provider",
         profile = "bundled",
         required = false,

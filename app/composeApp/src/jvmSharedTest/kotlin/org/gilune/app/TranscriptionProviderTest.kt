@@ -45,7 +45,7 @@ private fun whisper(state: String = "enabled") =
     providerPlugin(TRANSCRIPTION_PLUGIN, state, name = "Local transcription")
 
 private fun moonshine(state: String = "enabled") =
-    providerPlugin(MOONSHINE_PLUGIN, state, name = "Realtime transcription (Moonshine)")
+    providerPlugin(MOONSHINE_PLUGIN, state, name = "Transcription (Moonshine)")
 
 class TranscriptionProviderTest {
 
@@ -124,7 +124,7 @@ class TranscriptionProviderTest {
     fun theRuleIsSymmetric() {
         val switch = providerSwitch(listOf(whisper("disabled"), moonshine()), TRANSCRIPTION_PLUGIN, enable = true)
         assertEquals(listOf(MOONSHINE_PLUGIN), switch.disable)
-        assertTrue(switch.message.contains("Realtime transcription (Moonshine) switched off"))
+        assertTrue(switch.message.contains("Transcription (Moonshine) switched off"))
     }
 
     @Test

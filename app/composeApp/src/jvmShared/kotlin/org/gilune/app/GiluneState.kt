@@ -642,12 +642,22 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// its own — and the words come back for the caller to place at the
     /// caret. A crash before insertion loses nothing: the audio and its
     /// transcript stay in the kernel (ADR 0013).
-    fun dictate(audio: RecordedAudio, onText: (String) -> Unit) {
+    ///
+    /// With no `onText` the words were already placed as they were spoken
+    /// (ADR 0027): the recording is still kept and transcribed, so the
+    /// kernel holds the source and its interpretation, but nothing more is
+    /// inserted — the same words twice would be worse than none.
+    fun dictate(audio: RecordedAudio, onText: ((String) -> Unit)?) {
         val g = gilune.value ?: return
         scope.launch(Dispatchers.IO) {
             try {
                 val wav = wavBytes(audio)
                 val receipt = writeChunked(g.beginAttachedCapture("wav"), wav)
+                if (onText == null) {
+                    processAll(g)
+                    refresh()
+                    return@launch
+                }
                 message.value = "transcribing…"
                 val p = processAll(g)
                 val text = g.objectText(receipt.sourceId)

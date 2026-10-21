@@ -15,6 +15,13 @@ class DesktopAudioRecorder : AudioRecorder {
     private var worker: Thread? = null
     private val buffer = ByteArrayOutputStream()
 
+    @Volatile
+    private var listener: ((ByteArray) -> Unit)? = null
+
+    override fun listen(listener: ((ByteArray) -> Unit)?) {
+        this.listener = listener
+    }
+
     override fun start() {
         check(line == null) { "already recording" }
         val info = DataLine.Info(TargetDataLine::class.java, format)
@@ -27,7 +34,11 @@ class DesktopAudioRecorder : AudioRecorder {
             val chunk = ByteArray(4096)
             while (opened.isOpen) {
                 val read = opened.read(chunk, 0, chunk.size)
-                if (read > 0) synchronized(buffer) { buffer.write(chunk, 0, read) }
+                if (read > 0) {
+                    // The recording first; the tee after, and never at its cost.
+                    synchronized(buffer) { buffer.write(chunk, 0, read) }
+                    listener?.let { tee -> runCatching { tee(chunk.copyOf(read)) } }
+                }
                 if (read < 0) break
             }
         }.apply {
