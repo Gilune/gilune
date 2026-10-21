@@ -15,6 +15,8 @@ import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -131,6 +133,9 @@ private const val AUTOSAVE_IDLE_MS = 1200L
 /// placed in the *text's* coordinates and has to add it back: the layout
 /// measures from inside this padding, the overlay is a sibling outside it.
 private val EDITOR_PADDING = 14.dp
+
+/// How strongly a revealed line flashes at its peak.
+private const val PULSE_ALPHA = 0.28f
 
 /// ADR 0015 § 1's fence rule, asked **here** because the `/` menu's
 /// machine is line-scoped: [SuggestSession] sees one line and cannot know
@@ -736,6 +741,22 @@ private fun OpenNote(
             // at its line (owner, 2026-10-21): the caret goes to the end of
             // that line, the field takes the focus, and the page follows.
             // Asked once the buffer holds this note, and answered once.
+            // The line also pulses (owner, 2026-10-21) — two soft flashes
+            // behind its text, so the eye finds it as well as the caret.
+            var pulseRange by remember(relPath) { mutableStateOf<IntRange?>(null) }
+            var pulses by remember(relPath) { mutableStateOf(0) }
+            val pulse = remember { Animatable(0f) }
+            // Its own effect: the reveal's effect restarts the moment it
+            // clears the request (the request is its key), which would
+            // cancel a flash mid-way and leave it drawn.
+            LaunchedEffect(pulses) {
+                if (pulses == 0) return@LaunchedEffect
+                repeat(2) {
+                    pulse.animateTo(PULSE_ALPHA, tween(180))
+                    pulse.animateTo(0f, tween(520))
+                }
+                pulseRange = null
+            }
             LaunchedEffect(state.reveal.value, relPath, editor.openRelPath) {
                 val target = state.reveal.value ?: return@LaunchedEffect
                 if (target.relPath != relPath || editor.openRelPath != relPath) return@LaunchedEffect
@@ -744,6 +765,8 @@ private fun OpenNote(
                 editor.text = editor.text.copy(selection = TextRange(at))
                 editor.resumeEditing = true
                 caretMoves++
+                pulseRange = (editor.text.text.lastIndexOf('\n', at - 1) + 1)..at
+                pulses++
             }
 
             // The `/` menu belongs to this note and this mode; leaving
@@ -892,6 +915,31 @@ private fun OpenNote(
                 // the field reserved for it, and being its sibling here is
                 // what makes it scroll with the text it covers.
                 Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("note-scroll")) {
+                    // Drawn before the field, so behind its text; it takes
+                    // no input, so a click goes straight through.
+                    val pulsing = pulseRange
+                    val pulseLayout = layout
+                    if (pulsing != null && pulseLayout != null) {
+                        val bounds = runCatching {
+                            val mapping = transformation.filter(AnnotatedString(editor.text.text)).offsetMapping
+                            val limit = pulseLayout.layoutInput.text.length
+                            val first = pulseLayout.getLineForOffset(mapping.originalToTransformed(pulsing.first).coerceIn(0, limit))
+                            val last = pulseLayout.getLineForOffset(mapping.originalToTransformed(pulsing.last).coerceIn(0, limit))
+                            pulseLayout.getLineTop(first) to pulseLayout.getLineBottom(last)
+                        }.getOrNull()
+                        if (bounds != null) {
+                            val pulseDensity = LocalDensity.current
+                            Box(
+                                Modifier
+                                    .offset(x = EDITOR_PADDING - 4.dp, y = EDITOR_PADDING + with(pulseDensity) { bounds.first.toDp() })
+                                    .width(blockWidth + 8.dp)
+                                    .height(with(pulseDensity) { (bounds.second - bounds.first).toDp() })
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(colours.primary.copy(alpha = pulse.value))
+                                    .testTag("reveal-pulse"),
+                            )
+                        }
+                    }
                     BasicTextField(
                         value = editor.text,
                         onValueChange = { typed ->
