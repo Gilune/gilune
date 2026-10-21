@@ -22,7 +22,37 @@ interface AudioRecorder {
     /// throws is ignored so the recording never pays for it. A recorder
     /// with no tee keeps this default and records exactly as before.
     fun listen(listener: ((ByteArray) -> Unit)?) {}
+
+    /// How loud the microphone is right now, 0 (silence) to 1 (full
+    /// scale), for the bars that show it is hearing something before any
+    /// words arrive. A recorder that cannot say keeps 0.
+    val level: Float get() = 0f
 }
+
+/// The loudness of a run of 16-bit little-endian PCM as 0..1 on a decibel
+/// scale: its RMS in dBFS, with [LEVEL_FLOOR_DB] and below reading 0 and
+/// full scale reading 1. Decibels, because speech spans a wide range of
+/// amplitudes and a linear meter would sit near the floor for most of it.
+fun pcmLevel(pcm: ByteArray, length: Int = pcm.size): Float {
+    val samples = length / 2
+    if (samples == 0) return 0f
+    var sum = 0.0
+    for (i in 0 until samples) {
+        val lo = pcm[2 * i].toInt() and 0xff
+        val hi = pcm[2 * i + 1].toInt()
+        val s = ((hi shl 8) or lo).toShort() / 32768.0
+        sum += s * s
+    }
+    val rms = kotlin.math.sqrt(sum / samples)
+    if (rms <= 0.0) return 0f
+    val db = 20 * kotlin.math.log10(rms)
+    return ((db - LEVEL_FLOOR_DB) / -LEVEL_FLOOR_DB).coerceIn(0.0, 1.0).toFloat()
+}
+
+/// The quietest sound the level bars show, in dBFS. Room tone through a
+/// laptop microphone sits around -60; speech at a normal distance well
+/// above -40.
+const val LEVEL_FLOOR_DB = -60.0
 
 /// The canonical shape every Gilune recording takes, on every shell:
 /// 16 kHz mono signed 16-bit PCM. The kernel's transcriber refuses

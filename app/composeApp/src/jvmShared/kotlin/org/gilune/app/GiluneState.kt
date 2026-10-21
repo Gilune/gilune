@@ -591,15 +591,19 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         }
     }
 
-    private fun writeChunked(writer: uniffi.gilune_ffi.CaptureWriter, wav: ByteArray): uniffi.gilune_ffi.CaptureReceipt {
-        var offset = 0
-        while (offset < wav.size) {
-            val end = minOf(offset + CAPTURE_CHUNK, wav.size)
-            writer.writeChunk(wav.copyOfRange(offset, end))
-            offset = end
+    /// The writer is closed once it has finished: it holds a reference to
+    /// the vault's handle, and an unclosed one kept the vault's database
+    /// open until the garbage collector got round to it.
+    private fun writeChunked(writer: uniffi.gilune_ffi.CaptureWriter, wav: ByteArray): uniffi.gilune_ffi.CaptureReceipt =
+        writer.use {
+            var offset = 0
+            while (offset < wav.size) {
+                val end = minOf(offset + CAPTURE_CHUNK, wav.size)
+                it.writeChunk(wav.copyOfRange(offset, end))
+                offset = end
+            }
+            it.finish()
         }
-        return writer.finish()
-    }
 
     /// Speech becomes a note of its own: the audio commits durably, the
     /// transcript becomes the note's body (ADR 0013), and the note opens.

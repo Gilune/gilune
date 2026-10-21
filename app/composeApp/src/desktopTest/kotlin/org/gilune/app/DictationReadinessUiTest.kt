@@ -13,9 +13,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.unit.dp
 import org.junit.Rule
 import org.junit.rules.RuleChain
@@ -35,6 +39,7 @@ class DictationReadinessUiTest {
         var starts = 0
         override fun start() { starts += 1 }
         override fun stop() = RecordedAudio(ByteArray(0), WAV_SAMPLE_RATE, WAV_CHANNELS, WAV_BITS_PER_SAMPLE)
+        override val level: Float get() = 0.5f
     }
 
     private fun transcriber(granted: List<String>, state: String = "enabled") = PluginInfo(
@@ -112,6 +117,15 @@ class DictationReadinessUiTest {
 
         assertEquals(1, recorder.starts)
         assertTrue(state.message.value.startsWith("dictating"), state.message.value)
+        // The bars show the microphone hearing, from the moment it opens
+        // until it stops.
+        compose.onAllNodesWithTag("mic-level").assertCountEquals(1)
+        compose.onNodeWithContentDescription("stop dictating").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        compose.onAllNodesWithTag("mic-level").assertCountEquals(0)
+        // The stop keeps the recording in the background; let it land before
+        // the vault is cleaned away.
+        compose.waitUntil(20_000) { state.message.value.let { it.startsWith("dictated") || it.startsWith("dictation ") } }
     }
 
     @Test
