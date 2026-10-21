@@ -72,6 +72,14 @@ data class ProviderPass(
 class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     val gilune = mutableStateOf<Gilune?>(null)
     val message = mutableStateOf("opening vault…")
+
+    /// A line the next editor to open its note should land on (a task or
+    /// a search match clicked in a list); that editor clears it.
+    val reveal = mutableStateOf<NoteLine?>(null)
+
+    fun revealNext(target: NoteLine) {
+        reveal.value = target
+    }
     val recent = mutableStateListOf<SourceSummary>()
     val plugins = mutableStateListOf<PluginInfo>()
 

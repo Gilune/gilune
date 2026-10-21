@@ -42,16 +42,26 @@ const val FILTER_ROW_CAP = 50
 /// the block is the whole page, keeps [FILTER_ROW_CAP].
 const val FILTER_EDIT_ROW_CAP = 8
 
+/// How far one click on `+N more` opens a block (owner, 2026-10-21): the
+/// next page of rows, so even a long list is shown a page at a time and
+/// never all at once — the cap's reason (rendering is what freezes an
+/// editor) still holds, it is just the reader's to move.
+const val FILTER_EXPAND_STEP = FILTER_ROW_CAP
+
+/// The most rows a block will ever draw, however far it is opened: the
+/// kernel's page bound.
+const val FILTER_MAX_ROWS = 500
+
 /// How many editor lines a collapsed block reserves: **one per row it
-/// draws**, one more for a `+N more` footer, and never fewer than one —
-/// a block with no matches still says so. The transformation reserves
-/// exactly this many blank lines and the overlay draws exactly this many
-/// rows into them, so the two cannot disagree and nothing below the block
-/// mis-sits.
-fun filterBlockLines(result: FilterResult): Int = when (result) {
+/// draws**, one more for the footer — `+N more`, and `Show fewer` once the
+/// block has been opened — and never fewer than one: a block with no
+/// matches still says so. The transformation reserves exactly this many
+/// blank lines and the overlay draws exactly this many rows into them, so
+/// the two cannot disagree and nothing below the block mis-sits.
+fun filterBlockLines(result: FilterResult, expanded: Boolean = false): Int = when (result) {
     is FilterResult.Hint -> 1
-    is FilterResult.Tasks -> maxOf(result.rows.size, 1) + if (result.more > 0) 1 else 0
-    is FilterResult.Notes -> maxOf(result.rows.size, 1) + if (result.more > 0) 1 else 0
+    is FilterResult.Tasks -> maxOf(result.rows.size, 1) + if (result.more > 0 || expanded) 1 else 0
+    is FilterResult.Notes -> maxOf(result.rows.size, 1) + if (result.more > 0 || expanded) 1 else 0
 }
 
 /// How many candidate lines one note may contribute before the engine

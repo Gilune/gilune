@@ -136,8 +136,8 @@
 
   <p>Click a heading to fold or unfold a list. Each row shows the task, the note it
   came from, and its date, coloured by how close it is. <strong>Clicking a row opens
-  that note</strong> — the agenda only ever reads your notes, it never edits them, so
-  you tick things off where you wrote them.</p>
+  that note with the cursor on the task</strong> — the agenda only ever reads your
+  notes, it never edits them, so you tick things off where you wrote them.</p>
 
   <p>Ticked tasks are not listed; an agenda is about what is still open. Neither is
   anything due more than a week out — four short lists are the point, and a query like
@@ -169,7 +169,7 @@ path:Projects/Kitchen
 ```</code></pre>
 
   <p>Gilune renders that as a live list of everything matching, right there in the
-  note. Clicking a row opens the note the task lives in.</p>
+  note. Clicking a row opens the note the task lives in, with the cursor on the task.</p>
 
   <p>A new vault comes with a page called <strong>Tasks</strong> at the top of the
   vault, full of lists like this one — overdue, due today, this week, not dated yet and
@@ -188,7 +188,9 @@ path:Projects/Kitchen
     <li><strong>Every block must say <code>type:</code></strong> —
     <code>type:task</code> for task lines, <code>type:note</code> for whole notes.
     Gilune will not guess what you meant.</li>
-    <li>A block shows at most fifty rows and counts anything past that.</li>
+    <li>A block shows a page of rows — eight while you are writing the note, fifty in
+    presentation mode — and counts the rest. Click <strong>+N more</strong> to show the
+    next fifty, and <strong>Show fewer</strong> to fold the list back.</li>
     <li>Task lines written <em>inside</em> a code block are never treated as real
     tasks, so the examples on this page could never end up in somebody's agenda.</li>
   </ul>

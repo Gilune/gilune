@@ -113,12 +113,20 @@ class PresentationModeUiTest {
     @Test
     fun clickingAMentionOpensThePersonsPage() {
         presentOnly("talk to @alice.smith today")
-        // The People plugin's recognition runs off the main thread.
+        // The People plugin's recognition runs off the main thread: wait
+        // until the mention is drawn as a link, then click it once — a
+        // click before that is plain text, and repeated clicks would leave
+        // lookups running when the test's vault is taken down.
         compose.waitUntil(10_000) {
-            clickWords("@alice.smith")
-            opened.isNotEmpty()
+            compose.onAllNodes(hasText("@alice.smith", substring = true)).fetchSemanticsNodes().any { node ->
+                val texts: List<androidx.compose.ui.text.AnnotatedString> =
+                    runCatching { node.config[androidx.compose.ui.semantics.SemanticsProperties.Text] }.getOrDefault(emptyList())
+                texts.any { text -> text.getLinkAnnotations(0, text.text.length).isNotEmpty() }
+            }
         }
-        assertEquals(listOf("alice.md"), opened.distinct())
+        clickWords("@alice.smith")
+        compose.waitUntil(10_000) { opened.isNotEmpty() }
+        assertEquals(listOf("alice.md"), opened)
     }
 
     @Test

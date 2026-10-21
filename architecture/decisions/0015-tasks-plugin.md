@@ -699,3 +699,17 @@ already had the plugin is granted it once, because the grown declaration
 asks for something never offered before (ADR 0018 § 5's rule, applied by the
 host to bundled page creation); a revoke is never undone. The plugin declares
 no `vault.folders` entry (ADR 0011 amendment of the same date).
+
+### Filter rows open, and lead to their line — 2026-10-21
+
+Owner: `+N more` should expand the list, and a task clicked in a list
+should open its note *at the task*. § 4's cap stays — rendering is what
+freezes an editor — but it becomes the reader's to move: `+N more` shows the
+next page (fifty rows, up to the kernel's 500-row page bound) and `Show
+fewer` folds it back, in Edit mode and presentation mode alike. In Edit mode
+the block reserves one more line for its footer once opened, so the
+reservation and the drawn rows still agree. Clicking a task row — in a block,
+the agenda panel, or a search result's quoted line — now opens the note with
+the caret at the end of that line (met by its text if the note has moved on
+since it was indexed), switching a presented note back to writing. The
+agenda still never edits; rows navigate as before, just more precisely.

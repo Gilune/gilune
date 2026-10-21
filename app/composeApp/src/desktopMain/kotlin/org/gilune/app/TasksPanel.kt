@@ -44,6 +44,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.testTag
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -121,7 +125,7 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
                 }
                 if (!open) continue
                 items(section.rows, key = { "${section.group.name}:${it.relPath}:${it.line}" }) { hit ->
-                    TaskHitRow(hit, today, onOpen)
+                    TaskHitRow(hit, today, onOpen, reveal = state::revealNext)
                 }
                 if (section.more > 0) {
                     item(key = "more-${section.group.name}") {
@@ -187,6 +191,7 @@ fun TaskHitRow(
     onOpen: ((String) -> Unit)?,
     modifier: Modifier = Modifier,
     onToggle: ((TaskHit) -> Unit)? = null,
+    reveal: ((NoteLine) -> Unit)? = null,
 ) {
     val colours = MaterialTheme.colorScheme
     Row(
@@ -195,7 +200,7 @@ fun TaskHitRow(
             .padding(horizontal = 6.dp)
             .clip(RoundedCornerShape(5.dp))
             .background(colours.surface)
-            .let { if (onOpen == null) it else it.clickable { onOpen(hit.relPath) } }
+            .let { if (onOpen == null) it else it.clickable { reveal?.invoke(hit.noteLine()); onOpen(hit.relPath) } }
             .padding(start = 12.dp, end = 8.dp, top = 5.dp, bottom = 5.dp),
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -269,9 +274,9 @@ const val FILTER_BLOCK_DECORATION = "gilune.filter"
 /// block's text, which is what keeps the reservation honest: a block
 /// nobody has evaluated yet reserves nothing and shows its raw fence, and
 /// the lines it does reserve are the rows it is about to draw.
-fun filterBlockDecoration(results: Map<String, FilterResult>): EditorBlockDecoration =
+fun filterBlockDecoration(results: Map<String, FilterResult>, expanded: Set<String> = emptySet()): EditorBlockDecoration =
     EditorBlockDecoration(FILTER_BLOCK_DECORATION) { info, body ->
-        if (!info.equals(FILTER_FENCE, ignoreCase = true)) null else results[body]?.let(::filterBlockLines)
+        if (!info.equals(FILTER_FENCE, ignoreCase = true)) null else results[body]?.let { filterBlockLines(it, body in expanded) }
     }
 
 /// A collapsed block's rows, **one editor line each** — the Edit-mode face
@@ -293,20 +298,61 @@ fun FilterBlockLines(
     maxRowWidth: Dp,
     modifier: Modifier = Modifier,
     onToggle: ((TaskHit) -> Unit)? = null,
+    expanded: Boolean = false,
+    onMore: (() -> Unit)? = null,
+    onFewer: (() -> Unit)? = null,
+    reveal: ((NoteLine) -> Unit)? = null,
 ) {
     Column(modifier) {
         when (result) {
             is FilterResult.Hint -> FilterTextLine(result.text, rowHeight, italic = true)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
-                for (row in result.rows) TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle)
-                if (result.more > 0) FilterTextLine("+${result.more} more", rowHeight, italic = false)
+                for (row in result.rows) TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle, reveal)
+                FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
             }
             is FilterResult.Notes -> {
                 if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
                 for (row in result.rows) NoteHitLine(row, onOpen, rowHeight, maxRowWidth)
-                if (result.more > 0) FilterTextLine("+${result.more} more", rowHeight, italic = false)
+                FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
             }
+        }
+    }
+}
+
+/// The line under a block's rows: `+N more`, which opens the next page of
+/// rows (owner, 2026-10-21), and `Show fewer` once the block has been
+/// opened. Each is clickable only where its words are — the space beside
+/// them still lands the caret in the block underneath, as a row's does.
+/// Nothing is drawn when there is nothing more and nothing to fold away.
+@Composable
+private fun FilterFooter(
+    more: Int,
+    expanded: Boolean,
+    onMore: (() -> Unit)?,
+    onFewer: (() -> Unit)?,
+    modifier: Modifier = Modifier,
+) {
+    if (more <= 0 && !expanded) return
+    val colours = MaterialTheme.colorScheme
+    fun Modifier.action(onClick: (() -> Unit)?, tag: String) =
+        if (onClick == null) this else clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand).testTag(tag)
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (more > 0) {
+            NoteResultText(
+                "+$more more",
+                fontSize = 11.sp,
+                color = if (onMore != null) colours.primary else colours.outline,
+                modifier = Modifier.action(onMore, "filter-more"),
+            )
+        }
+        if (expanded && onFewer != null) {
+            NoteResultText(
+                "Show fewer",
+                fontSize = 11.sp,
+                color = colours.primary,
+                modifier = Modifier.action(onFewer, "filter-fewer"),
+            )
         }
     }
 }
@@ -319,6 +365,7 @@ private fun TaskHitLine(
     rowHeight: Dp,
     maxWidth: Dp,
     onToggle: ((TaskHit) -> Unit)?,
+    reveal: ((NoteLine) -> Unit)? = null,
 ) {
     val colours = MaterialTheme.colorScheme
     Row(
@@ -327,7 +374,7 @@ private fun TaskHitLine(
             .widthIn(max = maxWidth)
             .clip(RoundedCornerShape(4.dp))
             .background(colours.surface)
-            .let { if (onOpen == null) it else it.clickable { onOpen(hit.relPath) }.pointerHoverIcon(PointerIcon.Hand) }
+            .let { if (onOpen == null) it else it.clickable { reveal?.invoke(hit.noteLine()); onOpen(hit.relPath) }.pointerHoverIcon(PointerIcon.Hand) }
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -428,11 +475,15 @@ fun FilterBlockView(
     val filter = plugins.tasksFilter()
     val open = state.gilune.value
     val today = rememberQueryDay()
-    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today) {
+    // How far this block has been opened: a page more per `+N more`.
+    var cap by remember(block) { mutableStateOf(FILTER_ROW_CAP) }
+    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today, cap) {
         if (open == null) FilterResult.Hint("Opening vault...")
-        else evaluateFilterBlock(open, state.vaultDir, block, types, today, operators = searchOperatorsFor(plugins, today))
+        else evaluateFilterBlock(open, state.vaultDir, block, types, today, cap, searchOperatorsFor(plugins, today))
     }.value
     val result = computed.value ?: FilterResult.Hint(computed.error ?: "Searching...")
+    val readMore: (() -> Unit)? =
+        if (cap < FILTER_MAX_ROWS) ({ cap = (cap + FILTER_EXPAND_STEP).coerceAtMost(FILTER_MAX_ROWS) }) else null
 
 
     Column(
@@ -450,13 +501,13 @@ fun FilterBlockView(
             is FilterResult.Hint -> FilterNoteRow(result.text)
             is FilterResult.Tasks -> {
                 if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
-                for (row in result.rows) TaskHitRow(row, today, onOpen, onToggle = { toggleTaskResult(state, it) })
-                FilterMore(result.more)
+                for (row in result.rows) TaskHitRow(row, today, onOpen, onToggle = { toggleTaskResult(state, it) }, reveal = state::revealNext)
+                FilterFooter(result.more, cap > FILTER_ROW_CAP, onMore = readMore, onFewer = { cap = FILTER_ROW_CAP }, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp))
             }
             is FilterResult.Notes -> {
                 if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
                 for (row in result.rows) NoteHitRow(row, onOpen)
-                FilterMore(result.more)
+                FilterFooter(result.more, cap > FILTER_ROW_CAP, onMore = readMore, onFewer = { cap = FILTER_ROW_CAP }, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp))
             }
         }
     }
@@ -512,13 +563,5 @@ private fun FilterNoteRow(text: String) {
 
 /// § 4's footer. Nought is drawn as nothing rather than as a line saying
 /// so.
-@Composable
-private fun FilterMore(count: Int) {
-    if (count <= 0) return
-    NoteResultText(
-        "+$count more",
-        fontSize = 11.sp,
-        color = MaterialTheme.colorScheme.outline,
-        modifier = Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp),
-    )
-}
+/// Where a task row's click lands: its own line, met by its text.
+internal fun TaskHit.noteLine() = NoteLine(relPath, line, checkboxLine)
