@@ -598,6 +598,13 @@ private fun OpenNote(
             builtInDecorations() + tasks + BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)
         }
 
+        // A line asked of a note being presented: back to writing first, so
+        // there is a caret to put on it.
+        LaunchedEffect(state.reveal.value, relPath, editor.openRelPath) {
+            val target = state.reveal.value ?: return@LaunchedEffect
+            if (target.relPath == relPath && editor.openRelPath == relPath && editor.reading) editor.reading = false
+        }
+
         if (editor.reading) {
             PresentedNote(state, editor, decorations, openRow) { write() }
         } else {
@@ -666,18 +673,27 @@ private fun OpenNote(
             }
             val open = state.gilune.value
             val blockDay = rememberQueryDay()
-            val evaluated = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, wanted, plugins, open, blockDay) {
+            // How far each block has been opened, by its text: `+N more`
+            // adds a page of rows, `Show fewer` folds it back (owner,
+            // 2026-10-21). Kept for as long as the note is open.
+            var blockCaps by remember(relPath) { mutableStateOf(mapOf<String, Int>()) }
+            val evaluated = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, wanted, plugins, open, blockDay, blockCaps) {
                 val types = searchTypesFor(plugins)
                 wanted.associateWith { body ->
                     if (open == null) FilterResult.Hint("Opening vault...")
-                    else evaluateFilterBlock(open, state.vaultDir, body, types, blockDay, FILTER_EDIT_ROW_CAP, searchOperatorsFor(plugins, blockDay))
+                    else evaluateFilterBlock(open, state.vaultDir, body, types, blockDay,
+                        blockCaps[body] ?: FILTER_EDIT_ROW_CAP, searchOperatorsFor(plugins, blockDay))
                 }
             }.value
             if (evaluated.error != null) {
                 androidx.compose.material3.TextButton(onClick = state::retrySearchIndex) { Text("Retry search") }
             }
             val results = evaluated.value ?: wanted.associateWith { FilterResult.Hint(evaluated.error ?: "Searching...") }
-            val blockDecorations = remember(results) { listOf(filterBlockDecoration(results)) }
+            val blockDecorations = remember(results, blockCaps) { listOf(filterBlockDecoration(results, blockCaps.keys)) }
+            fun openMore(body: String) {
+                val next = ((blockCaps[body] ?: FILTER_EDIT_ROW_CAP) + FILTER_EXPAND_STEP).coerceAtMost(FILTER_MAX_ROWS)
+                blockCaps = blockCaps + (body to next)
+            }
 
             val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size) {
                 MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f)
@@ -714,6 +730,20 @@ private fun OpenNote(
                 val margin = with(density) { EDITOR_PADDING.toPx() }
                 val rect = placed.getCursorRect(caret)
                 caretView.bringIntoView(rect.copy(top = rect.top - margin, bottom = rect.bottom + margin))
+            }
+
+            // A task or a search match clicked elsewhere opens this note
+            // at its line (owner, 2026-10-21): the caret goes to the end of
+            // that line, the field takes the focus, and the page follows.
+            // Asked once the buffer holds this note, and answered once.
+            LaunchedEffect(state.reveal.value, relPath, editor.openRelPath) {
+                val target = state.reveal.value ?: return@LaunchedEffect
+                if (target.relPath != relPath || editor.openRelPath != relPath) return@LaunchedEffect
+                state.reveal.value = null
+                val at = revealOffset(editor.text.text, target.line, target.text) ?: return@LaunchedEffect
+                editor.text = editor.text.copy(selection = TextRange(at))
+                editor.resumeEditing = true
+                caretMoves++
             }
 
             // The `/` menu belongs to this note and this mode; leaving
@@ -989,7 +1019,15 @@ private fun OpenNote(
                     if (laidOut != null) {
                         for (block in collapsed) {
                             val result = results[block.fence.body] ?: continue
-                            CollapsedFilterBlock(block, laidOut, result, blockDay, openRow, blockWidth) { toggleTaskResult(state, it) }
+                            val body = block.fence.body
+                            val cap = blockCaps[body] ?: FILTER_EDIT_ROW_CAP
+                            CollapsedFilterBlock(
+                                block, laidOut, result, blockDay, openRow, blockWidth,
+                                expanded = body in blockCaps,
+                                onMore = if (cap < FILTER_MAX_ROWS) ({ openMore(body) }) else null,
+                                onFewer = { blockCaps = blockCaps - body },
+                                reveal = state::revealNext,
+                            ) { toggleTaskResult(state, it) }
                         }
                     }
                 }
@@ -1042,6 +1080,10 @@ private fun CollapsedFilterBlock(
     today: LocalDate,
     onOpen: ((String) -> Unit)?,
     width: Dp,
+    expanded: Boolean = false,
+    onMore: (() -> Unit)? = null,
+    onFewer: (() -> Unit)? = null,
+    reveal: ((NoteLine) -> Unit)? = null,
     onToggle: (org.gilune.plugins.tasks.TaskHit) -> Unit,
 ) {
     // The layout is one frame behind a buffer that has just changed, so
@@ -1063,7 +1105,8 @@ private fun CollapsedFilterBlock(
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
-        FilterBlockLines(result, today, onOpen, height / block.lines, width, onToggle = onToggle)
+        FilterBlockLines(result, today, onOpen, height / block.lines, width, onToggle = onToggle,
+            expanded = expanded, onMore = onMore, onFewer = onFewer, reveal = reveal)
     }
 }
 

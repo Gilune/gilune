@@ -156,7 +156,7 @@ fun SearchPanel(
                 modifier = Modifier.padding(start = 12.dp, top = 4.dp),
             )
             else -> LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(bottom = 6.dp)) {
-                items(hits, key = { it.relPath }) { hit -> HitRows(hit, onOpen) }
+                items(hits, key = { it.relPath }) { hit -> HitRows(hit, onOpen, state::revealNext) }
             }
         }
     }
@@ -168,7 +168,7 @@ fun SearchPanel(
 }
 
 @Composable
-private fun HitRows(hit: SearchHit, onOpen: (String) -> Unit) {
+private fun HitRows(hit: SearchHit, onOpen: (String) -> Unit, reveal: (NoteLine) -> Unit) {
     val colours = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth().padding(bottom = 5.dp)) {
         Column(
@@ -202,7 +202,7 @@ private fun HitRows(hit: SearchHit, onOpen: (String) -> Unit) {
                 color = colours.onSurfaceVariant,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpen(hit.relPath) }
+                    .clickable { reveal(NoteLine(hit.relPath, line.number, line.text)); onOpen(hit.relPath) }
                     .padding(start = 22.dp, end = 8.dp, top = 2.dp, bottom = 2.dp),
             )
         }
