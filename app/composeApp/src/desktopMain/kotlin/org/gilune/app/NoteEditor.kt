@@ -832,6 +832,21 @@ private fun OpenNote(
                 return true
             }
 
+            // Tab nests list lines and Shift+Tab lifts them (owner,
+            // 2026-10-21: subtasks); elsewhere Tab types two spaces. The
+            // field's own Tab typed a literal tab at the caret, which on a
+            // task's line left it un-nested with a tab after its text.
+            fun indentLines(outdent: Boolean): Boolean {
+                val value = editor.text
+                val edit = indentEdit(value.text, value.selection.start, value.selection.end, outdent)
+                if (edit.text == value.text && TextRange(edit.selectionStart, edit.selectionEnd) == value.selection) return true
+                editor.dirty = editor.dirty || edit.text != value.text
+                editor.text = value.copy(text = edit.text, selection = TextRange(edit.selectionStart, edit.selectionEnd))
+                caretMoves++
+                typedHere = false
+                return true
+            }
+
             var verticalX by remember { mutableStateOf<Float?>(null) }
             fun moveByLines(lines: Int, extend: Boolean): Boolean {
                 val placed = layout ?: return false
@@ -999,6 +1014,7 @@ private fun OpenNote(
                                         event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
                                         event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
                                         event.key == Key.DirectionUp -> moveByLines(-1, event.isShiftPressed)
+                                        event.key == Key.Tab -> indentLines(event.isShiftPressed)
                                         else -> false
                                     }
                                     event.key == Key.DirectionDown -> { completions.move(1); true }

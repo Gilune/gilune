@@ -98,7 +98,16 @@ class ListContinuationTest {
     @Test
     fun anEmptyBulletLetsGoTheSameWay() {
         assertEquals("|", press("- \n|"))
-        assertEquals("|", press("  * \n|"))
+    }
+
+    @Test
+    fun anEmptyNestedItemStepsOutALevelBeforeTheListLetsGo() {
+        // Owner, 2026-10-21 (subtasks): a child, Return, Return is the next
+        // parent — the nested empty item moves out one level, marker kept.
+        assertEquals("* |", press("  * \n|"))
+        assertEquals("- [ ] |", press("  - [ ] \n|"))
+        assertEquals("  - [ ] |", press("    - [ ] \n|"), "one level at a time")
+        assertEquals("- [ ] |", press("\t- [ ]\n|"), "a tab is one level too")
     }
 
     @Test
@@ -223,5 +232,37 @@ class ListContinuationTest {
             "- [ ] milk\n- [ ] ",
             listContinuation(after, after.length)!!.applyTo(after, after.length).text,
         )
+    }
+}
+
+class IndentEditTest {
+    @Test
+    fun aCaretInsideTheLineMovesWithIt() {
+        val edit = indentEdit("- [ ] child", 4, 4, outdent = false)
+        assertEquals("  - [ ] child", edit.text)
+        assertEquals(6, edit.selectionStart)
+    }
+
+    @Test
+    fun outdentNeverPullsTheCaretBeforeItsLine() {
+        val text = "a\n  - b"
+        val edit = indentEdit(text, 3, 3, outdent = true) // between the two spaces
+        assertEquals("a\n- b", edit.text)
+        assertEquals(2, edit.selectionStart, "clamped to the line's start")
+    }
+
+    @Test
+    fun aListQuotedInAFenceIsText() {
+        val text = "```\n- [ ] quoted\n```"
+        val edit = indentEdit(text, 6, 6, outdent = false)
+        assertEquals(text.substring(0, 6) + LIST_INDENT + text.substring(6), edit.text,
+            "Tab types indentation at the caret instead of nesting a quoted list")
+    }
+
+    @Test
+    fun outdentAtTheTopLevelChangesNothing() {
+        val edit = indentEdit("- [ ] top", 9, 9, outdent = true)
+        assertEquals("- [ ] top", edit.text)
+        assertEquals(9, edit.selectionStart)
     }
 }

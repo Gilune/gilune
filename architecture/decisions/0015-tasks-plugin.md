@@ -713,3 +713,13 @@ the agenda panel, or a search result's quoted line — now opens the note with
 the caret at the end of that line (met by its text if the note has moved on
 since it was indexed), switching a presented note back to writing. The
 agenda still never edits; rows navigate as before, just more precisely.
+
+Same date, owner: subtasks are written as ordinary nested list items, so the
+editor learns to nest. Tab on list lines indents them one level (two spaces,
+which nests under a `- ` bullet in CommonMark and reads the same in
+Obsidian); Shift+Tab lifts them; elsewhere Tab types two spaces instead of
+the field's literal tab, and code fences are left alone. Return on an empty
+*nested* item now steps out one level instead of letting go of the list
+(`ListContinuation.Unwrap.keep`; the phone's editor applies the same
+decision). How lists, the agenda and filter blocks *show* parent and child
+tasks is not decided yet.

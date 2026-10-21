@@ -299,7 +299,13 @@ sealed interface ListContinuation {
     /// typed, so the caret comes back onto a line that is now blank —
     /// Return on an empty item clears the marker rather than leaving a
     /// stray blank line above the one you land on.
-    data class Unwrap(val range: IntRange) : ListContinuation
+    ///
+    /// `keep` is written where the range was. An empty **nested** item
+    /// steps out a level instead of letting go (owner, 2026-10-21 — a
+    /// child task, Return, Return is the next parent): the range is the
+    /// item and the typed newline, and `keep` is the same empty item one
+    /// level shallower, with the caret after it.
+    data class Unwrap(val range: IntRange, val keep: String = "") : ListContinuation
 }
 
 /// The one place both editors decide what Return does to a list, taken
@@ -349,6 +355,12 @@ fun listContinuation(text: CharSequence, caretAfterNewline: Int): ListContinuati
     // what the break carried down are one item between them.
     val carried = text.substring(caretAfterNewline, lineEndFor(text, caretAfterNewline))
     if (previous.substring(marker.value.length).isBlank() && carried.isBlank()) {
+        val indent = bullet.groupValues[1]
+        if (indent.isNotEmpty()) {
+            // Nested: out one level, the marker kept, ready to type.
+            val emptyItem = previous.substring(indent.length, marker.value.length) + " ".takeIf { !marker.value.endsWith(" ") }.orEmpty()
+            return ListContinuation.Unwrap(lineStart until caretAfterNewline, keep = indent.dropLevel() + emptyItem)
+        }
         return ListContinuation.Unwrap(lineStart until caretAfterNewline)
     }
     val prefix = if (task != null) {
@@ -374,10 +386,90 @@ fun ListContinuation.applyTo(text: CharSequence, caret: Int): ContinuedBuffer = 
         caret + prefix.length,
     )
     is ListContinuation.Unwrap -> ContinuedBuffer(
-        text.substring(0, range.first) + text.substring(range.last + 1, text.length),
-        range.first,
+        text.substring(0, range.first) + keep + text.substring(range.last + 1, text.length),
+        range.first + keep.length,
     )
 }
+
+// ------------------------------------------------------------- nesting
+
+/// One level of list nesting: two spaces, which nests an item under a
+/// `- ` bullet in CommonMark and reads the same in Obsidian.
+const val LIST_INDENT = "  "
+
+/// What Tab or Shift+Tab does to a buffer (owner, 2026-10-21: subtasks).
+data class IndentEdit(val text: String, val selectionStart: Int, val selectionEnd: Int)
+
+/// Tab nests every list line the selection touches one level deeper, and
+/// Shift+Tab lifts each one level out — prose lines among them are left
+/// alone, and so is anything inside a code fence. With no list line
+/// touched, Tab types one level of indentation at the caret (replacing a
+/// selection) and Shift+Tab takes one level off the lines touched. The
+/// selection moves with its text.
+fun indentEdit(text: String, selectionStart: Int, selectionEnd: Int, outdent: Boolean): IndentEdit {
+    val low = minOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+    val high = maxOf(selectionStart, selectionEnd).coerceIn(0, text.length)
+    val starts = buildList { add(0); text.forEachIndexed { i, c -> if (c == '\n') add(i + 1) } }
+    fun lineOf(offset: Int) = starts.indexOfLast { it <= offset }
+    val first = lineOf(low)
+    var last = lineOf(high)
+    // A selection ending at the very start of a line does not reach into it.
+    if (last > first && high == starts[last]) last--
+    fun lineText(i: Int) = text.substring(starts[i], if (i + 1 < starts.size) starts[i + 1] - 1 else text.length)
+
+    val fenced = BooleanArray(starts.size)
+    var inFence = false
+    for (i in starts.indices) {
+        val line = lineText(i)
+        val delimiter = line.trim().startsWith("```")
+        fenced[i] = inFence || delimiter
+        if (delimiter) inFence = !inFence
+    }
+    val listLines = (first..last).filter { !fenced[it] && LIST_ITEM.containsMatchIn(lineText(it)) }
+    if (listLines.isEmpty() && !outdent) {
+        val written = text.substring(0, low) + LIST_INDENT + text.substring(high)
+        return IndentEdit(written, low + LIST_INDENT.length, low + LIST_INDENT.length)
+    }
+    val targets = (if (listLines.isEmpty()) (first..last).toList() else listLines).toSet()
+
+    // Per touched line, how many characters change at its start.
+    val delta = IntArray(starts.size)
+    for (i in targets) {
+        delta[i] = if (outdent) -lineText(i).leadingLevelWidth() else LIST_INDENT.length
+    }
+    val written = buildString {
+        for (i in starts.indices) {
+            if (i > 0) append('\n')
+            val line = lineText(i)
+            when {
+                delta[i] > 0 -> append(LIST_INDENT).append(line)
+                delta[i] < 0 -> append(line.substring(-delta[i]))
+                else -> append(line)
+            }
+        }
+    }
+    fun map(offset: Int): Int {
+        val line = lineOf(offset)
+        var shifted = offset
+        for (i in 0 until line) shifted += delta[i]
+        return when {
+            delta[line] > 0 -> shifted + delta[line]
+            delta[line] < 0 -> shifted - minOf(-delta[line], offset - starts[line])
+            else -> shifted
+        }
+    }
+    return IndentEdit(written, map(selectionStart.coerceIn(0, text.length)), map(selectionEnd.coerceIn(0, text.length)))
+}
+
+/// How much one level out takes from a line's start: a tab, or up to two
+/// spaces.
+private fun String.leadingLevelWidth(): Int = when {
+    startsWith("\t") -> 1
+    else -> takeWhile { it == ' ' }.length.coerceAtMost(LIST_INDENT.length)
+}
+
+/// An indentation one level shallower.
+private fun String.dropLevel(): String = substring(leadingLevelWidth())
 
 /// Whether the step from one buffer to the next was **one newline typed**:
 /// nothing else inserted, nothing else removed, and the caret left
