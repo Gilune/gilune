@@ -11,6 +11,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -76,6 +77,24 @@ class RevealLineUiTest {
         val (_, tabs) = host(agendaReading = false)
         compose.waitUntil(10_000) { compose.onAllNodesWithText("buy milk", substring = true).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("buy milk", substring = true).performClick()
+        assertCaretOnTheTask(tabs)
+    }
+
+    @Test
+    fun theRevealedLinePulsesAndThePulseGoes() {
+        val (state, tabs) = host(agendaReading = false)
+        tabs.open("Home/kitchen.md")
+        compose.waitUntil(10_000) { tabs.activeTab?.editor?.openRelPath == "Home/kitchen.md" }
+        compose.waitForIdle()
+        // The test clock otherwise runs an animation to its end whenever it
+        // waits, so the flash is stepped through by hand.
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle { state.revealNext(NoteLine("Home/kitchen.md", 4, task)) }
+        compose.mainClock.advanceTimeBy(150)
+        assertEquals(1, compose.onAllNodesWithTag("reveal-pulse").fetchSemanticsNodes().size, "the line is flashing")
+        compose.mainClock.advanceTimeBy(3_000)
+        assertEquals(0, compose.onAllNodesWithTag("reveal-pulse").fetchSemanticsNodes().size, "and then it is not")
+        compose.mainClock.autoAdvance = true
         assertCaretOnTheTask(tabs)
     }
 
