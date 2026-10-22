@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 9;
+pub const SCHEMA_VERSION: i64 = 10;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -698,6 +698,19 @@ const MIGRATIONS: &[&str] = &[
          payload TEXT, state TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
          UNIQUE(plan_id, rel_path));
      CREATE INDEX refactoring_entries_plan ON refactoring_entries(plan_id, entry_id);",
+    // v10 (ADR 0007 amendment 2026-10-22): every file in the vault can be
+    // carried by sync. Attachments are blobs recorded in place, so the
+    // blob row takes the same stat facts a projection row has (ADR 0020
+    // § 2.5) and an unchanged file is never re-hashed. `local_objects` is
+    // the device-local set of notes a person has taken out of sync, with
+    // the last revision their peers were sent, so leaving local scope
+    // can send one revision that supersedes what peers hold.
+    "ALTER TABLE blobs ADD COLUMN mtime_ns INTEGER NOT NULL DEFAULT 0;
+     ALTER TABLE blobs ADD COLUMN recorded_ns INTEGER NOT NULL DEFAULT 0;
+     CREATE TABLE local_objects (
+         object_id TEXT PRIMARY KEY,
+         last_sent_revision TEXT NOT NULL
+     );",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {

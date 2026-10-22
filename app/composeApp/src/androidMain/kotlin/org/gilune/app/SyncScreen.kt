@@ -69,7 +69,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import uniffi.gilune_ffi.FoundDevice
 import uniffi.gilune_ffi.PeerInfo
+import uniffi.gilune_ffi.SyncStage
 import uniffi.gilune_ffi.SyncStatus
 
 /// Where this device's identity and roster live: app-private internal
@@ -334,9 +336,9 @@ fun SyncSection(state: GiluneState) {
     Text(
         "While this is on, your other devices can reach this phone over the local " +
             "network — that is the moment anything is bound, and nothing is bound " +
-            "before it. While it is off, joining a device that is showing a code and " +
-            "Sync with devices now both still work; it is only the other direction " +
-            "that closes.\n\n" +
+            "before it. While it is off, nothing is exchanged in either direction — " +
+            "joining a device that is showing a code still works, so you can pair " +
+            "first and switch on after.\n\n" +
             "Your notes never leave this phone except to devices you have paired.",
         style = MaterialTheme.typography.bodySmall,
         color = colours.onSurfaceVariant,
@@ -384,10 +386,23 @@ fun SyncSection(state: GiluneState) {
     PairedDevices(state, status)
 
     HorizontalDivider(color = colours.outlineVariant)
+    val running = state.syncing.value
     OutlinedButton(
         onClick = { state.syncDevices() },
+        enabled = !running,
         modifier = Modifier.heightIn(min = TouchTarget).testTag("sync-now"),
-    ) { Text("Sync with devices now") }
+    ) { Text(if (running) "Syncing…" else "Sync with devices now") }
+    // The stage under way, as the kernel reports it (§ 1: words, not a
+    // spinner — and not silence for the length of a connect timeout).
+    if (running) {
+        Text(
+            state.syncProgress.lastOrNull()?.let { progressSentence(it) } ?: "starting…",
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.onSurfaceVariant,
+            modifier = Modifier.testTag("sync-progress"),
+        )
+    }
+    state.lastSyncRound.value?.takeUnless { running }?.let { round -> LastRound(round) }
     Text(
         "Exchanges everything new with each paired device. Gilune tries the address it " +
             "last used first, and looks for the device on this network only when that " +
@@ -413,6 +428,39 @@ fun SyncSection(state: GiluneState) {
         color = colours.onSurfaceVariant,
         modifier = Modifier.testTag("sync-cadence"),
     )
+}
+
+/// What the last round came to, per device, where the button is. The
+/// message line above the composer gets the one-line summary; this is
+/// where the kernel's own sentence for an unreachable device is read.
+@Composable
+private fun LastRound(round: SyncRound) {
+    val colours = MaterialTheme.colorScheme
+    Surface(
+        color = colours.surfaceVariant,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier.fillMaxWidth().testTag("sync-last-round"),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(roundHeading(round), style = MaterialTheme.typography.titleSmall, color = colours.onSurfaceVariant)
+            for (outcome in round.peers) {
+                Text(
+                    outcomeSentence(outcome),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (outcome.stage == SyncStage.FAILED) colours.error else colours.onSurface,
+                    modifier = Modifier.testTag("sync-outcome"),
+                )
+            }
+            for (halt in round.report.halted) {
+                if (round.peers.none { it.stage == SyncStage.FAILED && halt.endsWith(it.reason) }) {
+                    Text(halt, style = MaterialTheme.typography.bodySmall, color = colours.error)
+                }
+            }
+            if (round.peers.isEmpty() && round.report.halted.isEmpty()) {
+                Text("Nothing to sync with.", style = MaterialTheme.typography.bodySmall, color = colours.onSurfaceVariant)
+            }
+        }
+    }
 }
 
 /// Clear the device-local sync state and enrol again, on `syncAction`'s
@@ -546,38 +594,104 @@ private fun DevicesOnThisNetwork(state: GiluneState, status: SyncStatus) {
         }
         return
     }
+    // Which row has its code field open, by fingerprint — one at a time,
+    // because one code is being read off one other screen.
+    var pairingWith by remember { mutableStateOf<String?>(null) }
     for (device in state.discovered) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp)
-                .testTag("found-row"),
-        ) {
-            Text(
-                device.fingerprint,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            Text(
-                device.address,
-                fontFamily = FontFamily.Monospace,
-                style = MaterialTheme.typography.bodySmall,
-                color = colours.onSurfaceVariant,
-            )
-            Text(
-                foundDeviceState(device.state, device.compatible),
-                style = MaterialTheme.typography.bodySmall,
-                color = if (device.compatible) colours.onSurfaceVariant else colours.error,
-            )
-        }
+        FoundDeviceRow(
+            state,
+            device,
+            open = pairingWith == device.fingerprint,
+            onOpen = { pairingWith = if (pairingWith == device.fingerprint) null else device.fingerprint },
+            onDone = { pairingWith = null },
+        )
     }
     Text(
         "A device shows its own fingerprint in its Sync settings. Comparing the two is " +
-            "how you know you are pairing with what you meant to — copy the address above " +
-            "into the field below and use the six-digit code that device is showing.",
+            "how you know you are pairing with what you meant to. Pair from its row with " +
+            "the six-digit code that device is showing — the address is already known.",
         style = MaterialTheme.typography.bodySmall,
         color = colours.onSurfaceVariant,
     )
+}
+
+/// One device a search produced, paired **from here** when it can be:
+/// the search gave the address, so the row asks only for the code that
+/// device is showing (§ 3 — a code whichever way it was found) and dials
+/// the address itself. Copying the address into the field below was the
+/// first thing the owner noticed about this screen.
+@Composable
+private fun FoundDeviceRow(
+    state: GiluneState,
+    device: FoundDevice,
+    open: Boolean,
+    onOpen: () -> Unit,
+    onDone: () -> Unit,
+) {
+    val colours = MaterialTheme.colorScheme
+    val offer = foundDeviceOffer(device.state, device.compatible)
+    var code by remember(device.fingerprint) { mutableStateOf("") }
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .testTag("found-row"),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            device.fingerprint,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Text(
+            device.address,
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+            color = colours.onSurfaceVariant,
+        )
+        Text(
+            foundDeviceState(device.state, device.compatible),
+            style = MaterialTheme.typography.bodySmall,
+            color = if (device.compatible) colours.onSurfaceVariant else colours.error,
+        )
+        if (offer != null) {
+            OutlinedButton(
+                onClick = onOpen,
+                modifier = Modifier.heightIn(min = TouchTarget).testTag("found-pair"),
+            ) { Text(if (open) "Cancel" else offer) }
+        }
+        if (open && offer != null) {
+            Text(
+                foundPairingHint(device),
+                style = MaterialTheme.typography.bodySmall,
+                color = colours.onSurfaceVariant,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = normalisedPairingCode(it) },
+                    singleLine = true,
+                    label = { Text("Code") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.weight(1f).testTag("found-code"),
+                )
+                Button(
+                    onClick = {
+                        val typed = code
+                        code = ""
+                        onDone()
+                        state.pairWithFound(device, typed)
+                    },
+                    enabled = code.length == 6,
+                    modifier = Modifier.heightIn(min = TouchTarget).testTag("found-pair-go"),
+                ) { Text("Pair") }
+            }
+        }
+    }
 }
 
 @Composable

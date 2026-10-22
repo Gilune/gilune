@@ -175,6 +175,7 @@ impl NoteIndexer for Shapes {
 fn fixture(text: &str) -> (tempfile::TempDir, Store, Arc<AtomicBool>) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     let fail = Arc::new(AtomicBool::new(false));
     store
         .register_indexer(

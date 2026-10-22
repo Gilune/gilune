@@ -293,8 +293,14 @@ pub fn content_version(text: &str) -> String {
     format!("sha256:{}", hex::encode(Sha256::digest(text.as_bytes())))
 }
 
+/// The one reserved key a person may write: `gilune-sync: local` keeps a
+/// note on this device (ADR 0007, amendment 2026-10-22). Every other
+/// `gilune-*` key is the kernel's, and writing one is forgery.
+pub const USER_RESERVED_KEY: &str = "gilune-sync";
+
 fn is_reserved(key: &str) -> bool {
-    key.to_ascii_lowercase().starts_with("gilune-")
+    let key = key.to_ascii_lowercase();
+    key.starts_with("gilune-") && key != USER_RESERVED_KEY
 }
 
 /// Locate the envelope without normalising any bytes, including CRLF or BOM.

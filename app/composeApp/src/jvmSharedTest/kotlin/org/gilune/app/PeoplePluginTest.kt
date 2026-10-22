@@ -12,6 +12,7 @@ class PeoplePluginTest {
     private val registry = PluginExtensions(listOf(peopleExtensions()))
     private fun withPeople(test: (File, Gilune) -> Unit) {
         val root = Files.createTempDirectory("gilune-people").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         Gilune.open(root.absolutePath).use { kernel ->
             registry.registerPlugins(kernel); registry.registerIndexers(kernel)
             assertTrue(registry.initializePages(kernel).isEmpty())
@@ -77,7 +78,15 @@ class PeoplePluginTest {
         Gilune.open(exported.absolutePath).use { rebuilt ->
             registry.registerPlugins(rebuilt); registry.registerIndexers(rebuilt); rebuilt.reconcile(); rebuilt.rebuildIndex(null)
             val after = query(rebuilt, "person-connection").page(rebuilt).requireComplete().hits
-            assertEquals(before.associate { it.relPath to it.facts.toSet() }, after.associate { it.relPath to it.facts.toSet() })
+            // A file copied into another vault is adopted there under its own id
+            // and type (ADR 0007, 2026-10-22), so the kernel's own revision and
+            // creation stamps are that vault's; every fact that is the person's
+            // or the plugin's must be identical.
+            val stamped = setOf("frontmatter.gilune-revision", "frontmatter.gilune-created-ms")
+            assertEquals(
+                before.associate { hit -> hit.relPath to hit.facts.filterNot { it.key in stamped }.toSet() },
+                after.associate { hit -> hit.relPath to hit.facts.filterNot { it.key in stamped }.toSet() },
+            )
         }
     }
 

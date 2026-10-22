@@ -146,6 +146,7 @@ fn a_windows_file_lock_during_rebuild_is_reported_and_retried_after_unlock() {
 fn store() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().expect("tempdir");
     let store = Store::open(dir.path()).expect("open");
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     (dir, store)
 }
 

@@ -4,6 +4,7 @@ use super::*;
 fn revision_positions_preserve_nested_unicode_and_crlf_snippets() -> Result<()> {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     let q = SearchRequest {
         clauses: vec![],
         line_mode: false,

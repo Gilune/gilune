@@ -54,6 +54,51 @@ class NoteEditorUiTest {
     }
 
     @Test
+    fun theKeepOnThisDeviceItemAppearsOnlyWithSyncOnAndWritesTheMarkThroughTheEditor() {
+        val vault = Files.createTempDirectory("gilune-editor-local").toFile()
+        vault.resolve("Captures").mkdirs()
+        vault.resolve("Captures/note.md").writeText("---\ngilune-id: abc\n---\nmine\n")
+        val state = GiluneState(vault.absolutePath, CoroutineScope(Dispatchers.Default))
+        val editor = EditorState()
+        editor.open(vault.absolutePath, "Captures/note.md")
+        editor.reading = false
+        compose.setContent {
+            GiluneTheme(dark = false) {
+                Box(Modifier.fillMaxSize()) { NoteEditor(state, editor, Modifier.fillMaxSize()) }
+            }
+        }
+        // Sync off: the menu says nothing about keeping anything anywhere.
+        compose.onNodeWithTag("note-actions").performClick()
+        compose.onNodeWithTag("toggle-local-scope").assertDoesNotExist()
+        // The dropdown is its own popup root, so it is closed through one
+        // of its own items rather than a key sent to the window.
+        compose.onNodeWithTag("toggle-presentation").performClick()
+        compose.waitForIdle()
+        editor.reading = false
+
+        // Sync on: the item appears, and choosing it marks the note through
+        // the editor's own header, which reaches the file at once — and
+        // the menu stays open, showing the switch flipped.
+        state.syncStatus.value = localScopeSyncStatus(enabled = true)
+        compose.waitForIdle()
+        compose.onNodeWithTag("note-actions").performClick()
+        compose.onNodeWithTag("toggle-local-scope").performClick()
+        compose.waitForIdle()
+        assertTrue(noteIsLocal(editor.frontMatterRaw), editor.frontMatterRaw)
+        val onDisk = vault.resolve("Captures/note.md").readText()
+        assertTrue(noteIsLocal(splitNoteRaw(onDisk).first), onDisk)
+        assertTrue(onDisk.contains("gilune-id: abc\n"), "the kernel's keys survive: $onDisk")
+        assertTrue(onDisk.endsWith("mine\n"), onDisk)
+        compose.onNodeWithTag("toggle-local-scope").assertExists("the menu stays open after a flip")
+
+        // The same item, still open, offers the way back.
+        compose.onNodeWithTag("toggle-local-scope").performClick()
+        compose.waitForIdle()
+        assertFalse(noteIsLocal(splitNoteRaw(vault.resolve("Captures/note.md").readText()).first))
+        compose.onNodeWithTag("toggle-local-scope").assertExists()
+    }
+
+    @Test
     fun clicking_the_empty_area_below_the_text_starts_editing() {
         val vault = Files.createTempDirectory("gilune-editor").toFile()
         vault.resolve("Captures").mkdirs()

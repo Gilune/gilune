@@ -341,6 +341,95 @@ pub struct SyncReport {
     pub incomplete: bool,
 }
 
+/// What a round is doing with one peer, as it happens. Mirrors
+/// `gilune_sync::Stage`; the counts and the words travel beside it in
+/// `SyncProgressEvent` because a uniffi enum carries no payload a Kotlin
+/// `when` can read as cheaply as two fields.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum SyncStage {
+    /// Dialling the address the peer gave last time.
+    Connecting,
+    /// The remembered address answered nothing; asking the network.
+    Looking,
+    /// A session is open and operations are moving both ways.
+    Exchanging,
+    /// Finished with this peer; `applied` and `sent` are its own counts.
+    Done,
+    /// Could not be reached, or the session ended on a fault; `reason`
+    /// is the same sentence the round's `halted` carries.
+    Failed,
+}
+
+/// One thing a round said while it ran.
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SyncProgressEvent {
+    /// The peer as the roster names it — its device name, or its
+    /// fingerprint when it gave none.
+    pub peer: String,
+    pub stage: SyncStage,
+    /// Operations received from this peer. Meaningful on `Done` only.
+    pub applied: i64,
+    /// Operations sent to this peer. Meaningful on `Done` only.
+    pub sent: i64,
+    /// Why, on `Failed`. Empty otherwise.
+    pub reason: String,
+}
+
+/// A screen's ear on a round (ADR 0019 § 1, the step that is "words, not
+/// a spinner"). A round with one unreachable peer spends a connect
+/// timeout, a browse and a second dial before it has a result, and the
+/// shells showed nothing until it was over. Implemented in Kotlin by
+/// whatever has a screen; `sync_now` stays the silent form for the
+/// background worker.
+#[uniffi::export(with_foreign)]
+pub trait SyncProgress: Send + Sync {
+    fn report(&self, event: SyncProgressEvent);
+}
+
+/// Bridges the foreign trait onto the sync crate's own.
+struct ProgressAdapter(Arc<dyn SyncProgress>);
+
+impl gilune_sync::SyncProgress for ProgressAdapter {
+    fn report(&self, peer: &str, stage: gilune_sync::Stage) {
+        use gilune_sync::Stage;
+        let (stage, applied, sent, reason) = match stage {
+            Stage::Connecting => (SyncStage::Connecting, 0, 0, String::new()),
+            Stage::Looking => (SyncStage::Looking, 0, 0, String::new()),
+            Stage::Exchanging => (SyncStage::Exchanging, 0, 0, String::new()),
+            Stage::Done { applied, sent } => {
+                (SyncStage::Done, applied as i64, sent as i64, String::new())
+            }
+            Stage::Failed { reason } => (SyncStage::Failed, 0, 0, reason),
+        };
+        self.0.report(SyncProgressEvent {
+            peer: peer.to_string(),
+            stage,
+            applied,
+            sent,
+            reason,
+        });
+    }
+}
+
+impl From<gilune_sync::ExchangeReport> for SyncReport {
+    fn from(report: gilune_sync::ExchangeReport) -> Self {
+        SyncReport {
+            applied: report.applied as i64,
+            duplicates: report.duplicates as i64,
+            sent: report.sent as i64,
+            blobs_completed: report.blobs_completed as i64,
+            blobs_pending: report.blobs_pending as i64,
+            bytes: report.bytes as i64,
+            incomplete: report.incomplete(),
+            halted: report
+                .halted
+                .iter()
+                .map(|h| format!("{}: {}", h.device_id, h.reason))
+                .collect(),
+        }
+    }
+}
+
 impl From<gilune_sync::service::PeerSummary> for PeerInfo {
     fn from(p: gilune_sync::service::PeerSummary) -> Self {
         PeerInfo {
@@ -2324,21 +2413,20 @@ impl Gilune {
     /// rather than hunted for.
     pub fn sync_now(&self) -> FfiResult<SyncReport> {
         let store = self.store();
-        let report = self.with_sync(|service| service.sync_now(&store))?;
-        Ok(SyncReport {
-            applied: report.applied as i64,
-            duplicates: report.duplicates as i64,
-            sent: report.sent as i64,
-            blobs_completed: report.blobs_completed as i64,
-            blobs_pending: report.blobs_pending as i64,
-            bytes: report.bytes as i64,
-            incomplete: report.incomplete(),
-            halted: report
-                .halted
-                .iter()
-                .map(|h| format!("{}: {}", h.device_id, h.reason))
-                .collect(),
-        })
+        Ok(self.with_sync(|service| service.sync_now(&store))?.into())
+    }
+
+    /// The same round, told as it goes: each stage with each peer is
+    /// reported to `progress` the moment it begins, so a screen can say
+    /// which device is being contacted and how rather than sit silent for
+    /// the length of a connect timeout. The report at the end is the same
+    /// one `sync_now` returns.
+    pub fn sync_now_reporting(&self, progress: Arc<dyn SyncProgress>) -> FfiResult<SyncReport> {
+        let store = self.store();
+        let adapter = ProgressAdapter(progress);
+        Ok(self
+            .with_sync(|service| service.sync_now_reporting(&store, &adapter))?
+            .into())
     }
 }
 
