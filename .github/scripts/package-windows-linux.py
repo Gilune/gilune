@@ -18,6 +18,12 @@ UPGRADE_CODE = "c077b799-5193-4ce3-b93a-411c67e29e37"
 # Published jpackage MSIs that explicitly allow downgrades. Their incoming
 # RemoveExistingProducts invokes our cached MSI with this product code.
 LEGACY_DOWNGRADE_PRODUCTS = {"1.0.3": "{AAE0D767-8197-38BD-8519-19579879B9FE}"}
+# The jpackage-built all-users releases. Every later all-users install wrote
+# HKLM\Software\Gilune\Installed; these two did not, so a per-user package
+# recognises them by their product registration instead. Windows Installer's
+# own related-product search skips products of the other context.
+JPACKAGE_PRODUCTS = {"1.0.1": "{982A4DDD-BAD3-3E27-A87A-52B95E3EF200}",
+                     "1.0.3": LEGACY_DOWNGRADE_PRODUCTS["1.0.3"]}
 NAMESPACE = uuid.UUID(UPGRADE_CODE)
 WIX = "http://schemas.microsoft.com/wix/2006/wi"
 REPO = Path(__file__).resolve().parents[2]
@@ -196,6 +202,10 @@ def write_wix(bundle, destination, release, scope):
         search = node(product, "Property", Id="GILUNE_ALLUSERS")
         node(search, "RegistrySearch", Id="GiluneAllUsersSearch", Root="HKLM", Key="Software\\Gilune",
              Name="Installed", Type="raw", Win64="yes")
+        for legacy_version, product_code in JPACKAGE_PRODUCTS.items():
+            node(search, "RegistrySearch", Id="GiluneAllUsers" + legacy_version.replace(".", "_"), Root="HKLM",
+                 Key="SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + product_code,
+                 Name="DisplayName", Type="raw", Win64="yes")
         node(product, "Condition", Message=ALL_USERS_MESSAGE).text = "NOT GILUNE_ALLUSERS"
     node(product, "Media", Id="1", Cabinet="payload.cab", EmbedCab="yes")
     node(product, "MajorUpgrade", DowngradeErrorMessage="A newer version of Gilune is installed.")

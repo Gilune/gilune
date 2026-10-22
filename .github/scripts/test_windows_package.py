@@ -185,9 +185,18 @@ class WindowsPackageTest(unittest.TestCase):
             for component_id in guids["per-user"]:
                 self.assertNotEqual(guids["per-user"][component_id], guids["per-machine"][component_id])
             # It cannot remove an all-users copy, so it refuses to install beside one.
-            search = user.find(".//w:Property[@Id='GILUNE_ALLUSERS']/w:RegistrySearch", NS)
+            searches = user.findall(".//w:Property[@Id='GILUNE_ALLUSERS']/w:RegistrySearch", NS)
             self.assertEqual(("HKLM", "Software\\Gilune", "Installed", "yes"),
-                             (search.attrib["Root"], search.attrib["Key"], search.attrib["Name"], search.attrib["Win64"]))
+                             (searches[0].attrib["Root"], searches[0].attrib["Key"], searches[0].attrib["Name"], searches[0].attrib["Win64"]))
+            # The jpackage releases wrote no such value; their product
+            # registrations are searched by product code instead.
+            self.assertEqual(
+                {"SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + code for code in package.JPACKAGE_PRODUCTS.values()},
+                {s.attrib["Key"] for s in searches[1:]})
+            self.assertIn("{AAE0D767-8197-38BD-8519-19579879B9FE}", package.JPACKAGE_PRODUCTS.values())
+            for search in searches[1:]:
+                self.assertEqual(("HKLM", "DisplayName", "raw", "yes"),
+                                 (search.attrib["Root"], search.attrib["Name"], search.attrib["Type"], search.attrib["Win64"]))
             conditions = {c.text: c.attrib["Message"] for c in user.findall("w:Product/w:Condition", NS)}
             self.assertEqual(package.ALL_USERS_MESSAGE, conditions["NOT GILUNE_ALLUSERS"])
             self.assertNotIn("NOT GILUNE_ALLUSERS", {c.text for c in machine.findall("w:Product/w:Condition", NS)})
@@ -344,8 +353,13 @@ class WindowsFileVersionTest(unittest.TestCase):
             self.assertEqual("GiluneUserPrograms", directories["INSTALLDIR"]["Directory_Parent"])
             self.assertEqual([], table("CustomAction"), "a per-user package runs nothing of its own")
             self.assertEqual({"GILUNE_ALLUSERS"}, {row["Property"] for row in table("AppSearch")})
-            locator = table("RegLocator")[0]
-            self.assertEqual(("2", "Software\\Gilune", "Installed"), (locator["Root"], locator["Key"], locator["Name"]))
+            self.assertEqual(1 + len(package.JPACKAGE_PRODUCTS), len(table("AppSearch")))
+            locators = {row["Key"]: row for row in table("RegLocator")}
+            self.assertEqual(1 + len(package.JPACKAGE_PRODUCTS), len(locators))
+            self.assertEqual(("2", "Installed"), (locators["Software\\Gilune"]["Root"], locators["Software\\Gilune"]["Name"]))
+            for code in package.JPACKAGE_PRODUCTS.values():
+                locator = locators["SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + code]
+                self.assertEqual(("2", "DisplayName"), (locator["Root"], locator["Name"]))
             self.assertIn("NOT GILUNE_ALLUSERS", {row["Condition"] for row in table("LaunchCondition")})
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallAdd"]["Condition"])
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallRollback"]["Condition"])
