@@ -1633,6 +1633,54 @@ gates promises) are ratified. **Next: application-level engineering — see
      (right-click via performMouseInput Secondary; popups are their own
      roots — close with a click outside, never onRoot key input). No
      Android surface yet.
+   - **Native Windows install (2026-10-22, Fable 5.1, branch
+     claude/trusting-wescoff-d12a97; evidence in
+     `.github/linux-windows-build.md` § Native Windows install).** The MSI
+     is NOT jpackage since October 2026 (the jpackage notes above are
+     historical): `.github/scripts/package-windows-linux.py` authors WiX
+     for wixl on Ubuntu and `.github/windows-launcher/` is the Rust
+     `Gilune.exe`. Owner's 1.1.0 findings fixed: (1) the Start-menu
+     shortcut was ADVERTISED (wixl writes the feature as target when none
+     is given) → `Target="[#file]"`, Icon id `GiluneIcon.ico`; (2) the
+     firewall prompt named "OpenJDK Platform binary" → the MSI adds the
+     `Gilune` inbound rule itself, Private profile only, via type 51 + type
+     50 deferred no-impersonate netsh custom actions (wixl has no
+     Directory-sourced EXE CAs), delete-then-add on install/repair/upgrade
+     AND delete-by-program for Gilune.exe + runtime/bin/javaw.exe first (a
+     dismissed 1.1.0 prompt left BLOCK rows on the owner's notebook; Block
+     beats Allow; lifecycle test seeds such rows before install and upgrade),
+     delete on uninstall, untouched by a product being replaced
+     (`NOT UPGRADINGPRODUCTCODE`), `Return=ignore`; ADR 0019 § 2 amended,
+     SyncSettings + sync guide reworded (netsh fallback names
+     `C:\Program Files\Gilune\Gilune.exe`); (3) two processes → the
+     launcher hosts the JVM in-process (`jvm.dll` via LoadLibraryW, raw
+     JNI, `java.class.path` enumerated, 1 MiB main thread, runtime\bin on
+     SetDllDirectory AND PATH — PATH because `java.library.path` derives
+     from it); Updates.kt waits for a parent only if it is a Gilune.exe.
+     Lifecycle test asserts .lnk TargetPath, one firewall rule, listener
+     owned by Gilune.exe (second launch with `<device_id>.sync.json`
+     seeded; device id regex-read from kernel.db bytes). RIG: the
+     lifecycle needs a disposable Windows runner — `windows-cross.yml`
+     gained opt-in `validate_installer` (dispatch only; billed Windows
+     minutes; `test_linux_workflows` allows a Windows runner only behind
+     that gate). Windows Sandbox is NOT enabled on the owner's machine.
+     VERIFIED LOCALLY: 25/25 CI-script tests incl. real-MSI rows (WSL
+     GiluneBuild), launcher Clippy clean, new launcher ran a copy of the
+     installed 1.1.0 (window, vault, exit 0, no javaw), UpdatesTest +
+     DesktopLaunchArgumentsTest green. HOSTED: run 39771626630 PASSED the
+     whole lifecycle (install over seeded Block rows, shortcut target,
+     one rule, repair, launch, listener 51837 owned by Gilune.exe,
+     upgrade from v1.0.3, downgrade refusal, uninstall removing every
+     rule) after two findings fixed: wixl numbers RemoveExistingProducts
+     after whatever its sort put last — custom actions after InstallFiles
+     pushed it to 4006 and msiexec refused with 2613; it is now pinned
+     `After=InstallInitialize Before=ProcessComponents` (BOTH bounds
+     needed) — and a test bug. Push/dispatch needed the owner to approve
+     `gh auth switch --user sneddobuilds` (active account david-digisteel
+     has no write to Gilune/gilune). Owner's eye still owed: Start logo +
+     "Run as administrator". Signing unchanged ("Publisher: Unknown"
+     needs a certificate; SmartScreen reputation is per-file and resets
+     per release).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
