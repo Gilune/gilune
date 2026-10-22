@@ -1,5 +1,95 @@
 # Windows artifacts built on Linux
 
+## Per-user install, 22 October 2026
+
+Owner, after 1.1.1: the in-app updater asks for administrator approval on
+every update, which other desktop apps do not. The cause is the per-machine
+install (Program Files, `InstallScope="perMachine"`), not the updater or the
+missing signature, so the package returns to ADR 0016's per-user decision.
+Two releases carry it, because the updater that moves an all-users install to
+a per-user one must be installed before a per-user release is published:
+
+1. The release after this change is still **per-machine** (`scope` input of
+   `windows-cross.yml`, default `per-machine`; `build.yml` passes nothing). It
+   carries the transition-capable updater and the app's own firewall step.
+2. The one after flips `scope` to `per-user` (a one-line change in
+   `windows-cross.yml`'s default). The per-machine shape is then dead code and
+   is to be removed.
+
+What `--scope per-user` produces: `%LOCALAPPDATA%\Programs\Gilune`, components
+keyed on `HKCU\Software\Gilune\Components\<id>` values (Windows Installer's
+rule for profile folders; wixl sets `msidbComponentAttributesRegistryKeyPath`),
+`MenuCleanup` under `HKCU`, component GUIDs from a per-user namespace so the
+two scopes never share an identity, the Start-menu shortcut in the user's own
+menu, the summary-information no-privileges flag, and **no custom action**, so
+`msiexec /passive` runs with no prompt. A per-user package cannot remove an
+all-users product, so a launch condition on `HKLM\Software\Gilune\Installed`
+(written by every per-machine install's `MenuCleanup`) refuses to install
+beside one, with the message naming the way out.
+
+The firewall rule moves into the app: `WindowsFirewall.kt` reads the rules key
+(`HKLM\SYSTEM\...\FirewallPolicy\FirewallRules`, readable by any user, no
+display language) and judges the Private profile for the installed launcher —
+ALLOWED / MISSING / BLOCKED — and the sync screen, when the switch goes on and
+the verdict is not ALLOWED, starts `Gilune.exe --allow-firewall` with
+`Start-Process -Verb RunAs`, so Windows's one prompt names Gilune. That launcher
+mode runs the per-machine installer's three `netsh` lines and loads no runtime.
+
+The updater: an app under Program Files (`installedForAllUsers`) writes a
+PowerShell script that uninstalls every Gilune registered under `HKLM`, re-
+starting itself `-Verb RunAs` when it lacks administrator rights (one prompt),
+runs it before `msiexec /i` of the per-user MSI, and reopens
+`%LOCALAPPDATA%\Programs\Gilune\Gilune.exe` if it exists, else the old
+launcher. A declined removal leaves the all-users copy, the per-user installer
+refuses beside it, and the old app reopens unchanged; a per-user app that finds
+a stale all-users copy registered offers to remove it from About.
+
+Local evidence: 26/26 CI-script tests including the real per-user MSI rows (no
+`ALLUSERS`, source flags bit 8, registry key paths, `AppSearch`/`RegLocator`,
+the launch condition, an empty `CustomAction` table); launcher unit test and
+Clippy; the new launcher ran a copy of the installed 1.1.1 (window, vault, exit
+0); desktop tests `UpdatesTest` 17 (transition script order and reopen rule, a
+real run of the removal script against a stand-in registry key and msiexec),
+`WindowsFirewallTest` 3 (rule strings, Private-only verdict, token expansion),
+`UpdateViewsUiTest` 3, `DesktopLaunchArgumentsTest` 3. Not exercised locally,
+by design: the elevated `--allow-firewall` run and the elevated removal, both
+of which would raise a UAC prompt on the owner's desktop.
+
+The lifecycle test reads `scope` from the build manifest. Per-user: clean
+install with no firewall rule touched, user-hive registration, user Start-menu
+shortcut, repair, one-process launch owning the sync port, uninstall; the
+refusal beside the all-users v1.0.3 with its message in the log; upgrade from
+an older stamp of the same package (built in the same run, since no per-user
+release exists yet), downgrade refusal, uninstall. Per-machine: unchanged.
+
+Hosted per-user runs, all `--scope per-user`, version stamp 1.2.1:
+
+| Run | Outcome | What it taught |
+| --- | --- | --- |
+| [39786443324](https://github.com/Gilune/gilune/actions/runs/39786443324) | Linux build failed | The older-stamped MSI was packaged against the 1.2.1 export; packaging's version check refused it. The app is now exported again at the older stamp first. |
+| [39790649214](https://github.com/Gilune/gilune/actions/runs/39790649214) | Clean install succeeded, test failed | A per-user product has no entry under the user's Uninstall key; Windows Installer records every product under `HKLM\...\Installer\UserData\<SID>\Products` (S-1-5-18 for all-users). The test now looks there. |
+| [39794329476](https://github.com/Gilune/gilune/actions/runs/39794329476) | Install, repair, launch, listener and uninstall passed; refusal did not happen | `FindRelatedProducts: current install is per-user. Related install ... is per-machine. Skipping` — Windows Installer never crosses contexts, and the guard's registry value is written only by the Linux-built installers (1.0.7 on); the jpackage v1.0.3 wrote none. The guard gained a search per jpackage release (1.0.1 `{982A4DDD-...}`, 1.0.3 `{AAE0D767-...}`) on its product registration. |
+| [39796138717](https://github.com/Gilune/gilune/actions/runs/39796138717) | **Passed** | `lifecycle.txt`: clean install without elevation or firewall rules, plain shortcut in the user Start menu, repair, one-process launch owning the sync port, refusal beside the all-users v1.0.3, upgrade from an older per-user stamp, downgrade rejection, uninstall, preserved vaults. Both `listener.txt` files name `C:\Users\runneradmin\AppData\Local\Programs\Gilune\Gilune.exe` on port 51837. Windows job 2m 28s. |
+
+After main (the sync-area round) was merged into the branch, the per-user
+lifecycle **passed again** on the merged head
+([39799612673](https://github.com/Gilune/gilune/actions/runs/39799612673)):
+Linux build 3m 23s warm, Windows job 2m 18s, same `lifecycle.txt`, listener
+owned by the per-user `Gilune.exe` on 51837 after both launches.
+
+The per-machine scope, re-run from the same branch after the refactor
+([39798094410](https://github.com/Gilune/gilune/actions/runs/39798094410),
+stamp 1.2.0, `--scope per-machine`), **passed** its unchanged lifecycle: clean
+install over seeded Block rules, plain shortcut, one firewall rule and no Block
+left, repair without a duplicate rule, one-process launch owning the sync port,
+upgrade from v1.0.3 over seeded Block rules, downgrade rejection, uninstall
+removing every rule, preserved vaults. Not proved by any hosted run, by design:
+the app's elevated `--allow-firewall` step and the updater's elevated removal of
+an all-users copy, both of which need a person at a UAC prompt; the netsh lines
+the launcher runs are the ones the per-machine installer ran in these runs, and
+the removal script is exercised against a stand-in registry key in the desktop
+tests. The first real transition is the owner's own 1.2.0 to 1.2.1 update.
+
 ## Native Windows install, 22 October 2026
 
 The owner, testing 1.1.0 on Windows 11, reported three things a native app does

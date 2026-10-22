@@ -286,6 +286,74 @@ class UpdatesTest {
         assertEquals("reopened", lines[1], "Gilune comes back whatever the installer answered")
     }
 
+    @Test fun anAllUsersInstallIsKnownByItsPlace() {
+        val env = mapOf(
+            "ProgramFiles" to """C:\Program Files""",
+            "ProgramW6432" to """C:\Program Files""",
+            "LOCALAPPDATA" to """C:\Users\Pat\AppData\Local""",
+        )
+        assertTrue(installedForAllUsers(File("""C:\Program Files\Gilune\Gilune.exe""")) { env[it] })
+        assertTrue(installedForAllUsers(File("""c:\program files\gilune\GILUNE.EXE""")) { env[it] })
+        assertFalse(installedForAllUsers(File("""C:\Users\Pat\AppData\Local\Programs\Gilune\Gilune.exe""")) { env[it] })
+        assertFalse(installedForAllUsers(File("""C:\Program Filesx\Gilune\Gilune.exe""")) { env[it] })
+        assertEquals(File("""C:\Users\Pat\AppData\Local\Programs\Gilune\Gilune.exe"""), perUserLauncher { env[it] })
+        assertNull(perUserLauncher { null })
+    }
+
+    @Test fun theTransitionRemovesTheAllUsersCopyFirstAndReopensWhicheverLauncherExists() {
+        val remove = File(temp, "remove.ps1")
+        val newExe = File(temp, "Programs/Gilune/Gilune.exe")
+        val old = File(temp, "old/Gilune.exe")
+        val msi = File(temp, "Gilune-1.2.1.msi")
+        val script = installScript(msi, old, emptyList(), File(temp, "l"), transition = Transition(remove, newExe))
+        val lines = script.lines().filter { it.isNotBlank() }
+        val remover = lines.indexOfFirst { "powershell.exe" in it && remove.absolutePath in it }
+        val installer = lines.indexOfFirst { it.startsWith("call") && "/i \"${msi.absolutePath}\"" in it }
+        assertTrue(remover in 1 until installer, "the all-users copy goes before the per-user install:\n$script")
+        assertTrue(lines.last().startsWith("if exist \"${newExe.absolutePath}\" (start \"\" /b \"${newExe.absolutePath}\")"), lines.last())
+        assertTrue("else (start \"\" /b \"${old.absolutePath}\")" in lines.last(), "the old app reopens if the new one is not there")
+        assertFalse("powershell" in installScript(msi, old, emptyList(), File(temp, "l")), "a per-user install needs no removal step")
+    }
+
+    @Test fun theRemovalScriptUninstallsEveryGiluneRegisteredForAllUsers() {
+        if (!System.getProperty("os.name").startsWith("Windows")) return
+        val dir = File(temp, "remove").apply { mkdirs() }
+        val record = File(dir, "record.txt")
+        val stub = File(dir, "stub-msiexec.cmd").apply {
+            writeText("@echo off\r\necho msiexec %* >> \"${record.absolutePath}\"\r\nexit /b 0\r\n")
+        }
+        // A stand-in for the all-users Uninstall key, in this user's hive.
+        val key = """HKCU\Software\GiluneTest\Uninstall-${System.nanoTime()}"""
+        fun reg(vararg args: String) = ProcessBuilder("reg", *args)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor()
+        try {
+            assertEquals(0, reg("add", """$key\{AAAA-1}""", "/v", "DisplayName", "/d", "Gilune", "/f"))
+            assertEquals(0, reg("add", """$key\{BBBB-2}""", "/v", "DisplayName", "/d", "Other", "/f"))
+            val script = File(dir, "remove.ps1").apply {
+                writeText(
+                    removeAllUsersScript(
+                        File(dir, "remove.log"), msiexec = stub.absolutePath,
+                        uninstallKey = key.replaceFirst("HKCU\\", "HKCU:\\"), elevate = false,
+                    ).replace("\n", "\r\n"),
+                )
+            }
+            val run = ProcessBuilder(
+                "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath,
+            ).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+            assertTrue(run.waitFor(60, TimeUnit.SECONDS), "the script finishes")
+            assertEquals(0, run.exitValue())
+            val lines = record.readLines().map { it.trim() }
+            assertEquals(1, lines.size, "only the Gilune product is removed: $lines")
+            assertTrue(lines[0].startsWith("msiexec /x {AAAA-1} /passive /norestart /l*v"), lines[0])
+            // With elevation left in, a run without administrator rights asks
+            // Windows for them, once, by starting itself again.
+            val real = removeAllUsersScript(File(dir, "l"))
+            assertTrue("-Verb RunAs" in real && "\$PSCommandPath" in real && ALL_USERS_UNINSTALL_KEY in real, real)
+        } finally {
+            reg("delete", key, "/f")
+        }
+    }
+
     @Test fun miniJsonReadsWhatGitHubSends() {
         val parsed = MiniJson.parse("""{"a":[1,-2.5e1,true,false,null,"x\"y\\zé\n"],"b":{}}""") as Map<*, *>
         assertEquals(listOf(1L, -25.0, true, false, null, "x\"y\\zé\n"), parsed["a"])
