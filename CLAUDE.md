@@ -1519,11 +1519,18 @@ gates promises) are ratified. **Next: application-level engineering — see
      VERIFIED LOCALLY: 25/25 CI-script tests incl. real-MSI rows (WSL
      GiluneBuild), launcher Clippy clean, new launcher ran a copy of the
      installed 1.1.0 (window, vault, exit 0, no javaw), UpdatesTest +
-     DesktopLaunchArgumentsTest green. NOT YET: the hosted run — the
-     session's active gh account (david-digisteel) cannot push to
-     Gilune/gilune; the owner account sneddobuilds is also logged into gh
-     (`gh auth switch --user sneddobuilds`). First hosted run to be
-     recorded in the build doc. Signing unchanged ("Publisher: Unknown"
+     DesktopLaunchArgumentsTest green. HOSTED: run 39771626630 PASSED the
+     whole lifecycle (install over seeded Block rows, shortcut target,
+     one rule, repair, launch, listener 51837 owned by Gilune.exe,
+     upgrade from v1.0.3, downgrade refusal, uninstall removing every
+     rule) after two findings fixed: wixl numbers RemoveExistingProducts
+     after whatever its sort put last — custom actions after InstallFiles
+     pushed it to 4006 and msiexec refused with 2613; it is now pinned
+     `After=InstallInitialize Before=ProcessComponents` (BOTH bounds
+     needed) — and a test bug. Push/dispatch needed the owner to approve
+     `gh auth switch --user sneddobuilds` (active account david-digisteel
+     has no write to Gilune/gilune). Owner's eye still owed: Start logo +
+     "Run as administrator". Signing unchanged ("Publisher: Unknown"
      needs a certificate; SmartScreen reputation is per-file and resets
      per release).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
