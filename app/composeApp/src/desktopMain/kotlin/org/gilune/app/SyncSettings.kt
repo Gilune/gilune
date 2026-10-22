@@ -135,15 +135,16 @@ internal fun SyncSection(state: GiluneState) {
     }
     // Meant to be on, and not listening. The switch is remembered across
     // restarts, so this is the state where a machine came back up and
-    // could not take its port — busy, or a firewall that said no. Showing
-    // the switch quietly off would be the wrong answer twice: it hides a
-    // fault, and it invites a person to flip a switch that is already
-    // where they left it.
+    // could not take its port, because another program holds it. (A
+    // firewall never makes a bind fail; it only drops what arrives.)
+    // Showing the switch quietly off would be the wrong answer twice: it
+    // hides a fault, and it invites a person to flip a switch that is
+    // already where they left it.
     if (status.wanted && !status.enabled) {
         Text(
             "Sync is switched on, but this machine could not start listening — usually " +
-                "another program already has the port, or Windows blocked it. Turn the " +
-                "switch off and on again to retry.",
+                "another program already has the port. Turn the switch off and on again " +
+                "to retry.",
             fontSize = 12.sp,
             lineHeight = 18.sp,
             color = colours.error,
@@ -177,24 +178,24 @@ internal fun SyncSection(state: GiluneState) {
     publicNetworkWarning(publicNets)?.let { warning ->
         Text(warning, fontSize = 12.sp, lineHeight = 18.sp, color = colours.error)
     }
-    // The firewall paragraph is § 2 in user words. Three things it has
-    // to carry, and each was a decision: the prompt is caused by this
-    // switch and by nothing else, so it appears the first time and never
-    // again; Private is the profile this is for and Public is the one it
-    // is not; and a person without administrator rights is told what
-    // happened rather than left with a switch that silently does
-    // nothing. The `netsh` line itself belongs in the guide, not here —
-    // a settings screen is no place for a command to be mistyped from.
+    // The firewall paragraph is § 2 in user words. The Windows installer
+    // adds the firewall rule itself — Private profile only, removed at
+    // uninstall — so the paragraph's job changed: say that the port opens
+    // here and nowhere else; say that no prompt is expected and that a
+    // non-administrator can use sync; and say what a prompt means (the
+    // install did not add the rule) and what to tick if it comes. The
+    // `netsh` line itself belongs in the guide, not here — a settings
+    // screen is no place for a command to be mistyped from.
     Text(
         "Switching this on is what opens a port on this machine, and nothing else " +
-            "does — capture, notes and everything else work with it off. The first " +
-            "time you turn it on, and only that first time, Windows asks whether to " +
-            "allow Gilune through the firewall: tick Private networks and leave " +
-            "Public unticked, so this device answers on your own network and not on " +
-            "a café's. If you are not an administrator on this machine Windows will " +
-            "simply say it was blocked — a supported state rather than a fault. " +
-            "Someone with administrator rights can add the rule once, and the user " +
-            "guide has the exact command.",
+            "does — capture, notes and everything else work with it off. Installing " +
+            "Gilune already allowed it through Windows Firewall for private networks, " +
+            "so no prompt is expected and you need not be an administrator. If Windows " +
+            "does ask, the install did not add that rule: tick Private networks and " +
+            "leave Public unticked, so this device answers on your own network and not " +
+            "on a café's. Without administrator rights Windows will say it was blocked " +
+            "instead of asking; someone with those rights can add the rule once, and " +
+            "the user guide has the exact command.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,

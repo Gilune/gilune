@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import xml.etree.ElementTree as ET
 
 spec = importlib.util.spec_from_file_location("windows_package", Path(__file__).with_name("package-windows-linux.py"))
@@ -47,6 +48,92 @@ class WindowsPackageTest(unittest.TestCase):
             self.assertEqual(len(second), len(set(second.values())))
             self.assertEqual(package.UPGRADE_CODE, tree.find("w:Product", NS).attrib["UpgradeCode"])
             self.assertIsNotNone(tree.find(".//w:MajorUpgrade", NS))
+
+    def test_start_menu_shortcut_targets_the_installed_launcher_itself(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "Gilune"
+            bundle.mkdir()
+            for name in ("Gilune.exe", "gilune.ico", "program.jar"):
+                (bundle / name).write_text("fixture")
+            path = root / "installer.wxs"
+            # The fixture launcher is not a PE file; the version reader is
+            # covered by the real-MSI regression below.
+            with unittest.mock.patch.object(package, "file_version", lambda _path: None):
+                package.write_wix(bundle, path, "1.0.7")
+            tree = ET.parse(path)
+            shortcuts = tree.findall(".//w:Shortcut", NS)
+            self.assertEqual(1, len(shortcuts))
+            shortcut = shortcuts[0]
+            launcher = [f for f in tree.findall(".//w:File", NS) if f.attrib["Name"] == "Gilune.exe"]
+            self.assertEqual(1, len(launcher))
+            # wixl writes the feature as the target when none is given, which
+            # is an advertised shortcut: no logo in Start search and no "Run as
+            # administrator". The target names the installed file instead.
+            self.assertEqual("[#" + launcher[0].attrib["Id"] + "]", shortcut.attrib["Target"])
+            self.assertNotIn("Advertise", shortcut.attrib)
+            self.assertEqual("INSTALLDIR", shortcut.attrib["WorkingDirectory"])
+            icon = tree.find(".//w:Icon", NS)
+            self.assertTrue(icon.attrib["Id"].endswith(".ico"), icon.attrib)
+            self.assertEqual(icon.attrib["Id"], shortcut.attrib["Icon"])
+            arp = [p for p in tree.findall(".//w:Property", NS) if p.attrib["Id"] == "ARPPRODUCTICON"]
+            self.assertEqual(icon.attrib["Id"], arp[0].attrib["Value"])
+
+    def test_firewall_rule_is_added_for_private_networks_and_removed_at_uninstall(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "Gilune"
+            bundle.mkdir()
+            (bundle / "gilune.ico").write_text("fixture")
+            path = root / "installer.wxs"
+            package.write_wix(bundle, path, "1.0.7")
+            tree = ET.parse(path)
+            actions = {a.attrib["Id"]: a.attrib for a in tree.findall(".//w:CustomAction", NS)}
+            self.assertEqual({"GiluneNetshPath", "GiluneFirewallRemove", "GiluneFirewallRemoveJavaw",
+                              "GiluneFirewallRemoveLauncher", "GiluneFirewallRollback",
+                              "GiluneFirewallAdd"}, set(actions))
+            # The netsh path is a property formatted by an immediate action:
+            # wixl 0.103 has no Directory-sourced EXE custom actions.
+            self.assertEqual("[System64Folder]netsh.exe", actions["GiluneNetshPath"]["Value"])
+            # Rules Windows made for either program (a Block from a dismissed
+            # prompt on 1.1.0 beats any Allow) go before the Allow is added.
+            self.assertEqual(r'advfirewall firewall delete rule name=all program="[INSTALLDIR]runtime\bin\javaw.exe"',
+                             actions["GiluneFirewallRemoveJavaw"]["ExeCommand"])
+            self.assertEqual('advfirewall firewall delete rule name=all program="[INSTALLDIR]Gilune.exe"',
+                             actions["GiluneFirewallRemoveLauncher"]["ExeCommand"])
+            for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher",
+                         "GiluneFirewallRollback", "GiluneFirewallAdd"):
+                action = actions[name]
+                self.assertEqual(package.NETSH_PROPERTY, action["Property"])
+                self.assertEqual("no", action["Impersonate"], "netsh needs the system, not the user")
+                self.assertEqual("ignore", action["Return"], "a firewall that will not take a rule must not fail the install")
+                self.assertIn("firewall", action["ExeCommand"])
+            add = actions["GiluneFirewallAdd"]["ExeCommand"]
+            self.assertIn('name="Gilune"', add)
+            self.assertIn("profile=private", add)
+            self.assertNotIn("public", add)
+            self.assertIn("dir=in action=allow enable=yes", add)
+            self.assertIn('program="[INSTALLDIR]Gilune.exe"', add)
+            self.assertEqual("deferred", actions["GiluneFirewallAdd"]["Execute"])
+            for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
+                self.assertEqual("deferred", actions[name]["Execute"])
+            self.assertEqual("rollback", actions["GiluneFirewallRollback"]["Execute"])
+            self.assertEqual(actions["GiluneFirewallRemove"]["ExeCommand"], actions["GiluneFirewallRollback"]["ExeCommand"])
+            self.assertIn('delete rule name="Gilune"', actions["GiluneFirewallRemove"]["ExeCommand"])
+            steps = {c.attrib["Action"]: c for c in tree.findall(".//w:InstallExecuteSequence/w:Custom", NS)}
+            self.assertEqual("InstallFiles", steps["GiluneFirewallRemove"].attrib["After"])
+            self.assertEqual("GiluneFirewallRemove", steps["GiluneFirewallRemoveJavaw"].attrib["After"])
+            self.assertEqual("GiluneFirewallRemoveJavaw", steps["GiluneFirewallRemoveLauncher"].attrib["After"])
+            self.assertEqual("GiluneFirewallRemoveLauncher", steps["GiluneFirewallRollback"].attrib["After"])
+            self.assertEqual("GiluneFirewallRollback", steps["GiluneFirewallAdd"].attrib["After"])
+            # Removal leaves the rules alone while a newer product replaces this
+            # one, whatever order RemoveExistingProducts runs in; adding never
+            # happens during removal.
+            for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
+                self.assertEqual("NOT UPGRADINGPRODUCTCODE", steps[name].text)
+            self.assertEqual('NOT REMOVE~="ALL"', steps["GiluneFirewallAdd"].text)
+            self.assertEqual('NOT REMOVE~="ALL"', steps["GiluneFirewallRollback"].text)
+            self.assertIsNone(steps["GiluneNetshPath"].text)
 
     def test_launcher_resource_carries_the_installer_version(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -125,6 +212,49 @@ class WindowsFileVersionTest(unittest.TestCase):
             self.assertEqual("", sequence["LaunchConditions"]["Condition"])
             self.assertLess(int(sequence["LaunchConditions"]["Sequence"]),
                             int(sequence["InstallInitialize"]["Sequence"]))
+            # A plain shortcut: the Shortcut table's target is the file, not
+            # the feature wixl would otherwise write (an advertised shortcut).
+            shortcuts = table("Shortcut")
+            self.assertEqual(1, len(shortcuts))
+            self.assertEqual("[#" + files["Gilune.exe"]["File"] + "]", shortcuts[0]["Target"])
+            self.assertEqual(package.ICON_ID, shortcuts[0]["Icon_"])
+            self.assertEqual({package.ICON_ID}, {row["Name"] for row in table("Icon")})
+            # Firewall custom actions as Windows Installer will read them:
+            # type 51 sets the property; type 50 runs the property's exe,
+            # deferred (0x400) without impersonation (0x800), continuing on
+            # failure (0x40); rollback adds 0x100.
+            custom = {row["Action"]: row for row in table("CustomAction")}
+            self.assertEqual("51", custom["GiluneNetshPath"]["Type"])
+            self.assertEqual(package.NETSH_PROPERTY, custom["GiluneNetshPath"]["Source"])
+            self.assertEqual(str(50 | 0x400 | 0x800 | 0x40), custom["GiluneFirewallAdd"]["Type"])
+            for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
+                self.assertEqual(str(50 | 0x400 | 0x800 | 0x40), custom[name]["Type"])
+            self.assertEqual(str(50 | 0x400 | 0x100 | 0x800 | 0x40), custom["GiluneFirewallRollback"]["Type"])
+            for name in ("GiluneFirewallAdd", "GiluneFirewallRemove", "GiluneFirewallRemoveJavaw",
+                         "GiluneFirewallRemoveLauncher", "GiluneFirewallRollback"):
+                self.assertEqual(package.NETSH_PROPERTY, custom[name]["Source"])
+            self.assertEqual(package.FIREWALL_ADD, custom["GiluneFirewallAdd"]["Target"])
+            self.assertEqual(package.FIREWALL_DELETE, custom["GiluneFirewallRemove"]["Target"])
+            self.assertEqual(r'advfirewall firewall delete rule name=all program="[INSTALLDIR]runtime\bin\javaw.exe"',
+                             custom["GiluneFirewallRemoveJavaw"]["Target"])
+            # Scheduled inside the transaction, in the order deletes, rollback,
+            # add, each with its condition.
+            order = [int(sequence[a]["Sequence"]) for a in (
+                "InstallInitialize", "InstallFiles", "GiluneFirewallRemove", "GiluneFirewallRemoveJavaw",
+                "GiluneFirewallRemoveLauncher", "GiluneFirewallRollback", "GiluneFirewallAdd", "InstallFinalize")]
+            self.assertEqual(order, sorted(order))
+            self.assertEqual(len(order), len(set(order)))
+            self.assertLess(int(sequence["GiluneNetshPath"]["Sequence"]), int(sequence["InstallInitialize"]["Sequence"]))
+            # RemoveExistingProducts sits immediately after InstallInitialize: a
+            # documented slot, inside the transaction. Left to wixl it followed
+            # the custom actions and Windows Installer refused the package.
+            self.assertEqual(int(sequence["InstallInitialize"]["Sequence"]) + 1,
+                             int(sequence["RemoveExistingProducts"]["Sequence"]))
+            self.assertLess(int(sequence["RemoveExistingProducts"]["Sequence"]), int(sequence["InstallFiles"]["Sequence"]))
+            for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
+                self.assertEqual("NOT UPGRADINGPRODUCTCODE", sequence[name]["Condition"])
+            self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallAdd"]["Condition"])
+            self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallRollback"]["Condition"])
 
 
 if __name__ == "__main__":

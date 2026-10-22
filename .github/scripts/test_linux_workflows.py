@@ -16,12 +16,26 @@ BASH = ("C:/Program Files/Git/bin/bash.exe" if os.name == "nt" else shutil.which
 
 class LinuxWorkflowTest(unittest.TestCase):
     def test_every_hosted_runner_is_linux(self):
+        # One exception: the installer lifecycle needs a disposable Windows
+        # machine, and runs only when a manual dispatch asks for it. A job
+        # on any other runner must be gated on that input, so pushes and
+        # releases never start a Windows runner.
         for workflow in WORKFLOWS.glob("*.yml"):
             with self.subTest(workflow=workflow.name):
-                runners = re.findall(r"^\s+runs-on:\s*(.+)$", workflow.read_text(encoding="utf-8"), re.MULTILINE)
+                text = workflow.read_text(encoding="utf-8")
+                jobs = text.split("\njobs:\n", 1)[1]
+                blocks = re.split(r"^  (?=[A-Za-z0-9_-]+:\s*$)", jobs, flags=re.MULTILINE)
+                runners = re.findall(r"^\s+runs-on:\s*(.+)$", text, re.MULTILINE)
                 self.assertTrue(runners, "Expected at least one explicit hosted runner")
-                for runner in runners:
-                    self.assertRegex(runner.strip("'\""), r"^ubuntu-[a-z0-9.-]+$")
+                for block in blocks:
+                    for runner in re.findall(r"^\s+runs-on:\s*(.+)$", block, re.MULTILINE):
+                        runner = runner.strip("'\"")
+                        if re.fullmatch(r"ubuntu-[a-z0-9.-]+", runner):
+                            continue
+                        self.assertRegex(runner, r"^windows-[a-z0-9.-]+$")
+                        self.assertRegex(block, r"(?m)^    if:.*inputs\.validate_installer")
+                        self.assertIn("validate_installer:\n", text.split("\njobs:\n", 1)[0])
+                        self.assertIn("default: false", text.split("\njobs:\n", 1)[0])
 
     @unittest.skipUnless(BASH, "bash is needed for workflow version decisions")
     def test_actual_version_step_handles_manual_defaults_branches_and_tags(self):

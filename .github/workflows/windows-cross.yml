@@ -1,13 +1,19 @@
 name: Windows build on Linux
 
 # Reused by the release pipeline and the explicit MSI-only build. Compilation,
-# packaging and MSI metadata checks all run on Linux; no Windows runner is used.
+# packaging and MSI metadata checks all run on Linux. A Windows runner starts
+# only when a manual dispatch asks for the installer lifecycle (billed at
+# Windows rates; a few minutes), never from a push or a release.
 on:
   workflow_call:
     inputs:
       version:
         required: true
         type: string
+      validate_installer:
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       version:
@@ -15,6 +21,11 @@ on:
         required: true
         default: '1.0.7'
         type: string
+      validate_installer:
+        description: 'Also install, repair, launch, upgrade and uninstall the MSI on a disposable Windows runner'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -32,7 +43,11 @@ jobs:
   build:
     name: Compile and package Windows on Linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    # A release tag starts with no cache of its own (caches are per ref, and
+    # main never builds packages), so its first Windows build is cold: the
+    # v1.1.1 tag run was cancelled at 35 minutes with the kernel built and the
+    # application still packaging. Warm builds take about 5 minutes.
+    timeout-minutes: 60
     env:
       VERSION: ${{ inputs.version }}
       LIBCLANG_PATH: /usr/lib/llvm-19/lib
@@ -114,4 +129,44 @@ jobs:
           name: bindings-desktop-windows
           path: app/build/windows-cross/native/bindings
           if-no-files-found: error
+          retention-days: 7
+      # The payload manifest the installer lifecycle verifies against. Not a
+      # gilune-* artifact, so the release job never collects it.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-manifest
+          path: app/build/windows-cross/package/Gilune/build-manifest.json
+          if-no-files-found: error
+          retention-days: 7
+
+  installer:
+    name: Installer lifecycle on a disposable Windows runner
+    needs: build
+    if: ${{ inputs.validate_installer }}
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: gilune-windows-msi
+          path: artifacts/package
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-build-manifest
+          path: artifacts/package/Gilune
+      - name: Previous published release to upgrade from
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release download v1.0.3 --pattern Gilune-1.0.3.msi --dir artifacts/previous
+      - name: Install, repair, launch, upgrade, refuse a downgrade, uninstall
+        shell: pwsh
+        run: .github/scripts/test-windows-installer.ps1 -Artifacts artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer-results
+          path: artifacts/results
+          if-no-files-found: ignore
           retention-days: 7
