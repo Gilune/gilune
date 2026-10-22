@@ -97,6 +97,15 @@ with version stamp 1.1.1 (no release published):
 | [39769146019](https://github.com/Gilune/gilune/actions/runs/39769146019) | 17m 09s | 1m 00s | Clean install over seeded Block rules, repair and first launch passed; the test then looked up the port's owner after closing the app (test bug, fixed) |
 | [39771626630](https://github.com/Gilune/gilune/actions/runs/39771626630) | 4m 10s (warm) | 1m 26s | **Passed** the whole lifecycle |
 
+The merge to main was pushed together with tag `v1.1.1`, so the main run executed
+only the build plan and the tag run
+[39773115720](https://github.com/Gilune/gilune/actions/runs/39773115720) owned
+the build. Linux checks and Android passed; the Windows job was **cancelled at
+its 35-minute limit**: a tag has no cache of its own (caches are per ref and main
+never builds packages), so a release's first Windows build is cold, and this one
+ran over. The cache was saved on cancellation, the failed jobs were re-run warm,
+and the job's limit is now 60 minutes.
+
 `lifecycle.txt` from the passing run: clean install over seeded Block rules, plain
 shortcut, one firewall rule and no Block left, repair without a duplicate rule,
 one-process launch owning the sync port, upgrade from v1.0.3 over seeded Block

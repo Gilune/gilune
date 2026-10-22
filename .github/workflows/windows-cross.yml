@@ -43,7 +43,11 @@ jobs:
   build:
     name: Compile and package Windows on Linux
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    # A release tag starts with no cache of its own (caches are per ref, and
+    # main never builds packages), so its first Windows build is cold: the
+    # v1.1.1 tag run was cancelled at 35 minutes with the kernel built and the
+    # application still packaging. Warm builds take about 5 minutes.
+    timeout-minutes: 60
     env:
       VERSION: ${{ inputs.version }}
       LIBCLANG_PATH: /usr/lib/llvm-19/lib
