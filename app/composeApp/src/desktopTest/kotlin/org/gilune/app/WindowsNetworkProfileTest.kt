@@ -78,8 +78,9 @@ class WindowsNetworkProfileTest {
 
     @Test
     fun onlyRulesNamingThisAppsOwnProgramsCountWhateverTheirCaseOrTokens() {
-        val runtime = java.io.File("C:\\Program Files\\Gilune\\runtime")
-        val ours = programsOfThisApp(runtime)
+        // Text, not a File: on Linux a File reads the backslashes as
+        // letters, and this matcher only ever meets Windows paths.
+        val ours = programsOfThisApp("C:\\Program Files\\Gilune\\runtime\\")
         assertTrue("c:\\program files\\gilune\\runtime\\bin\\javaw.exe" in ours, "$ours")
         assertTrue("c:\\program files\\gilune\\gilune.exe" in ours, "the launcher beside the runtime: $ours")
 

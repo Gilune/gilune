@@ -101,18 +101,20 @@ fun firewallRulesForThisApp(): List<FirewallRule> {
     val runtime = java.io.File(System.getProperty("java.home").orEmpty())
     val root = runtime.parentFile ?: return emptyList()
     val output = runCatching { netFirewallRulesUnder(root) }.getOrDefault("")
-    return rulesForPrograms(parseFirewallRules(output), programsOfThisApp(runtime))
+    return rulesForPrograms(parseFirewallRules(output), programsOfThisApp(runtime.absolutePath))
 }
 
 /// The programs a rule could name and mean this app: the runtime's two
-/// launchers and the exe that starts it. Lower-cased absolute paths.
-internal fun programsOfThisApp(runtime: java.io.File): Set<String> {
-    val root = runtime.parentFile ?: runtime
-    return setOf(
-        java.io.File(runtime, "bin\\javaw.exe"),
-        java.io.File(runtime, "bin\\java.exe"),
-        java.io.File(root, "Gilune.exe"),
-    ).map { it.absolutePath.lowercase() }.toSet()
+/// launchers and the exe that starts it. Lower-cased Windows paths, joined
+/// as text: they are compared with what the firewall prints, and a
+/// `java.io.File` on any other OS reads the backslashes as letters (the
+/// Linux runner resolved them under its working directory).
+internal fun programsOfThisApp(runtime: String): Set<String> {
+    val rt = runtime.trimEnd('\\')
+    val root = rt.substringBeforeLast('\\', rt)
+    return setOf("$rt\\bin\\javaw.exe", "$rt\\bin\\java.exe", "$root\\Gilune.exe")
+        .map { it.lowercase() }
+        .toSet()
 }
 
 /// Rules whose program is one of ours. A rule's program may be written
