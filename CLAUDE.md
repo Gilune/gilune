@@ -1533,6 +1533,31 @@ gates promises) are ratified. **Next: application-level engineering — see
      "Run as administrator". Signing unchanged ("Publisher: Unknown"
      needs a certificate; SmartScreen reputation is per-file and resets
      per release).
+   - **Per-user install (2026-10-22, Fable 5.1, branch
+     claude/per-user-install; evidence in `.github/linux-windows-build.md`
+     § Per-user install).** Owner: the updater's UAC prompt on every update
+     ("Claude's Windows app doesn't ask"). Cause = per-machine MSI, not
+     signing. Package returns to ADR 0016's per-user decision (amendment):
+     `--scope per-user` → `%LOCALAPPDATA%\Programs\Gilune`, HKCU registry
+     keypaths, per-user component namespace, NO custom actions, launch
+     condition refusing to install beside an all-users copy
+     (`HKLM\Software\Gilune\Installed`). TWO-RELEASE SEQUENCE: the next
+     release stays per-machine (`windows-cross.yml` `scope` default) and
+     carries the transition-capable updater; the one after flips the
+     default to per-user; per-machine shape then dead (remove). Firewall
+     rule moves into the app (ADR 0019 amendment): `WindowsFirewall.kt`
+     reads the FirewallRules registry key (any user, no locale), Private-
+     only verdict ALLOWED/MISSING/BLOCKED (a Public Block is what Windows
+     writes when Private alone is ticked — fine); switching sync on with
+     not-ALLOWED starts `Gilune.exe --allow-firewall` via `Start-Process
+     -Verb RunAs` (prompt names Gilune; launcher mode runs the 3 netsh
+     lines, no JVM). Updater: an app under Program Files runs a PowerShell
+     removal (HKLM Gilune products, self-re-launch RunAs) BEFORE the
+     per-user msiexec, reopens the new launcher if present else the old;
+     stale all-users copy → About offers removal. Lifecycle test is
+     scope-aware (manifest `scope`); per-user validation packages an
+     older stamp of itself to upgrade from. Git identity for this repo set
+     --local to sneddobuilds (owner ask). Hosted runs: see the build doc.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
