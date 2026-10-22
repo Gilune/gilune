@@ -77,6 +77,7 @@ import uniffi.gilune_ffi.IntegrityAlert
 import uniffi.gilune_ffi.PairingOffer
 import uniffi.gilune_ffi.PeerInfo
 import uniffi.gilune_ffi.QrMatrix
+import uniffi.gilune_ffi.SyncStage
 import uniffi.gilune_ffi.SyncStatus
 
 /// Big enough to scan from a phone held at arm's length, and no bigger:
@@ -163,6 +164,20 @@ internal fun SyncSection(state: GiluneState) {
             lineHeight = 18.sp,
             color = colours.error,
         )
+    }
+    // Listening, and on a network Windows will not let anybody reach it
+    // on. Asked once per visit while sync is on, off the main thread -
+    // it is a child process - and said in red beside the switch, because
+    // the switch is where a person looks when their other device says
+    // this one would not take a connection. (A Block rule, the other
+    // thing Windows can do to a listening Gilune, is the firewall row's
+    // business above: it reads the rule and offers to fix it.)
+    var publicNets by remember { mutableStateOf<List<String>>(emptyList()) }
+    LaunchedEffect(status.enabled) {
+        publicNets = if (status.enabled) withContext(Dispatchers.IO) { publicNetworks() } else emptyList()
+    }
+    publicNetworkWarning(publicNets)?.let { warning ->
+        Text(warning, fontSize = 12.sp, lineHeight = 18.sp, color = colours.error)
     }
     // The firewall paragraph is § 2 in user words. The rule is Private
     // profile only and the app asks for it, once, with the one prompt
@@ -276,22 +291,88 @@ internal fun SyncSection(state: GiluneState) {
     }
 
     HorizontalDivider(color = colours.outlineVariant)
+    SyncNow(state, status)
+}
+
+/// The button, what it is doing while it runs, and what the last round
+/// came to — all in one place, because the foot-of-window message line is
+/// not where a person looks for why their notebook did not sync (§ 1:
+/// words, not a spinner, and not silence either).
+@Composable
+private fun SyncNow(state: GiluneState, status: SyncStatus) {
+    val colours = MaterialTheme.colorScheme
+    val running = state.syncing.value
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         OutlinedButton(
             onClick = { state.syncDevices() },
-            enabled = status.peers.any { it.state == "paired" },
-        ) { Text("Sync with devices now", fontSize = 12.sp) }
+            enabled = !running && status.peers.any { it.state == "paired" },
+        ) { Text(if (running) "Syncing…" else "Sync with devices now", fontSize = 12.sp) }
         Text(
             "Exchanges changes with every paired device this one has an address for. " +
                 "Different from Sync now on the Vault page, which only re-reads the " +
                 "files in this vault.",
             fontSize = 12.sp,
             lineHeight = 18.sp,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = colours.onSurfaceVariant,
         )
+    }
+    // The stage under way, as the kernel reports it. A device that cannot
+    // be reached costs a connect timeout, a browse and a second dial
+    // before the round has anything final to say, and this line is what
+    // stops that reading as a button that did nothing.
+    if (running) {
+        Text(
+            state.syncProgress.lastOrNull()?.let { progressSentence(it) } ?: "starting…",
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = colours.onSurfaceVariant,
+        )
+    }
+    val round = state.lastSyncRound.value
+    if (round != null && !running) {
+        val anyFailed = round.peers.any { it.stage == SyncStage.FAILED } || round.report.halted.isNotEmpty()
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(colours.surfaceVariant)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(roundHeading(round), style = MaterialTheme.typography.titleSmall, color = colours.onSurfaceVariant)
+            for (outcome in round.peers) {
+                Text(
+                    outcomeSentence(outcome),
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = if (outcome.stage == SyncStage.FAILED) colours.error else colours.onSurface,
+                )
+            }
+            // A stream that stopped *inside* a session is named by the
+            // originating device rather than the peer, and § 8's rule is
+            // that it is said; the standing alert above carries the
+            // long-lived form, this is the round's.
+            for (halt in round.report.halted) {
+                if (round.peers.none { it.stage == SyncStage.FAILED && halt.endsWith(it.reason) }) {
+                    Text(halt, fontSize = 12.sp, lineHeight = 18.sp, color = colours.error)
+                }
+            }
+            if (round.peers.isEmpty() && round.report.halted.isEmpty()) {
+                Text("Nothing to sync with.", fontSize = 12.sp, color = colours.onSurfaceVariant)
+            }
+            if (anyFailed && round.peers.any { it.stage == SyncStage.DONE }) {
+                Text(
+                    "A device that could not be reached is not holding the others up — what " +
+                        "the reachable ones had is here.",
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = colours.onSurfaceVariant,
+                )
+            }
+        }
     }
 }
 
@@ -569,9 +650,10 @@ private fun DevicesOnThisNetwork(state: GiluneState, status: SyncStatus) {
         ) { Text(if (busy) "looking…" else "Look for devices", fontSize = 12.sp) }
         Text(
             if (status.enabled) {
-                "Asks every Gilune on this network to say it is there. Pairing never " +
-                    "needs this — a device you have paired is reached at the address " +
-                    "it gave — so looking happens when you ask and not otherwise."
+                "Asks every Gilune on this network to say it is there. A device that " +
+                    "answers can be paired from its row with the code it is showing — " +
+                    "no address to type. A device you have already paired is reached at " +
+                    "the address it gave, so looking happens when you ask and not otherwise."
             } else {
                 "Turn sync on first — announcing this device and looking for others " +
                     "are the same switch."
@@ -582,7 +664,18 @@ private fun DevicesOnThisNetwork(state: GiluneState, status: SyncStatus) {
         )
     }
 
-    for (found in state.discovered) FoundRow(found)
+    // Which row has its code field open, by fingerprint: one at a time,
+    // because one code is being read off one other screen.
+    var pairingWith by remember { mutableStateOf<String?>(null) }
+    for (found in state.discovered) {
+        FoundRow(
+            state,
+            found,
+            open = pairingWith == found.fingerprint,
+            onOpen = { pairingWith = if (pairingWith == found.fingerprint) null else found.fingerprint },
+            onDone = { pairingWith = null },
+        )
+    }
 
     if (looked && !busy && state.discovered.isEmpty()) {
         Text(
@@ -598,37 +691,92 @@ private fun DevicesOnThisNetwork(state: GiluneState, status: SyncStatus) {
 /// advertisement carried besides an address and a version — the human
 /// name is exchanged inside the encrypted handshake (§ 1), so a row for
 /// a device this one has never paired with cannot say what it is called.
+///
+/// A device that can be paired is paired **from here**: the search just
+/// produced its address, so the row asks for the one thing it cannot know
+/// — the code that device is showing — and dials the address itself.
+/// Copying an address off this row into a field two sections down was
+/// the first thing the owner noticed about this screen.
 @Composable
-private fun FoundRow(found: FoundDevice) {
+private fun FoundRow(
+    state: GiluneState,
+    found: FoundDevice,
+    open: Boolean,
+    onOpen: () -> Unit,
+    onDone: () -> Unit,
+) {
     val colours = MaterialTheme.colorScheme
     val wrong = !found.compatible || found.state == "revoked"
-    Row(
+    val offer = foundDeviceOffer(found.state, found.compatible)
+    var code by remember(found.fingerprint) { mutableStateOf("") }
+    Column(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(colours.surfaceVariant)
             .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Column(Modifier.weight(1f)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    found.fingerprint,
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = colours.onSurface,
+                )
+                Text(
+                    "${found.address} · ${found.state}",
+                    fontSize = 12.sp,
+                    color = colours.onSurfaceVariant,
+                )
+                Text(
+                    foundDeviceNote(found.state, found.compatible),
+                    fontSize = 12.sp,
+                    lineHeight = 18.sp,
+                    color = if (wrong) colours.error else colours.onSurfaceVariant,
+                )
+            }
+            if (offer != null) {
+                Button(onClick = onOpen) { Text(if (open) "Cancel" else offer, fontSize = 12.sp) }
+            }
+        }
+        if (open && offer != null) {
             Text(
-                found.fingerprint,
-                fontSize = 13.sp,
-                fontFamily = FontFamily.Monospace,
-                color = colours.onSurface,
-            )
-            Text(
-                "${found.address} · ${found.state}",
-                fontSize = 12.sp,
-                color = colours.onSurfaceVariant,
-            )
-            Text(
-                foundDeviceNote(found.state, found.compatible),
+                foundPairingHint(found),
                 fontSize = 12.sp,
                 lineHeight = 18.sp,
-                color = if (wrong) colours.error else colours.onSurfaceVariant,
+                color = colours.onSurfaceVariant,
             )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                androidx.compose.material3.OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it.filter { c -> c.isDigit() }.take(6) },
+                    singleLine = true,
+                    placeholder = {
+                        Text("123456", fontSize = 12.sp, color = colours.onSurfaceVariant)
+                    },
+                    modifier = Modifier.width(140.dp),
+                )
+                Button(
+                    onClick = {
+                        // Taken now, before the field is cleared: the
+                        // action runs on another thread a moment later
+                        // (the lesson `EnterACode` records).
+                        val secret = code
+                        code = ""
+                        onDone()
+                        state.pairWithFound(found, secret)
+                    },
+                    enabled = code.length == 6,
+                ) { Text("Pair", fontSize = 12.sp) }
+            }
         }
     }
 }
@@ -642,7 +790,8 @@ private fun EnterACode(state: GiluneState, enabled: Boolean) {
 
     Text("Enter a code from another device", style = MaterialTheme.typography.titleSmall)
     Text(
-        "The other device's Sync settings show both of these while its code is open.",
+        "For a device that Look for devices could not find. The other device's Sync " +
+            "settings show both of these while its code is open.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
@@ -931,9 +1080,9 @@ internal fun discoveryNote(enabled: Boolean, advertising: Boolean, discovery: St
                 "shown here, which is what pairing uses anyway."
     }
 
-/// What a browse found about one device, given that a stranger's row can
-/// offer nothing but the fact. Pairing costs a code whichever way the
-/// device was found (§ 3), so there is no button here to imply otherwise.
+/// What a browse found about one device. Pairing costs a code whichever
+/// way the device was found (§ 3): the row's button (`foundDeviceOffer`)
+/// takes the address off the person's hands, never the code.
 internal fun foundDeviceNote(state: String, compatible: Boolean): String = when {
     !compatible ->
         "That device is running a version of Gilune this one cannot talk to. " +
@@ -946,7 +1095,7 @@ internal fun foundDeviceNote(state: String, compatible: Boolean): String = when 
             "a new pairing rather than an undo."
     else ->
         "Not paired with this one. Start pairing on that device and enter its code " +
-            "below — being visible on a network has never been permission to sync."
+            "here — being visible on a network has never been permission to sync."
 }
 
 /// A browse that found nothing. The honest answer is almost always the

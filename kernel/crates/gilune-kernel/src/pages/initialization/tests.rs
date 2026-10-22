@@ -80,12 +80,19 @@ fn failure_after_one_prepared_page_rolls_back_the_entire_initialization() {
     std::fs::create_dir_all(store.vault().join("Cards")).unwrap();
     std::fs::write(store.vault().join("Cards/two.md"), "unrelated work").unwrap();
     assert!(initialize(&store).is_err());
-    assert_eq!(count(&store, "objects"), 0);
-    assert_eq!(count(&store, "revisions"), 0);
-    assert_eq!(count(&store, "operations"), 0);
+    // The unrelated file was adopted as a note on the way (ADR 0007,
+    // 2026-10-22) — one object, one revision, one operation of its own —
+    // and the initialiser itself left nothing behind.
+    assert_eq!(count(&store, "objects"), 1);
+    assert_eq!(count(&store, "revisions"), 1);
+    assert_eq!(count(&store, "operations"), 1);
     std::fs::remove_file(store.vault().join("Cards/two.md")).unwrap();
+    store.reconcile().unwrap();
+    for (proposal, _) in store.open_proposals().unwrap() {
+        store.resolve_tombstone(&proposal, true).unwrap();
+    }
     assert_eq!(initialize(&store).unwrap()[0].status, "initialized");
-    assert_eq!(count(&store, "objects"), 3);
+    assert_eq!(count(&store, "objects"), 4);
 }
 
 #[test]
@@ -107,21 +114,29 @@ fn existing_or_deleted_catalogue_history_prevents_backfilling_defaults() {
 }
 
 #[test]
-fn unmanaged_exported_definitions_use_scalar_semantics_without_adoption() {
+fn exported_definitions_are_adopted_under_their_own_id_and_type() {
     let (_dir, store, _) = setup();
     enable(&store);
     std::fs::write(store.vault().join("broken.md"), "---\ninvalid: [\n---\n").unwrap();
     assert!(initialize(&store).is_err());
     assert_eq!(count(&store, "objects"), 0);
     std::fs::remove_file(store.vault().join("broken.md")).unwrap();
+    // A file exported from another vault carries an id and a type nobody
+    // here holds: it is adopted under both (ADR 0007, 2026-10-22), so the
+    // card type has history and the initialiser seeds nothing over it.
     let source = "---\ngilune-id: exported-card\ngilune-type: \"org.example.cards/card\" # exported\nname: Custom\n---\n";
     std::fs::write(store.vault().join("custom.md"), source).unwrap();
     assert_eq!(initialize(&store).unwrap()[0].status, "preserved-existing");
-    assert_eq!(count(&store, "objects"), 1); // Only the receipt.
-    assert_eq!(
-        std::fs::read_to_string(store.vault().join("custom.md")).unwrap(),
-        source
-    );
+    assert_eq!(count(&store, "objects"), 2); // The adopted card and the receipt.
+    let adopted: String = store
+        .conn()
+        .query_row("SELECT type_id FROM objects WHERE object_id = 'exported-card'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(adopted, "org.example.cards/card");
+    let rendered = std::fs::read_to_string(store.vault().join("custom.md")).unwrap();
+    assert!(rendered.contains("gilune-id: exported-card\n"), "{rendered}");
+    assert!(rendered.contains("name: Custom\n"), "the person's own key survives: {rendered}");
+    assert!(rendered.contains("# exported"), "and so does their comment: {rendered}");
 }
 
 #[test]
@@ -143,6 +158,10 @@ fn synced_receipts_and_partial_delivery_do_not_reseed_and_offline_runs_surface_c
     }
     assert_eq!(initialize(&b).unwrap()[0].status, "recorded");
     assert_eq!(count(&b, "objects"), 4); // Two seeds, two honest initialization receipts.
+    // Two vaults initialised offline converge (ADR 0007, 2026-10-22): a
+    // seed's id no longer depends on the device, so c's seeds ARE a's
+    // seeds and nothing collides on a path. Receipts stay per device —
+    // they are each device's own evidence — so there are two of those.
     let (_c, c, _) = setup();
     enable(&c);
     initialize(&c).unwrap();
@@ -150,9 +169,9 @@ fn synced_receipts_and_partial_delivery_do_not_reseed_and_offline_runs_surface_c
         c.apply_operation("fixture", op, crate::limits::Limits::DEFAULT)
             .unwrap();
     }
-    assert_eq!(count(&c, "objects"), 6);
-    assert!(c.project().unwrap().held_back > 0);
-    assert!(!c
+    assert_eq!(count(&c, "objects"), 4);
+    assert_eq!(c.project().unwrap().held_back, 0);
+    assert!(c
         .integrity_alerts_of(crate::alerts::VAULT_PROJECTION_PATH_OCCUPIED)
         .unwrap()
         .is_empty());

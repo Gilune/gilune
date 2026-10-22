@@ -12,6 +12,7 @@ import uniffi.gilune_ffi.*
 class ItemSearchTest {
     private fun vault(run: (File,Gilune,PluginExtensions)->Unit) {
         val root=Files.createTempDirectory("gilune-item-search").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         Gilune.open(root.absolutePath).use { kernel ->
             val registry=PluginExtensions(listOf(tasksExtensions(),peopleExtensions()))
             registry.registerPlugins(kernel);registry.registerIndexers(kernel)
@@ -84,6 +85,7 @@ class ItemSearchTest {
 
     @Test fun unrelatedScopedTypeConsumesPeopleOperatorsWithoutTaskRegistration() {
         val root=Files.createTempDirectory("gilune-independent-items").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         val id="fixture.outline"
         val plugin=BundledPluginExtensions(
             PluginDeclaration(id,"Outline","domain","bundled",false,null,null,emptyList(),emptyList(),listOf(PluginContribution(Slots.SEARCH_TYPES,"outline","Outline"))),

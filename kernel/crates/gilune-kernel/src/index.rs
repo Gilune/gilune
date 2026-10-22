@@ -810,6 +810,14 @@ impl Notes {
         rel_path: &str,
     ) -> std::result::Result<Option<&NoteText>, String> {
         if !self.0.contains_key(rel_path) {
+            // Only notes have text to index. An attachment is a changed
+            // path in the feed too (ADR 0007, 2026-10-22), and reading an
+            // image as prose would stop this namespace's cursor for ever.
+            if !rel_path.ends_with(".md") {
+                self.0.insert(rel_path.to_string(), Ok(None));
+            }
+        }
+        if !self.0.contains_key(rel_path) {
             let _profile = crate::update_profile::span("read_and_split_source", "");
             probe::file_read();
             let read = match std::fs::read_to_string(store.vault().join(rel_path)) {
