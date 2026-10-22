@@ -88,12 +88,28 @@ gh workflow run windows-cross.yml --ref <branch> -f version=1.1.1 -f validate_in
 ```
 
 The run's `windows-installer-results` artifact holds `lifecycle.txt`,
-`listener.txt` and every msiexec log. **The hosted run is pending**: the session
-that made this change could push neither the branch nor the dispatch (its active
-GitHub account has no write access to the repository), so the first run is to be
-recorded here with its number and outcome. Until then the MSI-level evidence is
-the wixl regression and the local launcher run above. Code signing is unchanged:
-any remaining "Publisher: Unknown" needs a certificate and is out of scope.
+`listener.txt` and every msiexec log. Three hosted runs, all from this branch
+with version stamp 1.1.1 (no release published):
+
+| Run | Linux build | Windows lifecycle | Outcome |
+| --- | --- | --- | --- |
+| [39764223871](https://github.com/Gilune/gilune/actions/runs/39764223871) | 33m 25s (cold caches) | 39s | Clean install failed 1603: error 2613, RemoveExistingProducts sequenced after the custom actions (fixed above) |
+| [39769146019](https://github.com/Gilune/gilune/actions/runs/39769146019) | 17m 09s | 1m 00s | Clean install over seeded Block rules, repair and first launch passed; the test then looked up the port's owner after closing the app (test bug, fixed) |
+| [39771626630](https://github.com/Gilune/gilune/actions/runs/39771626630) | 4m 10s (warm) | 1m 26s | **Passed** the whole lifecycle |
+
+`lifecycle.txt` from the passing run: clean install over seeded Block rules, plain
+shortcut, one firewall rule and no Block left, repair without a duplicate rule,
+one-process launch owning the sync port, upgrade from v1.0.3 over seeded Block
+rules, downgrade rejection, uninstall removing every rule, preserved vaults. Both
+`listener.txt` files name `C:\Program Files\Gilune\Gilune.exe` (process name
+`Gilune`) as the owner of port 51837. Since the seeded Block rows carried the
+lower-cased javaw.exe path and none survived, netsh's `program=` match is
+case-insensitive, as expected. The Linux build durations are runner time, not
+billing; the Windows job is billed at twice its minutes. Code signing is
+unchanged: any remaining "Publisher: Unknown" needs a certificate and is out of
+scope. What only the owner's eye can confirm: the Gilune logo in Start search and
+"Run as administrator" in the shortcut's context menu, after installing the
+candidate MSI from a run's `gilune-windows-msi` artifact.
 
 ## Current pipeline: Linux runners only
 
