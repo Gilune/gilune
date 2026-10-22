@@ -84,15 +84,18 @@ try {
         $syncDir = Join-Path $env:LOCALAPPDATA 'Gilune/sync'
         New-Item -ItemType Directory -Path $syncDir -Force | Out-Null
         [IO.File]::WriteAllText((Join-Path $syncDir ($match.Groups[1].Value + '.sync.json')), '{"enabled":true}')
+        # The owner is resolved while the app is still running: Launch closes
+        # it before returning.
         $listener = Launch {
             param($launcherId)
             $rows = @(Get-NetTCPConnection -State Listen -OwningProcess $launcherId -ErrorAction SilentlyContinue)
-            if ($rows.Count -gt 0) { $rows[0] }
+            if ($rows.Count -gt 0) {
+                $owner = Get-Process -Id $rows[0].OwningProcess
+                @{ pid = $rows[0].OwningProcess; exe = $owner.Path; name = $owner.ProcessName; port = $rows[0].LocalPort }
+            }
         } 'bind the sync port'
-        $owner = Get-Process -Id $listener.OwningProcess
-        @{ pid = $listener.OwningProcess; exe = $owner.Path; name = $owner.ProcessName; port = $listener.LocalPort } |
-            ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $resultRoot 'listener.txt')
-        if ($owner.ProcessName -ne 'Gilune') { throw "The sync port is owned by $($owner.Path), not Gilune.exe" }
+        $listener | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $resultRoot 'listener.txt')
+        if ($listener.name -ne 'Gilune') { throw "The sync port is owned by $($listener.exe), not Gilune.exe" }
     }
 } finally {
     $env:JAVA_TOOL_OPTIONS = $originalJavaOptions
