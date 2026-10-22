@@ -72,7 +72,10 @@ internal fun expandEnvironment(path: String, env: (String) -> String? = System::
 /// Public is what Windows itself writes when Private alone is ticked, and
 /// is no problem.
 fun firewallVerdict(rules: List<FirewallRule>, program: File): FirewallVerdict {
-    val path = program.absolutePath
+    // As given, not absolutePath: the launcher's path is absolute already,
+    // and on Linux (the hosted suite) absolutePath would put the runner's
+    // working directory in front of a Windows path.
+    val path = program.path
     val mine = rules.filter {
         it.active && it.direction.equals("In", ignoreCase = true) &&
             it.program != null && it.program.equals(path, ignoreCase = true) && it.covers("Private")
