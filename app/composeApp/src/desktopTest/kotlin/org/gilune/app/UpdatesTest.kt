@@ -115,6 +115,19 @@ class UpdatesTest {
         assertFalse(target.exists())
     }
 
+    @Test fun theInstallerWaitsForALauncherParentButNotForWhateverOpenedGilune() {
+        // The MSI's launcher hosts the runtime in its own process, so its
+        // parent is Explorer or a shell: waiting on that would hold every
+        // update for the script's whole bound. A `Gilune.exe` parent (a
+        // jpackage launcher, or the earlier one that ran javaw.exe) still
+        // holds the files and is waited for.
+        assertEquals(listOf(7L), processesToWaitFor(7L, 3L, """C:\Windows\explorer.exe"""))
+        assertEquals(listOf(7L, 3L), processesToWaitFor(7L, 3L, """C:\Program Files\Gilune\Gilune.exe"""))
+        assertEquals(listOf(7L, 3L), processesToWaitFor(7L, 3L, """c:\program files\gilune\GILUNE.EXE"""))
+        assertEquals(listOf(7L), processesToWaitFor(7L, 3L, null))
+        assertEquals(listOf(7L), processesToWaitFor(7L, null, null))
+    }
+
     private fun updater(
         json: () -> String,
         current: AppVersion? = AppVersion(1, 0, 8),
