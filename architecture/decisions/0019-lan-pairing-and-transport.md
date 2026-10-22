@@ -842,6 +842,27 @@ Each stage is shippable alone and in order.
   Gilune rather than `javaw.exe` ("OpenJDK Platform binary"). The per-user
   DEB is untouched; nothing on Linux adds a rule.
 
+- **2026-10-22 (per-user install: the rule is the app's one elevated
+  step).** With the MSI per-user again (ADR 0016 amendment of the same
+  date) the installer has no elevated moment after all, and the rule moves
+  into the app, shaped as § 2 asked: the first time sync is switched on,
+  the shell reads where the rule stands — Windows keeps every rule as a
+  string under a registry key any user can read, in no display language,
+  so the verdict is ALLOWED / MISSING / BLOCKED on the **Private** profile
+  for the installed launcher, a Block on Public being what Windows itself
+  writes when Private alone is ticked — and when it is not ALLOWED starts
+  `Gilune.exe --allow-firewall` with Windows's one prompt for administrator
+  approval, which names Gilune. That mode runs the same three `netsh` lines
+  the per-machine installer ran (delete every rule for the launcher and
+  for the old `javaw.exe`, add the Private allow) and loads no runtime.
+  The row under the switch says where the rule stands and offers to ask
+  again after a refusal; a Block left by a dismissed Windows prompt is
+  reported in red and the same button clears it. A non-administrator is
+  asked for an administrator's password at that moment rather than told
+  "blocked" afterwards. Gate 13 reads accordingly: the one prompt is the
+  app's, worded, once per machine, and never on an update. The per-machine
+  package keeps its installer-added rule for as long as it is built.
+
 ## Ratification record
 
 Ratified by the owner on 2026-09-02, as proposed, with no
