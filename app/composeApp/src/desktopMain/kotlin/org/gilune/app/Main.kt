@@ -632,6 +632,7 @@ private fun DesktopApp(
                     onOpenToSide = { tabs.openToSide(it) },
                     onRenamed = { old, new -> tabs.noteRenamed(old, new) },
                     onDeleted = { tabs.noteDeleted(it) },
+                    onLocalScope = { rel, local -> tabs.noteLocalScope(rel, local) },
                 )
             }
             DragDivider(
