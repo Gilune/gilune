@@ -71,9 +71,11 @@ pub(super) struct VaultFiles {
     pub other: Vec<Found>,
 }
 
-/// Walk the vault. `.gilune/`, every dot-file and dot-folder (`.obsidian/`,
-/// the local marker itself) and `.tmp-*` are never anybody's: they are
-/// neither adopted nor announced.
+/// Walk the vault. Dot-folders (`.gilune/`, `.obsidian/`) are never
+/// entered, and a dot-file that is not Markdown (the local marker itself,
+/// `.DS_Store`) and `.tmp-*` are nobody's: neither adopted nor announced.
+/// A dot-prefixed `.md` IS a note — the Markdown walk this replaced took
+/// it, ADR 0020 § 10 counts it, and the Android suite pins it.
 pub(super) fn vault_files(root: &Path) -> Result<VaultFiles> {
     let mut markdown = Vec::new();
     let mut other = Vec::new();
@@ -85,15 +87,15 @@ pub(super) fn vault_files(root: &Path) -> Result<VaultFiles> {
             let entry = entry.map_err(|e| KernelError::Io { path: dir.clone(), source: e })?;
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            if name.starts_with('.') {
-                continue;
-            }
             if path.is_dir() {
-                let here = local || path.join(LOCAL_MARKER).is_file();
-                stack.push((path, here));
+                if !name.starts_with('.') {
+                    let here = local || path.join(LOCAL_MARKER).is_file();
+                    stack.push((path, here));
+                }
                 continue;
             }
-            if name.starts_with(".tmp-") || !path.is_file() {
+            let dot_file = name.starts_with('.') && !name.ends_with(".md");
+            if dot_file || name.starts_with(".tmp-") || !path.is_file() {
                 continue;
             }
             let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
