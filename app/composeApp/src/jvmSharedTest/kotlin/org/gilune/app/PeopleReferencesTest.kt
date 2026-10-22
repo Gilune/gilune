@@ -112,6 +112,7 @@ class PeopleReferencesTest {
 
     @Test fun kernelQueriesPairsAcrossItemsAndPagesWithoutTasksOrQueryTimeFileReads() {
         val root = Files.createTempDirectory("gilune-person-facts").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         Gilune.open(root.absolutePath).use { kernel ->
             val registry = PluginExtensions(listOf(peopleExtensions()))
             registry.registerPlugins(kernel); registry.registerIndexers(kernel)

@@ -18,7 +18,9 @@ import java.nio.file.Files
 import uniffi.gilune_ffi.Gilune
 
 class IndexedVault(prefix: String = "gilune-indexed") : AutoCloseable {
-    val root: File = Files.createTempDirectory(prefix).toFile()
+    // Local-only vault: the files these tests write stay unmanaged, as
+    // every file did before adoption (ADR 0007, 2026-10-22).
+    val root: File = Files.createTempDirectory(prefix).toFile().also { File(it, ".gilune-local").writeText("") }
     val dir: String = root.absolutePath
     val gilune: Gilune = Gilune.open(dir)
 

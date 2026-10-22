@@ -140,7 +140,8 @@ impl Store {
                         let changes: Vec<_> = page.properties.iter().map(|(key, value)| gilune_document::PropertyChange { key: key.clone(), value_yaml: Some(value.clone()) }).collect();
                         let source = snapshot.change_properties(snapshot.version(), &changes).map_err(|e| invalid(e.to_string()))?.text().to_string();
                         let receipt = self.create_page_in_txn(plugin_id, &CreatePage {
-                            type_id: page.type_id.clone(), definition_version: d.version.clone(), request_id: ids::new_id(),
+                            type_id: page.type_id.clone(), definition_version: d.version.clone(),
+                            request_id: super::deterministic_request_id(&json!([plugin_id, id, page.key]).to_string()),
                             rel_path: in_folder(&d.default_folder, &page.relative_file), source,
                         })?;
                         evidence.push_str(&format!("\n- {}: `{}` (object `{}`)\n", page.key, receipt.rel_path, receipt.object_id));
@@ -148,7 +149,10 @@ impl Store {
                 }
                 let d = definitions.iter().find(|d| d.type_id == config.receipt_type).ok_or_else(|| invalid("initializer receipt type disappeared"))?;
                 self.create_page_in_txn(plugin_id, &CreatePage {
-                    type_id: d.type_id.clone(), definition_version: d.version.clone(), request_id: ids::new_id(),
+                    type_id: d.type_id.clone(), definition_version: d.version.clone(),
+                    request_id: super::deterministic_request_id(
+                        &json!([plugin_id, id, "receipt", self.device_id()?]).to_string(),
+                    ),
                     rel_path: in_folder(&d.default_folder, &config.receipt_file), source: evidence,
                 })?;
                 Ok(status.to_string())

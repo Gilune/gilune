@@ -293,6 +293,20 @@ class TabsState(val vaultDir: String) {
         }
     }
 
+    /// Keep a note on this device, or let it sync again, through the tab
+    /// that holds it — so the buffer and the file agree, and the header
+    /// edit goes through the same lossless route the Properties window
+    /// takes. False when no tab holds the note; the caller then edits
+    /// the file itself.
+    fun noteLocalScope(relPath: String, local: Boolean): Boolean {
+        val (_, tab) = findTab(relPath) ?: return false
+        val editor = tab.editor
+        val updated = noteTextWithLocalScope(editor.document(), local)
+        editor.applyProperties(editor.frontMatterRaw, splitNoteRaw(updated).first)
+        flushEditor(vaultDir, editor, onNoteSaved)
+        return true
+    }
+
     /// The note is gone because the user destroyed it, so there is
     /// nothing to preserve and nothing to flush it to.
     fun noteDeleted(relPath: String) {

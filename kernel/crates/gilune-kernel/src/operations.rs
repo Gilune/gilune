@@ -1071,6 +1071,12 @@ impl Store {
                         text(revision, "payload").as_str(),
                     )?;
                 }
+                // A revision may carry new bytes: an attachment edited in
+                // place (ADR 0007, 2026-10-22). Declared exactly as a
+                // capture's blob is, and fetched the same way.
+                if let Some(blob) = payload.get("blob").filter(|b| b.is_object()) {
+                    applied.blob_wanted = self.accept_blob(conn, &object_id, blob, limits)?;
+                }
                 alerts::clear(conn, alerts::SYNC_AWAITING_REFERENT, &revision_id)?;
                 alerts::clear(conn, alerts::SYNC_REFERENT_REFUSED, &revision_id)?;
             }

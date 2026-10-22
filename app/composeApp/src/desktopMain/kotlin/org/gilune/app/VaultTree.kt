@@ -236,6 +236,7 @@ fun RailPanels(
     onOpenToSide: (String) -> Unit = {},
     onRenamed: (String, String) -> Unit = { _, _ -> },
     onDeleted: (String) -> Unit = {},
+    onLocalScope: (String, Boolean) -> Boolean = { _, _ -> false },
     navigation: NavigationVisibility = Prefs.navigation,
 ) {
     val colours = MaterialTheme.colorScheme
@@ -291,15 +292,16 @@ fun RailPanels(
                 val collection = BUNDLED_PLUGIN_EXTENSIONS.pageCollections(state.plugins).singleOrNull { it.collection.id == active.key }
                 if (collection != null) PageCollectionPanel(collection, state, onOpen, Modifier.weight(1f))
                 else VaultTree(
-                state,
-                tree,
-                onOpen,
-                onCreateNote,
-                Modifier.weight(1f),
-                onOpenToSide = onOpenToSide,
-                onRenamed = onRenamed,
-                onDeleted = onDeleted,
-            )
+                    state,
+                    tree,
+                    onOpen,
+                    onCreateNote,
+                    Modifier.weight(1f),
+                    onOpenToSide = onOpenToSide,
+                    onRenamed = onRenamed,
+                    onDeleted = onDeleted,
+                    onLocalScope = onLocalScope,
+                )
             }
         }
     }
@@ -362,6 +364,10 @@ private class TreeActions(
     val delete: (String) -> Unit,
     val pageCollections: List<FolderPageCollection>,
     val createPage: (FolderPageCollection) -> Unit,
+    /// Keep an entry on this device or let it sync again (ADR 0007,
+    /// 2026-10-22). Null while the vault's sync switch is off: then
+    /// nothing leaves anyway, and the menu says nothing it cannot mean.
+    val localScope: ((VaultEntry, Boolean) -> Unit)?,
 ) {
     fun pageMenuItems(folder: String) = pageCollections.filter { File(it.folder) == File(folder) }.map { collection ->
         ContextMenuItem(collection.binding.collection.folderCreateLabel!!) { createPage(collection.copy(folder = folder)) }
@@ -388,6 +394,31 @@ fun VaultTree(
     onOpenToSide: (String) -> Unit = {},
     onRenamed: (String, String) -> Unit = { _, _ -> },
     onDeleted: (String) -> Unit = {},
+    /// A note's mark is set through the tab that holds it when one does,
+    /// so the buffer and the file agree; answers whether a tab took it.
+    onLocalScope: (String, Boolean) -> Boolean = { _, _ -> false },
+) {
+    // The tree's menus are drawn by the shell's own renderer, whoever
+    // composes the tree: one item carries a switch (`SwitchMenuItem`),
+    // and the default renderer would draw it as plain text.
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.foundation.LocalContextMenuRepresentation provides GiluneContextMenuRepresentation,
+    ) {
+        VaultTreeContent(state, tree, onOpen, onCreateNote, modifier, onOpenToSide, onRenamed, onDeleted, onLocalScope)
+    }
+}
+
+@Composable
+private fun VaultTreeContent(
+    state: GiluneState,
+    tree: TreeState,
+    onOpen: (String) -> Unit,
+    onCreateNote: (String) -> Unit,
+    modifier: Modifier,
+    onOpenToSide: (String) -> Unit,
+    onRenamed: (String, String) -> Unit,
+    onDeleted: (String) -> Unit,
+    onLocalScope: (String, Boolean) -> Boolean,
 ) {
     var pending by remember { mutableStateOf<PendingName?>(null) }
     var deleting by remember { mutableStateOf<String?>(null) }
@@ -398,6 +429,15 @@ fun VaultTree(
     val list = rememberLazyListState()
     val entries = remember(state.vaultCursor.value, state.refreshCount.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
         listVault(state.vaultDir, tree.expanded.toSet())
+    }
+    // Which visible notes carry their own keep-here mark, so the row can
+    // say so as a folder's does. One header per visible note, read when
+    // the list refreshes and not per recomposition; a folder's marker is
+    // a stat and is asked for on the row itself.
+    val localNotes: Set<String> = remember(entries, state.vaultCursor.value, state.refreshCount.value, moveRevision) {
+        entries.filter { it.kind == VaultEntryKind.NOTE && noteIsLocalOnDisk(state.vaultDir, it.relPath) }
+            .map { it.relPath }
+            .toSet()
     }
     // The Captures folder is the inbox: the count is simply how many
     // notes still sit in it, shown quietly — never a nagging badge.
@@ -431,6 +471,27 @@ fun VaultTree(
         state.sync(announce = false)
     }
 
+    fun setLocalScope(entry: VaultEntry, local: Boolean) {
+        try {
+            if (entry.isDir) {
+                // The marker is a file; the kernel applies the scope to
+                // everything under it on its next pass, which is asked
+                // for here rather than left to the next save.
+                setFolderLocal(state.vaultDir, entry.relPath, local)
+                moveRevision++
+                state.sync(announce = false)
+            } else if (!onLocalScope(entry.relPath, local)) {
+                if (setNoteLocalOnDisk(state.vaultDir, entry.relPath, local)) state.noteSaved(entry.relPath)
+            }
+            // The row's switch reads the file, so the list is re-read now
+            // rather than at the next change the kernel announces.
+            moveRevision++
+            state.message.value = localScopeNotice(entry.relPath, local)
+        } catch (e: Exception) {
+            state.message.value = "could not change ${entry.relPath}: ${e.message}"
+        }
+    }
+
     val actions = TreeActions(
         open = onOpen,
         openToSide = onOpenToSide,
@@ -440,6 +501,7 @@ fun VaultTree(
         delete = { relPath -> deleting = relPath },
         pageCollections = folderCollections,
         createPage = { creatingPage = it },
+        localScope = if (showLocalScopeToggle(state.syncStatus.value)) ::setLocalScope else null,
     )
 
     val dragModifier = treeDragModifier(drag, tree, list) { entry, directory ->
@@ -538,7 +600,7 @@ fun VaultTree(
                                 onRenamed = onRenamed,
                             )
                         } else {
-                            TreeRow(entry, tree, state.vaultDir, capturesCount, actions, drag)
+                            TreeRow(entry, tree, state.vaultDir, capturesCount, actions, drag, entry.relPath in localNotes)
                         }
                         val inside = (pending as? PendingName.CreateFolder)
                             ?.takeIf { entry.isDir && it.parent == entry.relPath }
@@ -579,6 +641,7 @@ private fun TreeRow(
     capturesCount: Int,
     actions: TreeActions,
     drag: VaultTreeDrag,
+    keptNote: Boolean = false,
 ) {
     DisposableEffect(entry, drag) { onDispose { drag.rows.remove(entry) } }
     val rowModifier = Modifier.testTag("vault-entry:${entry.relPath}")
@@ -605,6 +668,23 @@ private fun TreeRow(
             if (entry.isDir) addAll(actions.pageMenuItems(entry.relPath))
             add(ContextMenuItem("Rename") { actions.rename(entry) })
             add(ContextMenuItem("Delete") { actions.delete(entry.relPath) })
+            // The entry's own sync switch, while the vault syncs at all:
+            // on, it syncs; off, it is kept here. Read when the menu opens
+            // — one marker or one header, for the one entry right-clicked
+            // — and fixed when a folder above has already decided.
+            actions.localScope?.let { toggle ->
+                val inherited = inheritsLocal(vaultDir, entry.relPath)
+                val own = if (entry.isDir) folderIsLocal(vaultDir, entry.relPath) else noteIsLocalOnDisk(vaultDir, entry.relPath)
+                val local = inherited || own
+                add(
+                    SwitchMenuItem(
+                        label = localScopeMenuLabel(entry.isDir, inherited),
+                        checked = !local,
+                        enabled = !inherited,
+                        tag = "vault-sync:${entry.relPath}",
+                    ) { toggle(entry, !local) },
+                )
+            }
             add(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
         }
     }) {
@@ -683,6 +763,21 @@ private fun TreeRow(
             if (entry.isDir && entry.relPath == "Captures" && capturesCount > 0) {
                 Spacer(Modifier.weight(1f))
                 Text("$capturesCount", fontSize = 11.sp, color = colours.onSurfaceVariant)
+            }
+            // An entry kept on this device by its own mark says so, quietly,
+            // whatever the sync switch: the mark is the fact, the switch is
+            // not. A folder's mark is its marker file; a note's is in its
+            // header. Rows kept only by a folder above show nothing — the
+            // folder's own badge covers them.
+            val kept = if (entry.isDir) folderIsLocal(vaultDir, entry.relPath) else keptNote
+            if (kept) {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    "local",
+                    fontSize = 11.sp,
+                    color = colours.onSurfaceVariant,
+                    modifier = Modifier.testTag("vault-local:${entry.relPath}"),
+                )
             }
         }
     }

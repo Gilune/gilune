@@ -139,7 +139,17 @@ pub struct MdnsDiscovery {
     /// The full name currently registered, so `withdraw` can unregister
     /// exactly what `advertise` registered rather than guess at it.
     registered: Mutex<Option<String>>,
+    /// How long `advertise` waits to hear the daemon announce before
+    /// deciding it is mute.
+    confirm_window: Duration,
+    /// How many times a mute daemon has been torn down and rebuilt.
+    restarts: std::sync::atomic::AtomicUsize,
 }
+
+/// How long an announcement is given to be sent. The daemon announces
+/// the moment it registers, from the thread that registered it; two
+/// seconds is a bound for a loaded machine, not a wait anybody notices.
+pub const CONFIRM_WINDOW: Duration = Duration::from_secs(2);
 
 impl Default for MdnsDiscovery {
     fn default() -> Self {
@@ -149,10 +159,39 @@ impl Default for MdnsDiscovery {
 
 impl MdnsDiscovery {
     pub fn new() -> MdnsDiscovery {
+        Self::with_confirm_window(CONFIRM_WINDOW)
+    }
+
+    /// The same, with the confirmation window named — so "not heard"
+    /// can be a test rather than a mute network.
+    pub fn with_confirm_window(confirm_window: Duration) -> MdnsDiscovery {
         MdnsDiscovery {
             daemon: Mutex::new(None),
             registered: Mutex::new(None),
+            confirm_window,
+            restarts: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+
+    /// How many times `advertise` rebuilt a daemon that announced nothing.
+    pub fn restarts(&self) -> usize {
+        self.restarts.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Throw the daemon away. The next call that needs one builds a new
+    /// one, with new sockets — which is the only repair `mdns-sd` offers
+    /// for a daemon whose multicast socket never opened (see `advertise`).
+    fn discard_daemon(&self) {
+        let taken = self
+            .daemon
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some(daemon) = taken {
+            let _ = daemon.shutdown();
+        }
+        self.restarts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     }
 
     /// The daemon, started if this is the first call.
@@ -183,39 +222,83 @@ impl PeerDiscovery for MdnsDiscovery {
         "mdns-sd".to_string()
     }
 
+    /// Advertise, and **hear it go out** before saying so.
+    ///
+    /// `mdns-sd` opens its one multicast socket when the daemon is built
+    /// and, if that bind fails, logs at debug level and carries on
+    /// without it: `register` still succeeds, the service sits in the
+    /// daemon's table, and nothing is ever sent or received. A desktop in
+    /// that state told its settings screen "found by others: yes, over
+    /// mdns-sd" for a whole session while holding no socket on 5353 at
+    /// all — found by nobody, and unable to look (2026-10-22, the owner's
+    /// desktop; a fresh socket bound fine, so whatever failed at daemon
+    /// start was transient). The daemon has no repair for it: the socket
+    /// is created once, in its constructor.
+    ///
+    /// So this is the Android adapter's rule brought to the desktop —
+    /// advertising is *measured*. The daemon's monitor reports `Announce`
+    /// only when an unsolicited response was actually sent on at least
+    /// one interface, so that event within the window is the proof. No
+    /// event: tear the daemon down, build a fresh one (fresh sockets), and
+    /// try once more; still nothing, and the answer is an error, which
+    /// `SyncService` records as not advertising and the screen says in
+    /// words. `sync_now` retries each round, so a transient failure heals
+    /// without anybody toggling a switch.
     fn advertise(&self, ad: &Advertisement) -> Result<()> {
-        let daemon = self.daemon()?;
-        // The instance name IS the fingerprint. DNS-SD instance names are
-        // visible to anyone on the network, and § 1 makes that a design
-        // constraint rather than an accident: what leaks is a random-
-        // looking identifier, not a person's laptop's name.
-        let instance = ad.fingerprint.replace(' ', "");
-        let properties = [
-            (TXT_VERSION, PROTOCOL),
-            (TXT_FINGERPRINT, ad.fingerprint.as_str()),
-        ];
-        let info = mdns_sd::ServiceInfo::new(
-            SERVICE_TYPE_FQ,
-            &instance,
-            &format!("{instance}.local."),
-            (),
-            ad.port,
-            &properties[..],
-        )
-        .map_err(|e| SyncError::Refused {
-            detail: format!("this device's advertisement could not be built: {e}"),
-        })?
-        // Let the daemon track this machine's addresses itself. A laptop
-        // that moves between Wi-Fi and Ethernet changes address without
-        // telling us, and an advertisement pinned to the address it had
-        // at switch-on would point at nothing.
-        .enable_addr_auto();
-        let fullname = info.get_fullname().to_string();
-        daemon.register(info).map_err(|e| SyncError::Refused {
-            detail: format!("this device could not advertise itself: {e}"),
-        })?;
-        *self.registered.lock().unwrap_or_else(|e| e.into_inner()) = Some(fullname);
-        Ok(())
+        let mut last = String::new();
+        for attempt in 0..2 {
+            if attempt > 0 {
+                self.discard_daemon();
+            }
+            let daemon = self.daemon()?;
+            // Subscribed before registering, so the announcement cannot be
+            // missed in the gap.
+            let heard = daemon.monitor().map_err(|e| SyncError::Refused {
+                detail: format!("this device's discovery daemon would not be watched: {e}"),
+            })?;
+            // The instance name IS the fingerprint. DNS-SD instance names
+            // are visible to anyone on the network, and § 1 makes that a
+            // design constraint rather than an accident: what leaks is a
+            // random-looking identifier, not a person's laptop's name.
+            let instance = ad.fingerprint.replace(' ', "");
+            let properties = [
+                (TXT_VERSION, PROTOCOL),
+                (TXT_FINGERPRINT, ad.fingerprint.as_str()),
+            ];
+            let info = mdns_sd::ServiceInfo::new(
+                SERVICE_TYPE_FQ,
+                &instance,
+                &format!("{instance}.local."),
+                (),
+                ad.port,
+                &properties[..],
+            )
+            .map_err(|e| SyncError::Refused {
+                detail: format!("this device's advertisement could not be built: {e}"),
+            })?
+            // Let the daemon track this machine's addresses itself. A
+            // laptop that moves between Wi-Fi and Ethernet changes address
+            // without telling us, and an advertisement pinned to the
+            // address it had at switch-on would point at nothing.
+            .enable_addr_auto();
+            let fullname = info.get_fullname().to_string();
+            daemon.register(info).map_err(|e| SyncError::Refused {
+                detail: format!("this device could not advertise itself: {e}"),
+            })?;
+            if announced(&heard, &fullname, self.confirm_window) {
+                *self.registered.lock().unwrap_or_else(|e| e.into_inner()) = Some(fullname);
+                return Ok(());
+            }
+            let _ = daemon.unregister(&fullname);
+            last = fullname;
+        }
+        Err(SyncError::Refused {
+            detail: format!(
+                "this machine's discovery daemon announced {last} on no interface at all, \
+                 twice, so other devices will not find it on their own. Pairing by address \
+                 and code still works, and so does being dialled at the address shown."
+            ),
+        })
     }
 
     fn withdraw(&self) {
@@ -264,6 +347,26 @@ impl PeerDiscovery for MdnsDiscovery {
         let _ = daemon.stop_browse(SERVICE_TYPE_FQ);
         Ok(found)
     }
+}
+
+/// Whether the daemon reported sending an announcement for `fullname`
+/// within `window`. `Announce` is emitted by the daemon only after an
+/// unsolicited response went out on at least one address, so it is the
+/// socket speaking, not the registration table.
+fn announced(
+    heard: &mdns_sd::Receiver<mdns_sd::DaemonEvent>,
+    fullname: &str,
+    window: Duration,
+) -> bool {
+    let deadline = std::time::Instant::now() + window;
+    while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
+        match heard.recv_timeout(remaining) {
+            Ok(mdns_sd::DaemonEvent::Announce(name, _)) if name == fullname => return true,
+            Ok(_) => continue,
+            Err(_) => return false,
+        }
+    }
+    false
 }
 
 fn property(info: &mdns_sd::ResolvedService, key: &str) -> String {
