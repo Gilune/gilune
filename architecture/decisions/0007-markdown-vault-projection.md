@@ -197,9 +197,10 @@ vault copied while closed restoring completely on another machine.
   one `object-created` operation carrying the blob declaration. The
   receiving device takes it as it takes a recording — chunked, digest-
   verified, promoted to `rel_path` — and because the document says
-  `attached`, no Markdown note is projected for it. Excluded: `.gilune/`,
-  dot-files and dot-folders (so `.obsidian/` and the local marker below
-  never travel), `.tmp-*`, files over `limits.max_blob_bytes` (512 MiB;
+  `attached`, no Markdown note is projected for it. Excluded: dot-folders
+  (`.gilune/`, `.obsidian/` — never entered), dot-files that are not
+  Markdown (the local marker below, `.DS_Store`), `.tmp-*`, files over
+  `limits.max_blob_bytes` (512 MiB;
   announced once by a not-damage alert naming the file), and anything
   local-only. A file edited in place (digest changed) is a new blob and
   a new revision of the same object; the receiving device replaces its
@@ -224,8 +225,12 @@ vault copied while closed restoring completely on another machine.
   with no operations, and other devices keep what they already had.
   Leaving local scope sends one `object-revised` that supersedes the
   last-sent head, so peers see one change rather than a history they
-  cannot reference. The marker file itself is a dot-file and never
-  travels; a folder's local-ness is inherited by its subfolders.
+  cannot reference. The marker file itself is a non-Markdown dot-file
+  and never travels; a folder's local-ness is inherited by its
+  subfolders. (A dot-prefixed `.md` is a note as before: the first text
+  of this amendment excluded every dot-file, which the Android widget
+  count — ADR 0020 § 10, `.hidden.md` is in the inbox — caught on the
+  v1.1.2 tag run; corrected the same day.)
   Evaluated when an operation would be created, never at exchange time,
   so an excluded file leaves no history for a later rule change to leak.
 

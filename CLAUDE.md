@@ -1560,7 +1560,9 @@ gates promises) are ratified. **Next: application-level engineering — see
      Obsidian / copied `.md` files were import candidates forever (no
      object, no op); non-md files were untracked. Shipped: schema v10
      (`blobs.mtime_ns/recorded_ns`, `local_objects`); `vault/adopt.rs` —
-     one walk (`vault_files`, dot-entries and `.tmp-*` are nobody's);
+     one walk (`vault_files`: dot-FOLDERS never entered, non-Markdown
+     dot-files and `.tmp-*` nobody's — a dot-prefixed `.md` IS a note,
+     ADR 0020 § 10, caught by the Android widget count on the tag run);
      Markdown adopted at reconcile as `org.memory.note` (origin
      `external-import`, document carries `path`; header-bearing files
      with an unknown id are adopted under that id and their own

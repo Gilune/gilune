@@ -294,8 +294,15 @@ fn a_missing_attachment_is_a_tombstone_proposal_and_dot_files_are_nobodys() {
     write(&store, ".obsidian/workspace.json", b"{}");
     write(&store, "Docs/.hidden.bin", b"x");
     write(&store, "Docs/.tmp-partial.pdf", b"x");
+    // A dot-prefixed note is still a note (ADR 0020 § 10): the walk this
+    // replaced took it, and the Android widget count pins it.
+    write(&store, "Docs/.hidden.md", b"a note that starts with a dot\n");
+    write(&store, ".gilune/local/notes.md", b"never: a dot-folder is never entered\n");
     let summary = store.reconcile().expect("reconcile");
     assert_eq!(summary.attachments, 1, "only the paper: {summary:?}");
+    assert_eq!(summary.adopted, 1, "only the dot-prefixed note: {summary:?}");
+    assert!(read(&store, "Docs/.hidden.md").starts_with("---\ngilune-id: "), "adopted with a header");
+    assert!(!read(&store, ".gilune/local/notes.md").starts_with("---"), "kernel state untouched");
 
     std::fs::remove_file(store.vault().join("Docs/paper.pdf")).expect("delete");
     let summary = store.reconcile().expect("reconcile");
