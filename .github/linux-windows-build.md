@@ -71,6 +71,12 @@ Hosted per-user runs, all `--scope per-user`, version stamp 1.2.1:
 | [39794329476](https://github.com/Gilune/gilune/actions/runs/39794329476) | Install, repair, launch, listener and uninstall passed; refusal did not happen | `FindRelatedProducts: current install is per-user. Related install ... is per-machine. Skipping` — Windows Installer never crosses contexts, and the guard's registry value is written only by the Linux-built installers (1.0.7 on); the jpackage v1.0.3 wrote none. The guard gained a search per jpackage release (1.0.1 `{982A4DDD-...}`, 1.0.3 `{AAE0D767-...}`) on its product registration. |
 | [39796138717](https://github.com/Gilune/gilune/actions/runs/39796138717) | **Passed** | `lifecycle.txt`: clean install without elevation or firewall rules, plain shortcut in the user Start menu, repair, one-process launch owning the sync port, refusal beside the all-users v1.0.3, upgrade from an older per-user stamp, downgrade rejection, uninstall, preserved vaults. Both `listener.txt` files name `C:\Users\runneradmin\AppData\Local\Programs\Gilune\Gilune.exe` on port 51837. Windows job 2m 28s. |
 
+After main (the sync-area round) was merged into the branch, the per-user
+lifecycle **passed again** on the merged head
+([39799612673](https://github.com/Gilune/gilune/actions/runs/39799612673)):
+Linux build 3m 23s warm, Windows job 2m 18s, same `lifecycle.txt`, listener
+owned by the per-user `Gilune.exe` on 51837 after both launches.
+
 The per-machine scope, re-run from the same branch after the refactor
 ([39798094410](https://github.com/Gilune/gilune/actions/runs/39798094410),
 stamp 1.2.0, `--scope per-machine`), **passed** its unchanged lifecycle: clean
