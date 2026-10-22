@@ -64,45 +64,51 @@
 
   <h3>The Windows firewall</h3>
 
-  <p>Installing Gilune on Windows adds a firewall rule, named <strong>Gilune</strong>, that
-  lets the app answer your other devices on <strong>private networks</strong> and on no
-  other. Private means the network at home or in the office that you already trust;
+  <p>Other devices reach Gilune through a Windows Firewall rule, named
+  <strong>Gilune</strong>, that lets the app answer on <strong>private networks</strong> and
+  on no other. Private means the network at home or in the office that you already trust;
   public means the café and the airport, where you do not want the app answering
-  strangers. The rule is added when Gilune is installed and removed when it is
-  uninstalled, so turning sync on asks you nothing, and you do not need to be an
-  administrator to use it. Installing also clears any rule Windows made for an earlier
-  Gilune — including a block left by a prompt that was dismissed — so a machine that
-  once said no is not stuck saying no. Gilune only starts listening when you turn sync
-  on — you will never open a port by simply writing a note.</p>
+  strangers. Gilune only starts listening when you turn sync on — you will never open a
+  port by simply writing a note.</p>
 
-  <p><strong>If Windows does ask</strong> whether to allow Gilune through the firewall,
-  the install did not manage to add that rule. Tick <strong>Private networks</strong> and
-  leave <strong>Public networks</strong> unticked, and you will not be asked again.</p>
+  <p>Gilune is installed for your own account, so installing and updating it never asks
+  for an administrator. Adding a firewall rule does, once: the first time you turn sync
+  on, Gilune asks Windows for the rule and Windows asks for an administrator's approval,
+  naming Gilune. Approve it and you are never asked again. The line under the switch says
+  where the rule stands, and offers to ask again if the request was declined. If you are
+  not an administrator, Windows asks for an administrator's password at that moment; with
+  none to hand, say no, and sync simply waits until someone can approve it.</p>
 
-  <p>If you are not an administrator on this machine, Windows will not offer the choice —
-  it will simply tell you that Gilune was blocked, and sync will never find anything.
-  Someone with an administrator account can add the rule once, in a terminal opened as
-  administrator:</p>
+  <p>An administrator can also add the rule by hand, in a terminal opened as
+  administrator — replace <code>&lt;you&gt;</code> with your Windows user name:</p>
 
-<pre><code>netsh advfirewall firewall add rule name="Gilune" dir=in action=allow enable=yes profile=private program="C:\Program Files\Gilune\Gilune.exe"</code></pre>
+<pre><code>netsh advfirewall firewall add rule name="Gilune" dir=in action=allow enable=yes profile=private program="C:\Users\&lt;you&gt;\AppData\Local\Programs\Gilune\Gilune.exe"</code></pre>
 
-  <p>That is a one-off. Afterwards sync works for you without any further prompt.</p>
+  <p>Gilune installed for all users of a computer, as releases up to 1.2.0 were (under
+  <code>C:\Program Files\Gilune</code>), carries the rule from its installer instead. The
+  next update moves such a copy to your own account; Windows asks once, to remove the
+  all-users copy, and after that updates ask nothing.</p>
 
   <h4>A block left behind</h4>
 
-  <p>Clicking <strong>Cancel</strong> on the prompt, or the prompt appearing for someone
-  who is not an administrator, leaves a <em>block</em> rule behind — and a block stops
-  every inbound connection on every network profile, private included, however many
-  allow rules sit beside it. Earlier releases listened from the bundled Java runtime, so
-  the block names <code>runtime\bin\javaw.exe</code>; this release listens from
-  <code>Gilune.exe</code> itself. The Sync page says so in red beside the switch while
-  such a rule exists. Installing or upgrading Gilune clears those rules, and an
-  administrator can clear them by hand in a terminal opened as administrator — remove
-  every rule Windows made for either program, then add the one Gilune needs:</p>
+  <p>Clicking <strong>Cancel</strong> on Windows's own firewall prompt, or that prompt
+  appearing for someone who is not an administrator, leaves a <em>block</em> rule behind —
+  and a block stops every inbound connection on every network profile, private included,
+  however many allow rules sit beside it. Releases before 1.1.1 listened from the bundled
+  Java runtime, so such a block names <code>runtime\bin\javaw.exe</code>; since then Gilune
+  listens from <code>Gilune.exe</code> itself. The Sync page says so in red beside the
+  switch while a block stands, and its <strong>Fix the rule</strong> button clears it the
+  same way the first request did — one administrator approval. An administrator can also
+  clear it by hand in a terminal opened as administrator: remove every rule Windows made
+  for the program, then add the one Gilune needs.</p>
 
-<pre><code>netsh advfirewall firewall delete rule name=all program="C:\Program Files\Gilune\runtime\bin\javaw.exe"
-netsh advfirewall firewall delete rule name=all program="C:\Program Files\Gilune\Gilune.exe"
-netsh advfirewall firewall add rule name="Gilune" dir=in action=allow enable=yes profile=private program="C:\Program Files\Gilune\Gilune.exe"</code></pre>
+<pre><code>netsh advfirewall firewall delete rule name=all program="C:\Users\&lt;you&gt;\AppData\Local\Programs\Gilune\runtime\bin\javaw.exe"
+netsh advfirewall firewall delete rule name=all program="C:\Users\&lt;you&gt;\AppData\Local\Programs\Gilune\Gilune.exe"
+netsh advfirewall firewall add rule name="Gilune" dir=in action=allow enable=yes profile=private program="C:\Users\&lt;you&gt;\AppData\Local\Programs\Gilune\Gilune.exe"</code></pre>
+
+  <p>For a copy installed for all users, the program path is
+  <code>C:\Program Files\Gilune\Gilune.exe</code> (and <code>C:\Program Files\Gilune\runtime\bin\javaw.exe</code>
+  for the older releases) instead.</p>
 
   <p>The same rules are listed under <strong>Windows Defender Firewall ▸ Advanced
   settings ▸ Inbound Rules</strong>, where a block row for either program can be deleted

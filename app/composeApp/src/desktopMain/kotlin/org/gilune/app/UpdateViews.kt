@@ -28,7 +28,9 @@ import java.awt.Desktop
 import java.net.URI
 
 /// The status in words, one sentence, shared by the strip and About.
-fun updateStatusWords(status: UpdateStatus): String = when (status) {
+/// `transition` is an install under Program Files moving to the person's
+/// own account, which asks Windows once.
+fun updateStatusWords(status: UpdateStatus, transition: Boolean = false): String = when (status) {
     UpdateStatus.Idle -> ""
     UpdateStatus.Checking -> "Checking for updates…"
     is UpdateStatus.UpToDate ->
@@ -36,7 +38,13 @@ fun updateStatusWords(status: UpdateStatus): String = when (status) {
     is UpdateStatus.Available -> "Gilune ${status.release.version} is available."
     is UpdateStatus.Downloading -> "Downloading Gilune ${status.release.version}… ${(status.fraction * 100).toInt()}%"
     is UpdateStatus.Failed -> status.words.replaceFirstChar { it.uppercase() } + "."
-    is UpdateStatus.Installing -> "Installing Gilune ${status.release.version} — it reopens when the installer is done."
+    is UpdateStatus.Installing ->
+        if (transition) {
+            "Installing Gilune ${status.release.version} — Windows asks once to remove the copy installed for " +
+                "all users, then Gilune reopens from your own account, where updates no longer ask."
+        } else {
+            "Installing Gilune ${status.release.version} — it reopens when the installer is done."
+        }
 }
 
 private fun openPage(url: String) {
@@ -69,7 +77,7 @@ fun UpdateBanner(updater: Updater) {
             "Gilune can check GitHub for new versions and install them for you. " +
                 "You can change this in Settings ▸ About."
         } else {
-            updateStatusWords(status)
+            updateStatusWords(status, updater.transitionsToPerUser)
         }
         Text(words, fontSize = 12.sp, color = colours.onSecondaryContainer, modifier = Modifier.weight(1f))
         if (status is UpdateStatus.Downloading && !asking) {
@@ -106,11 +114,32 @@ fun UpdatesSection(updater: Updater) {
     Text(
         "This is ${updater.describeBuild}. Gilune looks for new versions on GitHub, " +
             "downloads the installer, checks it is exactly the file GitHub published, " +
-            "then closes, installs and reopens. Windows asks for permission to install.",
+            "then closes, installs and reopens. " +
+            if (updater.transitionsToPerUser) {
+                "This copy is installed for all users, so the next update asks Windows once to remove " +
+                    "it and installs Gilune for your account instead; after that, updates ask nothing."
+            } else {
+                "Installed for your account, an update asks for no permission."
+            },
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
     )
+    if (updater.staleAllUsersCopy) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(
+                "A copy of Gilune installed for all users is still on this computer. It no longer " +
+                    "updates; removing it asks Windows once for an administrator's approval.",
+                fontSize = 12.sp,
+                lineHeight = 18.sp,
+                color = colours.error,
+                modifier = Modifier.weight(1f).testTag("stale-all-users"),
+            )
+            OutlinedButton(onClick = { updater.removeStaleAllUsersCopy() }, enabled = !updater.removingStaleCopy) {
+                Text("Remove it", fontSize = 12.sp)
+            }
+        }
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Switch(
             checked = updater.consent == true,
@@ -136,7 +165,7 @@ fun UpdatesSection(updater: Updater) {
             }
         }
     }
-    val words = updateStatusWords(updater.status)
+    val words = updateStatusWords(updater.status, updater.transitionsToPerUser)
     if (words.isNotEmpty()) {
         Text(words, fontSize = 12.sp, color = colours.onSurfaceVariant, modifier = Modifier.testTag("update-status"))
     }
