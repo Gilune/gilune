@@ -175,6 +175,7 @@ fun installScript(
     waitFor: List<Long>,
     log: File,
     msiexec: String = """%SystemRoot%\System32\msiexec.exe""",
+    transition: Transition? = null,
 ): String = buildString {
     val system = """%SystemRoot%\System32"""
     appendLine("@echo off")
@@ -190,18 +191,101 @@ fun installScript(
         appendLine("goto wait$pid")
         appendLine(":gone$pid")
     }
+    if (transition != null) {
+        // The copy installed for all users goes first, which is the one
+        // moment Windows asks for administrator approval; the PowerShell
+        // script asks. A refusal leaves that copy in place, the per-user
+        // installer then refuses to install beside it, and the old app
+        // reopens unchanged.
+        appendLine(
+            "call \"$system\\WindowsPowerShell\\v1.0\\powershell.exe\" -NoProfile -NonInteractive " +
+                "-ExecutionPolicy Bypass -File \"${transition.removeScript.absolutePath}\"",
+        )
+    }
     // `call` so the script carries on afterwards whatever the program is;
     // a batch script waits for a windowed program like msiexec to finish.
     appendLine("call \"$msiexec\" /i \"${msi.absolutePath}\" /passive /norestart /l*v \"${log.absolutePath}\"")
     // `/b`: no console of its own — the app is a window either way.
-    appendLine("start \"\" /b \"${appExe.absolutePath}\"")
+    if (transition != null) {
+        appendLine(
+            "if exist \"${transition.launcher.absolutePath}\" (start \"\" /b \"${transition.launcher.absolutePath}\") " +
+                "else (start \"\" /b \"${appExe.absolutePath}\")",
+        )
+    } else {
+        appendLine("start \"\" /b \"${appExe.absolutePath}\"")
+    }
 }
+
+/// An update that moves the app from the all-users install to the
+/// per-user one: the script that removes the all-users copy, and the
+/// launcher the per-user installer will have put in place.
+data class Transition(val removeScript: File, val launcher: File)
+
+/// Where Windows registers products installed for all users.
+const val ALL_USERS_UNINSTALL_KEY = """HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall"""
+
+/// PowerShell that uninstalls every Gilune registered for all users. It
+/// needs administrator rights, so when it has none it starts itself again
+/// with Windows's one prompt for them (`-Verb RunAs`) and answers with
+/// that run's exit code. `msiexec` and the registry key are parameters
+/// only so a test can stand them in; `elevate` false is for the same
+/// test, which must not raise a prompt.
+fun removeAllUsersScript(
+    log: File,
+    msiexec: String = """${'$'}env:SystemRoot\System32\msiexec.exe""",
+    uninstallKey: String = ALL_USERS_UNINSTALL_KEY,
+    elevate: Boolean = true,
+): String {
+    val elevation = if (!elevate) "" else """
+        |¤identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        |if (-not ([Security.Principal.WindowsPrincipal]¤identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+        |    ¤elevated = Start-Process -FilePath "¤env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -Wait -PassThru -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"' + ¤PSCommandPath + '"'))
+        |    exit ¤elevated.ExitCode
+        |}
+        |""".trimMargin()
+    return """
+        |¤ErrorActionPreference = 'Stop'
+        |¤products = @(Get-ItemProperty -Path '$uninstallKey\*' -ErrorAction SilentlyContinue | Where-Object { ¤_.DisplayName -eq 'Gilune' })
+        |if (¤products.Count -eq 0) { exit 0 }
+        |$elevation
+        |foreach (¤product in ¤products) {
+        |    ¤run = Start-Process -FilePath "$msiexec" -Wait -PassThru -ArgumentList @('/x', ¤product.PSChildName, '/passive', '/norestart', '/l*v', ('"' + '${log.absolutePath}' + '"'))
+        |    if (¤run.ExitCode -notin @(0, 3010)) { exit ¤run.ExitCode }
+        |}
+        |exit 0
+        |""".trimMargin().replace('¤', '$')
+}
+
+/// Whether a Gilune installed for all users is still registered: the copy
+/// a declined uninstall left behind, which no longer updates. Asked only
+/// of a per-user build.
+fun allUsersCopyPresent(): Boolean = runCatching {
+    val process = ProcessBuilder(
+        System.getenv("SystemRoot").orEmpty() + """\System32\reg.exe""", "query",
+        """HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall""", "/s", "/f", "Gilune", "/d", "/e",
+    ).redirectErrorStream(true).start()
+    val output = process.inputStream.use { it.readBytes().decodeToString() }
+    process.waitFor() == 0 && "Gilune" in output
+}.getOrDefault(false)
 
 /// What this process is, for the installer: the installed `Gilune.exe`,
 /// and the process ids to wait out. Null when this is not an installed
 /// Windows build — a dev run, a test, Linux — which is then offered the
 /// release page instead.
-data class InstalledApp(val exe: File, val processes: List<Long>)
+data class InstalledApp(val exe: File, val processes: List<Long>, val allUsers: Boolean = false)
+
+/// Under Program Files: installed for all users by an elevated installer,
+/// whose every update asks for administrator approval. Such an install
+/// moves to the per-user one at its next update.
+fun installedForAllUsers(exe: File, env: (String) -> String? = System::getenv): Boolean =
+    listOfNotNull(env("ProgramFiles"), env("ProgramW6432"), env("ProgramFiles(x86)")).any { folder ->
+        exe.absolutePath.startsWith(folder.trimEnd('\\') + "\\", ignoreCase = true)
+    }
+
+/// Where the per-user installer puts the launcher: what the transition
+/// reopens once the new copy is in place.
+fun perUserLauncher(env: (String) -> String? = System::getenv): File? =
+    env("LOCALAPPDATA")?.let { File(it, """Programs\Gilune\Gilune.exe""") }
 
 fun installedApp(): InstalledApp? {
     if (!System.getProperty("os.name").orEmpty().startsWith("Windows")) return null
@@ -216,7 +300,11 @@ fun installedApp(): InstalledApp? {
         )?.takeIf { it.isFile && it.name.equals("Gilune.exe", ignoreCase = true) } ?: return null
     val self = ProcessHandle.current()
     val parent = self.parent().orElse(null)
-    return InstalledApp(exe, processesToWaitFor(self.pid(), parent?.pid(), parent?.info()?.command()?.orElse(null)))
+    return InstalledApp(
+        exe,
+        processesToWaitFor(self.pid(), parent?.pid(), parent?.info()?.command()?.orElse(null)),
+        installedForAllUsers(exe),
+    )
 }
 
 /// Which processes the installer must wait out. This one always; its
@@ -259,9 +347,50 @@ class Updater(
     private val launch: (File) -> Unit = ::launchDetached,
     private val saveConsent: (Boolean) -> Unit = { Prefs.updateChecks = it },
     consent: Boolean? = Prefs.updateChecks,
+    private val allUsersCopy: () -> Boolean = ::allUsersCopyPresent,
+    private val runScript: (File) -> Int = ::runPowerShell,
 ) {
     var status by mutableStateOf<UpdateStatus>(UpdateStatus.Idle)
         private set
+
+    /// Whether the next update moves this install from Program Files to
+    /// the person's own account, which asks Windows once to remove the
+    /// all-users copy. After that, updates ask nothing.
+    val transitionsToPerUser: Boolean get() = installed?.allUsers == true && perUserLauncher() != null
+
+    /// A Gilune installed for all users that is still registered beside
+    /// this per-user one: what a declined removal leaves. It no longer
+    /// updates, and About offers to remove it.
+    var staleAllUsersCopy by mutableStateOf(false)
+        private set
+    var removingStaleCopy by mutableStateOf(false)
+        private set
+
+    init {
+        if (installed != null && !installed.allUsers) {
+            scope.launch { staleAllUsersCopy = withContext(Dispatchers.IO) { allUsersCopy() } }
+        }
+    }
+
+    /// Removes the all-users copy, with Windows's one prompt for
+    /// administrator approval, and looks again.
+    fun removeStaleAllUsersCopy() {
+        if (removingStaleCopy) return
+        removingStaleCopy = true
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    downloads.mkdirs()
+                    val script = File(downloads, "remove-all-users.ps1")
+                    script.writeText(removeAllUsersScript(File(downloads, "remove-all-users.log")).replace("\n", "\r\n"))
+                    runScript(script)
+                    staleAllUsersCopy = allUsersCopy()
+                }
+            } finally {
+                removingStaleCopy = false
+            }
+        }
+    }
 
     /// The person's answer to "may Gilune look for updates?": null until
     /// asked. Only a yes lets the app look on its own; Check now in About
@@ -366,8 +495,18 @@ class Updater(
                 }
                 val log = File(downloads, "install-${release.version}.log")
                 val script = File(downloads, "install-${release.version}.cmd")
+                // From Program Files the update is also the move to a
+                // per-user install: the all-users copy is removed first.
+                val transition = if (app.allUsers) {
+                    perUserLauncher()?.let { Transition(File(downloads, "remove-all-users-${release.version}.ps1"), it) }
+                } else {
+                    null
+                }
                 withContext(Dispatchers.IO) {
-                    script.writeText(installScript(msi, app.exe, app.processes, log).replace("\n", "\r\n"))
+                    transition?.removeScript?.writeText(
+                        removeAllUsersScript(File(downloads, "remove-all-users-${release.version}.log")).replace("\n", "\r\n"),
+                    )
+                    script.writeText(installScript(msi, app.exe, app.processes, log, transition = transition).replace("\n", "\r\n"))
                     launch(script)
                 }
                 status = UpdateStatus.Installing(release)
@@ -378,6 +517,14 @@ class Updater(
         }
     }
 }
+
+/// Runs a PowerShell script and waits for it; the script itself asks
+/// Windows for administrator approval when it needs it.
+private fun runPowerShell(script: File): Int =
+    ProcessBuilder(
+        System.getenv("SystemRoot").orEmpty() + """\System32\WindowsPowerShell\v1.0\powershell.exe""",
+        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath,
+    ).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor()
 
 /// Runs the install script. Java starts Windows children without a console
 /// window, so nothing flashes up; the installer shows its own progress.
