@@ -55,7 +55,13 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,6 +124,13 @@ internal fun SyncSection(state: GiluneState) {
     // reads as if sync were working until it is said (§ 8).
     AlertsBanner(state.syncAlerts, state::readmitDevice)
 
+    // The firewall is this switch's other half on Windows: the port is
+    // bound here, and whether anything reaches it is a rule Windows holds.
+    // Switching on asks for the rule when it is not there (one elevated
+    // prompt, naming Gilune); the row below says where it stands.
+    val firewallScope = rememberCoroutineScope()
+    val firewall = remember { FirewallState(installedApp()?.exe, firewallScope) }
+    LaunchedEffect(status.enabled) { firewall.refresh() }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -128,10 +141,12 @@ internal fun SyncSection(state: GiluneState) {
                 state.syncAction(
                     if (on) "sync is on — this device is reachable" else "sync is off",
                 ) { it.setSyncEnabled(on) }
+                if (on) firewall.allowIfNeeded()
             },
         )
         Text("Let other devices reach this one", fontSize = 13.sp)
     }
+    FirewallRow(firewall)
     // Meant to be on, and not listening. The switch is remembered across
     // restarts, so this is the state where a machine came back up and
     // could not take its port, because another program holds it. (A
@@ -149,24 +164,23 @@ internal fun SyncSection(state: GiluneState) {
             color = colours.error,
         )
     }
-    // The firewall paragraph is § 2 in user words. The Windows installer
-    // adds the firewall rule itself — Private profile only, removed at
-    // uninstall — so the paragraph's job changed: say that the port opens
-    // here and nowhere else; say that no prompt is expected and that a
-    // non-administrator can use sync; and say what a prompt means (the
-    // install did not add the rule) and what to tick if it comes. The
-    // `netsh` line itself belongs in the guide, not here — a settings
-    // screen is no place for a command to be mistyped from.
+    // The firewall paragraph is § 2 in user words. The rule is Private
+    // profile only and the app asks for it, once, with the one prompt
+    // Windows has for administrator approval; an all-users install already
+    // carries it from the installer. So the paragraph says: the port opens
+    // here and nowhere else; the rule is asked for once and names Gilune;
+    // and a refusal is a supported state the row above reports, not a
+    // fault. The `netsh` line itself belongs in the guide, not here — a
+    // settings screen is no place for a command to be mistyped from.
     Text(
         "Switching this on is what opens a port on this machine, and nothing else " +
-            "does — capture, notes and everything else work with it off. Installing " +
-            "Gilune already allowed it through Windows Firewall for private networks, " +
-            "so no prompt is expected and you need not be an administrator. If Windows " +
-            "does ask, the install did not add that rule: tick Private networks and " +
-            "leave Public unticked, so this device answers on your own network and not " +
-            "on a café's. Without administrator rights Windows will say it was blocked " +
-            "instead of asking; someone with those rights can add the rule once, and " +
-            "the user guide has the exact command.",
+            "does — capture, notes and everything else work with it off. Other devices " +
+            "reach it through a Windows Firewall rule for private networks only, never " +
+            "public ones, so this device answers on your own network and not on a " +
+            "café's. The first time you switch on, Gilune asks Windows for that rule " +
+            "and Windows asks once for an administrator's approval; the line above the " +
+            "switch says where it stands, and offers to ask again if it was refused. " +
+            "The user guide has the command an administrator can run instead.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
@@ -949,3 +963,89 @@ internal fun emptyDiscoveryNote(discovery: String): String =
             "that. Pairing by address and code still works on those networks: the " +
             "other device shows both while its code is open."
     }
+
+// ------------------------------------------------------------ firewall
+
+/// Where the Windows Firewall stands for the installed launcher, and the
+/// one action there is: ask for the rule, with administrator approval.
+/// Null `launcher` is a build that is not an installed Windows app (a dev
+/// run, Linux), which has no row.
+class FirewallState(private val launcher: File?, private val scope: CoroutineScope) {
+    var verdict by mutableStateOf<FirewallVerdict?>(null)
+        private set
+    var busy by mutableStateOf(false)
+        private set
+    /// What the last ask came back with, when it was not the rule.
+    var lastOutcome by mutableStateOf<FirewallOutcome?>(null)
+        private set
+
+    val shown: Boolean get() = launcher != null
+
+    fun refresh() {
+        val exe = launcher ?: return
+        scope.launch { verdict = withContext(Dispatchers.IO) { WindowsFirewall.inspect(exe) } }
+    }
+
+    /// Switching sync on: the rule is asked for when it is missing or a
+    /// block stands in its way. One prompt; the person's answer is the
+    /// answer.
+    fun allowIfNeeded() {
+        val exe = launcher ?: return
+        if (busy) return
+        scope.launch {
+            val now = withContext(Dispatchers.IO) { WindowsFirewall.inspect(exe) }
+            verdict = now
+            if (now == FirewallVerdict.MISSING || now == FirewallVerdict.BLOCKED) allow()
+        }
+    }
+
+    fun allow() {
+        val exe = launcher ?: return
+        if (busy) return
+        busy = true
+        scope.launch {
+            try {
+                val outcome = withContext(Dispatchers.IO) { WindowsFirewall.allow(exe) }
+                lastOutcome = outcome.takeIf { it != FirewallOutcome.Allowed }
+                verdict = withContext(Dispatchers.IO) { WindowsFirewall.inspect(exe) }
+            } finally {
+                busy = false
+            }
+        }
+    }
+}
+
+/// One line under the switch: the firewall's answer in words, and a
+/// button when there is something to do about it. Says nothing while the
+/// rule is in place — the paragraph below already explains it.
+@Composable
+internal fun FirewallRow(firewall: FirewallState) {
+    if (!firewall.shown) return
+    val colours = MaterialTheme.colorScheme
+    val verdict = firewall.verdict ?: return
+    val words = when (verdict) {
+        FirewallVerdict.ALLOWED -> "Windows Firewall lets Gilune through on private networks."
+        FirewallVerdict.MISSING -> "Windows Firewall does not let Gilune through yet — other devices cannot reach this one until it does."
+        FirewallVerdict.BLOCKED -> "A Windows Firewall rule is blocking Gilune on private networks — what a dismissed prompt leaves behind. It beats every allow beside it."
+        FirewallVerdict.UNKNOWN -> return
+    }
+    val refused = when (val outcome = firewall.lastOutcome) {
+        FirewallOutcome.Declined -> " The last request was declined."
+        is FirewallOutcome.Failed -> " The last request failed: ${outcome.words}."
+        else -> ""
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(
+            words + refused,
+            fontSize = 12.sp,
+            lineHeight = 18.sp,
+            color = if (verdict == FirewallVerdict.ALLOWED) colours.onSurfaceVariant else colours.error,
+            modifier = Modifier.weight(1f),
+        )
+        if (verdict != FirewallVerdict.ALLOWED) {
+            OutlinedButton(onClick = firewall::allow, enabled = !firewall.busy) {
+                Text(if (verdict == FirewallVerdict.BLOCKED) "Fix the rule" else "Allow on private networks", fontSize = 12.sp)
+            }
+        }
+    }
+}
