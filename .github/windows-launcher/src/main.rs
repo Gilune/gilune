@@ -9,7 +9,19 @@
 
 use std::ffi::{c_char, c_void, OsStr, OsString};
 use std::os::windows::ffi::OsStrExt;
+use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
+
+/// `Gilune.exe --allow-firewall`: add the Windows Firewall rule that lets
+/// this launcher answer other devices on private networks, and nothing
+/// else. The app starts this elevated (Windows asks once), so the prompt
+/// names Gilune rather than a shell; a per-user install has no other
+/// elevated moment. No runtime is loaded.
+const ALLOW_FIREWALL: &str = "--allow-firewall";
+const FIREWALL_RULE: &str = "Gilune";
+/// A console child of a windowed process would open a console of its own.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 type Jint = i32;
 type Jsize = i32;
@@ -172,6 +184,48 @@ fn class_path(lib: &Path) -> std::io::Result<OsString> {
     Ok(joined)
 }
 
+/// The netsh invocations, in order: delete every rule Windows holds for
+/// this launcher and for the runtime's javaw.exe (a Block row from a
+/// dismissed prompt beats any Allow, and netsh duplicates by name), then
+/// add the one rule — inbound, allow, Private profile only.
+fn firewall_commands(root: &Path, exe: &Path) -> Vec<Vec<OsString>> {
+    let program = |path: &Path| {
+        let mut argument = OsString::from("program=");
+        argument.push(path);
+        argument
+    };
+    let words = |text: &str| text.split(' ').map(OsString::from).collect::<Vec<_>>();
+    let javaw = root.join("runtime").join("bin").join("javaw.exe");
+    let mut commands = Vec::new();
+    for path in [&javaw, exe] {
+        let mut command = words("advfirewall firewall delete rule name=all");
+        command.push(program(path));
+        commands.push(command);
+    }
+    let mut add = words(&format!(
+        "advfirewall firewall add rule name={FIREWALL_RULE} dir=in action=allow enable=yes profile=private"
+    ));
+    add.push(program(exe));
+    commands.push(add);
+    commands
+}
+
+/// Runs the commands; the exit code is the add's, since the deletes may
+/// find nothing to delete.
+fn allow_firewall(root: &Path, exe: &Path) -> std::io::Result<i32> {
+    let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| OsString::from(r"C:\Windows"));
+    let netsh = Path::new(&system_root).join("System32").join("netsh.exe");
+    let mut code = 1;
+    for command in firewall_commands(root, exe) {
+        let status = Command::new(&netsh)
+            .args(&command)
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()?;
+        code = status.code().unwrap_or(1);
+    }
+    Ok(code)
+}
+
 fn load_create_java_vm(root: &Path) -> std::io::Result<CreateJavaVm> {
     let bin = root.join("runtime").join("bin");
     let jvm = bin.join("server").join("jvm.dll");
@@ -328,6 +382,9 @@ fn main() {
         let root = exe
             .parent()
             .ok_or_else(|| failure("Missing application directory"))?;
+        if std::env::args_os().nth(1).is_some_and(|argument| argument == ALLOW_FIREWALL) {
+            return allow_firewall(root, &exe);
+        }
         launch(root)
     };
     // The runtime's main thread is a thread of known stack size, not the
@@ -345,5 +402,32 @@ fn main() {
             ));
             std::process::exit(1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn firewall_rule_is_private_only_and_replaces_every_rule_for_both_programs() {
+        let root = Path::new(r"C:\Users\Pat\AppData\Local\Programs\Gilune");
+        let exe = root.join("Gilune.exe");
+        let commands: Vec<Vec<String>> = firewall_commands(root, &exe)
+            .into_iter()
+            .map(|command| command.into_iter().map(|word| word.to_string_lossy().into_owned()).collect())
+            .collect();
+        assert_eq!(3, commands.len());
+        for (command, program) in commands.iter().take(2).zip([
+            r"C:\Users\Pat\AppData\Local\Programs\Gilune\runtime\bin\javaw.exe",
+            r"C:\Users\Pat\AppData\Local\Programs\Gilune\Gilune.exe",
+        ]) {
+            assert_eq!(&["advfirewall", "firewall", "delete", "rule", "name=all"], &command[..5]);
+            assert_eq!(format!("program={program}"), command[5]);
+        }
+        let add = commands[2].join(" ");
+        assert!(add.starts_with("advfirewall firewall add rule name=Gilune dir=in action=allow enable=yes profile=private program="));
+        assert!(add.ends_with(r"\Gilune.exe"));
+        assert!(!add.contains("public"));
     }
 }
