@@ -215,11 +215,22 @@ fun installedApp(): InstalledApp? {
             ?: System.getProperty("compose.application.resources.dir")?.let { File(it).parentFile?.resolve("Gilune.exe") }
         )?.takeIf { it.isFile && it.name.equals("Gilune.exe", ignoreCase = true) } ?: return null
     val self = ProcessHandle.current()
-    // `Gilune.exe` starts the Java runtime and waits on it, so the
-    // installer must wait for both to let go of the files.
-    val processes = listOfNotNull(self.pid(), self.parent().orElse(null)?.pid())
-    return InstalledApp(exe, processes)
+    val parent = self.parent().orElse(null)
+    return InstalledApp(exe, processesToWaitFor(self.pid(), parent?.pid(), parent?.info()?.command()?.orElse(null)))
 }
+
+/// Which processes the installer must wait out. This one always; its
+/// parent only when the parent is a `Gilune.exe` launcher holding the
+/// files — the jpackage launcher, or the earlier MSI launcher that ran
+/// `javaw.exe` and waited on it. The current MSI launcher hosts the
+/// runtime in its own process, so the parent is whatever started Gilune
+/// (Explorer, a shell) and waiting on it would hold the update for the
+/// script's whole bound.
+fun processesToWaitFor(selfPid: Long, parentPid: Long?, parentCommand: String?): List<Long> =
+    listOfNotNull(
+        selfPid,
+        parentPid?.takeIf { parentCommand.orEmpty().endsWith("Gilune.exe", ignoreCase = true) },
+    )
 
 // ---------------------------------------------------------------- state
 
