@@ -1485,6 +1485,44 @@ gates promises) are ratified. **Next: application-level engineering — see
      stderr spam untouched (now appears at the first job, not at open).
      Jpackage note: Task Manager's second "Gilune" (1 MB) is the launcher
      relaunching itself with an adjusted PATH and waiting on the child.
+   - **Native Windows install (2026-10-22, Fable 5.1, branch
+     claude/trusting-wescoff-d12a97; evidence in
+     `.github/linux-windows-build.md` § Native Windows install).** The MSI
+     is NOT jpackage since October 2026 (the jpackage notes above are
+     historical): `.github/scripts/package-windows-linux.py` authors WiX
+     for wixl on Ubuntu and `.github/windows-launcher/` is the Rust
+     `Gilune.exe`. Owner's 1.1.0 findings fixed: (1) the Start-menu
+     shortcut was ADVERTISED (wixl writes the feature as target when none
+     is given) → `Target="[#file]"`, Icon id `GiluneIcon.ico`; (2) the
+     firewall prompt named "OpenJDK Platform binary" → the MSI adds the
+     `Gilune` inbound rule itself, Private profile only, via type 51 + type
+     50 deferred no-impersonate netsh custom actions (wixl has no
+     Directory-sourced EXE CAs), delete-then-add on install/repair/upgrade,
+     delete on uninstall, untouched by a product being replaced
+     (`NOT UPGRADINGPRODUCTCODE`), `Return=ignore`; ADR 0019 § 2 amended,
+     SyncSettings + sync guide reworded (netsh fallback names
+     `C:\Program Files\Gilune\Gilune.exe`); (3) two processes → the
+     launcher hosts the JVM in-process (`jvm.dll` via LoadLibraryW, raw
+     JNI, `java.class.path` enumerated, 1 MiB main thread, runtime\bin on
+     SetDllDirectory AND PATH — PATH because `java.library.path` derives
+     from it); Updates.kt waits for a parent only if it is a Gilune.exe.
+     Lifecycle test asserts .lnk TargetPath, one firewall rule, listener
+     owned by Gilune.exe (second launch with `<device_id>.sync.json`
+     seeded; device id regex-read from kernel.db bytes). RIG: the
+     lifecycle needs a disposable Windows runner — `windows-cross.yml`
+     gained opt-in `validate_installer` (dispatch only; billed Windows
+     minutes; `test_linux_workflows` allows a Windows runner only behind
+     that gate). Windows Sandbox is NOT enabled on the owner's machine.
+     VERIFIED LOCALLY: 25/25 CI-script tests incl. real-MSI rows (WSL
+     GiluneBuild), launcher Clippy clean, new launcher ran a copy of the
+     installed 1.1.0 (window, vault, exit 0, no javaw), UpdatesTest +
+     DesktopLaunchArgumentsTest green. NOT YET: the hosted run — the
+     session's active gh account (david-digisteel) cannot push to
+     Gilune/gilune; the owner account sneddobuilds is also logged into gh
+     (`gh auth switch --user sneddobuilds`). First hosted run to be
+     recorded in the build doc. Signing unchanged ("Publisher: Unknown"
+     needs a certificate; SmartScreen reputation is per-file and resets
+     per release).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
