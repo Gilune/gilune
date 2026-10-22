@@ -121,6 +121,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupPositionProvider
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.window.PopupProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -612,6 +613,39 @@ private fun OpenNote(
                             propertiesOpen = true
                         },
                     )
+                    // Keep this note on this device, or let it sync again
+                    // (ADR 0007, 2026-10-22): offered only while the vault
+                    // syncs at all, and written through the same lossless
+                    // header edit the Properties window uses.
+                    if (showLocalScopeToggle(state.syncStatus.value)) {
+                        val local = noteIsLocal(editor.frontMatterRaw)
+                        // Flipped in place, by the words or by the switch,
+                        // and the menu stays open: the header is state, so
+                        // the switch redraws with the new answer at once.
+                        val flipLocal = {
+                            try {
+                                val updated = noteTextWithLocalScope(editor.document(), !local)
+                                editor.applyProperties(editor.frontMatterRaw, splitNoteRaw(updated).first)
+                                write()
+                                state.message.value = localScopeNotice(relPath, !local)
+                            } catch (e: Exception) {
+                                state.message.value = "could not change $relPath: ${e.message}"
+                            }
+                        }
+                        DropdownMenuItem(
+                            text = { Text(localScopeMenuLabel(isDir = false, inherited = false), fontSize = 13.sp) },
+                            trailingIcon = {
+                                MiniSwitch(
+                                    checked = !local,
+                                    enabled = true,
+                                    onToggle = flipLocal,
+                                    modifier = Modifier.clearAndSetSemantics { },
+                                )
+                            },
+                            onClick = flipLocal,
+                            modifier = Modifier.testTag("toggle-local-scope"),
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Reveal in Explorer", fontSize = 13.sp) },
                         onClick = {

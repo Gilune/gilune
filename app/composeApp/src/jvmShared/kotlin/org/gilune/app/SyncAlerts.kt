@@ -77,6 +77,16 @@ const val VAULT_CONTENT_UNREADABLE = "vault-content-unreadable"
 /// A saved page could not publish its first file at an occupied path.
 const val VAULT_PROJECTION_PATH_OCCUPIED = "vault-projection-path-occupied"
 
+/// A file in the vault is larger than a device will take over sync, so it
+/// stays where it is and is not carried (ADR 0007, 2026-10-22). **Not
+/// damage**: the file is intact and nothing was attempted.
+const val VAULT_ATTACHMENT_TOO_LARGE = "vault-attachment-too-large"
+
+/// A file arriving from another device found its path occupied by different
+/// bytes and was written beside them under a name that says where it came
+/// from. **Not damage**: both copies are kept.
+const val VAULT_ATTACHMENT_PATH_OCCUPIED = "vault-attachment-path-occupied"
+
 /// A change refers to something whose own history has not arrived yet.
 /// **Not damage and not a halt**: the two devices met in the wrong order,
 /// the stream carries on, and the condition clears itself at the next
@@ -119,6 +129,8 @@ val ALERT_KINDS: List<String> = listOf(
     VAULT_CONTENT_UNREADABLE,
     VAULT_PROJECTION_PATH_OCCUPIED,
     SYNC_PREVIOUS_IDENTITY_CLAIMED,
+    VAULT_ATTACHMENT_TOO_LARGE,
+    VAULT_ATTACHMENT_PATH_OCCUPIED,
 )
 
 /// Whether a standing condition is one a person can act on from the sync
@@ -271,6 +283,17 @@ fun alertSentence(
             "A page is saved, but another file occupies its requested path$about. " +
                 "The existing file has been preserved. Once that path is available, " +
                 "$RESUMES and creates the page's file."
+
+        VAULT_ATTACHMENT_TOO_LARGE ->
+            "A file in your vault is too large to carry to your other devices$about, " +
+                "so it stays on ${words.thisDevice} and is not synced. Nothing is wrong " +
+                "with it, and $RESUMES with everything else."
+
+        VAULT_ATTACHMENT_PATH_OCCUPIED ->
+            "A file arrived from another device and found a different file already at " +
+                "its path$about, so it was saved beside that one under a name that says " +
+                "which device it came from. Both are kept, nothing was overwritten, and " +
+                "$RESUMES with everything else."
 
         VAULT_CONTENT_UNREADABLE ->
             "A note's text file could not be read$about, so it was left as it is " +

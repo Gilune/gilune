@@ -3,6 +3,7 @@ use super::*;
 fn vault() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().expect("temp");
     let store = Store::open(dir.path()).expect("open");
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     (dir, store)
 }
 fn write(store: &Store, path: &str, body: &str) {

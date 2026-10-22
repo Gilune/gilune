@@ -44,7 +44,7 @@ pub use discovery::{Advertisement, Discovered, MdnsDiscovery, NoDiscovery, PeerD
 pub use exchange::{ExchangeReport, Halted};
 pub use identity::{Enrolment, Identity, IdentityStore, KeyWrap};
 pub use roster::{Peer, PeerState, Roster};
-pub use service::SyncService;
+pub use service::{Silent, Stage, SyncProgress, SyncService};
 pub use transport::{DeviceOffer, Frame, Listener, Session, Transport};
 
 /// The protocol this build speaks. Agreed in the Noise handshake's

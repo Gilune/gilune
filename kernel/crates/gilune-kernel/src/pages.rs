@@ -134,8 +134,11 @@ impl Store {
             .as_bytes(),
         );
         let device = self.device_id()?;
-        let object_id =
-            deterministic_id(&json!(["page", device, plugin_id, request_id]).to_string());
+        // No device in the id (ADR 0007, 2026-10-22): a request id is a
+        // fresh UUID for a person's page, and a deterministic one for an
+        // initialiser's, so two vaults seeding the same page make the
+        // same object rather than two that collide on one path.
+        let object_id = deterministic_id(&json!(["page", plugin_id, request_id]).to_string());
         let revision_id = deterministic_id(&format!("page-revision:{object_id}"));
         let receipt = PageReceipt {
             object_id: object_id.clone(),
@@ -214,6 +217,17 @@ pub use initialization::PageInitialization;
 fn deterministic_id(value: &str) -> String {
     let h = ids::sha256_hex(value.as_bytes());
     format!("{}-{}-{}-{}-{}", &h[..8], &h[8..12], &h[12..16], &h[16..20], &h[20..32])
+}
+
+/// A request id that is the same on every device for the same seed: a
+/// name-derived UUID, so an initialiser's pages converge across vaults.
+pub(crate) fn deterministic_request_id(value: &str) -> String {
+    let h = ids::sha256_hex(value.as_bytes());
+    let mut bytes = [0u8; 16];
+    for (i, b) in bytes.iter_mut().enumerate() {
+        *b = u8::from_str_radix(&h[i * 2..i * 2 + 2], 16).unwrap_or(0);
+    }
+    uuid::Builder::from_random_bytes(bytes).into_uuid().to_string()
 }
 
 pub(crate) fn portable_path(supplied: &str) -> Result<String> {

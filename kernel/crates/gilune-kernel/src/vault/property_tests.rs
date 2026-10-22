@@ -79,6 +79,9 @@ fn crlf_bom_property_deletion_and_header_only_edits_round_trip() {
 #[test]
 fn valid_foreign_yaml_stays_an_unmanaged_import() {
     let (_dir, store, _, _) = capture();
+    // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+    // case in which a file the kernel did not write stays a candidate.
+    std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
     let text = format!("---\n{PROPERTIES}---\nordinary note\n");
     std::fs::write(store.vault().join("foreign.md"), &text).unwrap();
     let result = store.reconcile_path("foreign.md").unwrap();
@@ -193,6 +196,9 @@ fn a_processor_revision_cannot_erase_or_replace_source_properties() {
 #[test]
 fn foreign_yaml_can_use_flow_mappings_and_merges_without_adoption() {
     let (_dir, store, _, _) = capture();
+    // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+    // case in which a file the kernel did not write stays a candidate.
+    std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
     for (name, text) in [
         ("flow.md", "---\n{name: Example, tags: [a, b]}\n---\nbody\n"),
         ("merge.md", "---\ndefaults: &defaults {name: Example}\n<<: *defaults\n---\nbody\n"),

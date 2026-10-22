@@ -1485,6 +1485,154 @@ gates promises) are ratified. **Next: application-level engineering — see
      stderr spam untouched (now appears at the first job, not at open).
      Jpackage note: Task Manager's second "Gilune" (1 MB) is the launcher
      relaunching itself with an adjusted PATH and waiting on the child.
+   - **Sync-area round (2026-10-22, Fable, from the owner testing 1.1.0
+     on a desktop + a notebook on a Wi-Fi extender; branch
+     claude/sync-area-improvements-b0a1be).** Diagnosis first: the
+     notebook (NB1606, 192.168.1.137) was SEEN by discovery (its mDNS
+     announcement reaches the desktop) while ping and TCP 51837 to it
+     both time out from here — packets DROPPED, not refused — which is
+     the shape of a Windows machine whose extender SSID is classed
+     Public (the Private-only firewall rule does not apply). Owner to
+     check `Get-NetConnectionProfile` on NB1606. Shipped (ADR 0019
+     Amendments 2026-10-22): `reach` no longer re-dials an address the
+     search just named when it is the one that failed (one connect
+     timeout, not two — falsified: 2 accepts without the rule, 1 with);
+     seen-but-unreachable gets its own sentence
+     (`unreachable_despite_discovery`: network profile + "switched off
+     moments ago"); `halt_reason` drops the error variant's "refused:"
+     prefix; `SyncProgress`/`Stage` in gilune-sync +
+     `sync_now_reporting` on the FFI (foreign trait, record
+     `SyncProgressEvent`, enum `SyncStage`; `sync_now` stays silent for
+     SyncWorker); shared `SyncRound.kt` (progress sentence, per-peer
+     outcomes, status-line summary, `foundDeviceOffer`); both shells:
+     found rows offer "Pair…"/"Pair again" with an inline code field
+     (address never typed), Sync-now button shows the stage under way
+     and a "Last sync" block with per-device outcomes; desktop asks
+     `Get-NetConnectionProfile` once per Sync-page visit while sync is
+     on and warns in red when a network is Public
+     (`WindowsNetworkProfile.kt`); Android's "Sync now works while off"
+     sentence corrected (the kernel dials nobody when !wanted) and
+     `syncDevices` says so instead of "nothing to sync with". Guide +
+     ADR updated. NOT adopted: a `pairing` TXT flag (owner's call).
+     Suites: cargo gilune-sync+ffi green + clippy silent; desktop
+     886/0/10 (debug dll, no whisper); Android source set compiles
+     against bindings copied from the desktop binary — instrumented NOT
+     run, no emulator, and the new Android rows have no UI test;
+     neither shell's new UI was screenshot-validated live (a found row
+     needs a second device and the Sync-now block a real round).
+     BINDINGS CHANGED (three new types + one method) — CI regenerates
+     both targets; locally `app/kernelBindings/src/*/generated` and the
+     staged dll must be rebuilt before a dev run shows any of this.
+     Installer branding/shortcut/javaw findings went to a separate
+     session (windows-installer-plain). **SECOND FINDING, same session,
+     live on the owner's desktop**: the installed 1.1.0 reported "found
+     by others: yes, over mdns-sd" while its JVM held NO UDP 5353 socket
+     (only Chrome/Spotify/ChatGPT held it; a fresh shared bind from java
+     succeeded) — `mdns-sd` 0.21 creates its one multicast socket in the
+     daemon constructor, logs at debug on failure and runs mute for the
+     process's life; `register` still returns Ok. Fix: desktop
+     `advertise` subscribes to `daemon.monitor()` before registering and
+     is Ok only on an `Announce` for that fullname within 2 s (emitted
+     only after a real send); else shutdown + rebuild the daemon once,
+     then Err ⇒ `advertising=false` ⇒ screen says not findable;
+     `sync_now` retries. gate_c +2 (zero-window negative path, honest
+     label; falsified by forcing the check true). An installed 1.1.0 in
+     that state recovers only by restarting the app. Separately
+     measured: the notebook on the BT extender CAN dial the desktop
+     (connection accepted here at 10:29) while the desktop cannot even
+     ARP-resolve the notebook. CORRECTED an hour later: a second watch
+     showed the notebook answering ARP probes (Reachable every ~15 s)
+     while TCP 51837 always timed out — a firewall DROP, not the
+     repeater. ROOT CAUSE: the notebook's first firewall prompt had
+     left BLOCK rules for `C:\Program Files\Gilune\runtime\bin\javaw.exe`;
+     a Block rule beats every Allow on every profile, so Private changed
+     nothing. Removing them + the Private allow rule fixed sync both
+     ways. Shipped: `firewallRulesForThisApp()`/`firewallBlockWarning`
+     (read-only PowerShell, ~1.5 s, matched against java.home's
+     javaw/java + the launcher beside it, env tokens expanded) drawn
+     red beside the switch; installer session told to delete stale
+     rules for those programs on install/uninstall and to carry the
+     guide's commands (the guide's firewall section is THAT session's
+     to edit — not touched here). The repeater is NOT at fault.
+   - **Every vault file syncs (2026-10-22, Fable, ADR 0007 amendment
+     ratified then built in-session; same branch as the sync round).**
+     Root cause of "both say up to date, folders differ": New-note /
+     Obsidian / copied `.md` files were import candidates forever (no
+     object, no op); non-md files were untracked. Shipped: schema v10
+     (`blobs.mtime_ns/recorded_ns`, `local_objects`); `vault/adopt.rs` —
+     one walk (`vault_files`, dot-entries and `.tmp-*` are nobody's);
+     Markdown adopted at reconcile as `org.memory.note` (origin
+     `external-import`, document carries `path`; header-bearing files
+     with an unknown id are adopted under that id and their own
+     `gilune-type`); rows first then header, with a tracked file whose
+     bytes equal its record = header pending, and bytes equal to the
+     render = record catching up (crash rows adopt.commit.inside/
+     after_commit/after_write in crash_matrix); attachments =
+     `org.memory.attachment` blob rows in place (`attached: true` ⇒ no
+     note projected), stat rule, in-place edit = new blob + object-revised
+     carrying `blob` (apply now accepts it), missing file = tombstone
+     proposal, tombstoned attachment withdrawn iff bytes == blob;
+     receiver `settle_attachment_target` (same bytes / previous
+     revision's bytes ⇒ replace / else beside `<stem> (from <short>).<ext>`
+     + alert); local-only = `gilune-sync: local` (document crate: the one
+     user-writable reserved key) or `.gilune-local` folder marker —
+     never adopted, candidates stay; a synced note entering local scope
+     records `local_objects(last_sent_revision)` and `add_revision_naming`
+     withholds operations; leaving sends one `local-rejoin` revision
+     superseding the last-sent head; tombstones of local notes are not
+     sent; same-filename collision: arrivals project beside as
+     `<stem> (from <short device>).md` and the pass orders own objects
+     before arrivals; page ids drop the device (initialiser seeds get
+     deterministic request ids, receipts stay per-device) so fresh vaults
+     converge; index skips non-md paths. Tests: adopt_tests ×9,
+     gate_c ×4 two-device (note, image incl. in-place edit, local-only,
+     same filename), crash ×3 points, pages tests rewritten to the new
+     contract, 20-odd kernel tests that pinned "unmanaged" now use a
+     local-only vault (marker in their fixtures). Guide "What syncs"
+     rewritten + two not-a-problem entries; shells gained words for
+     `vault-attachment-too-large` / `-path-occupied`. Kotlin test
+     fixtures that treat the vault as plain files (IndexedVault,
+     ItemSearch, DocumentRefactoring, People*, SourceIndexer) mark their
+     vault local-only; the People portability test ignores the kernel's
+     revision/created stamps (a copied file is adopted under its id).
+     Three rules falsified by disabling each: path-in-document, local
+     withholding, own-before-arrival ordering. SUITES: cargo workspace
+     green + clippy silent; desktop 889/0/10; Android compiles;
+     instrumented NOT run. GAPS: over-limit
+     attachment path untested (needs a 512 MiB file); rejecting an
+     attachment's tombstone cannot restore bytes locally; a note
+     renamed after adoption still does not carry its rename to peers
+     (pre-existing: renames-by-id raise no op); the desktop tree still
+     hides loose non-md files; existing duplicate plugin pages on the
+     owner's machines are not migrated (delete one copy each).
+     **Desktop toggle (same day, owner ask; the owner wanted the switch
+     IN the right-click menu, at the size shown)**: the files list's
+     context menu is drawn by the shell (`ContextMenu.kt`:
+     `GiluneContextMenuRepresentation` via `LocalContextMenuRepresentation`
+     around VaultTree; `SwitchMenuItem` extends Compose's open
+     `ContextMenuItem`) so one item carries a `MiniSwitch` (24×13 dp) —
+     "Sync this note/folder" on = syncs, off = kept here; "Kept here by a
+     folder above" disabled when `inheritsLocal`; row node carries
+     Role.Switch + testTag `vault-sync:<rel>`. The note's ⋯ menu shows
+     the same item with the switch as its trailing icon. A kept folder
+     OR note shows a quiet "local" badge (testTag `vault-local:<rel>`,
+     unmerged tree; notes read once per refresh into `localNotes`; rows
+     kept only by a folder above show none). `localScopeOf` stays as a
+     helper. Both switches flip IN PLACE — words or control — and the
+     menu stays open (`choose` + `flipped` counter in the
+     representation; the ⋯ item's `flipLocal` bound to onClick and the
+     MiniSwitch). Both
+     menus shown only while `syncStatus.wanted`
+     (jvmShared `LocalScope.kt`: `showLocalScopeToggle`, `noteIsLocal`,
+     `noteTextWithLocalScope` via the kernel's `changeSourceProperties`,
+     `setFolderLocal`); an open note's mark goes through its tab
+     (`TabsState.noteLocalScope` → applyProperties + flushEditor), a
+     closed one is edited on disk then `noteSaved`; a folder toggle writes
+     the marker and runs `state.sync` so the kernel settles scope.
+     LocalScopeTest ×6 + UI rows in VaultTreeFoldersUiTest/NoteEditorUiTest
+     (right-click via performMouseInput Secondary; popups are their own
+     roots — close with a click outside, never onRoot key input). No
+     Android surface yet.
    - **Native Windows install (2026-10-22, Fable 5.1, branch
      claude/trusting-wescoff-d12a97; evidence in
      `.github/linux-windows-build.md` § Native Windows install).** The MSI

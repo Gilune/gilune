@@ -21,6 +21,10 @@ use crate::revisions::{add_revision, Announce};
 use crate::store::Store;
 use crate::{changes, fs, ids, probe, KernelError, Result};
 mod header;
+pub mod adopt;
+#[cfg(test)]
+mod adopt_tests;
+pub use adopt::{ATTACHMENT_TYPE, LOCAL_MARKER, LOCAL_VALUE, NOTE_TYPE};
 #[cfg(test)]
 mod property_tests;
 use header::Header;
@@ -107,6 +111,10 @@ pub struct ReconcileSummary {
     pub tombstone_proposals: i64,
     pub imports: i64,
     pub quarantined: i64,
+    /// Markdown files adopted as notes this pass (ADR 0007, 2026-10-22).
+    pub adopted: i64,
+    /// Files adopted as attachments this pass.
+    pub attachments: i64,
 }
 
 struct Head {
@@ -280,6 +288,15 @@ impl Store {
         let occupied: std::collections::BTreeSet<String> = self
             .integrity_alerts_of(crate::alerts::VAULT_PROJECTION_PATH_OCCUPIED)?
             .into_iter().map(|a| a.subject).collect();
+        // **Local before arrived, for a path both want.** An object this
+        // device made projects before one that arrived from elsewhere and
+        // has no file yet, so when two notes want one path it is always
+        // the arrival that goes beside (ADR 0007, 2026-10-22) — never the
+        // person's own note held back because the other id sorted first.
+        // The projection row is read once here and carried into the loop.
+        let ours = self.device_id()?;
+        let mut ordered: Vec<(Head, Option<Recorded>)> = Vec::new();
+        let mut arrived: Vec<(Head, Option<Recorded>)> = Vec::new();
         for head in self.live_heads()? {
             if is_attached(&head.payload) {
                 // An attached capture belongs to a note that already
@@ -288,6 +305,19 @@ impl Store {
                 // rather than pending in it, and no counter reports it.
                 continue;
             }
+            let row = self.recorded_for_object(&head.object_id)?;
+            let from_elsewhere = row.is_none()
+                && crate::operations::origins_of(self.conn(), &head.object_id)?
+                    .object
+                    .is_some_and(|origin| origin != ours);
+            if from_elsewhere {
+                arrived.push((head, row));
+            } else {
+                ordered.push((head, row));
+            }
+        }
+        ordered.extend(arrived);
+        for (head, row) in ordered {
             let rel_path = match self.projection_path(&head) {
                 Err(KernelError::DocumentInvalid { detail }) => {
                     summary.held_back += 1;
@@ -337,7 +367,6 @@ impl Store {
             }
             let canonical_sha = ids::sha256_hex(canonical.as_bytes());
             let target = self.vault().join(&rel_path);
-            let row = self.recorded_for_object(&head.object_id)?;
             let recorded = row.as_ref().map(|r| r.sha.clone());
             // The disk state is what detects an external edit, so this
             // never guesses — but it no longer *reads* to learn what it
@@ -381,9 +410,34 @@ impl Store {
                 }
                 (Some(_), None) => {
                     // A path requested by a new object is not authority over
-                    // an unrelated existing file, including one received by sync.
-                    summary.held_back += 1;
-                    self.report_occupied_projection(&head.object_id, &rel_path)?;
+                    // an unrelated existing file, including one received by
+                    // sync. A note that arrived from another device is
+                    // written beside the occupant under a name that says
+                    // where it came from (ADR 0007, 2026-10-22): held in
+                    // history with a notice and no file was a note nobody
+                    // could see. The name is the notice.
+                    let beside = self.conflict_path(&head, &rel_path)?;
+                    match beside {
+                        Some(beside)
+                            if write_new_projection(
+                                &self.vault().join(&beside),
+                                canonical.as_bytes(),
+                            )? =>
+                        {
+                            crashpoint("project.after_write");
+                            self.record_projection(
+                                &head,
+                                &beside,
+                                &canonical_sha,
+                                Some(ChangeKind::Created),
+                            )?;
+                            summary.written += 1;
+                        }
+                        _ => {
+                            summary.held_back += 1;
+                            self.report_occupied_projection(&head.object_id, &rel_path)?;
+                        }
+                    }
                 }
                 (Some(d), Some(r)) if d != r => {
                     // Externally changed since we last wrote: reconcile owns it.
@@ -419,6 +473,7 @@ impl Store {
             }
         }
         summary.removed = self.withdraw_tombstoned()?;
+        summary.removed += self.withdraw_tombstoned_attachments()?;
         // The index is maintained in the pass that recorded the change
         // (ADR 0020 § 2.3), so a consumer never has to ask for it and
         // never has to rescan to catch up.
@@ -564,10 +619,18 @@ impl Store {
         // can act on.
         let mut kept: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
-        for rel_path in self.markdown_files()? {
-            seen_paths.push(rel_path.clone());
-            self.reconcile_file(&rel_path, &mut summary, &mut kept, true)?;
+        let files = adopt::vault_files(self.vault())?;
+        for found in &files.markdown {
+            seen_paths.push(found.rel_path.clone());
+            self.reconcile_file(&found.rel_path, found.local, &mut summary, &mut kept, true)?;
         }
+        // Everything that is not a note (ADR 0007, amendment 2026-10-22):
+        // adopted in place, revised when its bytes change, proposed for
+        // deletion when it goes.
+        let (adopted_files, revised_files) = self.reconcile_attachments(&files.other)?;
+        summary.attachments += adopted_files;
+        summary.edits += revised_files;
+        summary.tombstone_proposals += self.propose_missing_attachments()?;
 
         // Tracked projections whose file is gone become tombstone
         // proposals; the file is not resurrected while a proposal is open.
@@ -640,7 +703,8 @@ impl Store {
         let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
         if self.vault().join(&rel).is_file() {
-            if let Some(object_id) = self.reconcile_file(&rel, &mut summary, &mut kept, false)? {
+            let local = adopt::folder_is_local(self.vault(), &rel);
+            if let Some(object_id) = self.reconcile_file(&rel, local, &mut summary, &mut kept, false)? {
                 seen.insert(object_id);
             }
         } else if let Some(record) = self.recorded_at_path(&rel)? {
@@ -674,6 +738,7 @@ impl Store {
     fn reconcile_file(
         &self,
         rel_path: &str,
+        local: bool,
         summary: &mut ReconcileSummary,
         kept: &mut std::collections::BTreeSet<String>,
         trust_stat_cache: bool,
@@ -694,7 +759,12 @@ impl Store {
         // is one — so without this every import in the vault was read on
         // every pass, which is exactly the cost § 2.5 removed for the
         // files the kernel writes.
-        if trust_stat_cache && tracked.is_none() {
+        //
+        // Only a candidate kept by its *folder* settles on the stat: one
+        // kept by its own key has to be read to learn the key is still
+        // there, and one that is neither is read so it can be adopted
+        // (ADR 0007, 2026-10-22).
+        if trust_stat_cache && tracked.is_none() && local {
             if let Some(object_id) = self.import_matches_record(rel_path)? {
                 // A kept note is still about its object while its file is
                 // there, and the notice that says so is withdrawn by not
@@ -715,6 +785,15 @@ impl Store {
 
         match parse_front_matter(&text) {
             FrontMatter::Absent | FrontMatter::Foreign | FrontMatter::Malformed if tracked.is_some() => {
+                // Bytes equal to the record are not a broken projection:
+                // they are an adopted file whose header has not landed
+                // yet (`adopt_markdown` commits the rows first), and
+                // `project` canonicalises it on its next pass.
+                if let Some((object_id, record)) = &tracked {
+                    if ids::sha256_hex(text.as_bytes()) == record.sha {
+                        return Ok(Some(object_id.clone()));
+                    }
+                }
                 // A file the kernel wrote lost or broke its identity:
                 // never guess, never overwrite — a person decides.
                 summary.quarantined +=
@@ -726,8 +805,28 @@ impl Store {
                 Ok(None)
             }
             FrontMatter::Absent | FrontMatter::Foreign => {
-                summary.imports += self.record_import(rel_path, &text, None)?;
-                Ok(None)
+                if local || adopt::header_says_local(&text) {
+                    // Kept on this device by the person's own mark: a
+                    // candidate for the index, never an object.
+                    summary.imports += self.record_import(rel_path, &text, None)?;
+                    return Ok(None);
+                }
+                match self.adopt_markdown(rel_path, &text, None, None) {
+                    Ok(object_id) => {
+                        summary.adopted += 1;
+                        Ok(Some(object_id))
+                    }
+                    // A header the lossless envelope cannot carry — YAML
+                    // anchors, merges, flow mappings — is kept as the
+                    // person wrote it and offered as a candidate, exactly
+                    // as before; failing the pass over one file would
+                    // stop every other file being seen.
+                    Err(KernelError::DocumentInvalid { .. }) => {
+                        summary.imports += self.record_import(rel_path, &text, None)?;
+                        Ok(None)
+                    }
+                    Err(e) => Err(e),
+                }
             }
             FrontMatter::Parsed(header) => {
                 let Some(object_id) =
@@ -748,10 +847,26 @@ impl Store {
                     // notice is still true.
                     if self.is_deleted(&object_id)? {
                         kept.insert(object_id.clone());
+                    } else if !self.object_exists(&object_id)?
+                        && !(local || adopt::header_says_local(&text))
+                    {
+                        // An id nobody here holds: the crash window after
+                        // adoption wrote the header, or a file copied from
+                        // another device's vault. Either way it is that
+                        // note, so it is adopted under its own id.
+                        self.adopt_markdown(rel_path, &text, Some(&header), Some(&object_id))?;
+                        summary.adopted += 1;
+                        return Ok(Some(object_id));
                     }
                     summary.imports += self.record_import(rel_path, &text, Some(&object_id))?;
                     return Ok(Some(object_id));
                 };
+                // Local scope is settled before any edit below is taken
+                // in, so an edit that adds the mark is a revision peers
+                // never hear of (ADR 0007, 2026-10-22).
+                if !self.is_deleted(&object_id)? {
+                    self.settle_local_scope(&object_id, local || adopt::header_says_local(&text))?;
+                }
                 if known.rel_path != rel_path {
                     if self.vault().join(&known.rel_path).exists() {
                         summary.quarantined +=
@@ -762,6 +877,26 @@ impl Store {
                     summary.renames += 1;
                 }
                 if ids::sha256_hex(text.as_bytes()) != known.sha {
+                    // Bytes that are exactly what this device would render
+                    // are not an edit: they are a header that landed after
+                    // adoption's rows and before its record (the crash
+                    // window), or `project`'s own canonical form. The
+                    // record catches up and nobody is told anything.
+                    // Asked only of a note whose words are in its own
+                    // document: rendering one reads nothing, whereas a
+                    // capture's body is its blob and rendering it would be
+                    // a read the feed never named (ADR 0020 § 8.5).
+                    let carries_text = |head: &Head| {
+                        serde_json::from_str::<serde_json::Value>(&head.payload)
+                            .ok()
+                            .is_some_and(|v| v.get("text").is_some())
+                    };
+                    if let Some(head) = self.live_head(&object_id)?.filter(carries_text) {
+                        if self.render(&head)?.as_deref() == Some(text.as_str()) {
+                            self.record_projection(&head, rel_path, &ids::sha256_hex(text.as_bytes()), None)?;
+                            return Ok(Some(object_id));
+                        }
+                    }
                     if self.is_deleted(&object_id)? {
                         // The object was deleted on another device and
                         // this file was edited here. The edit is the
@@ -865,13 +1000,19 @@ impl Store {
                 let carried = crate::operations::tombstone_payload(conn, &object_id)?;
                 conn.execute("UPDATE objects SET deleted = 1 WHERE object_id = ?1", [&object_id])?;
                 conn.execute("DELETE FROM projections WHERE object_id = ?1", [&object_id])?;
-                crate::operations::record(
-                    conn,
-                    crate::operations::TOMBSTONE,
-                    &object_id,
-                    carried,
-                    ids::now_ms(),
-                )?;
+                // A note kept on this device is deleted on this device:
+                // peers keep what they had (ADR 0007, 2026-10-22).
+                if self.is_local_object(&object_id)? {
+                    conn.execute("DELETE FROM local_objects WHERE object_id = ?1", [&object_id])?;
+                } else {
+                    crate::operations::record(
+                        conn,
+                        crate::operations::TOMBSTONE,
+                        &object_id,
+                        carried,
+                        ids::now_ms(),
+                    )?;
+                }
                 if let Some(record) = &vacated {
                     changes::record(
                         conn,
@@ -907,6 +1048,16 @@ impl Store {
     }
 
     // ---------------------------------------------------------- internals
+
+    /// The head that renders for one object, by the one rule every reader
+    /// takes, or `None` for an object with no live head.
+    fn live_head(&self, object_id: &str) -> Result<Option<Head>> {
+        let mut stmt = self
+            .conn()
+            .prepare(&format!("SELECT * FROM ({}) WHERE object_id = ?1", head_sql()))?;
+        let mut rows = stmt.query_map([object_id], read_head)?;
+        Ok(rows.next().transpose()?)
+    }
 
     fn live_heads(&self) -> Result<Vec<Head>> {
         let mut stmt = self.conn().prepare(&head_sql())?;
@@ -1149,6 +1300,28 @@ impl Store {
         Ok(heads.iter().all(|head| named.contains(head)))
     }
 
+    fn object_exists(&self, object_id: &str) -> Result<bool> {
+        Ok(self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM objects WHERE object_id = ?1)",
+            [object_id],
+            |row| row.get::<_, i64>(0),
+        )? == 1)
+    }
+
+    /// Where a note from another device goes when its own path is taken:
+    /// `<stem> (from <origin>).md`, with the origin device's short id
+    /// because the kernel knows no device names. `None` for an object
+    /// this device made itself — its collision is a local one.
+    fn conflict_path(&self, head: &Head, rel_path: &str) -> Result<Option<String>> {
+        let origins = crate::operations::origins_of(self.conn(), &head.object_id)?;
+        let Some(origin) = origins.object else { return Ok(None) };
+        if origin == self.device_id()? {
+            return Ok(None);
+        }
+        let (stem, ext) = rel_path.rsplit_once('.').unwrap_or((rel_path, "md"));
+        Ok(Some(format!("{stem} (from {}).{ext}", ids::short(&origin))))
+    }
+
     fn is_deleted(&self, object_id: &str) -> Result<bool> {
         let deleted: Option<i64> = self
             .conn()
@@ -1198,6 +1371,11 @@ impl Store {
         if let Some(path) = crate::pages::projection_path(&payload)? {
             crate::pages::checked_path(self.vault(), &path)?;
             return Ok(path);
+        }
+        // An adopted note names its own path (ADR 0007, 2026-10-22).
+        if let Some(path) = payload.get("path").and_then(|v| v.as_str()) {
+            crate::pages::checked_path(self.vault(), path)?;
+            return Ok(path.to_string());
         }
         if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
             if let Some(stem) = blob_rel.rsplit_once('.').map(|(stem, _)| stem) {
@@ -1756,31 +1934,6 @@ impl Store {
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }
 
-    /// Every `.md` file in the vault outside `.gilune/`, as portable
-    /// `/`-separated rel-paths in deterministic order.
-    fn markdown_files(&self) -> Result<Vec<String>> {
-        let mut found = Vec::new();
-        let mut stack = vec![self.vault().to_path_buf()];
-        while let Some(dir) = stack.pop() {
-            for entry in std::fs::read_dir(&dir)
-                .map_err(|e| KernelError::Io { path: dir.clone(), source: e })?
-            {
-                let entry = entry.map_err(|e| KernelError::Io { path: dir.clone(), source: e })?;
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().to_string();
-                if path.is_dir() {
-                    if !name.starts_with('.') {
-                        stack.push(path);
-                    }
-                } else if name.ends_with(".md") && !name.starts_with(".tmp-") {
-                    let rel = path.strip_prefix(self.vault()).unwrap_or(&path).to_path_buf();
-                    found.push(fs::portable_rel(&rel));
-                }
-            }
-        }
-        found.sort();
-        Ok(found)
-    }
 }
 
 /// The head selection the projection reads. One statement, ordered by the
@@ -2293,6 +2446,9 @@ mod tests {
     #[test]
     fn a_file_the_kernel_did_not_write_is_one_imported_change() {
         let (_dir, store, _rel) = captured("resident");
+        // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+        // case in which a file the kernel did not write stays a candidate.
+        std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
         let after_capture = cursor_now(&store);
         std::fs::write(store.vault().join("Notes.md"), "just my notes").expect("foreign file");
 
@@ -2315,6 +2471,9 @@ mod tests {
         // rewritten. It is `ExternalEdit` by construction — the kernel
         // does not claim the file, so nobody here wrote it.
         let (_dir, store, _rel) = captured("resident");
+        // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+        // case in which a file the kernel did not write stays a candidate.
+        std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
         std::fs::write(store.vault().join("Notes.md"), "just my notes").expect("foreign file");
         store.reconcile().expect("first sighting");
 
@@ -2368,6 +2527,9 @@ mod tests {
     #[test]
     fn an_import_that_leaves_the_vault_is_announced_once_and_offered_again_if_it_returns() {
         let (_dir, store, _rel) = captured("resident");
+        // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+        // case in which a file the kernel did not write stays a candidate.
+        std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
         std::fs::write(store.vault().join("Theirs.md"), "words from elsewhere").expect("write");
         store.reconcile().expect("first sighting");
 
@@ -2400,6 +2562,9 @@ mod tests {
         // written in another tool and saved here would be invisible
         // until something unrelated ran a full pass.
         let (_dir, store, _rel) = captured("resident");
+        // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+        // case in which a file the kernel did not write stays a candidate.
+        std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
         std::fs::write(store.vault().join("Theirs.md"), "their words").expect("write");
         let before = cursor_now(&store);
         assert_eq!(store.reconcile_path("Theirs.md").expect("one file").imports, 1);
@@ -3186,6 +3351,9 @@ mod tests {
                 store.project().expect("project");
                 store.conn().query_row("SELECT rel_path FROM projections", [], |r| r.get::<_, String>(0)).expect("path")
             } else {
+                // A local-only vault keeps the file a candidate (ADR 0007,
+                // 2026-10-22); anywhere else it would be adopted.
+                std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
                 std::fs::write(store.vault().join("external.md"), "before\n").expect("write");
                 "external.md".to_string()
             };
@@ -3371,6 +3539,9 @@ mod tests {
     #[test]
     fn a_foreign_markdown_file_is_an_import_candidate_not_an_error() {
         let (_dir, store, _rel) = captured("resident");
+        // Local-only by the person's own mark (ADR 0007, 2026-10-22): the one
+        // case in which a file the kernel did not write stays a candidate.
+        std::fs::write(store.vault().join(".gilune-local"), "").expect("local marker");
         std::fs::write(store.vault().join("Notes.md"), "just my notes").expect("foreign file");
         let summary = store.reconcile().expect("reconcile");
         assert_eq!(summary.imports, 1);

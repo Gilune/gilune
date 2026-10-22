@@ -76,6 +76,19 @@ pub const SYNC_PREVIOUS_IDENTITY_CLAIMED: &str = "sync-previous-identity-claimed
 /// renders again.
 pub const VAULT_CONTENT_UNREADABLE: &str = "vault-content-unreadable";
 
+/// A file in the vault that is larger than a blob may be
+/// (`limits.max_blob_bytes`), left where it is and not carried by sync
+/// (ADR 0007, amendment 2026-10-22). Not damage: the file is intact and
+/// nothing was attempted. Subject: the file's rel_path. Cleared when the
+/// file shrinks or leaves.
+pub const VAULT_ATTACHMENT_TOO_LARGE: &str = "vault-attachment-too-large";
+
+/// An attachment arriving from another device found its path occupied by
+/// different bytes, and was written beside them under a name that says
+/// where it came from. Not damage: both files are kept. Subject: the
+/// object id. Cleared when the object next projects to its own path.
+pub const VAULT_ATTACHMENT_PATH_OCCUPIED: &str = "vault-attachment-path-occupied";
+
 /// Whether an alert kind means something is **damaged**, as opposed to
 /// something being pending, refused by policy, or waiting on a person.
 ///

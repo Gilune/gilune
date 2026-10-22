@@ -96,6 +96,31 @@ pub(crate) fn add_revision(
     created_ms: i64,
     announce: Announce,
 ) -> Result<()> {
+    add_revision_naming(conn, object_id, revision_id, payload, origin, created_ms, announce, None, None)
+}
+
+/// `add_revision` with two things a plain revision never needs (ADR 0007,
+/// amendment 2026-10-22): `named` is what the operation tells peers it
+/// supersedes when that is not the heads it replaced locally — the one
+/// revision sent when a note leaves local scope names the head peers last
+/// saw, never the local history between — and `extra` is merged into the
+/// operation's payload (an attachment's new blob declaration).
+///
+/// **A note kept on this device records no operation at all.** The
+/// revision, the heads and the event are written exactly as ever; only
+/// the operation is withheld, so nothing of a local note can leave.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn add_revision_naming(
+    conn: &rusqlite::Connection,
+    object_id: &str,
+    revision_id: &str,
+    payload: &str,
+    origin: &str,
+    created_ms: i64,
+    announce: Announce,
+    named: Option<&[String]>,
+    extra: Option<serde_json::Value>,
+) -> Result<()> {
     conn.execute(
         "INSERT INTO revisions (revision_id, object_id, payload, origin, created_ms)
          VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -112,6 +137,27 @@ pub(crate) fn add_revision(
         "INSERT INTO heads (object_id, revision_id) VALUES (?1, ?2)",
         [object_id, revision_id],
     )?;
+    let local: i64 = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM local_objects WHERE object_id = ?1)",
+        [object_id],
+        |row| row.get(0),
+    )?;
+    if local == 1 {
+        if announce == Announce::Event {
+            conn.execute(
+                "INSERT INTO events
+                 (event_id, event_type, subject_id, payload, created_ms, origin_device)
+                 VALUES (?1, ?2, ?3, ?4, ?5,
+                         (SELECT value FROM meta WHERE key = 'device_id'))",
+                rusqlite::params![ids::new_id(), REVISION_ADDED_EVENT, object_id, payload, created_ms],
+            )?;
+        }
+        return Ok(());
+    }
+    let superseded: Vec<String> = match named {
+        Some(named) => named.to_vec(),
+        None => superseded,
+    };
     let mut carried = serde_json::json!({
         "object_id": object_id,
         "revision": {
@@ -122,6 +168,11 @@ pub(crate) fn add_revision(
         },
         "supersedes": superseded,
     });
+    if let Some(serde_json::Value::Object(extra)) = extra {
+        for (key, value) in extra {
+            carried[key] = value;
+        }
+    }
     // Whose object this is, and whose each superseded head was. Additive
     // keys, and the exit from `sync-awaiting-referent`: a receiver that
     // has never seen the object cannot look up whose it was, so a
