@@ -106,16 +106,84 @@ def build_launcher(bundle, stage, release):
     shutil.copy2(target_dir / "x86_64-pc-windows-msvc/release/gilune-windows-launcher.exe", bundle / "Gilune.exe")
 
 
+def node(parent, name, **attrs):
+    return ET.SubElement(parent, "{" + WIX + "}" + name, attrs)
+
+
+ICON_ID = "GiluneIcon.ico"
+FIREWALL_RULE = "Gilune"
+# wixl 0.103 builds EXE custom actions from a property (type 50) but not from
+# a directory, so an immediate type 51 action formats the netsh path first.
+NETSH_PROPERTY = "GILUNE_NETSH"
+FIREWALL_DELETE = f'advfirewall firewall delete rule name="{FIREWALL_RULE}"'
+# Every rule Windows ever made for the two programs the install has shipped,
+# whatever its name or action. A Block row from a cancelled or non-administrator
+# prompt on an earlier release beats any Allow, so it has to go.
+FIREWALL_PROGRAMS = {
+    "GiluneFirewallRemoveJavaw": r"[INSTALLDIR]runtime\bin\javaw.exe",
+    "GiluneFirewallRemoveLauncher": "[INSTALLDIR]Gilune.exe",
+}
+FIREWALL_DELETE_PROGRAM = 'advfirewall firewall delete rule name=all program="{}"'
+FIREWALL_ADD = (f'advfirewall firewall add rule name="{FIREWALL_RULE}" dir=in action=allow '
+                'enable=yes profile=private program="[INSTALLDIR]Gilune.exe"')
+
+
+def firewall_rules(product, sequence):
+    """Allow the installed launcher through Windows Firewall on private networks.
+
+    The rule is added by the installer, running as the system, so the user never
+    meets the Windows prompt and a non-administrator can use sync (ADR 0019 § 2:
+    Private profile only). The install owns every rule for its programs from here
+    on: before adding, it deletes the named rule and every rule for the launcher
+    or the earlier launcher's javaw.exe — netsh duplicates by name, and a Block
+    row left by a dismissed prompt on an earlier release wins over any Allow.
+    Uninstall deletes the same set. A product being replaced by a newer one
+    leaves the rules alone (UPGRADINGPRODUCTCODE) so the ordering of
+    RemoveExistingProducts cannot remove what the newer product just added.
+    netsh failures never fail the install: without the rule the user is back to
+    the Windows prompt.
+    """
+    node(product, "CustomAction", Id="GiluneNetshPath", Property=NETSH_PROPERTY,
+         Value="[System64Folder]netsh.exe")
+    removals = [("GiluneFirewallRemove", FIREWALL_DELETE)] + [
+        (action, FIREWALL_DELETE_PROGRAM.format(program)) for action, program in FIREWALL_PROGRAMS.items()]
+    actions = [(action, command, "deferred") for action, command in removals]
+    actions += [("GiluneFirewallRollback", FIREWALL_DELETE, "rollback"),
+                ("GiluneFirewallAdd", FIREWALL_ADD, "deferred")]
+    for action, command, execute in actions:
+        node(product, "CustomAction", Id=action, Property=NETSH_PROPERTY, ExeCommand=command,
+             Execute=execute, Impersonate="no", Return="ignore")
+    # Immediate, in the costing pass, so the path is known before the deferred
+    # actions are written into the installation script.
+    node(sequence, "Custom", Action="GiluneNetshPath", After="CostFinalize", Before="InstallInitialize")
+    previous = "InstallFiles"
+    for action, _command in removals:
+        node(sequence, "Custom", Action=action, After=previous).text = "NOT UPGRADINGPRODUCTCODE"
+        previous = action
+    # Rollback is scheduled before the action it undoes.
+    node(sequence, "Custom", Action="GiluneFirewallRollback", After=previous).text = (
+        'NOT REMOVE~="ALL"')
+    node(sequence, "Custom", Action="GiluneFirewallAdd", After="GiluneFirewallRollback").text = (
+        'NOT REMOVE~="ALL"')
+
+
 def write_wix(bundle, destination, release):
     ET.register_namespace("", WIX)
-    def node(parent, name, **attrs):
-        return ET.SubElement(parent, "{" + WIX + "}" + name, attrs)
     root = ET.Element("{" + WIX + "}Wix")
     product = node(root, "Product", Id="*", Name="Gilune", Language="1033",
                    Version=release, Manufacturer="Gilune", UpgradeCode=UPGRADE_CODE)
     node(product, "Package", InstallerVersion="500", Compressed="yes", InstallScope="perMachine")
     node(product, "Media", Id="1", Cabinet="payload.cab", EmbedCab="yes")
     node(product, "MajorUpgrade", DowngradeErrorMessage="A newer version of Gilune is installed.")
+    sequence = node(product, "InstallExecuteSequence")
+    # wixl gives RemoveExistingProducts no position of its own: it is numbered
+    # after whatever the dependency sort put before it, which was InstallFiles
+    # until custom actions followed InstallFiles and Windows Installer refused
+    # the package (error 2613). Immediately after InstallInitialize is one of
+    # the documented slots and keeps the old product's removal inside the
+    # transaction, so a failed upgrade rolls the old product back. Both bounds
+    # are needed: wixl's sort only places an action where a dependency forces it.
+    node(sequence, "RemoveExistingProducts", After="InstallInitialize", Before="ProcessComponents")
     for legacy_version, product_code in LEGACY_DOWNGRADE_PRODUCTS.items():
         if tuple(map(int, release.split("."))) > tuple(map(int, legacy_version.split("."))):
             # MajorUpgrade protects installs of this MSI over newer products.
@@ -124,8 +192,11 @@ def write_wix(bundle, destination, release):
             # has no UPGRADINGPRODUCTCODE; future upgrades have another code.
             node(product, "Condition", Message="A newer version of Gilune is installed.").text = (
                 f'NOT (UPGRADINGPRODUCTCODE ~= "{product_code}")')
-    node(product, "Icon", Id="GiluneIcon", SourceFile=str(bundle / "gilune.ico"))
-    node(product, "Property", Id="ARPPRODUCTICON", Value="GiluneIcon")
+    # Windows Installer writes the icon to its own folder under this Id and the
+    # shell reads the file by its extension, so the Id carries one.
+    node(product, "Icon", Id=ICON_ID, SourceFile=str(bundle / "gilune.ico"))
+    node(product, "Property", Id="ARPPRODUCTICON", Value=ICON_ID)
+    firewall_rules(product, sequence)
     top = node(product, "Directory", Id="TARGETDIR", Name="SourceDir")
     program = node(top, "Directory", Id="ProgramFiles64Folder")
     install = node(program, "Directory", Id="INSTALLDIR", Name="Gilune")
@@ -151,8 +222,15 @@ def write_wix(bundle, destination, release):
                          Source=str(path), Name=path.name, DiskId="1", KeyPath="yes",
                          **attributes)
         if rel.as_posix() == "Gilune.exe":
+            # A plain shortcut to the installed file. wixl 0.103 writes the
+            # owning feature as the target when none is given, which makes
+            # the shortcut advertised: Start then resolves it through the
+            # Installer, shows no logo and offers no "Run as administrator".
+            # (`Advertise="no"` is the WiX default; wixl only logs
+            # "unimplemented" for it, so the attribute is left out.)
             node(file_node, "Shortcut", Id="StartMenuShortcut", Directory="GiluneMenu",
-                 Name="Gilune", WorkingDirectory="INSTALLDIR", Icon="GiluneIcon", Advertise="yes")
+                 Name="Gilune", WorkingDirectory="INSTALLDIR", Icon=ICON_ID,
+                 Target="[#" + file_node.attrib["Id"] + "]")
         node(feature, "ComponentRef", Id=component_id)
     # Remove the application menu folder only if empty; user data is never part
     # of this payload and must never appear in installer cleanup instructions.

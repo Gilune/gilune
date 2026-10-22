@@ -1,5 +1,116 @@
 # Windows artifacts built on Linux
 
+## Native Windows install, 22 October 2026
+
+The owner, testing 1.1.0 on Windows 11, reported three things a native app does
+not do: Start search showed no logo and the context menu no "Run as
+administrator"; switching sync on raised the firewall prompt for "OpenJDK
+Platform binary" (Eclipse Adoptium); and Task Manager listed Gilune twice. All
+three had one cause each.
+
+- **Advertised shortcut.** wixl 0.103 writes the owning feature as the Shortcut
+  target when none is given; the installed `.lnk` resolved through
+  `C:\WINDOWS\Installer\{ProductCode}\GiluneIcon`. The shortcut now carries
+  `Target="[#<file id>]"`, and the Icon id is `GiluneIcon.ico` so the file the
+  Installer extracts has an extension the shell reads. (`Advertise="no"` is the
+  WiX default; wixl only logs "unimplemented" for the attribute, so it is omitted.)
+- **Firewall rule at install time.** The installer runs as the system, so the
+  rule the user used to be prompted for is added by it: `netsh advfirewall
+  firewall add rule name="Gilune" dir=in action=allow enable=yes profile=private
+  program="[INSTALLDIR]Gilune.exe"`. wixl builds EXE custom actions from a
+  property (type 50) but not from a directory, so an immediate type 51 action sets
+  `GILUNE_NETSH` to `[System64Folder]netsh.exe` before `InstallInitialize`; the
+  deferred, non-impersonated delete/rollback/add actions follow `InstallFiles`.
+  Delete-then-add on every install, repair and upgrade (netsh duplicates by
+  name); the deletes also clear every rule for `[INSTALLDIR]Gilune.exe` and
+  `[INSTALLDIR]runtime\bin\javaw.exe` by program (`delete rule name=all
+  program=...`), because the owner's notebook held Block rows for javaw.exe from
+  a dismissed 1.1.0 prompt and a Block beats any Allow — the install owns every
+  rule for its programs from here on; delete on uninstall; a product being replaced leaves the rule alone
+  (`NOT UPGRADINGPRODUCTCODE`) so the order of `RemoveExistingProducts` cannot
+  remove what the newer product added; `Return="ignore"` throughout, so a
+  firewall that will not take a rule returns the user to the prompt rather than
+  failing the install. Private profile only, per ADR 0019 § 2 (amended).
+  **First hosted attempt (run 39764223871) failed with error 2613,
+  "RemoveExistingProducts action sequenced incorrectly"**: wixl gives that action
+  no sequence number of its own and places it after whatever its dependency sort
+  put last, which had been `InstallFiles` (4001) and became the new custom
+  actions (4006). The package now schedules it explicitly
+  `After="InstallInitialize" Before="ProcessComponents"` (1501), a documented
+  slot inside the transaction, so a failed upgrade rolls the old product back;
+  both bounds are needed because wixl's sort only moves an action where a
+  dependency forces it. The real-MSI regression asserts the position.
+- **One process.** `Gilune.exe` loads `runtime\bin\server\jvm.dll` and creates
+  the VM in-process instead of spawning `javaw.exe`: `runtime\bin` goes on the
+  DLL search path (`SetDllDirectoryW`) and on `PATH` (the runtime derives
+  `java.library.path` from it, where `jawt` and friends are found by name);
+  options are the ones the old command line carried, plus `java.class.path`
+  listing `lib\*.jar` in name order because that property takes no wildcard;
+  `org.gilune.app.MainKt.main` runs on a 1 MiB thread as the Java launcher
+  arranges it; an uncaught exception exits 1; the `MessageBoxW` path remains for
+  everything before the VM is up. Raw JNI declarations checked against JDK 17's
+  `jni.h`; no new dependencies. The updater's install script used to wait for the
+  launcher's parent as well; it now waits for a parent only when that parent is a
+  `Gilune.exe`.
+
+Local evidence on the owner's machine (Windows 11, Rust 1.98, VS 2019 Build
+Tools): all 25 CI-script tests pass in the `GiluneBuild` WSL distro, including the
+real-MSI regression, which now reads the Shortcut, Icon, CustomAction and
+InstallExecuteSequence rows (types 51 / 3186 / 3442; order InstallInitialize <
+InstallFiles < remove < rollback < add < InstallFinalize; conditions as above).
+The launcher crate is Clippy-clean under `-D warnings`. The new launcher, built
+natively and dropped into a copy of the installed 1.1.0 at
+`C:\Program Files\Gilune`, passed `test-windows-launcher.ps1`: window rendered,
+isolated Unicode vault opened, normal close with exit 0, no `java`/`javaw`
+process beneath it, and the window owned by `Gilune.exe` itself, in about 2 s.
+Desktop tests `UpdatesTest` and `DesktopLaunchArgumentsTest` pass against
+bindings regenerated from the current kernel.
+
+What this machine cannot prove: the installer lifecycle refuses to run anywhere
+but a disposable Windows Actions runner, Windows Sandbox is not enabled here, and
+the owner's own 1.1.0 install must not be replaced by a test. So
+`windows-cross.yml` gained an opt-in `validate_installer` dispatch input (default
+false; never set by `workflow_call`, so pushes and releases start no Windows
+runner) that runs `test-windows-installer.ps1` on `windows-2025` against the
+freshly built MSI and the published v1.0.3. The lifecycle now also asserts the
+`.lnk`'s `TargetPath` is `C:\Program Files\Gilune\Gilune.exe` with an `.ico`
+icon, exactly one `Gilune` firewall rule after install and after repair
+(Inbound/Allow/Private/enabled, program = the launcher) with no other rule for
+any program under the install directory — Block rows for the lower-cased
+javaw.exe path are seeded with netsh before the clean install and again before
+the upgrade, as a dismissed prompt leaves them — none after uninstall,
+and — by starting the installed app a second time with sync switched on, the
+device id read from the vault's `kernel.db` and `<id>.sync.json` written beside
+the identity — that the sync listener is owned by `Gilune.exe`. Run it with:
+
+```sh
+gh workflow run windows-cross.yml --ref <branch> -f version=1.1.1 -f validate_installer=true
+```
+
+The run's `windows-installer-results` artifact holds `lifecycle.txt`,
+`listener.txt` and every msiexec log. Three hosted runs, all from this branch
+with version stamp 1.1.1 (no release published):
+
+| Run | Linux build | Windows lifecycle | Outcome |
+| --- | --- | --- | --- |
+| [39764223871](https://github.com/Gilune/gilune/actions/runs/39764223871) | 33m 25s (cold caches) | 39s | Clean install failed 1603: error 2613, RemoveExistingProducts sequenced after the custom actions (fixed above) |
+| [39769146019](https://github.com/Gilune/gilune/actions/runs/39769146019) | 17m 09s | 1m 00s | Clean install over seeded Block rules, repair and first launch passed; the test then looked up the port's owner after closing the app (test bug, fixed) |
+| [39771626630](https://github.com/Gilune/gilune/actions/runs/39771626630) | 4m 10s (warm) | 1m 26s | **Passed** the whole lifecycle |
+
+`lifecycle.txt` from the passing run: clean install over seeded Block rules, plain
+shortcut, one firewall rule and no Block left, repair without a duplicate rule,
+one-process launch owning the sync port, upgrade from v1.0.3 over seeded Block
+rules, downgrade rejection, uninstall removing every rule, preserved vaults. Both
+`listener.txt` files name `C:\Program Files\Gilune\Gilune.exe` (process name
+`Gilune`) as the owner of port 51837. Since the seeded Block rows carried the
+lower-cased javaw.exe path and none survived, netsh's `program=` match is
+case-insensitive, as expected. The Linux build durations are runner time, not
+billing; the Windows job is billed at twice its minutes. Code signing is
+unchanged: any remaining "Publisher: Unknown" needs a certificate and is out of
+scope. What only the owner's eye can confirm: the Gilune logo in Start search and
+"Run as administrator" in the shortcut's context menu, after installing the
+candidate MSI from a run's `gilune-windows-msi` artifact.
+
 ## Current pipeline: Linux runners only
 
 As of 3 October 2026, every hosted job in `build.yml` and `windows-cross.yml` runs
