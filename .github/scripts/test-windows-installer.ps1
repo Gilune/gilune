@@ -30,12 +30,17 @@ $shortcut = if ($perUser) {
 } else {
     Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\Gilune\Gilune.lnk'
 }
-function ProductsIn([string]$hive) {
-    @(Get-ItemProperty "${hive}:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue |
+# Windows Installer records every installed product under its owner's SID:
+# the machine's (S-1-5-18) for an all-users install, the installing user's
+# for a per-user one. A per-user product has no entry under the user's own
+# Uninstall key, so that is not where to look for it.
+$userSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+function ProductsFor([string]$sid) {
+    @(Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\$sid\Products\*\InstallProperties" -ErrorAction SilentlyContinue |
         Where-Object { $_.DisplayName -eq 'Gilune' })
 }
-function MachineProducts { ProductsIn 'HKLM' }
-function UserProducts { ProductsIn 'HKCU' }
+function MachineProducts { ProductsFor 'S-1-5-18' }
+function UserProducts { ProductsFor $userSid }
 function Products { @(MachineProducts) + @(UserProducts) }
 if ((Products).Count -ne 0 -or (Test-Path -LiteralPath $installed) -or (Test-Path -LiteralPath $machineInstalled)) {
     throw 'Runner already contains Gilune; refusing to replace an unrelated installation'
