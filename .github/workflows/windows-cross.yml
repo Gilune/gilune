@@ -142,6 +142,13 @@ jobs:
         if: ${{ inputs.scope == 'per-user' && inputs.validate_installer }}
         run: |
           previous=$(python3 -c 'import sys; a,b,c=map(int,sys.argv[1].split(".")); print(f"{a}.{b}.{c-1}" if c else f"{a}.{b-1}.99" if b else f"{a-1}.99.99")' "$VERSION")
+          # Packaging refuses an export whose version is not the MSI's, so the
+          # application is exported again at the older stamp (the candidate's
+          # MSI and manifest are already written).
+          (cd app && ./gradlew :composeApp:exportDesktopBundle \
+            -Pgilune.desktop.target=windows-x64 \
+            -Pgilune.desktop.bindings="$GITHUB_WORKSPACE/app/build/windows-cross/native/bindings" \
+            "-Pgilune.version=$previous")
           python3 .github/scripts/package-windows-linux.py \
             --libs app/composeApp/build/export/desktop/lib \
             --native app/build/windows-cross/native --runtime "$WINDOWS_JRE_HOME" \
