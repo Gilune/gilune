@@ -167,12 +167,36 @@ def firewall_rules(product, sequence):
         'NOT REMOVE~="ALL"')
 
 
-def write_wix(bundle, destination, release):
+# Where the app installs. `per-machine` is Program Files with an elevated
+# installer, which adds the firewall rule itself but makes every update ask
+# for administrator approval. `per-user` is %LOCALAPPDATA%\Programs\Gilune
+# with no elevation at all, so the in-app updater installs silently; the
+# firewall rule is then the app's own one-time elevated step (`Gilune.exe
+# --allow-firewall`). A per-user package cannot remove an all-users one, so it
+# refuses to install beside it; the app's updater removes the all-users copy
+# first, with one elevated uninstall.
+SCOPES = ("per-machine", "per-user")
+ALL_USERS_MESSAGE = ("Gilune is installed for all users of this computer. Remove that copy first, "
+                     "from Settings > Apps, or let the installed Gilune update itself.")
+
+
+def write_wix(bundle, destination, release, scope):
+    if scope not in SCOPES:
+        raise ValueError("scope must be one of " + ", ".join(SCOPES))
+    per_user = scope == "per-user"
     ET.register_namespace("", WIX)
     root = ET.Element("{" + WIX + "}Wix")
     product = node(root, "Product", Id="*", Name="Gilune", Language="1033",
                    Version=release, Manufacturer="Gilune", UpgradeCode=UPGRADE_CODE)
-    node(product, "Package", InstallerVersion="500", Compressed="yes", InstallScope="perMachine")
+    node(product, "Package", InstallerVersion="500", Compressed="yes",
+         InstallScope="perUser" if per_user else "perMachine")
+    if per_user:
+        # Written by every per-machine install's MenuCleanup component; the
+        # search reads the 64-bit view those x64 packages wrote to.
+        search = node(product, "Property", Id="GILUNE_ALLUSERS")
+        node(search, "RegistrySearch", Id="GiluneAllUsersSearch", Root="HKLM", Key="Software\\Gilune",
+             Name="Installed", Type="raw", Win64="yes")
+        node(product, "Condition", Message=ALL_USERS_MESSAGE).text = "NOT GILUNE_ALLUSERS"
     node(product, "Media", Id="1", Cabinet="payload.cab", EmbedCab="yes")
     node(product, "MajorUpgrade", DowngradeErrorMessage="A newer version of Gilune is installed.")
     sequence = node(product, "InstallExecuteSequence")
@@ -196,10 +220,19 @@ def write_wix(bundle, destination, release):
     # shell reads the file by its extension, so the Id carries one.
     node(product, "Icon", Id=ICON_ID, SourceFile=str(bundle / "gilune.ico"))
     node(product, "Property", Id="ARPPRODUCTICON", Value=ICON_ID)
-    firewall_rules(product, sequence)
+    if not per_user:
+        # netsh needs the system; a per-user package has no elevated moment.
+        firewall_rules(product, sequence)
     top = node(product, "Directory", Id="TARGETDIR", Name="SourceDir")
-    program = node(top, "Directory", Id="ProgramFiles64Folder")
+    if per_user:
+        program = node(node(top, "Directory", Id="LocalAppDataFolder"), "Directory", Id="GiluneUserPrograms", Name="Programs")
+    else:
+        program = node(top, "Directory", Id="ProgramFiles64Folder")
     install = node(program, "Directory", Id="INSTALLDIR", Name="Gilune")
+    # Components differ by where they put their files, so the two scopes never
+    # share a component identity.
+    component_namespace = uuid.uuid5(NAMESPACE, "per-user") if per_user else NAMESPACE
+    registry_root = "HKCU" if per_user else "HKLM"
     menu = node(top, "Directory", Id="ProgramMenuFolder")
     menu_dir = node(menu, "Directory", Id="GiluneMenu", Name="Gilune")
     feature = node(product, "Feature", Id="Complete", Title="Gilune", Level="1")
@@ -214,13 +247,20 @@ def write_wix(bundle, destination, release):
             continue
         component_id = ident("C", rel.as_posix())
         component = node(parent, "Component", Id=component_id,
-                         Guid=str(uuid.uuid5(NAMESPACE, rel.as_posix())), Win64="yes")
+                         Guid=str(uuid.uuid5(component_namespace, rel.as_posix())), Win64="yes")
         attributes = {}
         if embedded_version := file_version(path):
             attributes["DefaultVersion"] = embedded_version
+        if per_user:
+            # A component under the user profile keys on a per-user registry
+            # value, not on its file (Windows Installer's rule for profile
+            # folders), so each user's own install state is what is checked.
+            node(component, "RegistryValue", Root="HKCU", Key="Software\\Gilune\\Components",
+                 Name=component_id, Type="integer", Value="1", KeyPath="yes")
+        else:
+            attributes["KeyPath"] = "yes"
         file_node = node(component, "File", Id=ident("F", rel.as_posix()),
-                         Source=str(path), Name=path.name, DiskId="1", KeyPath="yes",
-                         **attributes)
+                         Source=str(path), Name=path.name, DiskId="1", **attributes)
         if rel.as_posix() == "Gilune.exe":
             # A plain shortcut to the installed file. wixl 0.103 writes the
             # owning feature as the target when none is given, which makes
@@ -235,8 +275,8 @@ def write_wix(bundle, destination, release):
     # Remove the application menu folder only if empty; user data is never part
     # of this payload and must never appear in installer cleanup instructions.
     cleanup = node(menu_dir, "Component", Id="MenuCleanup",
-                   Guid=str(uuid.uuid5(NAMESPACE, "menu-cleanup")), Win64="yes")
-    node(cleanup, "RegistryValue", Root="HKLM", Key="Software\\Gilune", Name="Installed",
+                   Guid=str(uuid.uuid5(component_namespace, "menu-cleanup")), Win64="yes")
+    node(cleanup, "RegistryValue", Root=registry_root, Key="Software\\Gilune", Name="Installed",
          Type="integer", Value="1", KeyPath="yes")
     node(cleanup, "RemoveFolder", Id="RemoveMenu", On="uninstall")
     node(feature, "ComponentRef", Id="MenuCleanup")
@@ -249,6 +289,7 @@ def main():
         parser.add_argument("--" + arg, type=Path, required=True)
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
+    parser.add_argument("--scope", required=True, choices=SCOPES)
     args = parser.parse_args()
     release = version(args.version)
     for needed in (args.libs / "composeApp-desktop.jar", args.native / "gilune_ffi.dll",
@@ -285,12 +326,12 @@ def main():
         shutil.copy2(REPO / "app/composeApp/src/desktopMain/resources/gilune-v2.ico", bundle / "gilune.ico")
         build_launcher(bundle, stage, release)
         manifest = {
-            "commit": args.commit, "version": release, "target": "windows-x64",
+            "commit": args.commit, "version": release, "target": "windows-x64", "scope": args.scope,
             "bindingsSha256": digest(args.native / "bindings/uniffi/gilune_ffi/gilune_ffi.kt"),
             "files": {p.relative_to(bundle).as_posix(): digest(p) for p in sorted(bundle.rglob("*")) if p.is_file()},
         }
         (bundle / "build-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
-        write_wix(bundle, stage / "installer.wxs", release)
+        write_wix(bundle, stage / "installer.wxs", release, args.scope)
         subprocess.run(["wixl", "-a", "x64", "-o", str(stage / ("Gilune-" + release + ".msi")),
                         str(stage / "installer.wxs")], check=True)
         # Do not retain temporary absolute paths as reusable build instructions.
