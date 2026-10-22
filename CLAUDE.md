@@ -1735,13 +1735,22 @@ gates promises) are ratified. **Next: application-level engineering — see
      re-pushed each time (nothing had consumed it). RULE: before a tag,
      `gh workflow run build.yml -f version=…` proves the Android suite
      for one full run's cost; a failed tag run costs the same AND a tag
-     move. **v1.2.0 = main + PR #20 (per-user Windows install, silent
-     updates, the app's own elevated firewall request;
-     `firewallRulesForThisApp` REPLACED by WindowsFirewall.kt's registry
-     reader — never re-add the PowerShell one) + the same Linux-path
-     fault in #20's own UpdatesTest/WindowsFirewallTest (`absolutePath`
-     → `path`; main run 39811990645). Windows paths in tests: build them
-     as text, compare `File.path`, never `absolutePath`.**
+     move. **v1.2.0 RELEASED the same evening** —
+     https://github.com/Gilune/gilune/releases/tag/v1.2.0 (MSI 138.3 MB,
+     DEB 110.0 MB, debug APK 123.8 MB; tag run 39817480975 on c181e22) =
+     1.1.2 + PR #20 (per-user Windows install, silent updates, the app's
+     own elevated firewall request; `firewallRulesForThisApp` REPLACED
+     by WindowsFirewall.kt's registry reader — never re-add the
+     PowerShell one) + the same Linux-path fault in #20's own
+     UpdatesTest/WindowsFirewallTest, fixed in two steps (#23:
+     `absolutePath` → `path` in installedForAllUsers/firewallVerdict,
+     main run 39811990645; #24: `File(parent, child)` joins with the
+     HOST separator — `perUserLauncher` now joins as text, main run
+     39813681442). The owner's installed 1.1.x is per-machine; 1.2.0 is
+     the first real per-machine → per-user transition (the two UAC steps
+     were never provable on a runner). RULE: Windows paths in shared or
+     desktop code that tests exercise are built as text and compared as
+     `File.path`; never `absolutePath` and never `File(parent, child)`.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
