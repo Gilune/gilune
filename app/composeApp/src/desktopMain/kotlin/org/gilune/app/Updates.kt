@@ -288,7 +288,9 @@ fun installedForAllUsers(exe: File, env: (String) -> String? = System::getenv): 
 /// Where the per-user installer puts the launcher: what the transition
 /// reopens once the new copy is in place.
 fun perUserLauncher(env: (String) -> String? = System::getenv): File? =
-    env("LOCALAPPDATA")?.let { File(it, """Programs\Gilune\Gilune.exe""") }
+    // Joined as text: File(parent, child) uses the host's separator, and
+    // the hosted suite runs this Windows path on Linux.
+    env("LOCALAPPDATA")?.let { File(it.trimEnd('\\') + """\Programs\Gilune\Gilune.exe""") }
 
 fun installedApp(): InstalledApp? {
     if (!System.getProperty("os.name").orEmpty().startsWith("Windows")) return null
