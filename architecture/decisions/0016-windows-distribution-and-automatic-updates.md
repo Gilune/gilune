@@ -414,3 +414,34 @@ of the following are evidence, not assertions:
   [SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)
   and [Artifact Signing integrations](https://learn.microsoft.com/en-us/azure/artifact-signing/how-to-signing-integrations)
   define the installer, signature and preferred CI-signing mechanisms.
+
+## Amendments
+
+- **2026-10-22 (per-user install, again).** The Linux-built MSI that replaced
+  jpackage's (`.github/linux-windows-build.md`) installed per-machine into
+  `C:\Program Files\Gilune` with `InstallScope="perMachine"`, so every update
+  the in-app updater ran asked for administrator approval — the elevation
+  friction this ADR rejected machine-wide installation for. The owner asked
+  for what other desktop apps do (2026-10-22: "Claude's Windows app doesn't
+  ask"), and the package returns to this ADR's per-user decision:
+  `InstallScope="perUser"`, files under `%LOCALAPPDATA%\Programs\Gilune`,
+  components keyed on `HKCU` registry values as Windows Installer requires
+  for profile folders, registration and the Start-menu shortcut in the user's
+  own hives, and no custom action at all, so `msiexec /passive` runs without
+  a prompt. Consequences recorded: a per-user package cannot remove an
+  all-users product, so it refuses to install beside one (launch condition on
+  the `HKLM\Software\Gilune\Installed` value every per-machine install
+  wrote); the updater running inside an all-users install removes that copy
+  first, with Windows's one prompt for administrator approval (a PowerShell
+  script that re-starts itself `-Verb RunAs`), then installs per-user and
+  reopens the new launcher — one last prompt, after which updates ask
+  nothing; a declined removal reopens the old copy unchanged and the per-user
+  app, when one exists beside a stale all-users copy, offers to remove it
+  from About. Because the updater that performs that move must be installed
+  before a per-user release is published, the release after this change is
+  still per-machine (`scope` input of `windows-cross.yml`, default
+  `per-machine`) and the one after it flips to per-user; the per-machine
+  shape is then dead and to be removed. The firewall rule a per-machine
+  installer added moves to the app (ADR 0019 amendment of the same date).
+  Each Windows account on a shared machine installs its own copy, as this
+  ADR always implied.
