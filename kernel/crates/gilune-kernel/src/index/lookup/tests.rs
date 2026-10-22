@@ -17,6 +17,7 @@ fn old_index_rebuild_preserves_sources_and_populates_folded_keys() {
     }).unwrap();
     drop(s);
     let s = Store::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     s.register_indexer("fixture", 1, &[], Arc::new(Labels))
         .unwrap();
     s.reconcile().unwrap();
@@ -132,6 +133,7 @@ impl NoteIndexer for Labels {
 fn setup() -> (tempfile::TempDir, Store) {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     store
         .register_indexer("fixture", 1, &[], Arc::new(Labels))
         .unwrap();

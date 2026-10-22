@@ -27,6 +27,7 @@ class PeopleEditorUiTest {
 
     private fun fixture(run: (GiluneState, Gilune) -> Unit) {
         val root = resources.directory("gilune-people-ui")
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         val scope = resources.scope
         resources.own(Gilune.open(root.path)).let { kernel ->
             BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(kernel)

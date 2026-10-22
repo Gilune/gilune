@@ -11,6 +11,7 @@ import uniffi.gilune_ffi.*
 class DocumentRefactoringTest {
     private fun fixture(run: (File, Gilune, PluginExtensions) -> Unit) {
         val root = Files.createTempDirectory("gilune-refactoring").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         Gilune.open(root.absolutePath).use { kernel ->
             val registry = PluginExtensions(listOf(peopleExtensions()))
             registry.registerPlugins(kernel); registry.registerIndexers(kernel); registry.initializePages(kernel)
@@ -134,6 +135,7 @@ class DocumentRefactoringTest {
 
     @Test fun unrelatedConsumerUsesPreviewApplyAndUndoWithoutEitherDomainPlugin() {
         val root = Files.createTempDirectory("gilune-label-refactor").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         Gilune.open(root.path).use { kernel ->
             val registry = PluginExtensions(listOf(refactoringFixture()))
             registry.registerPlugins(kernel); registry.registerIndexers(kernel)

@@ -225,6 +225,8 @@ fn run() -> Result<(), String> {
                     "tombstone_proposals": r.tombstone_proposals,
                     "imports": r.imports,
                     "quarantined": r.quarantined,
+                    "adopted": r.adopted,
+                    "attachments": r.attachments,
                 })
             );
             Ok(())
@@ -242,6 +244,8 @@ fn run() -> Result<(), String> {
                     "tombstone_proposals": r.tombstone_proposals,
                     "imports": r.imports,
                     "quarantined": r.quarantined,
+                    "adopted": r.adopted,
+                    "attachments": r.attachments,
                 })
             );
             Ok(())

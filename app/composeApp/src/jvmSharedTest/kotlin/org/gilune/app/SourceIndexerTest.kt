@@ -9,6 +9,7 @@ import uniffi.gilune_ffi.Gilune
 class SourceIndexerTest {
     @Test fun unrelatedSdkConsumerIndexesAliasedHeaderPropertiesAndSurvivesRebuild() {
         val root = Files.createTempDirectory("gilune-header-fixture").toFile()
+        java.io.File(root, ".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
         Gilune.open(root.absolutePath).use { kernel ->
             val registry = PluginExtensions(listOf(headerFixture()))
             registry.registerPlugins(kernel); registry.registerIndexers(kernel)

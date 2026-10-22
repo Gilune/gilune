@@ -168,6 +168,9 @@ fn fixture(
         store.project().unwrap();
         receipt.rel_path.replace(".txt", ".md")
     } else {
+        // Local-only by the person's mark (ADR 0007, 2026-10-22): the one
+        // case in which a file the kernel did not write stays unmanaged.
+        std::fs::write(dir.path().join(".gilune-local"), "").unwrap();
         std::fs::write(dir.path().join("note.md"), "label=red\n").unwrap();
         "note.md".into()
     };
