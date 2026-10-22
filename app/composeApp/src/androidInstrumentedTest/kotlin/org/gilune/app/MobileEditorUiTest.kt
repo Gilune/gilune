@@ -376,6 +376,10 @@ class MobileEditorUiTest {
 
     private fun vaultWith(body: String): Pair<GiluneState, File> {
         val vault = resources.directory("gilune-edit")
+        // These rows treat the vault as plain files and read them back
+        // byte for byte; a local-only vault keeps the kernel from adopting
+        // them (ADR 0007, 2026-10-22), as the desktop fixtures do.
+        File(vault, LOCAL_MARKER).writeText("")
         val note = File(vault, "note.md")
         note.writeText(NOTE_HEAD + body)
         return resources.state(vault.absolutePath) to note
