@@ -128,7 +128,7 @@ FIREWALL_ADD = (f'advfirewall firewall add rule name="{FIREWALL_RULE}" dir=in ac
                 'enable=yes profile=private program="[INSTALLDIR]Gilune.exe"')
 
 
-def firewall_rules(product):
+def firewall_rules(product, sequence):
     """Allow the installed launcher through Windows Firewall on private networks.
 
     The rule is added by the installer, running as the system, so the user never
@@ -153,7 +153,6 @@ def firewall_rules(product):
     for action, command, execute in actions:
         node(product, "CustomAction", Id=action, Property=NETSH_PROPERTY, ExeCommand=command,
              Execute=execute, Impersonate="no", Return="ignore")
-    sequence = node(product, "InstallExecuteSequence")
     # Immediate, in the costing pass, so the path is known before the deferred
     # actions are written into the installation script.
     node(sequence, "Custom", Action="GiluneNetshPath", After="CostFinalize", Before="InstallInitialize")
@@ -176,6 +175,15 @@ def write_wix(bundle, destination, release):
     node(product, "Package", InstallerVersion="500", Compressed="yes", InstallScope="perMachine")
     node(product, "Media", Id="1", Cabinet="payload.cab", EmbedCab="yes")
     node(product, "MajorUpgrade", DowngradeErrorMessage="A newer version of Gilune is installed.")
+    sequence = node(product, "InstallExecuteSequence")
+    # wixl gives RemoveExistingProducts no position of its own: it is numbered
+    # after whatever the dependency sort put before it, which was InstallFiles
+    # until custom actions followed InstallFiles and Windows Installer refused
+    # the package (error 2613). Immediately after InstallInitialize is one of
+    # the documented slots and keeps the old product's removal inside the
+    # transaction, so a failed upgrade rolls the old product back. Both bounds
+    # are needed: wixl's sort only places an action where a dependency forces it.
+    node(sequence, "RemoveExistingProducts", After="InstallInitialize", Before="ProcessComponents")
     for legacy_version, product_code in LEGACY_DOWNGRADE_PRODUCTS.items():
         if tuple(map(int, release.split("."))) > tuple(map(int, legacy_version.split("."))):
             # MajorUpgrade protects installs of this MSI over newer products.
@@ -188,7 +196,7 @@ def write_wix(bundle, destination, release):
     # shell reads the file by its extension, so the Id carries one.
     node(product, "Icon", Id=ICON_ID, SourceFile=str(bundle / "gilune.ico"))
     node(product, "Property", Id="ARPPRODUCTICON", Value=ICON_ID)
-    firewall_rules(product)
+    firewall_rules(product, sequence)
     top = node(product, "Directory", Id="TARGETDIR", Name="SourceDir")
     program = node(top, "Directory", Id="ProgramFiles64Folder")
     install = node(program, "Directory", Id="INSTALLDIR", Name="Gilune")

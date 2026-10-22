@@ -31,6 +31,15 @@ three had one cause each.
   remove what the newer product added; `Return="ignore"` throughout, so a
   firewall that will not take a rule returns the user to the prompt rather than
   failing the install. Private profile only, per ADR 0019 § 2 (amended).
+  **First hosted attempt (run 39764223871) failed with error 2613,
+  "RemoveExistingProducts action sequenced incorrectly"**: wixl gives that action
+  no sequence number of its own and places it after whatever its dependency sort
+  put last, which had been `InstallFiles` (4001) and became the new custom
+  actions (4006). The package now schedules it explicitly
+  `After="InstallInitialize" Before="ProcessComponents"` (1501), a documented
+  slot inside the transaction, so a failed upgrade rolls the old product back;
+  both bounds are needed because wixl's sort only moves an action where a
+  dependency forces it. The real-MSI regression asserts the position.
 - **One process.** `Gilune.exe` loads `runtime\bin\server\jvm.dll` and creates
   the VM in-process instead of spawning `javaw.exe`: `runtime\bin` goes on the
   DLL search path (`SetDllDirectoryW`) and on `PATH` (the runtime derives

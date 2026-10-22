@@ -245,6 +245,12 @@ class WindowsFileVersionTest(unittest.TestCase):
             self.assertEqual(order, sorted(order))
             self.assertEqual(len(order), len(set(order)))
             self.assertLess(int(sequence["GiluneNetshPath"]["Sequence"]), int(sequence["InstallInitialize"]["Sequence"]))
+            # RemoveExistingProducts sits immediately after InstallInitialize: a
+            # documented slot, inside the transaction. Left to wixl it followed
+            # the custom actions and Windows Installer refused the package.
+            self.assertEqual(int(sequence["InstallInitialize"]["Sequence"]) + 1,
+                             int(sequence["RemoveExistingProducts"]["Sequence"]))
+            self.assertLess(int(sequence["RemoveExistingProducts"]["Sequence"]), int(sequence["InstallFiles"]["Sequence"]))
             for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
                 self.assertEqual("NOT UPGRADINGPRODUCTCODE", sequence[name]["Condition"])
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallAdd"]["Condition"])
