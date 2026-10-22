@@ -815,6 +815,33 @@ Each stage is shippable alone and in order.
     the optional `expected-head`; the joiner's rate limiter keys the
     whole attempt by the fingerprint the pairing names.
 
+- **2026-10-22 (native Windows install).** § 2's premise — "there is no
+  installer moment in which to pre-create a rule" — no longer holds. The
+  per-user MSI it refers to was replaced by the per-machine, elevated MSI
+  built on Linux (`.github/linux-windows-build.md`), and that installer
+  now uses the moment: it adds an inbound Windows Firewall rule named
+  `Gilune` for the installed `Gilune.exe`, **Private profile only**, as a
+  deferred, non-impersonated `netsh` custom action. Install, repair and
+  upgrade delete-then-add it (netsh would otherwise duplicate the rule),
+  and first delete every rule Windows holds for the launcher or for the
+  earlier launcher's `javaw.exe`, by program: a Block row left by a
+  dismissed prompt on 1.1.0 beats any Allow, and did on the owner's
+  notebook. The install owns every rule for its programs from here on;
+  uninstall deletes it, and a product being replaced by a newer one leaves
+  it alone so the order of `RemoveExistingProducts` cannot remove what the
+  newer product just added. A netsh failure never fails the install; it
+  only returns the user to the prompt. The prompt is therefore the
+  fallback — it means the install did not add the rule — not the expected
+  first-run event, and gate 13 is read accordingly: no prompt on an
+  installed app with sync switched on, capture and startup still never
+  behind the bind, and the non-administrator path needing no administrator
+  at all; the `netsh` line stays in the guide for the fallback and names
+  `C:\Program Files\Gilune\Gilune.exe`. Lazy binding is unchanged. The
+  launcher also hosts the Java runtime in its own process now, so the
+  socket's owner, the rule's program and any remaining prompt all name
+  Gilune rather than `javaw.exe` ("OpenJDK Platform binary"). The per-user
+  DEB is untouched; nothing on Linux adds a rule.
+
 ## Ratification record
 
 Ratified by the owner on 2026-09-02, as proposed, with no
