@@ -116,6 +116,14 @@ FIREWALL_RULE = "Gilune"
 # a directory, so an immediate type 51 action formats the netsh path first.
 NETSH_PROPERTY = "GILUNE_NETSH"
 FIREWALL_DELETE = f'advfirewall firewall delete rule name="{FIREWALL_RULE}"'
+# Every rule Windows ever made for the two programs the install has shipped,
+# whatever its name or action. A Block row from a cancelled or non-administrator
+# prompt on an earlier release beats any Allow, so it has to go.
+FIREWALL_PROGRAMS = {
+    "GiluneFirewallRemoveJavaw": r"[INSTALLDIR]runtime\bin\javaw.exe",
+    "GiluneFirewallRemoveLauncher": "[INSTALLDIR]Gilune.exe",
+}
+FIREWALL_DELETE_PROGRAM = 'advfirewall firewall delete rule name=all program="{}"'
 FIREWALL_ADD = (f'advfirewall firewall add rule name="{FIREWALL_RULE}" dir=in action=allow '
                 'enable=yes profile=private program="[INSTALLDIR]Gilune.exe"')
 
@@ -125,28 +133,36 @@ def firewall_rules(product):
 
     The rule is added by the installer, running as the system, so the user never
     meets the Windows prompt and a non-administrator can use sync (ADR 0019 § 2:
-    Private profile only). netsh adds a duplicate for every call with the same
-    name, so every install, repair and upgrade deletes before adding; uninstall
-    deletes. A product being replaced by a newer one leaves the rule alone
-    (UPGRADINGPRODUCTCODE) so the ordering of RemoveExistingProducts cannot
-    remove what the newer product just added. netsh failures never fail the
-    install: without the rule the user is back to the Windows prompt.
+    Private profile only). The install owns every rule for its programs from here
+    on: before adding, it deletes the named rule and every rule for the launcher
+    or the earlier launcher's javaw.exe — netsh duplicates by name, and a Block
+    row left by a dismissed prompt on an earlier release wins over any Allow.
+    Uninstall deletes the same set. A product being replaced by a newer one
+    leaves the rules alone (UPGRADINGPRODUCTCODE) so the ordering of
+    RemoveExistingProducts cannot remove what the newer product just added.
+    netsh failures never fail the install: without the rule the user is back to
+    the Windows prompt.
     """
     node(product, "CustomAction", Id="GiluneNetshPath", Property=NETSH_PROPERTY,
          Value="[System64Folder]netsh.exe")
-    for action, command, execute in (("GiluneFirewallRemove", FIREWALL_DELETE, "deferred"),
-                                     ("GiluneFirewallRollback", FIREWALL_DELETE, "rollback"),
-                                     ("GiluneFirewallAdd", FIREWALL_ADD, "deferred")):
+    removals = [("GiluneFirewallRemove", FIREWALL_DELETE)] + [
+        (action, FIREWALL_DELETE_PROGRAM.format(program)) for action, program in FIREWALL_PROGRAMS.items()]
+    actions = [(action, command, "deferred") for action, command in removals]
+    actions += [("GiluneFirewallRollback", FIREWALL_DELETE, "rollback"),
+                ("GiluneFirewallAdd", FIREWALL_ADD, "deferred")]
+    for action, command, execute in actions:
         node(product, "CustomAction", Id=action, Property=NETSH_PROPERTY, ExeCommand=command,
              Execute=execute, Impersonate="no", Return="ignore")
     sequence = node(product, "InstallExecuteSequence")
     # Immediate, in the costing pass, so the path is known before the deferred
     # actions are written into the installation script.
     node(sequence, "Custom", Action="GiluneNetshPath", After="CostFinalize", Before="InstallInitialize")
-    node(sequence, "Custom", Action="GiluneFirewallRemove", After="InstallFiles").text = (
-        "NOT UPGRADINGPRODUCTCODE")
+    previous = "InstallFiles"
+    for action, _command in removals:
+        node(sequence, "Custom", Action=action, After=previous).text = "NOT UPGRADINGPRODUCTCODE"
+        previous = action
     # Rollback is scheduled before the action it undoes.
-    node(sequence, "Custom", Action="GiluneFirewallRollback", After="GiluneFirewallRemove").text = (
+    node(sequence, "Custom", Action="GiluneFirewallRollback", After=previous).text = (
         'NOT REMOVE~="ALL"')
     node(sequence, "Custom", Action="GiluneFirewallAdd", After="GiluneFirewallRollback").text = (
         'NOT REMOVE~="ALL"')
