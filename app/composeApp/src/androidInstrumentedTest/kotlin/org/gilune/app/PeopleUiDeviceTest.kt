@@ -26,6 +26,9 @@ class PeopleUiDeviceTest {
 
     private fun fixture(run: (GiluneState, Gilune) -> Unit) {
         val root = resources.directory("gilune-people-ui")
+        // Plain files read back byte for byte: a local-only vault keeps
+        // the kernel from adopting them (ADR 0007, 2026-10-22).
+        root.resolve(LOCAL_MARKER).writeText("")
         val scope = resources.scope
         resources.own(Gilune.open(root.path)).let { kernel ->
             BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(kernel)
