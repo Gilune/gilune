@@ -22,7 +22,11 @@ three had one cause each.
   `GILUNE_NETSH` to `[System64Folder]netsh.exe` before `InstallInitialize`; the
   deferred, non-impersonated delete/rollback/add actions follow `InstallFiles`.
   Delete-then-add on every install, repair and upgrade (netsh duplicates by
-  name); delete on uninstall; a product being replaced leaves the rule alone
+  name); the deletes also clear every rule for `[INSTALLDIR]Gilune.exe` and
+  `[INSTALLDIR]runtime\bin\javaw.exe` by program (`delete rule name=all
+  program=...`), because the owner's notebook held Block rows for javaw.exe from
+  a dismissed 1.1.0 prompt and a Block beats any Allow — the install owns every
+  rule for its programs from here on; delete on uninstall; a product being replaced leaves the rule alone
   (`NOT UPGRADINGPRODUCTCODE`) so the order of `RemoveExistingProducts` cannot
   remove what the newer product added; `Return="ignore"` throughout, so a
   firewall that will not take a rule returns the user to the prompt rather than
@@ -62,7 +66,10 @@ runner) that runs `test-windows-installer.ps1` on `windows-2025` against the
 freshly built MSI and the published v1.0.3. The lifecycle now also asserts the
 `.lnk`'s `TargetPath` is `C:\Program Files\Gilune\Gilune.exe` with an `.ico`
 icon, exactly one `Gilune` firewall rule after install and after repair
-(Inbound/Allow/Private/enabled, program = the launcher), none after uninstall,
+(Inbound/Allow/Private/enabled, program = the launcher) with no other rule for
+any program under the install directory — Block rows for the lower-cased
+javaw.exe path are seeded with netsh before the clean install and again before
+the upgrade, as a dismissed prompt leaves them — none after uninstall,
 and — by starting the installed app a second time with sync switched on, the
 device id read from the vault's `kernel.db` and `<id>.sync.json` written beside
 the identity — that the sync listener is owned by `Gilune.exe`. Run it with:

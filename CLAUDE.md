@@ -1497,7 +1497,10 @@ gates promises) are ratified. **Next: application-level engineering — see
      firewall prompt named "OpenJDK Platform binary" → the MSI adds the
      `Gilune` inbound rule itself, Private profile only, via type 51 + type
      50 deferred no-impersonate netsh custom actions (wixl has no
-     Directory-sourced EXE CAs), delete-then-add on install/repair/upgrade,
+     Directory-sourced EXE CAs), delete-then-add on install/repair/upgrade
+     AND delete-by-program for Gilune.exe + runtime/bin/javaw.exe first (a
+     dismissed 1.1.0 prompt left BLOCK rows on the owner's notebook; Block
+     beats Allow; lifecycle test seeds such rows before install and upgrade),
      delete on uninstall, untouched by a product being replaced
      (`NOT UPGRADINGPRODUCTCODE`), `Return=ignore`; ADR 0019 § 2 amended,
      SyncSettings + sync guide reworded (netsh fallback names

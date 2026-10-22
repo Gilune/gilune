@@ -61,13 +61,35 @@ function VerifyCandidate {
     if ($rule.Enabled -ne 'True' -or $rule.Direction -ne 'Inbound' -or $rule.Action -ne 'Allow' -or "$($rule.Profile)" -ne 'Private') {
         throw "Firewall rule is $($rule.Enabled)/$($rule.Direction)/$($rule.Action)/$($rule.Profile); expected True/Inbound/Allow/Private"
     }
+    # The install owns every rule for its programs: a Block row that a
+    # dismissed prompt left for javaw.exe would beat the Allow above.
+    $others = @(ProgramRules | Where-Object { $_.Name -ne $rule.Name })
+    if ($others.Count -ne 0) {
+        throw "Other firewall rules remain for the installed programs: $(($others | ForEach-Object { "$($_.DisplayName) [$($_.Action)]" }) -join ', ')"
+    }
 }
 function FirewallRules { @(Get-NetFirewallRule -DisplayName 'Gilune' -ErrorAction SilentlyContinue) }
+# Every rule whose program lives under the install directory, whatever its name.
+function ProgramRules {
+    @(Get-NetFirewallApplicationFilter | Where-Object { $_.Program -and $_.Program.StartsWith("$installed\", 'OrdinalIgnoreCase') } |
+        ForEach-Object { Get-NetFirewallRule -Name $_.InstanceID -ErrorAction SilentlyContinue })
+}
+# What a cancelled or non-administrator firewall prompt left behind on 1.1.0:
+# Block rows for the runtime's javaw.exe, path as Windows wrote it.
+function SeedBlockRule([string]$label) {
+    $javaw = (Join-Path $installed 'runtime\bin\javaw.exe').ToLowerInvariant()
+    foreach ($profile in @('public', 'private')) {
+        & netsh advfirewall firewall add rule name="OpenJDK Platform binary" dir=in action=block enable=yes profile=$profile program="$javaw" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Could not seed the $profile Block rule before $label" }
+    }
+    if (@(ProgramRules | Where-Object { $_.Action -eq 'Block' }).Count -ne 2) { throw "Seeding Block rules before $label did not take" }
+}
 function VerifyRemoved([string]$what) {
     if ((Products).Count -ne 0 -or (Test-Path -LiteralPath (Join-Path $installed 'Gilune.exe'))) {
         throw "$what left the registered application behind"
     }
     if ((FirewallRules).Count -ne 0) { throw "$what left the Gilune firewall rule behind" }
+    if ((ProgramRules).Count -ne 0) { throw "$what left firewall rules for the installed programs behind" }
 }
 function VerifyListener([string]$phase) {
     # The launcher test records which process bound the sync port. It must
@@ -76,7 +98,8 @@ function VerifyListener([string]$phase) {
     $listener = Get-Content -LiteralPath (Join-Path $results "$phase/listener.txt") -Raw | ConvertFrom-Json
     if ($listener.exe -ne (Join-Path $installed 'Gilune.exe')) { throw "Sync port is owned by '$($listener.exe)'" }
 }
-if ((FirewallRules).Count -ne 0) { throw 'Runner already has a Gilune firewall rule; refusing to judge the installer by it' }
+if ((FirewallRules).Count -ne 0 -or (ProgramRules).Count -ne 0) { throw 'Runner already has firewall rules for Gilune; refusing to judge the installer by them' }
+SeedBlockRule 'clean install'
 Msi '/i' $candidate[0].FullName 'clean-install'
 VerifyCandidate
 Remove-Item -LiteralPath (Join-Path $installed 'Gilune.exe')
@@ -88,6 +111,8 @@ Msi '/x' $candidate[0].FullName 'clean-uninstall'
 VerifyRemoved 'Uninstall'
 Msi '/i' $previous[0].FullName 'previous-install'
 if ((Products).Count -ne 1) { throw 'Previous release was not registered' }
+# The owner's notebook: an earlier release installed, its prompt dismissed.
+SeedBlockRule 'upgrade'
 Msi '/i' $candidate[0].FullName 'upgrade'
 VerifyCandidate
 & "$PSScriptRoot/test-windows-launcher.ps1" -Bundle $installed -Results (Join-Path $results 'upgrade-launch') -SyncListener
@@ -101,5 +126,5 @@ foreach ($phase in @('clean-launch', 'upgrade-launch')) {
         throw 'Uninstall removed user-created vault content'
     }
 }
-'PASS: clean install, plain shortcut, firewall rule, repair without a duplicate rule, one-process launch owning the sync port, upgrade from v1.0.3, downgrade rejection, uninstall removing the rule, preserved vaults' |
+'PASS: clean install over seeded Block rules, plain shortcut, one firewall rule and no Block left, repair without a duplicate rule, one-process launch owning the sync port, upgrade from v1.0.3 over seeded Block rules, downgrade rejection, uninstall removing every rule, preserved vaults' |
     Set-Content -LiteralPath (Join-Path $results 'lifecycle.txt')

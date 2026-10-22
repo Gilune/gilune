@@ -823,6 +823,10 @@ Each stage is shippable alone and in order.
   `Gilune` for the installed `Gilune.exe`, **Private profile only**, as a
   deferred, non-impersonated `netsh` custom action. Install, repair and
   upgrade delete-then-add it (netsh would otherwise duplicate the rule),
+  and first delete every rule Windows holds for the launcher or for the
+  earlier launcher's `javaw.exe`, by program: a Block row left by a
+  dismissed prompt on 1.1.0 beats any Allow, and did on the owner's
+  notebook. The install owns every rule for its programs from here on;
   uninstall deletes it, and a product being replaced by a newer one leaves
   it alone so the order of `RemoveExistingProducts` cannot remove what the
   newer product just added. A netsh failure never fails the install; it
