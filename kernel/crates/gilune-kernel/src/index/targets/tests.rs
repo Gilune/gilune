@@ -69,6 +69,7 @@ struct Fixture {
 fn fixture(text: &str) -> Fixture {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path()).unwrap();
+    std::fs::write(dir.path().join(".gilune-local"), "").unwrap(); // local-only vault (ADR 0007, 2026-10-22)
     let fail = Arc::new(AtomicBool::new(false));
     let calls = Arc::new(AtomicUsize::new(0));
     for namespace in ["example.one", "example.two"] {

@@ -175,6 +175,89 @@ pub fn unreachable_because(
     )
 }
 
+/// Why a peer that a search **did** see could still not be reached.
+///
+/// A different fact from every branch of `unreachable_because`, and the
+/// one the live run over a Wi-Fi extender produced: the peer's
+/// announcement arrived, so it is on, it is on this network, and it is
+/// advertising — and a connection to the address it announced was
+/// dropped. Multicast reaching this machine while unicast does not has
+/// two usual causes, and both are over there: a Windows machine that
+/// classed its network as Public (the firewall rule that lets Gilune
+/// answer applies to Private networks only, so every inbound packet is
+/// dropped without a reply — which is exactly what a timeout looks like),
+/// or a device that went off a moment ago and whose announcement the
+/// network still remembers. Neither is fixed by the chain's next step, so
+/// the words name both and say where to look.
+///
+/// `detail` is what the dial said, kept because "connection timed out"
+/// and "connection refused" point at different things and a person who
+/// knows the difference deserves to be told which it was.
+pub fn unreachable_despite_discovery(called: &str, address: &str, detail: &str) -> String {
+    format!(
+        "{called} answered a search on this network but would not take a connection at \
+         {address} ({detail}). If that is a Windows machine, check that it treats this \
+         network as Private rather than Public — on a Public network Windows drops \
+         everything other devices send to Gilune — and that Gilune was allowed through \
+         its firewall. If it was just switched off or sent to sleep, the network may \
+         still remember it for a minute or two; try again then."
+    )
+}
+
+/// The words a halt carries for an error, without the error's own prefix.
+///
+/// `SyncError`'s `Display` is for logs and tests and says which variant
+/// it is — "refused: …" — but a `Halted` reason is a sentence a settings
+/// screen shows, and "refused: 192.168.1.137:51837 did not answer:
+/// connection timed out" told a person their peer refused them when it
+/// never answered at all. A refusal's detail is already the whole
+/// sentence; the other variants keep their prefix because it is the only
+/// name they have.
+pub fn halt_reason(error: &SyncError) -> String {
+    match error {
+        SyncError::Refused { detail } => detail.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// What a round is doing with one peer, as it happens.
+///
+/// A round with an unreachable peer spends a five-second connect timeout,
+/// a browse and a second dial before it has anything to say, and the
+/// shells showed nothing at all until it was over — a button that did
+/// nothing for twelve seconds and then printed one line in the foot of
+/// the window. Each stage is reported the moment it begins, so a screen
+/// can say which device is being contacted and how, and `Done` carries
+/// the counts so a screen can say what moved with *this* peer rather
+/// than only the round's total.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Stage {
+    /// Dialling the address the peer gave last time.
+    Connecting,
+    /// The remembered address answered nothing; asking the network.
+    Looking,
+    /// A session is open and operations are moving both ways.
+    Exchanging,
+    /// Finished with this peer.
+    Done { applied: usize, sent: usize },
+    /// The peer could not be reached, or the session ended on a fault.
+    /// The words are the same ones the round's `halted` carries.
+    Failed { reason: String },
+}
+
+/// Something a round tells as it goes. Implemented by the shells behind
+/// the FFI; `Silent` is what every caller that has no screen passes.
+pub trait SyncProgress: Send + Sync {
+    fn report(&self, peer: &str, stage: Stage);
+}
+
+/// No screen to tell.
+pub struct Silent;
+
+impl SyncProgress for Silent {
+    fn report(&self, _peer: &str, _stage: Stage) {}
+}
+
 /// A peer as a settings screen sees it. No secrets: the pair secret never
 /// leaves the roster.
 #[derive(Debug, Clone)]
@@ -1088,8 +1171,14 @@ impl SyncService {
         cached: &str,
         called: &str,
         browsed: &mut Browsed,
+        progress: &dyn SyncProgress,
     ) -> Result<Box<dyn crate::Session>> {
+        // What the cached address said when it failed, kept for the case
+        // where a search names that very address again: dialling it a
+        // second time costs another connect timeout and learns nothing.
+        let mut cached_failure: Option<SyncError> = None;
         if !cached.is_empty() {
+            progress.report(called, Stage::Connecting);
             match transport.connect(&format!("{static_pub}@{cached}")) {
                 Ok(session) => return Ok(session),
                 // A refusal from a peer that *answered* is a different
@@ -1097,10 +1186,13 @@ impl SyncService {
                 // no is not something discovery can fix, so the chain
                 // stops here rather than browsing the network over it.
                 Err(e @ SyncError::Protocol { .. }) => return Err(e),
-                Err(_) => {}
+                Err(e) => cached_failure = Some(e),
             }
         }
         let looked = self.discovery().name() != "none";
+        if looked {
+            progress.report(called, Stage::Looking);
+        }
         // **One browse per round, however many peers are unreachable.** A
         // browse costs 2.5 s — measured, and twice what exchanging a
         // hundred operations costs — so a laptop with three peers asleep
@@ -1118,11 +1210,32 @@ impl SyncService {
             .find(|d| !wanted.is_empty() && d.fingerprint == wanted);
         let found = ours.filter(|d| d.compatible());
         if let Some(found) = found {
-            let session = transport.connect(&format!("{static_pub}@{}", found.address))?;
-            // Discovery is expensive and this is what stops it being
-            // paid twice: the address that worked becomes the cached one.
-            let _ = self.roster().set_address(static_pub, &found.address);
-            return Ok(session);
+            // The search named the address that just failed: the answer
+            // is already known, and a second dial would only add a second
+            // timeout to a round that already cost one. The device is
+            // seen and will not take a connection, which is its own
+            // diagnostic below.
+            let failed = match cached_failure {
+                Some(e) if found.address == cached => Err(e),
+                _ => match transport.connect(&format!("{static_pub}@{}", found.address)) {
+                    Ok(session) => {
+                        // Discovery is expensive and this is what stops it
+                        // being paid twice: the address that worked
+                        // becomes the cached one.
+                        let _ = self.roster().set_address(static_pub, &found.address);
+                        return Ok(session);
+                    }
+                    Err(e @ SyncError::Protocol { .. }) => return Err(e),
+                    Err(e) => Err(e),
+                },
+            };
+            // Seen, compatible, and the connection was dropped or turned
+            // away: the chain's last step is words that say where to look,
+            // and this is a different place from the one the not-seen
+            // branches below point at.
+            return failed.map_err(|e| SyncError::Refused {
+                detail: unreachable_despite_discovery(called, &found.address, &halt_reason(&e)),
+            });
         }
         Err(SyncError::Refused {
             detail: unreachable_because(
@@ -1153,6 +1266,17 @@ impl SyncService {
     /// an error to learn a user's setting would log a fault every fifteen
     /// minutes for a device that is behaving exactly as asked.
     pub fn sync_now(&self, store: &Store) -> Result<ExchangeReport> {
+        self.sync_now_reporting(store, &Silent)
+    }
+
+    /// The same round, told as it goes (`SyncProgress`). Every stage is
+    /// reported before the work it names begins, so what a screen shows is
+    /// what the round is doing rather than what it has just finished.
+    pub fn sync_now_reporting(
+        &self,
+        store: &Store,
+        progress: &dyn SyncProgress,
+    ) -> Result<ExchangeReport> {
         if !self.wanted() {
             self.shared.outbound.store(false, Ordering::SeqCst);
             return Ok(ExchangeReport::default());
@@ -1188,6 +1312,7 @@ impl SyncService {
                 &address,
                 &called,
                 &mut browsed,
+                progress,
             ) {
                 Ok(session) => session,
                 Err(e) => {
@@ -1195,15 +1320,22 @@ impl SyncService {
                     // *stream* halting, so it is named by the peer rather
                     // than by an originating device id — what the shell
                     // shows has to make sense to a person.
+                    let reason = halt_reason(&e);
+                    progress.report(&called, Stage::Failed { reason: reason.clone() });
                     total.halted.push(crate::Halted {
                         device_id: called,
-                        reason: e.to_string(),
+                        reason,
                     });
                     continue;
                 }
             };
+            progress.report(&called, Stage::Exchanging);
             match exchange::sync(store, session.as_mut(), self.shared.limits) {
                 Ok(report) => {
+                    progress.report(
+                        &called,
+                        Stage::Done { applied: report.applied, sent: report.sent },
+                    );
                     total.applied += report.applied;
                     total.duplicates += report.duplicates;
                     total.uninterpreted += report.uninterpreted;
@@ -1223,10 +1355,14 @@ impl SyncService {
                     total.halted.extend(report.halted);
                     total.ended_on_cap |= report.ended_on_cap;
                 }
-                Err(e) => total.halted.push(crate::Halted {
-                    device_id: called,
-                    reason: e.to_string(),
-                }),
+                Err(e) => {
+                    let reason = halt_reason(&e);
+                    progress.report(&called, Stage::Failed { reason: reason.clone() });
+                    total.halted.push(crate::Halted {
+                        device_id: called,
+                        reason,
+                    });
+                }
             }
             let _ = session.close();
         }

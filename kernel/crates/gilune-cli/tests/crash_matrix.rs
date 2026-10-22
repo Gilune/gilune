@@ -213,3 +213,37 @@ fn repeated_captures_accumulate_and_stay_verifiable() {
 }
 
 mod support;
+
+/// Adoption (ADR 0007, 2026-10-22) is rows first, header second, so an
+/// abort anywhere leaves a file that is either untouched or adopted, and
+/// the next pass finishes it: one object, one operation, one header,
+/// never a quarantine and never a second copy.
+#[test]
+fn an_adoption_interrupted_anywhere_is_finished_by_the_next_pass() {
+    for point in ["adopt.commit.inside", "adopt.after_commit", "adopt.after_write"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let vault = dir.path();
+        ok_json(vault, &["init"]);
+        std::fs::create_dir_all(vault.join("Notes")).expect("mkdir");
+        std::fs::write(vault.join("Notes/plan.md"), "just my notes\n").expect("write");
+
+        let crashed = cli(vault, Some(point), &["reconcile"]);
+        assert!(!crashed.status.success(), "{point}: the process was meant to abort");
+
+        let recovered = ok_json(vault, &["reconcile"]);
+        assert_eq!(recovered["quarantined"], 0, "{point}: never a quarantine");
+        let status = ok_json(vault, &["status"]);
+        assert_eq!(status["projections"], 1, "{point}");
+        assert_eq!(status["operations"], 1, "{point}: adopted once, whatever happened");
+        assert_eq!(status["import_candidates"], 0, "{point}");
+        ok_json(vault, &["project"]);
+        let text = std::fs::read_to_string(vault.join("Notes/plan.md")).expect("read");
+        assert!(text.starts_with("---\ngilune-id: "), "{point}: the header landed: {text}");
+        assert!(text.ends_with("---\njust my notes\n"), "{point}: the body is untouched: {text}");
+        ok_json(vault, &["verify"]);
+        // And settled: a further pass changes nothing.
+        let again = ok_json(vault, &["reconcile"]);
+        assert_eq!(again["adopted"], 0, "{point}");
+        assert_eq!(again["edits"], 0, "{point}");
+    }
+}

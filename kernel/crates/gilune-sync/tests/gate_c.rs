@@ -1694,3 +1694,523 @@ fn switching_sync_off_stops_a_session_this_device_had_dialled() {
     );
     let _ = session.close();
 }
+
+// ------------------------------------------------- seen but unreachable
+
+/// A test-driven observer: everything a round says, in the order it said
+/// it.
+#[derive(Default)]
+struct Recorded(std::sync::Mutex<Vec<(String, gilune_sync::Stage)>>);
+
+impl gilune_sync::SyncProgress for Recorded {
+    fn report(&self, peer: &str, stage: gilune_sync::Stage) {
+        self.0.lock().expect("lock").push((peer.to_string(), stage));
+    }
+}
+
+impl Recorded {
+    fn stages_for(&self, peer: &str) -> Vec<gilune_sync::Stage> {
+        self.0
+            .lock()
+            .expect("lock")
+            .iter()
+            .filter(|(p, _)| p == peer)
+            .map(|(_, s)| s.clone())
+            .collect()
+    }
+}
+
+/// A socket that accepts and hangs up, counting every connection it took.
+///
+/// The shape of a machine whose address answers and whose Gilune does
+/// not. What matters here is only that each dial is counted.
+struct HangsUp {
+    address: String,
+    accepted: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl HangsUp {
+    fn start() -> HangsUp {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let address = listener.local_addr().expect("addr").to_string();
+        let accepted = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = accepted.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                drop(stream);
+            }
+        });
+        HangsUp { address, accepted }
+    }
+
+    fn accepted(&self) -> usize {
+        self.accepted.load(std::sync::atomic::Ordering::SeqCst)
+    }
+}
+
+/// **A peer the search saw and the dial could not reach is its own
+/// diagnostic**, and it is the one the live run over a Wi-Fi extender
+/// produced: the notebook's announcement arrived and every packet sent
+/// to the address it announced was dropped. The previous words were the
+/// dial's own — "refused: … did not answer: connection timed out" — which
+/// named nothing a person could act on and said "refused" about a device
+/// that never answered. The words now say what was observed (seen, and
+/// not reachable), where to look (that device's network profile and
+/// firewall), and the other everyday cause (it was just switched off).
+#[test]
+fn a_device_a_search_can_see_but_nothing_can_reach_is_told_where_to_look() {
+    let desktop = Device::new("Desktop").listening();
+    // The desktop as the network remembers it, at a port nothing answers
+    // on: seen, and not reachable.
+    let gone = Discovered {
+        address: format!("127.0.0.1:{}", free_port()),
+        ..advertisement_of(&desktop)
+    };
+    let phone = Device::new("Phone")
+        .listening()
+        .discovering(ScriptedDiscovery::answering(vec![gone.clone()]));
+    phone.pair_by_code(&desktop).expect("pair");
+    phone
+        .service
+        .set_peer_address(
+            &desktop.service.identity_public_hex(),
+            &format!("127.0.0.1:{}", free_port()),
+        )
+        .expect("stale it");
+
+    let report = phone.sync();
+    let reason = report.halted.first().expect("a halt").reason.clone();
+    assert!(
+        reason.contains("answered a search on this network"),
+        "what was observed comes first: {reason}"
+    );
+    assert!(
+        reason.contains(&gone.address),
+        "and the address the search gave is the one named: {reason}"
+    );
+    assert!(
+        reason.contains("Private rather than Public"),
+        "the Windows network profile is the usual cause and is named: {reason}"
+    );
+    assert!(
+        reason.contains("switched off or sent to sleep"),
+        "and so is a device the network still remembers: {reason}"
+    );
+    assert!(
+        !reason.starts_with("refused"),
+        "a device that never answered was not refusing anybody: {reason}"
+    );
+    assert!(
+        !reason.contains("no device could be found") && !reason.contains("not the problem"),
+        "none of the not-seen diagnostics apply to a device that was seen: {reason}"
+    );
+}
+
+/// **The address a search returns is not dialled again when it is the
+/// one that just failed.** The chain's second step exists to find an
+/// address the cached one is not; when it names the same one, a second
+/// dial is a second connect timeout for an answer already in hand — on a
+/// real network that was five seconds twice, per peer, per round.
+#[test]
+fn a_search_that_names_the_failed_address_does_not_cost_a_second_dial() {
+    let desktop = Device::new("Desktop").listening();
+    let hangs_up = HangsUp::start();
+    let seen_there = Discovered {
+        address: hangs_up.address.clone(),
+        ..advertisement_of(&desktop)
+    };
+    let discovery = ScriptedDiscovery::answering(vec![seen_there]);
+    let phone = Device::new("Phone").listening().discovering(discovery.clone());
+    phone.pair_by_code(&desktop).expect("pair");
+    phone
+        .service
+        .set_peer_address(&desktop.service.identity_public_hex(), &hangs_up.address)
+        .expect("cache the address that hangs up");
+
+    let report = phone.sync();
+    assert_eq!(report.halted.len(), 1, "{report:?}");
+    assert_eq!(discovery.browsed(), 1, "the cached address failed, so the network was asked");
+    assert_eq!(
+        hangs_up.accepted(),
+        1,
+        "the search named the address that had just failed, and it was not dialled twice"
+    );
+
+    // Whereas a search that names a *different* address is new
+    // information and is dialled — that is the whole point of the step.
+    let elsewhere = HangsUp::start();
+    let moved = Discovered {
+        address: elsewhere.address.clone(),
+        ..advertisement_of(&desktop)
+    };
+    phone.service.set_discovery(ScriptedDiscovery::answering(vec![moved]));
+    let report = phone.sync();
+    assert_eq!(report.halted.len(), 1, "{report:?}");
+    assert_eq!(hangs_up.accepted(), 2, "the cached address was tried first again");
+    assert_eq!(elsewhere.accepted(), 1, "and the new address the search gave was tried too");
+}
+
+/// **A round says what it is doing with each peer as it does it.** A
+/// device that cannot be reached costs a connect timeout, a browse and a
+/// second dial before the round has anything to say, and a button that
+/// does nothing visible for that long reads as a button that does
+/// nothing. Each stage is reported as it begins; `Done` carries this
+/// peer's own counts; `Failed` carries the same words the halt does.
+#[test]
+fn a_round_reports_each_stage_with_each_peer_as_it_goes() {
+    use gilune_sync::Stage;
+
+    // Reachable at the cached address: connect, exchange, done — and no
+    // looking, because § 1 keeps discovery off the path that works.
+    let desktop = Device::new("Desktop").listening();
+    let discovery = ScriptedDiscovery::answering(vec![advertisement_of(&desktop)]);
+    let phone = Device::new("Phone").listening().discovering(discovery.clone());
+    phone.pair_by_code(&desktop).expect("pair");
+    desktop.capture("one to carry");
+
+    let told = Recorded::default();
+    let report = phone
+        .service
+        .sync_now_reporting(&phone.store, &told)
+        .expect("sync");
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    let stages = told.stages_for("Desktop");
+    assert_eq!(stages[0], Stage::Connecting);
+    assert_eq!(stages[1], Stage::Exchanging);
+    match &stages[2] {
+        Stage::Done { applied, sent } => {
+            assert_eq!(*applied, report.applied, "the one peer's count is the round's");
+            assert_eq!(*sent, report.sent);
+            assert!(*applied >= 1, "the capture crossed");
+        }
+        other => panic!("a reachable peer ends in Done, not {other:?}"),
+    }
+    assert_eq!(stages.len(), 3, "nothing was said that did not happen: {stages:?}");
+
+    // Stale cached address, recovered by a search: looking appears
+    // between connecting and exchanging, and the peer is still named by
+    // the name it gave rather than by a key.
+    phone
+        .service
+        .set_peer_address(
+            &desktop.service.identity_public_hex(),
+            &format!("127.0.0.1:{}", free_port()),
+        )
+        .expect("stale it");
+    desktop.capture("another to carry");
+    let told = Recorded::default();
+    let report = phone
+        .service
+        .sync_now_reporting(&phone.store, &told)
+        .expect("sync");
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    let kinds: Vec<&str> = told
+        .stages_for("Desktop")
+        .iter()
+        .map(|s| match s {
+            Stage::Connecting => "connecting",
+            Stage::Looking => "looking",
+            Stage::Exchanging => "exchanging",
+            Stage::Done { .. } => "done",
+            Stage::Failed { .. } => "failed",
+        })
+        .collect();
+    assert_eq!(kinds, ["connecting", "looking", "exchanging", "done"]);
+
+    // Unreachable: the round ends with Failed, carrying the halt's own
+    // words, so a screen that shows the stage and a screen that shows
+    // the report never disagree.
+    phone
+        .service
+        .set_discovery(ScriptedDiscovery::answering(Vec::new()));
+    phone
+        .service
+        .set_peer_address(
+            &desktop.service.identity_public_hex(),
+            &format!("127.0.0.1:{}", free_port()),
+        )
+        .expect("stale it again");
+    let told = Recorded::default();
+    let report = phone
+        .service
+        .sync_now_reporting(&phone.store, &told)
+        .expect("sync");
+    let stages = told.stages_for("Desktop");
+    match stages.last() {
+        Some(Stage::Failed { reason }) => {
+            assert_eq!(reason, &report.halted[0].reason, "one set of words, told twice");
+        }
+        other => panic!("an unreachable peer ends in Failed, not {other:?}"),
+    }
+    assert!(
+        !stages.contains(&Stage::Exchanging),
+        "nothing was exchanged with a peer nobody reached: {stages:?}"
+    );
+
+    // And a device with sync switched off tells nobody anything, because
+    // it dials nobody (§ 2).
+    phone.service.set_enabled(false).expect("off");
+    let told = Recorded::default();
+    phone
+        .service
+        .sync_now_reporting(&phone.store, &told)
+        .expect("a quiet round");
+    assert!(told.stages_for("Desktop").is_empty());
+}
+
+/// A halt's words are a sentence for a settings screen, and the error
+/// variant's name is not part of the sentence. "refused: Desktop did not
+/// answer…" told the owner their notebook had refused them; it had never
+/// answered at all.
+#[test]
+fn a_halt_reason_is_the_sentence_and_not_the_errors_name_for_itself() {
+    let desktop = Device::new("Desktop").listening();
+    let phone = Device::new("Phone")
+        .listening()
+        .discovering(ScriptedDiscovery::answering(Vec::new()));
+    phone.pair_by_code(&desktop).expect("pair");
+    phone
+        .service
+        .set_peer_address(
+            &desktop.service.identity_public_hex(),
+            &format!("127.0.0.1:{}", free_port()),
+        )
+        .expect("stale it");
+    let report = phone.sync();
+    let reason = &report.halted.first().expect("a halt").reason;
+    assert!(!reason.starts_with("refused:"), "{reason}");
+    assert!(
+        reason.starts_with("Desktop "),
+        "the sentence starts with the device it is about: {reason}"
+    );
+    assert_eq!(
+        gilune_sync::service::halt_reason(&SyncError::Refused { detail: "no".to_string() }),
+        "no"
+    );
+    assert!(
+        gilune_sync::service::halt_reason(&SyncError::Protocol { detail: "x".to_string() })
+            .starts_with("protocol:"),
+        "a variant whose prefix is its only name keeps it"
+    );
+}
+
+// ------------------------------------------------ advertising is measured
+
+/// **An advertisement nobody could have heard is not reported as
+/// advertising.** `mdns-sd` builds its multicast socket once, when the
+/// daemon starts, and if that bind fails it carries on mute: `register`
+/// succeeds, the service sits in a table, nothing is ever sent. The
+/// owner's desktop sat in that state for a session saying "found by
+/// others: yes" while holding no socket on 5353 (2026-10-22). So the
+/// adapter waits for the daemon's own `Announce` — emitted only after an
+/// unsolicited response actually left on an interface — and, when it
+/// never comes, rebuilds the daemon once and then says no.
+///
+/// Honest label: a mute daemon cannot be manufactured from outside
+/// `mdns-sd`, so the negative path is driven by a **zero window**, under
+/// which no announcement can be heard in time. What that pins is the
+/// contract — not heard ⇒ one rebuild, then an error that `SyncService`
+/// turns into "not advertising" — and the coexistence test above pins the
+/// positive half with the real window and zero rebuilds.
+#[test]
+fn an_advertisement_nobody_could_have_heard_is_not_reported_as_advertising() {
+    let deaf = MdnsDiscovery::with_confirm_window(Duration::ZERO);
+    let result = deaf.advertise(&Advertisement {
+        fingerprint: unique_fingerprint("deaf"),
+        port: 51837,
+    });
+    match result {
+        Err(SyncError::Refused { detail }) => {
+            assert!(
+                detail.contains("announced") && detail.contains("no interface"),
+                "the error says what was observed: {detail}"
+            );
+            assert!(
+                detail.contains("address and code"),
+                "and hands over the route that still works (§ 1): {detail}"
+            );
+        }
+        other => panic!("an unheard advertisement must be an error, got {other:?}"),
+    }
+    assert_eq!(
+        deaf.restarts(),
+        1,
+        "the daemon is rebuilt exactly once — fresh sockets are the only repair on offer — \
+         before the adapter gives up"
+    );
+
+    // And a healthy daemon under the real window announces, is heard,
+    // and costs no rebuild — the coexistence test proves the browse side;
+    // this is the count.
+    let heard = MdnsDiscovery::new();
+    let fingerprint = unique_fingerprint("heard");
+    heard
+        .advertise(&Advertisement { fingerprint, port: 51837 })
+        .expect("a daemon with a socket announces within the window");
+    assert_eq!(heard.restarts(), 0);
+    heard.withdraw();
+}
+
+/// Through the service: what the adapter refuses, the facts say.
+#[test]
+fn a_service_whose_responder_announced_nothing_says_it_is_not_findable() {
+    let device = Device::new("Desktop")
+        .discovering(Arc::new(MdnsDiscovery::with_confirm_window(Duration::ZERO)))
+        .listening();
+    assert!(device.service.enabled(), "listening is unaffected");
+    assert!(
+        !device.service.advertising(),
+        "an announcement nobody could have heard is not 'found by others: yes'"
+    );
+}
+
+// ---------------------------------------- every file in the vault travels
+//
+// ADR 0007, amendment 2026-10-22. The one-device half — adoption, the
+// header, the blob row, local scope — is pinned in the kernel's own
+// `vault::adopt_tests`. This is the half the owner saw fail: that what one
+// device holds reaches the other.
+
+fn write_in(device: &Device, rel: &str, bytes: &[u8]) {
+    let path = device.vault_path.join(rel);
+    std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+    std::fs::write(path, bytes).expect("write");
+}
+
+fn read_in(device: &Device, rel: &str) -> String {
+    std::fs::read_to_string(device.vault_path.join(rel)).expect("read")
+}
+
+/// **A note made with another tool on one device appears on the other.**
+/// The owner's folder of notes that never crossed: New note, Obsidian or
+/// a copied file is adopted at reconcile, so one sync carries it, and
+/// the other device projects it at the same path with the same body and
+/// the same id.
+#[test]
+fn a_note_made_with_another_tool_on_one_device_appears_on_the_other() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+
+    write_in(&notebook, "Meetings/standup.md", b"- talked about sync\n- it works now\n");
+    assert_eq!(notebook.store.reconcile().expect("reconcile").adopted, 1);
+    let theirs = read_in(&notebook, "Meetings/standup.md");
+    assert!(theirs.starts_with("---\ngilune-id: "), "{theirs}");
+
+    let report = notebook.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert!(report.sent >= 1, "the adoption is one operation to send: {report:?}");
+    desktop.store.project().expect("project");
+    let ours = read_in(&desktop, "Meetings/standup.md");
+    assert_eq!(ours, theirs, "same path, same header, same body");
+
+    // And an edit made afterwards with that other tool follows it.
+    write_in(&notebook, "Meetings/standup.md", theirs.replace("it works now", "it really works").as_bytes());
+    notebook.store.reconcile().expect("reconcile");
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert!(read_in(&desktop, "Meetings/standup.md").contains("it really works"));
+}
+
+/// **An image dropped into one vault arrives byte-identical in the other**,
+/// with nothing written into either copy and no note projected for it.
+#[test]
+fn an_image_dropped_on_one_device_arrives_byte_identical_on_the_other() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+
+    let bytes: Vec<u8> = (0..70_000u32).map(|i| (i % 251) as u8).collect();
+    write_in(&notebook, "Pictures/whiteboard.png", &bytes);
+    assert_eq!(notebook.store.reconcile().expect("reconcile").attachments, 1);
+
+    let report = notebook.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert!(report.chunks >= 1, "the bytes crossed in this session: {report:?}");
+    desktop.store.project().expect("project");
+    assert_eq!(
+        std::fs::read(desktop.vault_path.join("Pictures/whiteboard.png")).expect("arrived"),
+        bytes,
+        "byte for byte"
+    );
+    assert!(!desktop.vault_path.join("Pictures/whiteboard.md").exists(), "no note for an attachment");
+    assert_eq!(
+        std::fs::read(notebook.vault_path.join("Pictures/whiteboard.png")).expect("still there"),
+        bytes,
+        "nothing was written into the original"
+    );
+
+    // Edited in place over there: the new bytes replace the old here,
+    // because the bytes here were exactly the ones the previous revision
+    // declared.
+    let edited: Vec<u8> = bytes.iter().map(|b| b.wrapping_add(1)).collect();
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    write_in(&notebook, "Pictures/whiteboard.png", &edited);
+    assert_eq!(notebook.store.reconcile().expect("reconcile").edits, 1);
+    let report = notebook.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert_eq!(
+        std::fs::read(desktop.vault_path.join("Pictures/whiteboard.png")).expect("replaced"),
+        edited
+    );
+}
+
+/// **A local-only note never leaves, and leaves when the mark goes.**
+#[test]
+fn a_local_only_note_never_leaves_until_its_mark_is_taken_off() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+
+    write_in(&notebook, "Private/.gilune-local", b"");
+    write_in(&notebook, "Private/salary.md", b"not for the desktop\n");
+    write_in(&notebook, "diary.md", b"---\ngilune-sync: local\n---\nnor this\n");
+    let summary = notebook.store.reconcile().expect("reconcile");
+    assert_eq!((summary.adopted, summary.imports), (0, 2), "{summary:?}");
+
+    let report = notebook.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    desktop.store.project().expect("project");
+    assert!(!desktop.vault_path.join("Private/salary.md").exists());
+    assert!(!desktop.vault_path.join("diary.md").exists());
+
+    std::fs::remove_file(notebook.vault_path.join("Private/.gilune-local")).expect("unmark");
+    assert_eq!(notebook.store.reconcile().expect("reconcile").adopted, 1);
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert!(read_in(&desktop, "Private/salary.md").ends_with("not for the desktop\n"));
+    assert!(!desktop.vault_path.join("diary.md").exists(), "the key is still on the other one");
+}
+
+/// **The same filename made on both devices keeps both.** The arrival is
+/// written beside the local note under a name that says where it came
+/// from; neither device's own note is held back.
+#[test]
+fn the_same_filename_made_on_both_devices_keeps_both() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+
+    write_in(&desktop, "Notes/Untitled.md", b"desktop's untitled\n");
+    write_in(&notebook, "Notes/Untitled.md", b"notebook's untitled\n");
+    desktop.store.reconcile().expect("reconcile");
+    notebook.store.reconcile().expect("reconcile");
+
+    let report = notebook.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    desktop.store.project().expect("project");
+    notebook.store.project().expect("project");
+
+    let from_notebook = format!("Notes/Untitled (from {}).md", gilune_kernel::ids::short(&notebook.device_id()));
+    let from_desktop = format!("Notes/Untitled (from {}).md", gilune_kernel::ids::short(&desktop.device_id()));
+    assert!(read_in(&desktop, "Notes/Untitled.md").ends_with("desktop's untitled\n"), "the desktop keeps its own");
+    assert!(read_in(&desktop, &from_notebook).ends_with("notebook's untitled\n"), "and gains the other beside it");
+    assert!(read_in(&notebook, "Notes/Untitled.md").ends_with("notebook's untitled\n"));
+    assert!(read_in(&notebook, &from_desktop).ends_with("desktop's untitled\n"));
+    assert_eq!(
+        desktop.store.project().expect("project").held_back,
+        0,
+        "nothing is held in history with no file"
+    );
+}

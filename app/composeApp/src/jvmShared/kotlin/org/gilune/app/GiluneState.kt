@@ -248,6 +248,21 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// rather than showing an empty list that means nothing yet.
     val discovering = mutableStateOf(false)
 
+    /// True while a round of `syncDevices` is running, so the button that
+    /// starts one can say so and refuse a second.
+    val syncing = mutableStateOf(false)
+
+    /// Everything the running round has said so far, in order — the
+    /// kernel reports each stage with each peer the moment it begins
+    /// (`SyncProgress`), and a screen draws the last of these as "what is
+    /// happening now". Cleared when a round starts.
+    val syncProgress = mutableStateListOf<uniffi.gilune_ffi.SyncProgressEvent>()
+
+    /// The most recent finished round, for the screen that has the
+    /// button. The foot-of-window message line is not where a person
+    /// looks for why their notebook did not sync.
+    val lastSyncRound = mutableStateOf<SyncRound?>(null)
+
     /// How this shell enrols the device (ADR 0019 § 4). The identity key
     /// lives **outside the vault** in a directory only the shell knows —
     /// `%LOCALAPPDATA%\Gilune` on Windows, `filesDir` on Android — and the
@@ -425,9 +440,30 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// enough that sharing a name would be a bug waiting to be written.
     fun syncDevices() {
         val g = gilune.value ?: return
+        // One round at a time: a second press while the first is mid-dial
+        // would open a second session to every peer and report twice.
+        if (syncing.value) return
+        // A device with sync switched off dials nobody (§ 2) and the
+        // kernel answers with an empty report rather than an error, which
+        // read as "nothing to sync with" — true, and not the reason.
+        if (syncStatus.value?.wanted == false) {
+            message.value = "sync is switched off on this device — turn it on to exchange notes"
+            return
+        }
+        syncing.value = true
+        syncProgress.clear()
+        message.value = "syncing with your devices…"
+        // The kernel calls this on the thread that is running the round —
+        // this coroutine's IO thread — and snapshot state may be written
+        // from any thread, so each stage reaches the screen as it begins.
+        val ear = object : uniffi.gilune_ffi.SyncProgress {
+            override fun report(event: uniffi.gilune_ffi.SyncProgressEvent) {
+                syncProgress.add(event)
+            }
+        }
         scope.launch(Dispatchers.IO) {
             try {
-                val report = g.syncNow()
+                val report = g.syncNowReporting(ear)
                 // Only when something arrived — an operation or the bytes
                 // an earlier operation was waiting for. Projection walks
                 // every object in the vault and rewrites what changed; an
@@ -439,16 +475,35 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 if (syncNeedsProjection(report.applied, report.blobsCompleted)) g.project()
                 refresh()
                 refreshSync()
-                message.value = when {
-                    report.halted.isNotEmpty() ->
-                        "device sync stopped: ${report.halted.first()}"
-                    report.applied == 0L && report.sent == 0L -> "devices are already up to date"
-                    else ->
-                        "device sync: ${report.applied} received, ${report.sent} sent" +
-                            if (report.incomplete) " (more to come)" else ""
-                }
+                val round = SyncRound(
+                    endedMs = System.currentTimeMillis(),
+                    report = report,
+                    peers = peerOutcomes(syncProgress.toList()),
+                )
+                lastSyncRound.value = round
+                message.value = roundSummary(round)
             } catch (e: Throwable) {
                 message.value = "device sync failed: ${e.message}"
+            } finally {
+                syncing.value = false
+            }
+        }
+    }
+
+    /// Pair with a device a search produced, at the address the search
+    /// gave — the person supplies only the code that device is showing.
+    /// Its own reporting rather than `syncAction`'s, because the one
+    /// failure a person can fix without reading it (no code open over
+    /// there) deserves to be named beside the kernel's reason.
+    fun pairWithFound(found: uniffi.gilune_ffi.FoundDevice, code: String) {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                val peer = g.pairWithCode(found.address, code)
+                refreshSync()
+                message.value = "paired with ${peer.name.ifBlank { found.fingerprint }}"
+            } catch (e: Throwable) {
+                message.value = foundPairingFailure(found, e.message ?: "no reason given")
             }
         }
     }

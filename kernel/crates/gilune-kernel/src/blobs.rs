@@ -200,6 +200,10 @@ impl Store {
         // The one fsync of the transfer, here rather than per chunk: the
         // bytes must be durable before the rename that publishes them.
         fs::fsync_file(&path)?;
+        // An attachment may find its path taken (ADR 0007, 2026-10-22):
+        // by the same bytes, by the bytes its previous revision declared,
+        // or by something else entirely. Each is a different answer.
+        let rel_path = self.settle_attachment_target(blob_id, &rel_path, &sha256)?;
         // The same promotion a capture takes, and deliberately not a
         // second copy of it: two of them had already drifted, and the
         // half that cleaned up after a lost race was the half that did
@@ -215,6 +219,67 @@ impl Store {
             alerts::clear(self.conn(), kind, blob_id)?;
         }
         Ok(true)
+    }
+
+    /// Where an arriving attachment's bytes go when its path is occupied.
+    ///
+    /// The same bytes: nowhere new, `promote` finds them there. The bytes
+    /// the object's previous revision declared: an edit in place, so the
+    /// old file is removed and the new one takes its path. Anything else
+    /// is somebody's file, kept, and the arrival is written beside it as
+    /// `<stem> (from <origin>).<ext>` — the blob row follows, so every
+    /// later question about where the bytes are is answered truthfully —
+    /// and a not-damage notice says so. A capture's blob never gets here:
+    /// its path is unique by construction.
+    fn settle_attachment_target(&self, blob_id: &str, rel_path: &str, sha256: &str) -> Result<String> {
+        let target = self.vault().join(rel_path);
+        if !target.exists() {
+            return Ok(rel_path.to_string());
+        }
+        let (object_id, type_id): (String, String) = self.conn().query_row(
+            "SELECT b.object_id, o.type_id FROM blobs b
+             JOIN objects o ON o.object_id = b.object_id WHERE b.blob_id = ?1",
+            [blob_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if type_id != crate::vault::ATTACHMENT_TYPE {
+            return Ok(rel_path.to_string());
+        }
+        let held = digest_of(&target)?;
+        if held == sha256 {
+            return Ok(rel_path.to_string());
+        }
+        let previous: i64 = self.conn().query_row(
+            "SELECT EXISTS(SELECT 1 FROM blobs
+                            WHERE object_id = ?1 AND sha256 = ?2 AND blob_id <> ?3)",
+            rusqlite::params![object_id, held, blob_id],
+            |row| row.get(0),
+        )?;
+        if previous == 1 {
+            std::fs::remove_file(&target)
+                .map_err(|e| KernelError::Io { path: target.clone(), source: e })?;
+            return Ok(rel_path.to_string());
+        }
+        let origin = crate::operations::origins_of(self.conn(), &object_id)?
+            .object
+            .filter(|o| !o.is_empty())
+            .map(|o| crate::ids::short(&o))
+            .unwrap_or_else(|| "elsewhere".to_string());
+        let (stem, ext) = rel_path.rsplit_once('.').unwrap_or((rel_path, "bin"));
+        let beside = format!("{stem} (from {origin}).{ext}");
+        self.conn().execute(
+            "UPDATE blobs SET rel_path = ?2 WHERE blob_id = ?1",
+            [blob_id, beside.as_str()],
+        )?;
+        alerts::raise(
+            self.conn(),
+            alerts::VAULT_ATTACHMENT_PATH_OCCUPIED,
+            &object_id,
+            &format!(
+                "{rel_path} already held different bytes, so the copy from another device                  was written beside it as {beside}; both are kept"
+            ),
+        )?;
+        Ok(beside)
     }
 
     /// Read a slice of a blob this device already holds, for sending. The
