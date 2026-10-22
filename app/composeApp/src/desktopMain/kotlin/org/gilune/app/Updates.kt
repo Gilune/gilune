@@ -279,7 +279,10 @@ data class InstalledApp(val exe: File, val processes: List<Long>, val allUsers: 
 /// moves to the per-user one at its next update.
 fun installedForAllUsers(exe: File, env: (String) -> String? = System::getenv): Boolean =
     listOfNotNull(env("ProgramFiles"), env("ProgramW6432"), env("ProgramFiles(x86)")).any { folder ->
-        exe.absolutePath.startsWith(folder.trimEnd('\\') + "\\", ignoreCase = true)
+        // The path as given: the launcher's is absolute already, and on
+        // Linux (the hosted suite) absolutePath would put the runner's
+        // working directory in front of a Windows path.
+        exe.path.startsWith(folder.trimEnd('\\') + "\\", ignoreCase = true)
     }
 
 /// Where the per-user installer puts the launcher: what the transition

@@ -1712,6 +1712,36 @@ gates promises) are ratified. **Next: application-level engineering — see
      `firewallBlockWarning` (PowerShell reader, say-only) was REMOVED in
      favour of `WindowsFirewall.kt` (registry reader, Private-only verdict,
      plus the fix action); `publicNetworks`/`publicNetworkWarning` stay.
+   - **v1.1.2 RELEASED (2026-10-22, Fable; PRs #18/#19/#21/#22 + the
+     installer round's #17)** —
+     https://github.com/Gilune/gilune/releases/tag/v1.1.2 (MSI 138.2 MB,
+     DEB 110.0 MB, debug APK 123.8 MB; run 39809574292). It took THREE
+     tag runs, each caught by a suite that runs nowhere else: (1) main's
+     Linux checks failed the firewall-rule matcher's test — `java.io.File`
+     on Linux reads a Windows path's backslashes as letters and
+     `absolutePath` puts the runner's cwd in front; the matcher now joins
+     its paths as text (#19). (2) The Android instrumented suite runs
+     ONLY on tag/manual runs, in THREE shards under
+     `.github/scripts/test-android.sh` — grep EVERY shard's `FAILED`
+     lines, not the first block (the first tag run had three failures;
+     two were read). Two rows wrote plain files into a vault and read
+     them back byte for byte → fixtures marked local-only like the
+     desktop ones (#21). (3) A REAL behaviour change: `vault_files`
+     skipped every dot entry where the Markdown walk it replaced skipped
+     dot-FOLDERS only — WidgetTest's inbox row (ADR 0020 § 10, `.hidden.md`
+     counts) caught it; dot-folders never entered, non-Markdown dot-files
+     + `.tmp-*` nobody's, a dot-prefixed `.md` is a note; ADR 0007
+     corrected (#22). A tag whose Release job never ran was deleted and
+     re-pushed each time (nothing had consumed it). RULE: before a tag,
+     `gh workflow run build.yml -f version=…` proves the Android suite
+     for one full run's cost; a failed tag run costs the same AND a tag
+     move. **v1.2.0 = main + PR #20 (per-user Windows install, silent
+     updates, the app's own elevated firewall request;
+     `firewallRulesForThisApp` REPLACED by WindowsFirewall.kt's registry
+     reader — never re-add the PowerShell one) + the same Linux-path
+     fault in #20's own UpdatesTest/WindowsFirewallTest (`absolutePath`
+     → `path`; main run 39811990645). Windows paths in tests: build them
+     as text, compare `File.path`, never `absolutePath`.**
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
