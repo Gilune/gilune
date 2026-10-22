@@ -45,6 +45,74 @@ class VaultTreeFoldersUiTest {
 
     private fun dirsOf(root: File) = root.listFiles()!!.filter { it.isDirectory }.map { it.name }.toSet()
 
+    private fun rightClick(tag: String) {
+        compose.onNodeWithTag(tag).performMouseInput { click(center, MouseButton.Secondary) }
+        compose.waitForIdle()
+    }
+
+    @Test
+    fun theRightClickMenuCarriesASyncSwitchOnlyWhileTheVaultSyncsAndTheSwitchWritesTheMark() = fixture { root, state, tree ->
+        tree.expanded.add("People")
+        compose.waitForIdle()
+        // Sync off: the menu has no switch.
+        rightClick("vault-entry:People")
+        compose.onNodeWithTag("vault-sync:People").assertDoesNotExist()
+        blankSpace() // the menu is its own popup root: a click outside closes it
+        compose.waitForIdle()
+
+        state.syncStatus.value = localScopeSyncStatus(enabled = true)
+        compose.waitForIdle()
+        rightClick("vault-entry:People")
+        compose.onNodeWithTag("vault-sync:People").assertIsOn()
+        // Choosing the folder's switch writes its marker; the menu stays
+        // open and the switch shows the new state.
+        compose.onNodeWithTag("vault-sync:People").performClick()
+        compose.waitForIdle()
+        assertTrue(root.resolve("People/$LOCAL_MARKER").isFile)
+        compose.onNodeWithTag("vault-sync:People").assertIsOff()
+        blankSpace() // the menu is its own popup root: a click outside closes it
+        compose.waitForIdle()
+        // The folder's row says so; the note inside, kept only by the
+        // folder, does not repeat it.
+        compose.onNodeWithTag(useUnmergedTree = true, testTag = "vault-local:People").assertExists()
+        compose.onNodeWithTag(useUnmergedTree = true, testTag = "vault-local:People/someone.md").assertDoesNotExist()
+
+        // The note inside follows the folder and cannot be switched on its own.
+        rightClick("vault-entry:People/someone.md")
+        compose.onNodeWithTag("vault-sync:People/someone.md").assertIsOff().assertIsNotEnabled()
+        blankSpace()
+        compose.waitForIdle()
+
+        // Back on removes the marker, in place.
+        rightClick("vault-entry:People")
+        compose.onNodeWithTag("vault-sync:People").assertIsOff().performClick()
+        compose.waitForIdle()
+        assertFalse(root.resolve("People/$LOCAL_MARKER").exists())
+        compose.onNodeWithTag("vault-sync:People").assertIsOn()
+        blankSpace()
+        compose.waitForIdle()
+
+        // A note's own switch marks the note itself, and back.
+        rightClick("vault-entry:People/someone.md")
+        compose.onNodeWithTag("vault-sync:People/someone.md").assertIsOn().assertIsEnabled().performClick()
+        compose.waitForIdle()
+        assertTrue(noteIsLocal(splitNoteRaw(root.resolve("People/someone.md").readText()).first))
+        compose.onNodeWithTag("vault-sync:People/someone.md").assertIsOff()
+        blankSpace()
+        compose.waitForIdle()
+        // A kept note's row says so, exactly as a folder's does.
+        compose.onNodeWithTag(useUnmergedTree = true, testTag = "vault-local:People/someone.md").assertExists()
+        compose.onNodeWithTag(useUnmergedTree = true, testTag = "vault-local:People").assertDoesNotExist()
+        rightClick("vault-entry:People/someone.md")
+        compose.onNodeWithTag("vault-sync:People/someone.md").assertIsOff().performClick()
+        compose.waitForIdle()
+        assertFalse(noteIsLocal(splitNoteRaw(root.resolve("People/someone.md").readText()).first))
+        compose.onNodeWithTag("vault-sync:People/someone.md").assertIsOn()
+        blankSpace()
+        compose.waitForIdle()
+        compose.onNodeWithTag(useUnmergedTree = true, testTag = "vault-local:People/someone.md").assertDoesNotExist()
+    }
+
     @Test
     fun clickingAwayFromAnUnnamedFolderCreatesNothing() = fixture { root, _, _ ->
         compose.onNodeWithContentDescription("new folder").performClick()

@@ -85,10 +85,26 @@
   <h2>Pairing two devices</h2>
 
   <p>Devices only talk to each other after you have introduced them, and you do that
-  once per pair. There are two ways to do it, and they are the same introduction
-  underneath — one of them just saves you typing.</p>
+  once per pair. There are three ways to do it, and they are the same introduction
+  underneath — two of them just save you typing.</p>
 
-  <h3>With the six-digit code</h3>
+  <h3>From the list of devices on your network</h3>
+
+  <ol>
+    <li>Turn sync on, on both devices.</li>
+    <li>On one device, in <strong>Settings ▸ Sync</strong>, press <strong>Start
+    pairing</strong>. It shows a six-digit code.</li>
+    <li>On the other device, press <strong>Look for devices</strong>. The first device
+    appears in the list with its fingerprint; press <strong>Pair…</strong> on its row,
+    type the six digits it is showing, and press <strong>Pair</strong>.</li>
+  </ol>
+
+  <p>That is the whole of it: no address to read off one screen and type into another,
+  because the search just found it. If the row says the device did not answer, check that
+  it is still showing a code — a device that is not showing one gives a stranger no reply
+  at all, by design.</p>
+
+  <h3>With the six-digit code and an address</h3>
 
   <ol>
     <li>On one device, in <strong>Settings ▸ Sync</strong>, press <strong>Start
@@ -99,8 +115,9 @@
     <li>Press <strong>Pair</strong>.</li>
   </ol>
 
-  <p>This works between any two devices, in either direction, always. It is the way that
-  never depends on anything else being in place.</p>
+  <p>This works between any two devices, in either direction, always — including on a
+  network where <strong>Look for devices</strong> finds nothing. It is the way that never
+  depends on anything else being in place.</p>
 
   <h3>When more than one address is offered</h3>
 
@@ -146,7 +163,9 @@
 
   <p>Once sync is on, a device announces itself on the network it is connected to. Press
   <strong>Look for devices</strong> on the Sync page and everything that answers appears
-  in a list — the ones you have already paired with, and any you have not.</p>
+  in a list — the ones you have already paired with, and any you have not. A device you
+  have not paired with can be paired straight from its row, with the code it is
+  showing.</p>
 
   <p>Syncing uses this on its own, too. Gilune tries the address it already has for a
   device first, because that is by far the quicker of the two; only when that address no
@@ -164,9 +183,41 @@
 
   <h2>What syncs</h2>
 
-  <p>Everything, both ways. Every note, every recording, every edit you make on either
+  <p>Everything in the vault, both ways. Every note, however it was made — in Gilune,
+  in Obsidian, with <strong>New note</strong>, or copied in as a file — every recording,
+  every image or other file you put in a vault folder, and every edit you make on either
   side. Deletions travel too — delete a note on the phone and it goes from the desktop
-  as well.</p>
+  as well. Folders travel with what is in them; an empty folder stays where it was
+  made.</p>
+
+  <p>A note Gilune did not write gets a short block of properties at the top the first
+  time Gilune sees it — its id and a few <code>gilune-</code> lines. That is how the two
+  devices know they are looking at the same note after it has been renamed or edited on
+  both. Your own text and your own properties are kept exactly as they were. Other files
+  are never written into: an image is carried as it is.</p>
+
+  <h3>Keeping something on one device</h3>
+
+  <p>On the desktop, while sync is switched on for the vault, right-click a note or a
+  folder in the files list: the menu carries <strong>Sync this note</strong> or
+  <strong>Sync this folder</strong> with a small switch — on means it syncs, off means it
+  stays on this device. Switch a folder off and everything inside it stays too; the rows
+  inside then show <strong>Kept here by a folder above</strong>, because the folder
+  decides for them. A note's own <strong>⋯</strong> menu carries the same switch. A note
+  or folder that is kept local shows <em>local</em> beside its name in the list.</p>
+
+  <p>Underneath, those are two marks you can also write yourself, and either works on
+  its own. Add <code>gilune-sync: local</code> to a note's properties, and that note
+  stays where it is. Put an empty file named
+  <code>.gilune-local</code> in a folder, and everything in that folder and below it stays.
+  A local note is still searchable and still yours; it simply never leaves. Take the
+  property off, or delete the marker file, and the note joins the others on the next
+  sync. A note that had already synced before you made it local stops being sent, and
+  your other devices keep the copy they had.</p>
+
+  <p>If the same filename is created on two devices before they sync, both are kept:
+  the one that arrives is saved beside yours with the other device's short id in its
+  name, so you can merge them by hand.</p>
 
   <p>A note sometimes arrives a little before its recording does: the words are small
   and the audio is not, so the audio follows on behind. That is normal, and nothing is
@@ -177,7 +228,11 @@
   <p>The <strong>desktop</strong> listens the whole time the app is open, so anything
   another device sends arrives while you are working. If you want to push what you have
   just written without waiting, press <strong>Sync with devices now</strong> at the
-  bottom of the Sync page.</p>
+  bottom of the Sync page. While it runs, the line under the button says which device
+  is being contacted and how — reaching a device that has gone quiet takes a few seconds
+  per step — and when it finishes, a <strong>Last sync</strong> box under the button says
+  what happened with each device: what was received and sent, or why one could not be
+  reached. A device that cannot be reached does not hold the others up.</p>
 
   <p>The <strong>phone</strong> syncs when you open it, and again every time you come
   back to it. On top of that it checks in the background roughly every fifteen minutes,
@@ -239,11 +294,22 @@
     <li><strong>Nothing is found at all.</strong> Many guest, hotel and office networks
     deliberately stop the devices on them from seeing one another. On a network like
     that, no amount of waiting will help and there is nothing wrong with Gilune. Put both
-    devices on a network of your own, or turn on the phone's hotspot and use that.</li>
+    devices on a network of your own, or turn on the phone's hotspot and use that. Check
+    the <strong>found by others</strong> line under This device on each machine, too: a
+    device announces itself only when that says so, and a desktop that says it is
+    not findable can be restarted to try again.</li>
 
-    <li><strong>A device is found but will not connect.</strong> Check that sync is
-    actually switched on over there, and that Gilune was allowed through the firewall on
-    private networks on that machine.</li>
+    <li><strong>A device is found but will not connect.</strong> It is on, it is on your
+    network, and everything sent to it is being dropped. On a Windows machine the usual
+    cause is that Windows has classed that network as <strong>Public</strong> — it does
+    this for every new network, and a Wi-Fi extender's name counts as a new network — so
+    the firewall rule that allows Gilune on private networks does not apply there. On that
+    machine, open Settings ▸ Network &amp; internet, open the network's properties and set
+    it to <strong>Private</strong>. The Sync page on that machine says so itself, in red
+    beside the switch, whenever Windows is treating one of its networks as Public. Failing
+    that, check that sync is switched on over there and that Gilune was allowed through
+    its firewall. Syncing <em>from</em> the affected machine to the others works
+    throughout: it is only the connections others open to it that are dropped.</li>
 
     <li><strong>It used to work and now it does not.</strong> The other device's address
     has probably changed — routers hand out new ones from time to time. Read the current
@@ -267,6 +333,12 @@
     revoked — an edit to one of its notes, say — so there was nothing left for it to be
     about. What that device sent you before you revoked it stays in your vault, and
     everything else carries on as normal.</li>
+
+    <li><strong>A file is too large to carry.</strong> Files over 512 MB stay on the
+    device they are on and are not synced. Nothing is wrong with the file.</li>
+
+    <li><strong>A file arrived and found another at its path.</strong> It was saved
+    beside the existing one, named for the device it came from. Both are kept.</li>
 
     <li><strong>A note's text file could not be read.</strong> Gilune left the note alone
     rather than rewriting it with a gap where the words should be. If you moved or renamed

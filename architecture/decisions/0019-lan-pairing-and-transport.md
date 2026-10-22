@@ -815,6 +815,81 @@ Each stage is shippable alone and in order.
     the optional `expected-head`; the joiner's rate limiter keys the
     whole attempt by the fingerprint the pairing names.
 
+- **2026-10-22 (owner's sync-area review, Fable).** Four refinements
+  from the owner testing 1.1.0 across a desktop and a notebook on a
+  Wi-Fi extender; none changes the protocol or the wire.
+  - **§ 1's chain does not dial the same address twice.** When a search
+    names the address that just failed, the answer is already known and
+    the second dial only added a second connect timeout. The result is
+    its own diagnostic (`unreachable_despite_discovery`): the device
+    answered a search and would not take a connection, which names the
+    Windows network profile (a Public network drops every inbound
+    packet without a reply, so it looks exactly like a timeout) and a
+    device switched off moments ago whose announcement the network
+    still remembers. The live run produced exactly this — multicast
+    arriving, unicast dropped — and the old words were the dial's own,
+    "refused: … did not answer: connection timed out", which named
+    nothing a person could act on and said "refused" about a device
+    that never answered. A halt's reason is now the sentence without
+    the error variant's prefix (`halt_reason`).
+  - **A round reports each stage with each peer as it begins**
+    (`SyncProgress`: connecting, looking, exchanging, done with counts,
+    failed with the halt's words). § 1 asks for words rather than a
+    spinner at the end of the chain; nothing had asked for words during
+    it, and a button that was silent for a connect timeout, a browse and
+    a second dial read as a button that did nothing. The silent form
+    stays for the background worker. The shells draw the stage under
+    the button and keep the last round's per-device outcome there,
+    rather than in the foot-of-window message line.
+  - **A device a search found is paired from its row.** § 3's rule
+    stands — pairing costs the code the other device is showing,
+    whichever way it was found — but the *address* never needed typing
+    when a search had just produced it, and both shells showed it to be
+    copied into a field further down. The row now asks for the code and
+    dials the address itself (`foundDeviceOffer`); a revoked device is
+    offered the new pairing it would be, not an undo (§ 9). The typed
+    address path stays for networks where a search finds nothing. Not
+    adopted: a `pairing` flag in the TXT record so the list could say
+    which device is showing a code — the record stays version and
+    fingerprint only until the owner asks for it.
+  - **The desktop asks Windows whether a network is Public** once per
+    visit to the Sync page while sync is on (`Get-NetConnectionProfile`
+    via a child process; empty when the question cannot be asked) and
+    says so in red beside the switch, naming the network and the fix.
+    § 2's rule is Private-only and stands; this is the diagnostic for
+    the machine on the wrong side of it, which is the one whose screen
+    said it was listening.
+  - **Desktop advertising is measured, as Android's always was.**
+    Found the same day, on the owner's desktop: `mdns-sd` builds its one
+    multicast socket when the daemon starts and, if that bind fails,
+    carries on mute — `register` succeeds, nothing is ever sent or
+    heard — so the desktop reported "found by others: yes, over
+    mdns-sd" for a whole session while holding no socket on UDP 5353
+    (a fresh bind succeeded, so the failure at daemon start was
+    transient). Neither device could find the other. `advertise` now
+    subscribes to the daemon's monitor before registering and returns
+    Ok only when the daemon reports an `Announce` for that name within
+    two seconds — the event the daemon emits only after an unsolicited
+    response actually left on an interface. Not heard: the daemon is
+    shut down and rebuilt once (fresh sockets are the only repair the
+    crate offers), then the answer is an error, `advertising` reads
+    false, the screen says not findable, and `sync_now`'s existing
+    retry heals it on a later round. The 1.1.0 desktop in that state
+    recovers only by restarting the app.
+  - **The desktop reads the firewall's own rules for its runtime** and
+    says, in red beside the switch, when a Block rule stands. The
+    notebook's real fault, once the repeater and the profile were ruled
+    out: the first prompt had left Block rules for the bundled
+    `javaw.exe`, and a Block rule wins over every allowance on every
+    profile, so Private changed nothing. One read-only query
+    (`Get-NetFirewallApplicationFilter` narrowed to the install root,
+    then the few rules it names; ~1.5 s) once per Sync-page visit while
+    sync is on; the sentence names the rule and its profile and sends
+    an administrator to the firewall console or the guide's commands.
+    The app never edits rules — that is the installer's job (the
+    install-time rule now also clears stale rules for the same
+    programs).
+
 ## Ratification record
 
 Ratified by the owner on 2026-09-02, as proposed, with no

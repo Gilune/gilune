@@ -150,3 +150,139 @@ vault copied while closed restoring completely on another machine.
   A targeted entry point, `reconcile_path(rel)`, reconciles one file to
   the same decisions the full pass would reach about it, so a writer's own
   save is taken in without a pass over the vault.
+
+- **2026-10-22 (ratified by the owner as written, "Ratified as written.
+  Build it."; built the same day): every file in the vault becomes
+  something sync can carry, and a person can keep some local.** Found by the owner syncing a desktop and a notebook: notes
+  made with New note, with Obsidian, or by copying a file in were
+  "import candidates" on whichever device made them — recorded in the
+  `imports` table, never an object, never an operation — so both
+  devices said "up to date" while whole folders differed. The 2026-08-30
+  decision left an import candidate waiting for "a user decision" that
+  was never built; this amendment makes the decision automatic, and
+  extends it to files that are not Markdown, with one rule for opting
+  out. Three rules, each ratifiable on its own, then two consequences.
+
+  **(a) Adoption of Markdown.** On reconcile, a `.md` file the kernel
+  does not claim — no front matter, or front matter with no reserved
+  `gilune-*` key — is adopted: an object of type `org.memory.note`
+  (schema 1) whose document is the file's text, with any foreign front
+  matter preserved as the document's custom metadata exactly as a page
+  keeps its own; one `object-created` operation with origin
+  `external-import`; and the file re-projected at the same path carrying
+  `gilune-id` and the other `gilune-*` keys. The body bytes are kept
+  byte-for-byte; only the header is added. Automatic, not asked: a
+  candidate nobody is ever asked about is the state that lost notes
+  between devices, and rule 13 (third-party editing is supported use)
+  already means the kernel writes front matter into files other tools
+  made and read. Unparseable front matter stays quarantined. A file
+  carrying a `gilune-id` the kernel does not hold is adopted **under
+  that id** when no object of that id exists — the crash window between
+  writing the header and committing the rows, and a file copied from
+  another device's vault, both land here, and both mean "this is that
+  note"; if the real history later arrives, the two revisions become
+  heads of one object, which is the conflict rule already in force. A
+  file whose id names a *deleted* object is not adopted (the kept-edit
+  notice covers it). The change feed announces an adoption as `Created`
+  with cause `Reconcile`; the `Imported` kind is no longer raised for
+  `.md` files, and an edit to an adopted note is the ordinary external
+  edit.
+
+  **(b) Attachments.** Any other file inside the vault — images, PDFs,
+  audio that is not already a capture's blob — becomes an attachment
+  object: type `org.memory.attachment` (schema 1), document `{media,
+  blob_id, rel_path, sha256, bytes, attached: true}`, the bytes recorded
+  as a content-addressed blob **in place** (state `ready`, origin
+  `local`; nothing is copied and nothing is written into the file), and
+  one `object-created` operation carrying the blob declaration. The
+  receiving device takes it as it takes a recording — chunked, digest-
+  verified, promoted to `rel_path` — and because the document says
+  `attached`, no Markdown note is projected for it. Excluded: `.gilune/`,
+  dot-files and dot-folders (so `.obsidian/` and the local marker below
+  never travel), `.tmp-*`, files over `limits.max_blob_bytes` (512 MiB;
+  announced once by a not-damage alert naming the file), and anything
+  local-only. A file edited in place (digest changed) is a new blob and
+  a new revision of the same object; the receiving device replaces its
+  copy only when the bytes it holds are the ones the previous revision
+  declared, otherwise keeps both (the arriving bytes at `<stem> (from
+  <origin>).<ext>`) and says so. A file that disappears is a tombstone
+  proposal, as a note is; rejecting the proposal cannot bring the bytes
+  back from this device (they were never copied), only from a peer that
+  holds them — stated as a gap.
+
+  **(c) Local-only.** A Markdown file whose front matter says
+  `gilune-sync: local`, and every file under a folder containing a
+  `.gilune-local` marker file, is never adopted: it stays a candidate,
+  indexed and searchable on this device, and produces no object and no
+  operation, so nothing of it ever leaves. `gilune-sync` becomes the one
+  reserved key a person may write (the document layer's reserved-key
+  rule gains that exception; forging any other `gilune-*` key is refused
+  as today). For a note that **already syncs**, entering local scope —
+  the key added, or the file moved under a marker — stops it being
+  sent: the object is recorded in a device-local `local_objects` set
+  with the last revision peers were sent, revisions carry on locally
+  with no operations, and other devices keep what they already had.
+  Leaving local scope sends one `object-revised` that supersedes the
+  last-sent head, so peers see one change rather than a history they
+  cannot reference. The marker file itself is a dot-file and never
+  travels; a folder's local-ness is inherited by its subfolders.
+  Evaluated when an operation would be created, never at exchange time,
+  so an excluded file leaves no history for a later rule change to leak.
+
+  **Same path on two devices.** Two devices each making
+  `Notes/Untitled.md` make two objects. When the second arrives, its
+  path is occupied by a different object's file: the arriving note is
+  projected at `Notes/Untitled (from <origin device>).md` — the origin's
+  short device id, because the kernel does not know device names — and
+  the existing not-damage notice names both, so the person merges by
+  hand. Today the arrival is held in history with the notice and no
+  file, which is a note nobody can see. The owner's desktop shows five
+  such notices for **plugin starting pages**: each machine's initialiser
+  made its own `Tasks.md`, `People/Connections/*.md` and
+  `Settings/Initialization/*.md` with device-dependent ids. Fixed at the
+  root: a page's object id no longer includes the device (`page`,
+  plugin id, request id — the request id is already a fresh UUID for a
+  person's page), and an initialiser's seeded pages use a request id
+  derived from (plugin id, initialiser id, page key), so two fresh vaults
+  initialise to the same object and revision ids and converge with no
+  conflict and no notice. Existing duplicates are not migrated; the
+  notices they raised stay until the person deletes one copy.
+
+  **Schema v10**: `blobs` gains `mtime_ns` and `recorded_ns` (the stat
+  rule of ADR 0020 § 2.5 applied to attachments, so an unchanged file is
+  not re-hashed); `local_objects(object_id PRIMARY KEY, last_sent_revision
+  TEXT NOT NULL)`. Operation payloads are unchanged in shape; the
+  attachment's `object-created` is the capture's shape with a different
+  type id, so a device running an older build applies it as a capture
+  with no note (the `attached` key) and loses nothing.
+
+  **Deviations found in the build, recorded rather than smoothed.**
+  (1) An arrival written beside the occupant raises no standing notice
+  after all: the projection pass clears the occupied notice the moment
+  the object projects cleanly, so a notice would have lasted one pass;
+  the file's own name says where it came from. (2) A candidate kept
+  local by its *key* is read on every pass (the key is inside the file;
+  only reading learns it is still there); one kept local by its folder
+  settles on the stat as before. (3) An initialiser's *receipt* page keeps
+  a per-device id — it is each device's own evidence — while its seeded
+  pages converge. (4) A file carrying a `gilune-type` of its own is
+  adopted under that type, not as a note, so an exported definition is
+  what it says it is. (5) An adopted note's document carries its path
+  (`path`), the one thing it had no other way to tell the device that
+  receives it. (6) The projection pass projects this device's own
+  objects before arrivals with no file yet, so the beside rule never
+  holds back the person's own note because the other id sorted first.
+
+  **Stated costs.** The kernel now writes a header into every Markdown
+  file a person or another tool puts in the vault; a vault opened by
+  Gilune once is a vault of Gilune-headed files. Everything in the vault
+  leaves the device unless marked local, which is what "sync" means and
+  why rule (c) ships in the same change. A large attachment folder is a
+  large first sync. The crash matrix gains adoption rows (abort between
+  the rows and the header write must leave the file either untouched or
+  adopted under the header's id). Gate: a New-note file and an image
+  made on one device appear on the other after one sync; a local-only
+  note and folder never do; moving a note out of a local folder sends
+  it; the same filename made on both devices keeps both; two fresh
+  vaults' plugin pages converge without a notice; `cargo test
+  --workspace`, clippy and the desktop suite green.
