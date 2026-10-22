@@ -2,6 +2,7 @@ import importlib.util
 import csv
 import io
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -32,7 +33,7 @@ class WindowsPackageTest(unittest.TestCase):
                 (bundle / name).write_text("fixture")
             def components(release):
                 path = root / (release + ".wxs")
-                package.write_wix(bundle, path, release)
+                package.write_wix(bundle, path, release, "per-machine")
                 tree = ET.parse(path)
                 result = {}
                 for component in tree.findall(".//w:Component", NS):
@@ -60,7 +61,7 @@ class WindowsPackageTest(unittest.TestCase):
             # The fixture launcher is not a PE file; the version reader is
             # covered by the real-MSI regression below.
             with unittest.mock.patch.object(package, "file_version", lambda _path: None):
-                package.write_wix(bundle, path, "1.0.7")
+                package.write_wix(bundle, path, "1.0.7", "per-machine")
             tree = ET.parse(path)
             shortcuts = tree.findall(".//w:Shortcut", NS)
             self.assertEqual(1, len(shortcuts))
@@ -86,7 +87,7 @@ class WindowsPackageTest(unittest.TestCase):
             bundle.mkdir()
             (bundle / "gilune.ico").write_text("fixture")
             path = root / "installer.wxs"
-            package.write_wix(bundle, path, "1.0.7")
+            package.write_wix(bundle, path, "1.0.7", "per-machine")
             tree = ET.parse(path)
             actions = {a.attrib["Id"]: a.attrib for a in tree.findall(".//w:CustomAction", NS)}
             self.assertEqual({"GiluneNetshPath", "GiluneFirewallRemove", "GiluneFirewallRemoveJavaw",
@@ -134,6 +135,67 @@ class WindowsPackageTest(unittest.TestCase):
             self.assertEqual('NOT REMOVE~="ALL"', steps["GiluneFirewallAdd"].text)
             self.assertEqual('NOT REMOVE~="ALL"', steps["GiluneFirewallRollback"].text)
             self.assertIsNone(steps["GiluneNetshPath"].text)
+
+    def test_per_user_package_needs_no_elevation_and_refuses_an_all_users_copy(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "Gilune"
+            (bundle / "lib").mkdir(parents=True)
+            for name in ("Gilune.exe", "gilune.ico", "lib/program.jar"):
+                (bundle / name).write_text("fixture")
+            trees = {}
+            with unittest.mock.patch.object(package, "file_version", lambda _path: None):
+                for scope in package.SCOPES:
+                    path = root / (scope + ".wxs")
+                    package.write_wix(bundle, path, "1.2.1", scope)
+                    trees[scope] = ET.parse(path)
+            user, machine = trees["per-user"], trees["per-machine"]
+            self.assertEqual("perUser", user.find(".//w:Package", NS).attrib["InstallScope"])
+            self.assertEqual("perMachine", machine.find(".//w:Package", NS).attrib["InstallScope"])
+            # No elevated moment: no custom actions at all, and the files live
+            # under the profile.
+            self.assertEqual([], user.findall(".//w:CustomAction", NS))
+            self.assertTrue(machine.findall(".//w:CustomAction", NS))
+            local = user.find(".//w:Directory[@Id='LocalAppDataFolder']", NS)
+            self.assertIsNotNone(local)
+            programs = local.find("w:Directory", NS)
+            self.assertEqual("Programs", programs.attrib["Name"])
+            self.assertEqual("INSTALLDIR", programs.find("w:Directory", NS).attrib["Id"])
+            self.assertIsNone(user.find(".//w:Directory[@Id='ProgramFiles64Folder']", NS))
+            # Profile-folder components key on a per-user registry value.
+            file_components = [c for c in user.findall(".//w:Component", NS) if c.find("w:File", NS) is not None]
+            self.assertEqual(3, len(file_components))
+            for component in file_components:
+                self.assertNotIn("KeyPath", component.find("w:File", NS).attrib)
+                key = component.find("w:RegistryValue", NS)
+                self.assertEqual(("HKCU", "yes", component.attrib["Id"]),
+                                 (key.attrib["Root"], key.attrib["KeyPath"], key.attrib["Name"]))
+            for component in machine.findall(".//w:Component", NS):
+                file = component.find("w:File", NS)
+                if file is not None:
+                    self.assertEqual("yes", file.attrib["KeyPath"])
+            cleanup = {t: [c for c in trees[t].findall(".//w:Component", NS) if c.attrib["Id"] == "MenuCleanup"][0]
+                       for t in package.SCOPES}
+            self.assertEqual("HKCU", cleanup["per-user"].find("w:RegistryValue", NS).attrib["Root"])
+            self.assertEqual("HKLM", cleanup["per-machine"].find("w:RegistryValue", NS).attrib["Root"])
+            # Different places, different component identities.
+            guids = {t: {c.attrib["Id"]: c.attrib["Guid"] for c in trees[t].findall(".//w:Component", NS)}
+                     for t in package.SCOPES}
+            self.assertEqual(set(guids["per-user"]), set(guids["per-machine"]))
+            for component_id in guids["per-user"]:
+                self.assertNotEqual(guids["per-user"][component_id], guids["per-machine"][component_id])
+            # It cannot remove an all-users copy, so it refuses to install beside one.
+            search = user.find(".//w:Property[@Id='GILUNE_ALLUSERS']/w:RegistrySearch", NS)
+            self.assertEqual(("HKLM", "Software\\Gilune", "Installed", "yes"),
+                             (search.attrib["Root"], search.attrib["Key"], search.attrib["Name"], search.attrib["Win64"]))
+            conditions = {c.text: c.attrib["Message"] for c in user.findall("w:Product/w:Condition", NS)}
+            self.assertEqual(package.ALL_USERS_MESSAGE, conditions["NOT GILUNE_ALLUSERS"])
+            self.assertNotIn("NOT GILUNE_ALLUSERS", {c.text for c in machine.findall("w:Product/w:Condition", NS)})
+            # The shortcut is the same plain one in both.
+            for tree in trees.values():
+                self.assertTrue(tree.find(".//w:Shortcut", NS).attrib["Target"].startswith("[#"))
+            with self.assertRaises(ValueError):
+                package.write_wix(bundle, root / "bad.wxs", "1.2.1", "everyone")
 
     def test_launcher_resource_carries_the_installer_version(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -186,7 +248,7 @@ class WindowsFileVersionTest(unittest.TestCase):
             (bundle / "invalid.dll").unlink()
 
             source = root / "installer.wxs"
-            package.write_wix(bundle, source, "1.0.7")
+            package.write_wix(bundle, source, "1.0.7", "per-machine")
             installer = root / "candidate.msi"
             subprocess.run(["wixl", "-a", "x64", "-o", str(installer), str(source)], check=True)
 
@@ -253,6 +315,38 @@ class WindowsFileVersionTest(unittest.TestCase):
             self.assertLess(int(sequence["RemoveExistingProducts"]["Sequence"]), int(sequence["InstallFiles"]["Sequence"]))
             for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
                 self.assertEqual("NOT UPGRADINGPRODUCTCODE", sequence[name]["Condition"])
+            self.assertIn("ALLUSERS", {row["Property"] for row in table("Property")})
+
+            # The per-user package, as Windows Installer reads it: no ALLUSERS,
+            # the no-privileges word-count bit, registry key paths, the
+            # all-users search and the condition that refuses it.
+            user_source = root / "per-user.wxs"
+            package.write_wix(bundle, user_source, "1.0.7", "per-user")
+            installer = root / "per-user.msi"
+            subprocess.run(["wixl", "-a", "x64", "-o", str(installer), str(user_source)], check=True)
+            self.assertNotIn("ALLUSERS", {row["Property"] for row in table("Property")})
+            summary = subprocess.check_output(["msiinfo", "suminfo", str(installer)], text=True)
+            source_flags = int(re.search(r"^Source:\s*(\d+)", summary, re.MULTILINE)[1])
+            self.assertTrue(source_flags & 8, f"the no-privileges bit is not set in source flags {source_flags}")
+            machine_summary = subprocess.check_output(["msiinfo", "suminfo", str(root / "candidate.msi")], text=True)
+            self.assertFalse(int(re.search(r"^Source:\s*(\d+)", machine_summary, re.MULTILINE)[1]) & 8)
+            components = {row["Component"]: row for row in table("Component")}
+            registry = {row["Registry"]: row for row in table("Registry")}
+            files = {row["FileName"]: row for row in table("File")}
+            for name in ("Gilune.exe", "runtime.dll", "readme.txt"):
+                component = components[files[name]["Component_"]]
+                self.assertIn(component["KeyPath"], registry, name + " keys on its file, not a registry value")
+                self.assertTrue(int(component["Attributes"]) & 4, "msidbComponentAttributesRegistryKeyPath")
+                self.assertEqual("Software\\Gilune\\Components", registry[component["KeyPath"]]["Key"])
+                self.assertEqual("1", registry[component["KeyPath"]]["Root"], "HKCU")
+            directories = {row["Directory"]: row for row in table("Directory")}
+            self.assertEqual("LocalAppDataFolder", directories["GiluneUserPrograms"]["Directory_Parent"])
+            self.assertEqual("GiluneUserPrograms", directories["INSTALLDIR"]["Directory_Parent"])
+            self.assertEqual([], table("CustomAction"), "a per-user package runs nothing of its own")
+            self.assertEqual({"GILUNE_ALLUSERS"}, {row["Property"] for row in table("AppSearch")})
+            locator = table("RegLocator")[0]
+            self.assertEqual(("2", "Software\\Gilune", "Installed"), (locator["Root"], locator["Key"], locator["Name"]))
+            self.assertIn("NOT GILUNE_ALLUSERS", {row["Condition"] for row in table("LaunchCondition")})
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallAdd"]["Condition"])
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallRollback"]["Condition"])
 
