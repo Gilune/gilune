@@ -102,16 +102,16 @@ class TasksPluginTest {
     fun theDeclarationCoversTheExecutableProviderAndItsConsumers() {
         val slots = tasksDeclaration().contributions
             .filter { it.slot != org.gilune.plugin.sdk.PAGE_TYPES_SLOT && it.slot != org.gilune.plugin.sdk.PAGE_INITIALIZERS_SLOT }
-            .associate { it.slot to it.id }
+            .groupBy({ it.slot }, { it.id })
         assertEquals(
             mapOf(
-                Slots.EDITOR_COMPLETIONS to "$TASKS_PLUGIN.editor",
-                Slots.SUGGEST_VALUES to DATE_VALUES_PROVIDER,
-                TASK_FIELDS_SLOT to TASKS_DUE_FIELD,
-                Slots.EDITOR_DECORATIONS to TASKS_DECORATIONS_CONTRIBUTION,
-                Slots.EDITOR_SUGGEST to TASKS_SUGGEST_CONTRIBUTION,
-                Slots.SEARCH_TYPES to "task",
-                Slots.NAVIGATION to TASKS_NAVIGATION_CONTRIBUTION,
+                Slots.EDITOR_COMPLETIONS to listOf("$TASKS_PLUGIN.editor"),
+                Slots.SUGGEST_VALUES to listOf(DATE_VALUES_PROVIDER, org.gilune.plugins.tasks.PRIORITY_VALUES_PROVIDER),
+                TASK_FIELDS_SLOT to listOf(TASKS_DUE_FIELD, org.gilune.plugins.tasks.TASKS_HIGH_FIELD, org.gilune.plugins.tasks.TASKS_LOW_FIELD),
+                Slots.EDITOR_DECORATIONS to listOf(TASKS_DECORATIONS_CONTRIBUTION),
+                Slots.EDITOR_SUGGEST to listOf(TASKS_SUGGEST_CONTRIBUTION),
+                Slots.SEARCH_TYPES to listOf("task"),
+                Slots.NAVIGATION to listOf(TASKS_NAVIGATION_CONTRIBUTION),
             ),
             slots,
         )
@@ -159,7 +159,7 @@ class TasksPluginTest {
         )
         // Everything else the plugin contributes is untouched: the switch
         // is over the panel, not over the plugin.
-        assertEquals(listOf("due"), taskFields(listOf(off)).map { it.key })
+        assertEquals(listOf("due", "high", "low"), taskFields(listOf(off)).map { it.key })
     }
 
     @Test
@@ -233,9 +233,13 @@ class TasksPluginTest {
     @Test
     fun dueIsTheFirstRegistrationIntoTheSlotThisPluginPublishes() {
         val fields = taskFields(listOf(installedTasksPlugin()))
-        assertEquals(1, fields.size, "the plugin's own field list is that registry, one entry long")
+        assertEquals(listOf("due", "high", "low"), fields.map { it.key }, "the plugin's own fields are that registry: due first, then the two priority words")
         assertEquals("due", fields[0].key)
         assertEquals("Due date", fields[0].label)
+        // The priority fields carry one value each — the one-step shape
+        // (ADR 0015 amendment 2026-10-23).
+        assertEquals("priority:high", fields[1].values("", today).single().insert)
+        assertEquals("priority:low", fields[2].values("anything", today).single().insert)
         // The config's third string is a provider id, and this is what
         // resolving it bought: stage two's rows, with ISO dates.
         val rows = fields[0].values("tomorrow", today)
@@ -245,7 +249,7 @@ class TasksPluginTest {
     @Test
     fun anotherPluginsFieldArrivesThroughTheSameDoor() {
         val fields = taskFields(listOf(installedTasksPlugin(), contributorFixture()))
-        assertEquals(listOf("due", "assignee"), fields.map { it.key })
+        assertEquals(listOf("due", "high", "low", "assignee"), fields.map { it.key })
     }
 
     @Test
@@ -266,7 +270,7 @@ class TasksPluginTest {
     @Test
     fun theGateStillDropsADisabledContributor() {
         val fields = taskFields(listOf(installedTasksPlugin(), contributorFixture(state = "disabled")))
-        assertEquals(listOf("due"), fields.map { it.key }, "the publisher's own field survives; the other does not")
+        assertEquals(listOf("due", "high", "low"), fields.map { it.key }, "the publisher's own field survives; the other does not")
     }
 
     @Test
@@ -283,7 +287,7 @@ class TasksPluginTest {
             ),
         )
         assertEquals(
-            listOf("due"),
+            listOf("due", "high", "low"),
             taskFields(listOf(installedTasksPlugin(), people)).map { it.key },
             "an unknown provider id offers nothing, rather than a row that does nothing",
         )
@@ -305,7 +309,7 @@ class TasksPluginTest {
                 contributions = listOf(PluginContribution(TASK_FIELDS_SLOT, "x", "X", config)),
             )
             assertEquals(
-                listOf("due"),
+                listOf("due", "high", "low"),
                 taskFields(listOf(installedTasksPlugin(), plugin)).map { it.key },
                 "config <$config> should offer nothing",
             )
@@ -410,11 +414,11 @@ class TasksPluginTest {
 
     @Test
     fun theTokenRegistrationsStyleAndNothingElse() {
-        // Three registrations: two style a token and answer no click, and
-        // the third — the stamper — bears the plugin's only activation but
+        // Five registrations: four style a token and answer no click, and
+        // the fifth — the stamper — bears the plugin's only activation but
         // never renders. So the click a user makes is still the checkbox's.
         val decorations = tasksDecorations(today = today)
-        assertEquals(3, decorations.size)
+        assertEquals(5, decorations.size)
         assertEquals(
             listOf("org.memory.tasks.done-stamp"),
             decorations.filter { it.activate != null }.map { it.id },

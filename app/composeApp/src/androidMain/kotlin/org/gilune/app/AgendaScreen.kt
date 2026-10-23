@@ -281,6 +281,7 @@ private fun AgendaRow(hit: TaskHit, today: LocalDate, onToggle: () -> Unit, onOp
             Modifier.fillMaxWidth().heightIn(min = TouchTarget).testTag("agenda-row"),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            TaskPriorityMark(hit.priority, Modifier.padding(start = 6.dp))
             Box(
                 Modifier
                     .size(TouchTarget)

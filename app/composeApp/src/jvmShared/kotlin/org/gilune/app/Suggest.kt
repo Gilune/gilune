@@ -150,6 +150,12 @@ class SuggestSession private constructor(
             val chosen = offered.getOrNull(selected) ?: return SuggestOutcome.Dismissed
             val rows = chosen.values("", today)
             if (rows.isEmpty()) return SuggestOutcome.Dismissed
+            // One value and nothing to choose between: write it now. `/high`
+            // is one Enter where a date is two (ADR 0015 amendment
+            // 2026-10-23); a field with several values opens stage two.
+            rows.singleOrNull()?.insert?.let { token ->
+                return SuggestOutcome.Insert(Acceptance(replaceRange, "$token "))
+            }
             return SuggestOutcome.Open(
                 copy(
                     fragmentStart = caretInLine,
