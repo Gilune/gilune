@@ -108,6 +108,9 @@ fun SettingsPane(
     onClose: () -> Unit,
     initialSection: String? = null,
     updater: Updater? = null,
+    /// Opens a note in the editor: a plugin's settings may lead to a page
+    /// (its page defaults live in the vault as Markdown).
+    onOpenNote: (String) -> Unit = {},
 ) {
     var pane by remember { mutableStateOf(initialPane(initialSection)) }
     val colours = MaterialTheme.colorScheme
@@ -181,7 +184,7 @@ fun SettingsPane(
                                 if (plugin == null) {
                                     PluginsManager(state) { pane = Pane.Plugin(it) }
                                 } else {
-                                    PluginScreen(state, plugin)
+                                    PluginScreen(state, plugin, onOpenNote)
                                 }
                             }
                         }
@@ -303,7 +306,7 @@ private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {
 /// to, what it adds — and the switches that take any of it away.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
+private fun PluginScreen(state: GiluneState, plugin: PluginInfo, onOpenNote: (String) -> Unit = {}) {
     val colours = MaterialTheme.colorScheme
     val on = plugin.state == "enabled"
 
@@ -403,6 +406,18 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo) {
     if (plugin.pluginId == org.gilune.plugins.people.PEOPLE_PLUGIN) {
         HorizontalDivider(color = colours.outlineVariant)
         PeopleSettings(state, plugin)
+    }
+
+    // Where a plugin's pages go. The page defaults that decide it were
+    // reachable only from a small button in the rail panel; the owner
+    // looked here first (2026-10-23) and found nothing. One source of
+    // truth, two doors: this section reads the same defaults and opens
+    // the same dialog.
+    val collections = BUNDLED_PLUGIN_EXTENSIONS.pageCollections(state.plugins.toList())
+        .filter { it.pluginId == plugin.pluginId }
+    if (collections.isNotEmpty()) {
+        HorizontalDivider(color = colours.outlineVariant)
+        WherePagesGo(state, collections, onOpenNote)
     }
 
     if (!plugin.required) {
@@ -650,6 +665,62 @@ private fun PeopleSettings(state: GiluneState, plugin: PluginInfo) {
         state.pluginAction(
             "go to definition is now ${key ?: org.gilune.plugins.people.DEFAULT_DEFINITION_KEY}",
         ) { it.setPluginSettings(plugin.pluginId, org.gilune.plugins.people.peopleSettingsDocument(plugin.settings, key)) }
+    }
+}
+
+/// The folder each of a plugin's page types starts new pages in, with the
+/// way to change it. Read from the page definitions, which fold in the
+/// vault's page-defaults pages, so a folder changed from anywhere shows
+/// here. A changed folder is for future pages: existing pages stay where
+/// they are, and the row says so.
+@Composable
+private fun WherePagesGo(state: GiluneState, collections: List<BoundPageCollection>, onOpenNote: (String) -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    val kernel = state.gilune.value
+    var folders by remember(kernel, collections, state.vaultCursor.value) { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var defaultsFor by remember { mutableStateOf<BoundPageCollection?>(null) }
+    androidx.compose.runtime.LaunchedEffect(kernel, collections, state.vaultCursor.value, defaultsFor) {
+        if (kernel == null || defaultsFor != null) return@LaunchedEffect
+        folders = try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                collections.groupBy { it.pluginId }.flatMap { (owner, bound) ->
+                    val definitions = BoundPageCreation(kernel, owner).definitions()
+                    bound.mapNotNull { binding ->
+                        definitions.singleOrNull { it.typeId == binding.collection.pageTypeId }
+                            ?.let { binding.collection.id to it.defaultFolder.replace('\\', '/') }
+                    }
+                }.toMap()
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (e: Exception) {
+            GiluneLog.warn("page folders unavailable", e)
+            emptyMap()
+        }
+    }
+    Text("Where pages go", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "New pages of each kind start in these folders. Changing one applies to pages " +
+            "made from then on; pages already in the vault stay where they are.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    for (binding in collections) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.testTag("page-folder:${binding.collection.id}"),
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(binding.collection.title, fontSize = 13.sp)
+                Text(folders[binding.collection.id] ?: "…", fontSize = 12.sp, color = colours.onSurfaceVariant)
+            }
+            TextButton(onClick = { defaultsFor = binding }, enabled = kernel != null) { Text("Change…") }
+        }
+    }
+    defaultsFor?.let { binding ->
+        PageDefaultsDialog(binding, state, onOpenNote) { defaultsFor = null }
     }
 }
 
