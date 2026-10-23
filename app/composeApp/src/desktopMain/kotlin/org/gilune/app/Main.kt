@@ -709,6 +709,7 @@ private fun DesktopApp(
             onClose = { onSettingsOpen(false) },
             initialSection = probe?.removePrefix("settings:")?.takeIf { probe.startsWith("settings:") },
             updater = updater,
+            onOpenNote = { rel -> onSettingsOpen(false); openNote(rel) },
         )
     }
 }

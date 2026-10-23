@@ -35,8 +35,8 @@ class FolderPageCreationUiTest {
         root.deleteRecursively()
     }
 
-    private fun show(state: GiluneState, opened: (String) -> Unit = {}) {
-        val tree = TreeState()
+    private fun show(state: GiluneState, expanded: List<String> = emptyList(), opened: (String) -> Unit = {}) {
+        val tree = TreeState().apply { this.expanded.addAll(expanded) }
         compose.setContent { GiluneTheme(dark = false) {
             VaultTree(state, tree, opened, modifier = Modifier.width(320.dp).fillMaxHeight())
         } }
@@ -57,6 +57,27 @@ class FolderPageCreationUiTest {
         compose.onNodeWithTag("page-field-handle").performTextInput(handle)
         compose.waitUntil(10_000) { compose.onAllNodes(hasText("Create") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("Create").performClick()
+    }
+
+    /// The connections folder offers the same door the people folder does
+    /// (owner ask, 2026-10-23): the collection had every part of it but the
+    /// label that puts it on the folder's menu.
+    @Test fun connectionsFolderCreatesATypedConnection() = fixture { root, state, kernel ->
+        var opened: String? = null
+        show(state, expanded = listOf("People")) { opened = it }
+        menu("People/Connections")
+        awaitText("Create connection")
+        compose.onNodeWithText("Create connection").performClick()
+        compose.onNodeWithTag("page-field-keyword").performTextInput("reviewer")
+        compose.onNodeWithTag("page-field-label").performTextInput("Reviewer")
+        compose.waitUntil(10_000) { compose.onAllNodes(hasText("Create") and isEnabled()).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Create").performClick()
+        compose.waitUntil(10_000) { opened != null }
+        assertEquals("People/Connections/reviewer.md", opened)
+        val text = kernel.documentSnapshot(opened!!).content.text
+        assertTrue(text.contains("gilune-type: $CONNECTION_TYPE"), text)
+        assertTrue(text.contains("keyword: \"reviewer\"") || text.contains("keyword: reviewer"), text)
+        assertTrue(root.resolve(opened!!).isFile)
     }
 
     @Test fun peopleFolderCreatesAndRevealsTypedPersonAndRejectsDuplicateHandles() = fixture { root, state, kernel ->

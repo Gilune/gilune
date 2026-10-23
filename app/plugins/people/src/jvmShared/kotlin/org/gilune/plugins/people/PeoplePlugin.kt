@@ -63,7 +63,7 @@ fun peopleExtensions(): BundledPluginExtensions {
                 fun value(key: String) = facts.firstOrNull { it.key == key }?.value
                 PageRow(value(LABEL) ?: value(KEYWORD) ?: fallback,
                     value(KEYWORD).orEmpty() + if (value(RETIRED) == "true") " · retired" else "", value(PROBLEM))
-            }, identityPredicate = KEYWORD))
+            }, identityPredicate = KEYWORD, folderCreateLabel = "Create connection"))
     val declaration = PluginDeclaration(PEOPLE_PLUGIN, "People", "domain", "bundled", false, null, null,
         emptyList(), listOf(PAGE_CREATE_CAPABILITY),
         listOf(

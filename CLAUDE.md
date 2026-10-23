@@ -1778,6 +1778,30 @@ gates promises) are ratified. **Next: application-level engineering — see
      DEB 109.9 MB, debug APK 123.8 MB; tag run 39938857749 on c6dd22f,
      first green on the first try). The owner's existing Untitled copies
      rename themselves on the first sync after both devices update.
+   - **People: where pages go + Create connection (2026-10-23, Fable,
+     owner ask).** FINDING: folder choice already existed — every page
+     type's "Page defaults" page under `Settings/Page defaults/` (folder +
+     template, read by `BoundPageCreation.definitions()`), reachable ONLY
+     from a small button in the rail's People / People connections panels;
+     the plugin's settings screen said nothing, which is where the owner
+     looked. Shipped: `WherePagesGo` section on every plugin screen that
+     registers page collections (desktop `SettingsPane.kt`; rows per
+     collection: title + current default folder off the UI thread +
+     "Change…" → the SAME `PageDefaultsDialog` — dialog when no defaults
+     page exists, else opens that page via the new `onOpenNote` threaded
+     SettingsPane → PluginScreen, Main closes settings and opens the tab);
+     the connection collection gained `folderCreateLabel = "Create
+     connection"` — the person collection had it, the connection one
+     never did, that was the whole gap (form keyword/label/retired already
+     existed; the folder resolves from the defaults so a moved folder's
+     menu follows). NO tree badge exists for plugin folders
+     (`vault.folders` only CREATES starting folders on first open), so
+     "badge follows" was nothing to do — stated. Guide: people.html gains
+     the right-click paths + "Choose where pages go". Tests:
+     FolderPageCreationUiTest +1 (connections folder → typed connection;
+     `show(expanded=)`), PeopleSettingsUiTest (rows name People and
+     People/Connections; Change… leads to the defaults page or the dialog).
+     Android untouched (its panels already carry Page defaults).
    - **Task priority (2026-10-23, Fable; owner ask — undated tasks had
      no order anyone chose, and a day can hold more tasks than ideally
      should). ADR 0015 amendment 2026-10-23 (the v0 refusal named this
