@@ -47,6 +47,21 @@ class SuggestTest {
     // ---- the trigger --------------------------------------------------
 
     @Test
+    fun aFieldWithOneValueIsInsertedFromStageOneInOneEnter() {
+        // `/hi` names the high-priority field; its provider offers exactly
+        // one value, so Enter writes the word and no second stage opens
+        // (ADR 0015 amendment 2026-10-23). The date field keeps two.
+        val high = SuggestField("high", "High priority", org.gilune.plugins.tasks.priorityValues("high"))
+        val opened = assertNotNull(SuggestSession.open(line, caret, listOf(due, high), "", today))
+        val session = assertNotNull(opened.update("- [ ] milk /hi", 14))
+        assertEquals(SuggestStage.FIELDS, session.stage)
+        assertEquals(listOf("high"), session.candidates.map { it.detail })
+        val acceptance = accepted(session.accept())
+        assertEquals(11..13, acceptance.replaceRange, "the slash and the typed letters go")
+        assertEquals("priority:high ", acceptance.text)
+    }
+
+    @Test
     fun aSlashAfterASpaceOnATaskLineOpensASession() {
         val session = assertNotNull(open())
         assertEquals(SuggestStage.FIELDS, session.stage)

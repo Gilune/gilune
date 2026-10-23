@@ -218,6 +218,7 @@ fun TaskHitRow(
         verticalAlignment = Alignment.Top,
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        TaskPriorityMark(hit.priority, Modifier.padding(top = 1.dp))
         if (onToggle != null) TaskResultCheckbox(hit, onToggle)
         Column(Modifier.weight(1f)) {
             NoteResultText(

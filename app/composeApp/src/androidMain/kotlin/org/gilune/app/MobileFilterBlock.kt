@@ -129,6 +129,7 @@ private fun TaskRow(hit: TaskHit, today: LocalDate, onOpen: ((String) -> Unit)?,
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        TaskPriorityMark(hit.priority)
         TaskResultCheckbox(hit, onToggle, Modifier.size(TouchTarget))
         Column(Modifier.weight(1f)) {
             Text(
