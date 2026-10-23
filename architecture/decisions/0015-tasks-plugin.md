@@ -762,3 +762,38 @@ parent is listed (in the agenda, within the same group), and as its own row
 otherwise. The agenda
 panel shows the same marker and opens rows, but still never edits. Task row
 labels now use the task's own line only.
+
+- **2026-10-23 (priority).** The refusal of priorities above was for v0 and
+  named its own door — "if wanted later, `priority:high`, same convention" —
+  and the owner's case opens it: more tasks can be done on a day than ideally
+  should be, and the undated agenda group had an order nobody chose (the
+  index's path-and-line order). One word field on the task line,
+  `priority:high` or `priority:low`, whitespace-delimited and
+  position-independent like a date; no word is the ordinary level, and so is
+  `priority:normal` for whoever writes the default out. Indexed as a word
+  fact (`org.memory.tasks.priority`, `high`|`low`) and one derived sort key
+  (`org.memory.tasks.order` = `<rank>|<due or ~>`, rank 1/2/3), so every
+  task list — the agenda's groups and `filter` blocks — sorts by a single
+  predicate: level, then due date, then the line's place in its note, which
+  stays the person's own ordering. The derived key was chosen over a two-key
+  kernel sort because it needs no kernel or bindings change; its cost is one
+  fact per task line, stated in the indexer (version 3, so the namespace is
+  re-derived on upgrade). Operators `priority:high|low|none|normal` on
+  `type:task` (negating a level falls to the read, as `-due:week` does).
+  `/high` and `/low` write the word in ONE Enter: a field whose provider
+  offers exactly one value is inserted from stage one, on both the
+  SuggestSession and the editor-completion routes; the two-stage menu is
+  unchanged for dates. Styled as a token (high the marker colour; low and
+  normal muted); rows carry a thin bar (error for high, outline for low) in
+  the agenda panel, filter blocks and both mobile screens; the row label
+  hides the word as it hides the dates. **Not built, each on purpose:** a
+  flag (one dimension until use shows another); drag-to-reorder (the order
+  must be derivable from the text or it does not survive a sync); urgency
+  scores (refusal unchanged); and click-to-cycle on the token — the
+  decoration seam runs every registration's `activate` in one chain on any
+  click, so a cycling activation would fire on every checkbox tick; editing
+  the word is the way, and a per-registration click is a seam change for a
+  later round. Gate: indexer facts and key order; the search operator over
+  the scan oracle; the compiled operator and the five-row ordering against
+  the real kernel in `FilterBlockTest`; the one-Enter field in `SuggestTest`;
+  the field registry's three entries.

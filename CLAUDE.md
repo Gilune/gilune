@@ -1802,6 +1802,39 @@ gates promises) are ratified. **Next: application-level engineering — see
      `show(expanded=)`), PeopleSettingsUiTest (rows name People and
      People/Connections; Change… leads to the defaults page or the dialog).
      Android untouched (its panels already carry Page defaults).
+   - **Task priority (2026-10-23, Fable; owner ask — undated tasks had
+     no order anyone chose, and a day can hold more tasks than ideally
+     should). ADR 0015 amendment 2026-10-23 (the v0 refusal named this
+     door).** One word field on the task line: `priority:high` |
+     `priority:low`; none = ordinary = `priority:normal`. Tasks plugin
+     only: `TaskPriority` enum + `taskPriorityIn`/`taskOrderKey` in
+     TaskSearch.kt; indexer v3 emits `org.memory.tasks.priority`
+     (high|low, only when stated) and `org.memory.tasks.order` =
+     `<rank>|<due or ~>` on EVERY task line — the ONE sort predicate the
+     agenda and filter blocks now pass (was TASK_DUE_PREDICATE), so the
+     order is level → due → place-in-note with no kernel/bindings change
+     (chosen over a two-key kernel sort); `priority:` operator
+     (high|low|none|normal; negated level → Scan); `/high` `/low` = two
+     `tasks.fields` entries keyed by the word (provider
+     `org.gilune.priority`, one candidate each) and BOTH suggest routes
+     insert a one-value field from stage one in ONE Enter (Suggest.kt
+     accept + the EditorCompletion registration); decorations: high
+     MARKER, low/normal MUTED (5 registrations now); `TaskPriorityMark`
+     (jvmShared) = 3 dp bar, error/outline, in TasksPanel row, Android
+     AgendaRow and MobileFilterBlock row; `taskLabel` hides the word;
+     search hint tables both shells. NOT built: flag, drag-reorder,
+     urgency score, click-to-cycle (the seam runs EVERY `activate` in one
+     chain on any click — a cycling activation would fire on every
+     checkbox tick). Tests: TasksIndexerTest (+1, exact fact lists gained
+     the order key), TaskSearchTest priority vault, FilterBlockTest
+     five-row ordering + compiled operator against the real kernel,
+     SuggestTest one-Enter row, TasksPluginTest/PluginExtensionsTest field
+     lists are now due/high/low. Guide § Setting a priority.
+     WORKTREE NOTE: a fresh worktree has NO generated bindings
+     (`app/kernelBindings/src/*Main/generated` is gitignored) and no
+     `app/local.properties`; copy both from a sibling worktree whose
+     gilune-ffi is at the same commit, and `cargo build -p gilune-ffi`
+     so desktopTest finds `kernel/target/debug/gilune_ffi.dll`.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

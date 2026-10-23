@@ -29,7 +29,7 @@ const val TASKS_INDEX_NAMESPACE = TASKS_PLUGIN
 
 /// Change what these facts mean and change this: the namespace, and only
 /// this namespace, is then derived again from the beginning of the feed.
-const val TASKS_INDEXER_VERSION = 2L
+const val TASKS_INDEXER_VERSION = 3L
 
 /// `open` or `done`, read off the checkbox marker. Every task line has
 /// exactly one, which is what makes `type:task` a question the index can
@@ -37,6 +37,13 @@ const val TASKS_INDEXER_VERSION = 2L
 const val TASK_STATE_PREDICATE = "$TASKS_PLUGIN.state"
 const val TASK_DUE_PREDICATE = "$TASKS_PLUGIN.due"
 const val TASK_DONE_PREDICATE = "$TASKS_PLUGIN.done"
+/// The priority word a line states, `high` or `low`; absent for the
+/// ordinary level (ADR 0015 amendment 2026-10-23).
+const val TASK_PRIORITY_PREDICATE = "$TASKS_PLUGIN.priority"
+/// Every task line's sort key, `<rank>|<due or ~>` ([taskOrderKey]): the
+/// one derived fact here, and the one predicate every task list sorts
+/// by, so priority then due date then place-in-note is a single sort.
+const val TASK_ORDER_PREDICATE = "$TASKS_PLUGIN.order"
 
 const val TASK_STATE_OPEN = "open"
 const val TASK_STATE_DONE = "done"
@@ -47,6 +54,8 @@ fun taskPredicateKinds(): List<PredicateKind> = listOf(
     PredicateKind(TASK_STATE_PREDICATE, ValueKind.TEXT),
     PredicateKind(TASK_DUE_PREDICATE, ValueKind.DATE),
     PredicateKind(TASK_DONE_PREDICATE, ValueKind.DATE),
+    PredicateKind(TASK_PRIORITY_PREDICATE, ValueKind.TEXT),
+    PredicateKind(TASK_ORDER_PREDICATE, ValueKind.TEXT),
 )
 
 /// What the plugin says about one note.
@@ -78,6 +87,9 @@ fun taskFacts(text: String): List<Fact> {
         facts += Fact(at, TASK_STATE_PREDICATE, if (marker == 'x') TASK_STATE_DONE else TASK_STATE_OPEN)
         taskDateIn(line, DUE_FIELD)?.let { facts += Fact(at, TASK_DUE_PREDICATE, it) }
         taskDateIn(line, DONE_FIELD)?.let { facts += Fact(at, TASK_DONE_PREDICATE, it) }
+        val priority = taskPriorityIn(line)
+        priority?.let { facts += Fact(at, TASK_PRIORITY_PREDICATE, it.token) }
+        facts += Fact(at, TASK_ORDER_PREDICATE, taskOrderKey(priority, taskDateIn(line, DUE_FIELD)))
     }
     return facts
 }
@@ -108,6 +120,9 @@ class TasksScopedIndexer : ScopedIndexer, uniffi.gilune_ffi.LocalScopedIndexer {
                 add(ScopedFact(location, TASK_STATE_PREDICATE, if (marker == 'x') TASK_STATE_DONE else TASK_STATE_OPEN))
                 taskDateIn(own, DUE_FIELD)?.let { add(ScopedFact(location, TASK_DUE_PREDICATE, it)) }
                 taskDateIn(own, DONE_FIELD)?.let { add(ScopedFact(location, TASK_DONE_PREDICATE, it)) }
+                val priority = taskPriorityIn(own)
+                priority?.let { add(ScopedFact(location, TASK_PRIORITY_PREDICATE, it.token)) }
+                add(ScopedFact(location, TASK_ORDER_PREDICATE, taskOrderKey(priority, taskDateIn(own, DUE_FIELD))))
             }
         }
     }

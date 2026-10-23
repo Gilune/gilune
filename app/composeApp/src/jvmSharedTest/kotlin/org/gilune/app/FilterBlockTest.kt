@@ -88,6 +88,40 @@ class FilterBlockTest {
     private fun run(block: String, cap: Int = FILTER_ROW_CAP, registry: List<SearchType> = types) =
         evaluateFilterBlock(gilune, vault, block, registry, today, cap)
 
+    // ------------------------------------------------------------------
+    // Priority (ADR 0015 amendment 2026-10-23): the order every list takes
+    // ------------------------------------------------------------------
+
+    @Test
+    fun rowsOrderByPriorityThenDueDateThenTheirPlaceInTheNote() {
+        IndexedVault("gilune-filter-priority").use { built ->
+            built.write(
+                "Later/undated.md",
+                """
+                ---
+                gilune-id: id-later
+                ---
+                - [ ] relaxed priority:low
+                - [ ] plain
+                - [ ] urgent priority:high
+                - [ ] urgent and dated due:2026-09-20 priority:high
+                - [ ] dated plain due:2026-09-10
+                """.trimIndent(),
+            )
+            val all = evaluateFilterBlock(built.gilune, built.dir, "type:task is:open", types, today, FILTER_ROW_CAP) as FilterResult.Tasks
+            assertEquals(listOf(4, 3, 5, 2, 1), all.rows.map { it.line }, "high before ordinary before low; dated before undated within a level")
+            assertEquals(
+                listOf(org.gilune.plugins.tasks.TaskPriority.HIGH, org.gilune.plugins.tasks.TaskPriority.HIGH, null, null, org.gilune.plugins.tasks.TaskPriority.LOW),
+                all.rows.map { it.priority },
+            )
+            // The operator compiles to the indexed word, and `none` to its absence.
+            val high = evaluateFilterBlock(built.gilune, built.dir, "type:task priority:high", types, today, FILTER_ROW_CAP) as FilterResult.Tasks
+            assertEquals(listOf(4, 3), high.rows.map { it.line })
+            val none = evaluateFilterBlock(built.gilune, built.dir, "type:task priority:none", types, today, FILTER_ROW_CAP) as FilterResult.Tasks
+            assertEquals(listOf(5, 2), none.rows.map { it.line })
+        }
+    }
+
     /// The task's own words. The panel's `taskLabel` says this properly
     /// and is tested where it lives; it is desktop code and this test is
     /// shared, so the rows are read plainly here instead.

@@ -229,6 +229,7 @@ private val MOBILE_TASK_QUERY_FORMS = listOf(
     "type:task" to "task lines, not notes",
     "due:" to "today, overdue, week, none, before:/after:",
     "is:" to "open, done",
+    "priority:" to "high, low, none",
 )
 
 @Composable

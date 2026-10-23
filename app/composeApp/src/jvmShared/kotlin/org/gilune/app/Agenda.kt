@@ -3,7 +3,7 @@
 package org.gilune.app
 
 import org.gilune.plugin.sdk.SearchType
-import org.gilune.plugins.tasks.TASK_DUE_PREDICATE
+import org.gilune.plugins.tasks.TASK_ORDER_PREDICATE
 import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
 import org.gilune.plugins.tasks.TaskHit
 import org.gilune.plugins.tasks.kernelTaskRows
@@ -37,7 +37,7 @@ internal fun loadAgenda(gilune: uniffi.gilune_ffi.Gilune?, types: List<SearchTyp
     val sections = queries.mapNotNull { (group, terms) ->
         val query = compileSearch("type:task is:open $terms", types = types, today = today,
             maxLines = 1, pageSize = AGENDA_ROW_CAP.toUInt(), groupByNote = false,
-            sortPredicate = TASK_DUE_PREDICATE) ?: return@mapNotNull null
+            sortPredicate = TASK_ORDER_PREDICATE) ?: return@mapNotNull null
         val page = query.page(gilune).requireComplete()
         if (page.totalHits == 0uL) null else {
             val rows = kernelTaskRows(page.hits)
@@ -82,7 +82,7 @@ enum class AgendaEmpty {
 private val AGENDA_TASK_LINE = Regex("""^([ \t]*)([-*+])([ \t]+)\[([ xX])]""")
 
 /// § 1's tokens, as a row reads them off a line it is only drawing.
-private val AGENDA_DATE_TOKEN = Regex("""\s(?:due|done):\d{4}-\d{2}-\d{2}\b""")
+private val AGENDA_DATE_TOKEN = Regex("""\s(?:due|done):\d{4}-\d{2}-\d{2}\b|\spriority:(?:high|normal|low)\b""")
 
 /// Ticked — `[x]`, or GFM's `[X]`. False on anything that is not a task
 /// line at all, so a stray row from a note-level query is treated as open

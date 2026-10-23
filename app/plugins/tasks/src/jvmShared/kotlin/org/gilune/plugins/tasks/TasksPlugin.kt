@@ -32,6 +32,11 @@ const val TASK_FIELDS_SLOT = "tasks.fields"
 /// publishes** (§ 3): the field list *is* that registry, one entry long,
 /// so other date fields can arrive through the same provider contract.
 const val TASKS_DUE_FIELD = "due"
+/// The two priority fields (ADR 0015 amendment 2026-10-23), keyed by the
+/// word they write so `/hi` and `/lo` reach them: each has one value, and
+/// the hosts insert a one-value field in a single step.
+const val TASKS_HIGH_FIELD = "high"
+const val TASKS_LOW_FIELD = "low"
 const val TASKS_DECORATIONS_CONTRIBUTION = "task-dates"
 const val TASKS_SUGGEST_CONTRIBUTION = "slash-menu"
 const val TASKS_NAVIGATION_CONTRIBUTION = "tasks"
@@ -72,6 +77,23 @@ fun tasksDeclaration(): PluginDeclaration =
                 config = """{"key":"due","label":"Due date","values":"$DATE_VALUES_PROVIDER"}""",
             ),
             PluginContribution(
+                slot = Slots.SUGGEST_VALUES,
+                id = PRIORITY_VALUES_PROVIDER,
+                label = "Priority words",
+            ),
+            PluginContribution(
+                slot = TASK_FIELDS_SLOT,
+                id = TASKS_HIGH_FIELD,
+                label = "High priority",
+                config = """{"key":"high","label":"High priority","values":"$PRIORITY_VALUES_PROVIDER"}""",
+            ),
+            PluginContribution(
+                slot = TASK_FIELDS_SLOT,
+                id = TASKS_LOW_FIELD,
+                label = "Low priority",
+                config = """{"key":"low","label":"Low priority","values":"$PRIORITY_VALUES_PROVIDER"}""",
+            ),
+            PluginContribution(
                 slot = Slots.EDITOR_DECORATIONS,
                 id = TASKS_DECORATIONS_CONTRIBUTION,
                 label = "Due and done dates",
@@ -82,7 +104,8 @@ fun tasksDeclaration(): PluginDeclaration =
                 // wasm host has to read one (§ 7).
                 config = """{"line":"task","tokens":[""" +
                     """{"key":"due","pattern":"\\sdue:\\d{4}-\\d{2}-\\d{2}\\b","role":"marker"},""" +
-                    """{"key":"done","pattern":"\\sdone:\\d{4}-\\d{2}-\\d{2}\\b","role":"muted"}],""" +
+                    """{"key":"done","pattern":"\\sdone:\\d{4}-\\d{2}-\\d{2}\\b","role":"muted"},""" +
+                    """{"key":"priority","pattern":"\\spriority:(high|normal|low)\\b","role":"marker"}],""" +
                     """"onToggle":"done"}""",
             ),
             PluginContribution(
@@ -95,7 +118,7 @@ fun tasksDeclaration(): PluginDeclaration =
                 slot = Slots.SEARCH_TYPES,
                 id = "task",
                 label = "type:task in search and filters",
-                config = """{"type":"task","operators":["due","done"]}""",
+                config = """{"type":"task","operators":["due","done","priority"]}""",
             ),
             // The dead slot becomes real (§ 5, T3). The `config` names the
             // panel, so the shell routes to it by key rather than by
@@ -124,6 +147,12 @@ private fun tokenPattern(key: String) = Regex("""\s$key:\d{4}-\d{2}-\d{2}\b""")
 
 private val DUE_TOKEN = tokenPattern("due")
 private val DONE_TOKEN = tokenPattern("done")
+
+/// The priority word, in two registrations so the levels take two
+/// colours: high the marker colour, low — and the written-out ordinary —
+/// the muted one. Both mirror `PRIORITY_TOKEN` in `TaskSearch.kt`.
+private val PRIORITY_HIGH_TOKEN = Regex("""\spriority:high\b""")
+private val PRIORITY_LOW_TOKEN = Regex("""\spriority:(?:low|normal)\b""")
 
 private const val TASKS_MARKER_GROUP = 4
 private const val TASKS_MARKER_LENGTH = 3
@@ -232,6 +261,8 @@ private fun doneStamper(filter: String, today: LocalDate): EditorDecoration = Ed
 fun tasksDecorations(filter: String = "", today: LocalDate = LocalDate.now()): List<EditorDecoration> = listOf(
     tokenDecoration("org.memory.tasks.due", DUE_TOKEN, DecorationRole.MARKER, filter),
     tokenDecoration("org.memory.tasks.done", DONE_TOKEN, DecorationRole.MUTED, filter),
+    tokenDecoration("org.memory.tasks.priority-high", PRIORITY_HIGH_TOKEN, DecorationRole.MARKER, filter),
+    tokenDecoration("org.memory.tasks.priority-low", PRIORITY_LOW_TOKEN, DecorationRole.MUTED, filter),
     doneStamper(filter, today),
 )
 
@@ -312,7 +343,14 @@ fun tasksExtensions(): BundledPluginExtensions = BundledPluginExtensions(
             else {
                 val fragment = context.text.substring(fragmentStart, context.caret)
                 val options = if (next == null) context.fields.filter { it.key.contains(fragment, true) || it.label.contains(fragment, true) }
-                    .map { org.gilune.plugin.sdk.EditorOption(it.label, it.key, continueWith = it.key) }
+                    .map { field ->
+                        // A field with exactly one value is inserted in one
+                        // step: `/high` writes the word and no second menu
+                        // asks which high (ADR 0015 amendment 2026-10-23).
+                        val only = field.values("", context.today).singleOrNull()?.insert
+                        if (only != null) org.gilune.plugin.sdk.EditorOption(field.label, field.key, insertion = "$only ")
+                        else org.gilune.plugin.sdk.EditorOption(field.label, field.key, continueWith = field.key)
+                    }
                 else context.fields.singleOrNull { it.key == next.data }?.values?.invoke(fragment, context.today).orEmpty()
                     .map { org.gilune.plugin.sdk.EditorOption(it.display, it.detail, it.insert?.let { token -> "$token " }) }
                 org.gilune.plugin.sdk.EditorCompletion(start, context.caret, options)
@@ -322,9 +360,10 @@ fun tasksExtensions(): BundledPluginExtensions = BundledPluginExtensions(
     searchTypes = listOf(SearchTypeRegistration("task", TASK_SEARCH_TYPE) { settings ->
         taskSearchType(jsonString(settings, TASK_FILTER_KEY).orEmpty())
     }),
-    suggestionProviders = listOf(SuggestionProviderRegistration(DATE_VALUES_PROVIDER) { key, _ ->
-        dateValues(key)
-    }),
+    suggestionProviders = listOf(
+        SuggestionProviderRegistration(DATE_VALUES_PROVIDER) { key, _ -> dateValues(key) },
+        SuggestionProviderRegistration(PRIORITY_VALUES_PROVIDER) { key, _ -> priorityValues(key) },
+    ),
     fieldSlots = setOf(TASK_FIELDS_SLOT),
     scopedIndexer = org.gilune.plugin.sdk.ScopedIndexerRegistration(TASKS_INDEXER_VERSION, taskPredicateKinds(), createLocal = ::TasksScopedIndexer, create = ::TasksScopedIndexer),
 )

@@ -121,6 +121,28 @@
     is a date Gilune can actually resolve. Nothing half-finished gets written.</li>
   </ul>
 
+  <h2 id="priority">Setting a priority</h2>
+
+  <p>Some tasks matter more than the others due the same day. Give a task a priority
+  and every list puts it in its place: high first, then ordinary, then low, and within
+  each level the due date, then the order the tasks have in their note.</p>
+
+  <ol>
+    <li>On the task line type <code>/</code> and then <code>hi</code> or <code>lo</code>.
+    The menu offers <strong>High priority</strong> or <strong>Low priority</strong>.</li>
+    <li>Press <kbd>Enter</kbd>. One press writes the word; there is no second step.</li>
+  </ol>
+
+<pre><code>- [ ] ring the plumber due:2026-09-04 priority:high</code></pre>
+
+  <p>No word means ordinary, and so does <code>priority:normal</code> if you prefer to
+  write it out. To change or remove a priority, edit the word. On the line a high
+  priority takes the accent colour and a low one is muted; in the agenda and in live
+  lists a thin bar beside the task says the same thing, red for high and grey for low.
+  In search and in filter blocks, <code>priority:high</code>, <code>priority:low</code>
+  and <code>priority:none</code> narrow to a level, and <code>-priority:low</code>
+  leaves one out.</p>
+
   <h2>Ticking things off</h2>
 
   <p>Click the checkbox. As well as ticking it, Gilune adds the day you finished it:</p>
