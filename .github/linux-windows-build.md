@@ -12,9 +12,25 @@ a per-user one must be installed before a per-user release is published:
 1. The release after this change is still **per-machine** (`scope` input of
    `windows-cross.yml`, default `per-machine`; `build.yml` passes nothing). It
    carries the transition-capable updater and the app's own firewall step.
+   That was 1.2.0.
 2. The one after flips `scope` to `per-user` (a one-line change in
    `windows-cross.yml`'s default). The per-machine shape is then dead code and
    is to be removed.
+
+**What happened instead (23 October 2026).** 1.2.1 was released without the
+flip, so it was per-machine too (`ALLUSERS=1`, Program Files, the firewall
+custom actions). The owner's 1.2.0 updater took the update as the move it was
+written for: it removed 1.2.0 with one elevated prompt
+(`remove-all-users-1.2.1.log`: product 1.2.0 removed, status 0), then ran the
+1.2.1 MSI, which being per-machine asked again (`install-1.2.1.log`: "Elevation
+required to install product, will prompt for credentials") and installed to
+Program Files. Two prompts, and still an all-users install. Nothing in the MSI
+mechanism caused this; a per-user MSI installs with none, as the hosted runs
+below show. The default is now `per-user` (both `workflow_call` and
+`workflow_dispatch`, and the packaging step's fallback), so the release after
+1.2.1 is the first per-user one: the 1.2.1 updater removes the all-users copy
+with one prompt and installs it silently, and every update after that asks
+nothing.
 
 What `--scope per-user` produces: `%LOCALAPPDATA%\Programs\Gilune`, components
 keyed on `HKCU\Software\Gilune\Components\<id>` values (Windows Installer's
