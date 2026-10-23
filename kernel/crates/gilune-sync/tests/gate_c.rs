@@ -2214,3 +2214,186 @@ fn the_same_filename_made_on_both_devices_keeps_both() {
         "nothing is held in history with no file"
     );
 }
+
+// ------------------------------------------------- renames travel (0007, 2026-10-23)
+
+fn markdown_under(root: &std::path::Path) -> Vec<String> {
+    let mut found: Vec<String> = paired::files_under(root)
+        .into_iter()
+        .filter(|p| p.extension().is_some_and(|e| e == "md"))
+        .map(|p| p.strip_prefix(root).expect("under").to_string_lossy().replace('\\', "/"))
+        .collect();
+    found.sort();
+    found
+}
+
+fn rename_in(device: &Device, from: &str, to: &str) {
+    std::fs::rename(device.vault_path.join(from), device.vault_path.join(to)).expect("rename");
+    device.store.reconcile().expect("reconcile");
+    device.store.project().expect("project");
+}
+
+/// **A note renamed on one device is renamed on the other** — the fault
+/// the owner met on 2026-10-23: a Ctrl+N note reached the other device as
+/// `Untitled.md` and stayed so, because a rename was followed by id here
+/// and never became an operation.
+#[test]
+fn a_note_renamed_on_one_device_is_renamed_on_the_other() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+
+    write_in(&notebook, "Untitled.md", b"shopping\n");
+    notebook.store.reconcile().expect("adopt");
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["Untitled.md"]);
+
+    rename_in(&notebook, "Untitled.md", "Shopping.md");
+    let report = notebook.sync();
+    assert!(report.halted.is_empty(), "{:?}", report.halted);
+    assert!(report.sent >= 1, "the rename is an operation: {report:?}");
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["Shopping.md"], "moved, not copied");
+    assert_eq!(read_in(&desktop, "Shopping.md"), read_in(&notebook, "Shopping.md"), "same head, same bytes");
+
+    // Renamed again and edited in the same pass: both travel, in order.
+    let text = read_in(&notebook, "Shopping.md");
+    std::fs::rename(notebook.vault_path.join("Shopping.md"), notebook.vault_path.join("Groceries.md")).expect("rename");
+    write_in(&notebook, "Groceries.md", text.replace("shopping", "shopping, milk").as_bytes());
+    notebook.store.reconcile().expect("reconcile");
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["Groceries.md"]);
+    assert!(read_in(&desktop, "Groceries.md").contains("shopping, milk"));
+
+    // And an edit on the other side lands in the renamed file both ways.
+    let text = read_in(&desktop, "Groceries.md");
+    write_in(&desktop, "Groceries.md", format!("{text}eggs\n").as_bytes());
+    desktop.store.reconcile().expect("reconcile");
+    desktop.sync();
+    notebook.store.project().expect("project");
+    assert_eq!(markdown_under(&notebook.vault_path), vec!["Groceries.md"]);
+    assert!(read_in(&notebook, "Groceries.md").contains("eggs"));
+}
+
+/// **Renamed on both devices at once: each keeps its own name** while the
+/// heads are concurrent, and the next edit resolves both devices onto one.
+#[test]
+fn a_rename_on_both_devices_at_once_keeps_each_name_until_an_edit_resolves_it() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+    write_in(&notebook, "Untitled.md", b"shopping\n");
+    notebook.store.reconcile().expect("adopt");
+    notebook.sync();
+    desktop.store.project().expect("project");
+
+    rename_in(&notebook, "Untitled.md", "Shopping.md");
+    rename_in(&desktop, "Untitled.md", "Groceries.md");
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["Groceries.md"], "the desktop's own name stands");
+    assert!(read_in(&desktop, "Groceries.md").contains("gilune-conflicted: true"), "and says it is contested");
+    desktop.sync();
+    notebook.store.project().expect("project");
+    assert_eq!(markdown_under(&notebook.vault_path), vec!["Shopping.md"], "so does the notebook's");
+    assert!(read_in(&notebook, "Shopping.md").contains("gilune-conflicted: true"));
+
+    // The desktop edits: its revision supersedes both heads, and the
+    // device that resolved the conflict keeps its name everywhere.
+    let text = read_in(&desktop, "Groceries.md");
+    write_in(&desktop, "Groceries.md", format!("{text}resolved\n").as_bytes());
+    desktop.store.reconcile().expect("reconcile");
+    desktop.store.project().expect("project");
+    desktop.sync();
+    notebook.store.project().expect("project");
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&notebook.vault_path), vec!["Groceries.md"]);
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["Groceries.md"]);
+    assert!(!read_in(&notebook, "Groceries.md").contains("gilune-conflicted"));
+    assert!(read_in(&notebook, "Groceries.md").contains("resolved"));
+    assert_eq!(read_in(&notebook, "Groceries.md"), read_in(&desktop, "Groceries.md"));
+}
+
+/// **A rename made before renames travelled reaches the other device**
+/// once the renamer updates: the owner's existing `Untitled` copies take
+/// their names on the first sync, with nobody touching them.
+#[test]
+fn a_rename_made_before_renames_travelled_reaches_the_other_device() {
+    let desktop = Device::new("Desktop").listening();
+    let notebook = Device::new("Notebook").listening();
+    notebook.pair_by_code(&desktop).expect("pair");
+    write_in(&notebook, "Untitled.md", b"old world\n");
+    notebook.store.reconcile().expect("adopt");
+    notebook.sync();
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["Untitled.md"]);
+
+    // The pre-amendment shape on the notebook, by hand: file moved,
+    // record followed, no revision, nothing sent.
+    std::fs::rename(notebook.vault_path.join("Untitled.md"), notebook.vault_path.join("World.md")).expect("rename");
+    rusqlite::Connection::open(notebook.vault_path.join(".gilune/local/kernel.db"))
+        .expect("the notebook's own database")
+        .execute("UPDATE projections SET rel_path = 'World.md' WHERE rel_path = 'Untitled.md'", [])
+        .expect("old record");
+    assert_eq!(notebook.sync().sent, 0, "nothing to send yet");
+
+    // The first pass after the update sends the rename it should have.
+    notebook.store.reconcile().expect("reconcile");
+    notebook.store.project().expect("catch up");
+    assert!(notebook.sync().sent >= 1);
+    desktop.store.project().expect("project");
+    assert_eq!(markdown_under(&desktop.vault_path), vec!["World.md"]);
+    assert!(read_in(&desktop, "World.md").ends_with("---\nold world\n"));
+}
+
+/// **A third device that pulls the streams in the wrong order** still
+/// ends with the note under its final name (the S4 lesson). A full
+/// replica forwards every device's stream, ordered by device id, which is
+/// vault age: B is made first, so a device meeting B alone pulls B's
+/// stream — the edit — before A's, which holds the object and its rename
+/// the edit was written over. The edit waits for its referent rather
+/// than landing under the old name, and the next pass settles it.
+#[test]
+fn a_third_device_hearing_the_edit_before_the_rename_still_lands_the_final_name() {
+    let b = Device::new("B").listening();
+    let a = Device::new("A").listening();
+    let c = Device::new("C").listening();
+    assert!(b.device_id() < a.device_id(), "B's stream is pulled first");
+    b.pair_by_code(&a).expect("pair a-b");
+
+    write_in(&a, "Untitled.md", b"shopping\n");
+    a.store.reconcile().expect("adopt");
+    a.sync();
+    b.store.project().expect("project");
+    rename_in(&a, "Untitled.md", "Shopping.md");
+    a.sync();
+    b.store.project().expect("project");
+    assert_eq!(markdown_under(&b.vault_path), vec!["Shopping.md"]);
+    let text = read_in(&b, "Shopping.md");
+    write_in(&b, "Shopping.md", text.replace("shopping", "shopping, milk").as_bytes());
+    b.store.reconcile().expect("reconcile");
+
+    // C meets B only. B's own stream — the edit, written over A's rename
+    // — comes first and names revisions C has never seen, so it waits;
+    // A's stream, forwarded by B, lands the object and the rename.
+    c.pair_by_code(&b).expect("pair c-b");
+    c.sync();
+    c.store.project().expect("project");
+    assert!(
+        markdown_under(&c.vault_path).iter().all(|p| p == "Shopping.md"),
+        "whatever has landed is under the final name, never Untitled: {:?}",
+        markdown_under(&c.vault_path)
+    );
+
+    // The next pass lets B's stream resume on top of them.
+    c.sync();
+    c.store.project().expect("project");
+    assert_eq!(markdown_under(&c.vault_path), vec!["Shopping.md"], "one file, the final name");
+    assert!(read_in(&c, "Shopping.md").contains("shopping, milk"));
+    b.store.project().expect("B's own header catches up with its edit");
+    assert_eq!(read_in(&c, "Shopping.md"), read_in(&b, "Shopping.md"));
+    assert!(c.alerts_of("sync-awaiting-referent").is_empty(), "the wait was cleared by the resume");
+}
