@@ -1773,6 +1773,11 @@ gates promises) are ratified. **Next: application-level engineering — see
      is device_id = vault age: make the EDITOR's vault older to pull the
      edit first (gilune-sync gained rusqlite as a dev-dep to write the
      pre-fix shape by hand). Kernel-only; no FFI/bindings change.
+     **v1.2.1 RELEASED (2026-10-23)** = 1.2.0 + PR #26 —
+     https://github.com/Gilune/gilune/releases/tag/v1.2.1 (MSI 138.3 MB,
+     DEB 109.9 MB, debug APK 123.8 MB; tag run 39938857749 on c6dd22f,
+     first green on the first try). The owner's existing Untitled copies
+     rename themselves on the first sync after both devices update.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
