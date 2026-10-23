@@ -187,6 +187,11 @@ fn managed_move_preserves_object_identity_but_changes_source_version() {
     let before = store.document_snapshot(&rel).unwrap();
     std::fs::rename(store.vault().join(&rel), store.vault().join("moved.md")).unwrap();
     store.reconcile().unwrap();
+    // A rename is a revision (ADR 0007, 2026-10-23): the record is on it,
+    // the file's header is not yet, and the projection pass settles that
+    // exactly as it does after an edit.
+    assert_eq!(store.document_snapshot("moved.md").unwrap().source.state, DocumentState::NeedsReconciliation);
+    store.project().unwrap();
     let after = store.document_snapshot("moved.md").unwrap();
     assert_eq!(after.source.document_key, before.source.document_key);
     assert_ne!(after.source.version, before.source.version);
