@@ -16,7 +16,7 @@
 package org.gilune.app
 
 import org.gilune.plugin.sdk.SearchType
-import org.gilune.plugins.tasks.TASK_DUE_PREDICATE
+import org.gilune.plugins.tasks.TASK_ORDER_PREDICATE
 import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
 import org.gilune.plugins.tasks.TaskHit
 import org.gilune.plugins.tasks.kernelTaskRows
@@ -209,7 +209,7 @@ fun evaluateFilterBlock(
     val task = classified.typeKey.equals(TASK_SEARCH_TYPE, ignoreCase = true)
     val compiled = compileSearch(classified.query, operators = operators, types = types, today = today,
         maxLines = if (task) 1 else 0, pageSize = cap.coerceIn(1, 500).toUInt(),
-        groupByNote = !task, sortPredicate = if (task) TASK_DUE_PREDICATE else "")
+        groupByNote = !task, sortPredicate = if (task) TASK_ORDER_PREDICATE else "")
         ?: return FilterResult.Hint(FILTER_NO_MATCHES)
     val page = compiled.page(gilune).requireComplete()
     if (task) {
