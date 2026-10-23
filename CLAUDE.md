@@ -1835,6 +1835,18 @@ gates promises) are ratified. **Next: application-level engineering — see
      `app/local.properties`; copy both from a sibling worktree whose
      gilune-ffi is at the same commit, and `cargo build -p gilune-ffi`
      so desktopTest finds `kernel/target/debug/gilune_ffi.dll`.
+   - **v1.2.2 RELEASED (2026-10-23, Fable; three PRs merged at once at the
+     owner's ask)** — https://github.com/Gilune/gilune/releases/tag/v1.2.2
+     (MSI 138.3 MB, DEB 110.0 MB, debug APK 123.9 MB; tag run 39964981192
+     on 2eed7c7, green first time) = 1.2.1 + #28 (installer session: MSI
+     built PER-USER by default — 1.2.1 had still been per-machine, so its
+     update asked twice; 1.2.2 is the first per-user package and the
+     update onto it is the one transition) + #30 (the owner's fork: task
+     priority word, one-Enter /high and /low, agenda/filter ordering, both
+     shells) + #29 (people: where pages go, Create connection). Merge
+     order #28, #30, then #29 after bringing main in here: the only
+     conflict was CLAUDE.md (two status bullets at one anchor; both kept).
+     Desktop 908/0/10 on the merged tree before the push.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
