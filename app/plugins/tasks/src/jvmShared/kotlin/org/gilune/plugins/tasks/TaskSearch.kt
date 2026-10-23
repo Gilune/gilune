@@ -44,7 +44,7 @@ const val TASK_SEARCH_TYPE = "task"
 fun taskSearchType(filter: String = ""): SearchType = SearchType(
     key = TASK_SEARCH_TYPE,
     operators = { today ->
-        listOf(DateFieldOperator(DUE_FIELD, today), DateFieldOperator(DONE_FIELD, today), MARKER_OPERATOR)
+        listOf(DateFieldOperator(DUE_FIELD, today), DateFieldOperator(DONE_FIELD, today), MARKER_OPERATOR, PRIORITY_OPERATOR)
     },
     extract = { note -> taskLines(note, filter) },
     constraints = buildList {
@@ -73,6 +73,10 @@ data class TaskHit(
     val text: String,
     val due: LocalDate?,
     val done: LocalDate?,
+    /// The level the line states, or null for the ordinary one (ADR 0015
+    /// amendment 2026-10-23). Last and defaulted so the callers that build
+    /// a hit by hand keep compiling.
+    val priority: TaskPriority? = null,
 ) {
     /** Exact first physical line used by the guarded checkbox edit. */
     val checkboxLine: String get() = text.substringBefore('\n')
@@ -84,8 +88,10 @@ fun kernelTaskRows(hits: List<uniffi.gilune_ffi.SearchHit>): List<TaskHit> = hit
     hit.items.map { item ->
         fun date(predicate: String): LocalDate? = item.facts.firstOrNull { it.key == predicate }
             ?.value?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        val level = item.facts.firstOrNull { it.key == TASK_PRIORITY_PREDICATE }?.value
         TaskHit(hit.relPath, hit.name, item.firstLine.toInt(), item.text,
-            date(TASK_DUE_PREDICATE), date(TASK_DONE_PREDICATE))
+            date(TASK_DUE_PREDICATE), date(TASK_DONE_PREDICATE),
+            TaskPriority.entries.firstOrNull { it.token == level })
     }
 }
 
@@ -218,6 +224,39 @@ private val MARKER_OPERATOR = object : SearchOperator {
     }
 }
 
+/// `priority:` — the one word field (ADR 0015 amendment 2026-10-23):
+/// `high` and `low` are the two levels a line may state; `none` is a line
+/// stating neither, and `normal` is the same set, because the ordinary
+/// level written out means what leaving it out means. Anything else
+/// matches nothing, as a typo inside `due:` does.
+///
+/// Negating a level falls to the read: "not high" is "low or ordinary",
+/// a disjunction the conjunction cannot hold — the same fallback the date
+/// operators take for `-due:week`.
+private val PRIORITY_OPERATOR = object : SearchOperator {
+    override val name = PRIORITY_FIELD
+
+    override fun matches(note: SearchedNote, argument: String): Boolean {
+        val value = argument.trim().lowercase(Locale.ROOT)
+        val stated = taskPriorityIn(note.body)
+        if (value == NONE_VALUE || value == NORMAL_VALUE) return stated == null
+        val level = TaskPriority.entries.firstOrNull { it.token == value } ?: return false
+        return stated == level
+    }
+
+    override fun compile(argument: String, negated: Boolean): Compiled {
+        val value = argument.trim().lowercase(Locale.ROOT)
+        if (value == NONE_VALUE || value == NORMAL_VALUE) {
+            val op = if (negated) ConstraintOp.EXISTS else ConstraintOp.NOT_EXISTS
+            return Compiled.Exact(listOf(taskFact(TASK_PRIORITY_PREDICATE, op, "")))
+        }
+        val level = TaskPriority.entries.firstOrNull { it.token == value }
+            ?: return if (negated) Compiled.Scan else Compiled.Never
+        if (negated) return Compiled.Scan
+        return Compiled.Exact(listOf(taskFact(TASK_PRIORITY_PREDICATE, ConstraintOp.EQ, level.token)))
+    }
+}
+
 /// § 4's value forms, and the whole of them:
 ///
 /// - `YYYY-MM-DD` — that day exactly
@@ -296,8 +335,40 @@ internal fun taskDateIn(line: String, field: String): String? =
 
 internal const val DUE_FIELD = "due"
 internal const val DONE_FIELD = "done"
+internal const val PRIORITY_FIELD = "priority"
+
+/// The two levels a task may be given beyond the ordinary (ADR 0015
+/// amendment 2026-10-23). No token is the ordinary level, so the word has
+/// two values and the sort rank three.
+enum class TaskPriority(val token: String, val label: String, val rank: Int) {
+    HIGH("high", "High", 1),
+    LOW("low", "Low", 3),
+}
+
+/// What a line with no priority word, or with `priority:normal`, sorts as.
+const val TASK_NORMAL_RANK = 2
+
+/// § 1's shape for the one word field: `priority:` plus one of three
+/// words, whitespace-separated and position-independent, like a date
+/// token. Mirrors the decoration's pattern in `TasksPlugin.kt`.
+internal val PRIORITY_TOKEN = Regex("""\spriority:(high|normal|low)\b""")
+
+/// The level a line states, or null for the ordinary one — which
+/// `priority:normal` also is: the word is accepted so a person may write
+/// the default out, and it means exactly what leaving it out means.
+fun taskPriorityIn(line: String): TaskPriority? =
+    PRIORITY_TOKEN.find(line)?.groupValues?.get(1)?.let { word -> TaskPriority.entries.firstOrNull { it.token == word } }
+
+/// The one key every task list sorts by: the rank, then the due date —
+/// `~` sorts after any date, so an undated task follows the dated ones of
+/// its rank — with the kernel's path-and-line order breaking ties, which
+/// is the person's own order within a note. One text key rather than a
+/// two-key kernel sort, so the ordering needs no kernel change.
+fun taskOrderKey(priority: TaskPriority?, dueIso: String?): String =
+    "${priority?.rank ?: TASK_NORMAL_RANK}|${dueIso ?: "~"}"
 
 private const val NONE_VALUE = "none"
+private const val NORMAL_VALUE = "normal"
 private const val TODAY_VALUE = "today"
 private const val OVERDUE_VALUE = "overdue"
 private const val WEEK_VALUE = "week"

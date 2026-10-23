@@ -14,15 +14,15 @@ on:
         required: false
         default: false
         type: boolean
-      # Where the MSI installs. per-machine (Program Files, elevated, adds
-      # the firewall rule itself) is what every published release so far is
-      # and what the release pipeline builds until the updater that moves an
-      # all-users install to a per-user one has shipped; per-user
-      # (%LOCALAPPDATA%\Programs\Gilune, no elevation, silent in-app updates)
-      # is the shape after that.
+      # Where the MSI installs. per-user (%LOCALAPPDATA%\Programs\Gilune, no
+      # elevation, silent in-app updates) is the release shape from 1.2.2 on;
+      # releases up to 1.2.1 were per-machine (Program Files, elevated, the
+      # firewall rule added by the installer), and 1.2.0 onward carry the
+      # updater that removes such a copy before installing per-user. The
+      # per-machine shape stays only until no supported release needs it.
       scope:
         required: false
-        default: 'per-machine'
+        default: 'per-user'
         type: string
   workflow_dispatch:
     inputs:
@@ -37,11 +37,11 @@ on:
         default: false
         type: boolean
       scope:
-        description: 'Where the MSI installs: per-machine (Program Files, elevated) or per-user (no elevation)'
+        description: 'Where the MSI installs: per-user (no elevation; the release shape) or per-machine (Program Files, elevated; releases up to 1.2.1)'
         required: false
-        default: 'per-machine'
+        default: 'per-user'
         type: choice
-        options: ['per-machine', 'per-user']
+        options: ['per-user', 'per-machine']
 
 permissions:
   contents: read
@@ -129,7 +129,7 @@ jobs:
             "-Pgilune.version=$VERSION"
       - name: Assemble the Windows application and MSI
         env:
-          SCOPE: ${{ inputs.scope || 'per-machine' }}
+          SCOPE: ${{ inputs.scope || 'per-user' }}
         run: |
           python3 .github/scripts/package-windows-linux.py \
             --libs app/composeApp/build/export/desktop/lib \

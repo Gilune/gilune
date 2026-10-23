@@ -30,6 +30,30 @@ class TaskSearchTest {
     /// does not move a line number every other assertion here counts on.
     private val markerVault: String by lazy { buildMarkerVault() }
 
+    /// A third tiny vault for `priority:` (ADR 0015 amendment 2026-10-23):
+    /// one line per level, the written-out ordinary among them, and a
+    /// prose line carrying the bytes so degradation is proven both ways.
+    private val priorityVault: String by lazy { buildPriorityVault() }
+
+    private fun buildPriorityVault(): String {
+        val root = Files.createTempDirectory("gilune-task-priority").toFile()
+        val file = File(root, "Levels/list.md")
+        file.parentFile?.mkdirs()
+        file.writeText(
+            """
+            ---
+            gilune-id: id-levels
+            ---
+            - [ ] urgent one priority:high
+            - [ ] relaxed one priority:low
+            - [ ] plain one
+            - [ ] stated plain priority:normal
+            A prose line about priority:high, not a task.
+            """.trimIndent(),
+        )
+        return root.toString()
+    }
+
     private fun buildVault(): String {
         val root = Files.createTempDirectory("gilune-task-search").toFile()
         fun write(relPath: String, text: String) {
@@ -125,6 +149,25 @@ class TaskSearchTest {
 
     private fun hits(query: String, on: LocalDate = today): List<SearchHit> =
         searchVault(vault, query, SearchOperators(), types(), on, maxLines = 50)
+
+    // -----------------------------------------------------------------
+    // `priority:` (ADR 0015 amendment 2026-10-23)
+    // -----------------------------------------------------------------
+
+    @Test
+    fun priorityIsAWordOperatorScopedToTaskLines() {
+        assertEquals(listOf("Levels/list.md:1"), rows("type:task priority:high", dir = priorityVault))
+        assertEquals(listOf("Levels/list.md:2"), rows("type:task priority:low", dir = priorityVault))
+        // No word and the word for the default are the same set.
+        assertEquals(listOf("Levels/list.md:3", "Levels/list.md:4"), rows("type:task priority:none", dir = priorityVault))
+        assertEquals(rows("type:task priority:none", dir = priorityVault), rows("type:task priority:normal", dir = priorityVault))
+        // Negating a level is everything but it; a level nobody defined is nothing.
+        assertEquals(listOf("Levels/list.md:2", "Levels/list.md:3", "Levels/list.md:4"), rows("type:task -priority:high", dir = priorityVault))
+        assertEquals(emptyList(), rows("type:task priority:urgent", dir = priorityVault))
+        // Without the type the word is prose, and a text search finds the
+        // bytes wherever they are — the task line and the sentence alike.
+        assertEquals(listOf("Levels/list.md:1", "Levels/list.md:5"), rows("priority:high", dir = priorityVault, types = listOf(NOTE_SEARCH_TYPE)))
+    }
 
     // -----------------------------------------------------------------
     // What a task line is (§ 1).

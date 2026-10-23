@@ -116,7 +116,7 @@ class PluginExtensionsTest {
         val registry = PluginExtensions(listOf(tasksExtensions(), names))
         val plugins = listOf(installedTasksPlugin(), assignment(), installed(names, settings = "bob.jones"))
         val fields = registry.fields(TASK_FIELDS_SLOT, plugins)
-        assertEquals(listOf("due", "assign"), fields.map { it.key })
+        assertEquals(listOf("due", "high", "low", "assign"), fields.map { it.key })
         assertEquals("due:2026-09-06", fields.first().values("tomorrow", today).first().insert)
         assertEquals("assign: @bob.jones", fields.last().values("bob", today).single().insert)
         assertTrue(fields.last().values("alice", today).isEmpty())
@@ -128,11 +128,11 @@ class PluginExtensionsTest {
         val registry = PluginExtensions(listOf(tasksExtensions(), names))
         for (state in listOf("disabled", "removed")) {
             assertTrue(registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(state), assignment(), installed(names))).isEmpty())
-            assertEquals(listOf("due"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(state), installed(names))).map { it.key })
-            assertEquals(listOf("due"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(), installed(names, state))).map { it.key })
+            assertEquals(listOf("due", "high", "low"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(state), installed(names))).map { it.key })
+            assertEquals(listOf("due", "high", "low"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(), installed(names, state))).map { it.key })
         }
-        assertEquals(listOf("due"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment())).map { it.key })
-        assertEquals(listOf("due", "assign"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(), installed(names))).map { it.key })
+        assertEquals(listOf("due", "high", "low"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment())).map { it.key })
+        assertEquals(listOf("due", "high", "low", "assign"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(), installed(names))).map { it.key })
     }
 
     @Test
@@ -141,7 +141,7 @@ class PluginExtensionsTest {
         val registry = PluginExtensions(listOf(tasksExtensions(), names))
         val impostor = installedPlugin("org.example.copy", contributions = names.declaration.contributions)
         val undeclaredOwner = installedPlugin(namesId)
-        assertEquals(listOf("due"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(), impostor, undeclaredOwner)).map { it.key })
+        assertEquals(listOf("due", "high", "low"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), assignment(), impostor, undeclaredOwner)).map { it.key })
     }
 
     @Test
@@ -175,7 +175,7 @@ class PluginExtensionsTest {
         val names = names()
         val registry = PluginExtensions(listOf(tasksExtensions(), names))
         val copy = installedPlugin("org.example.other", contributions = assignment().contributions)
-        assertEquals(listOf("due"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), installed(names), assignment(), copy)).map { it.key })
+        assertEquals(listOf("due", "high", "low"), registry.fields(TASK_FIELDS_SLOT, listOf(installedTasksPlugin(), installed(names), assignment(), copy)).map { it.key })
     }
 
     @Test
