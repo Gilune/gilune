@@ -55,6 +55,97 @@ fn read(store: &Store, rel: &str) -> String {
 
 // ------------------------------------------------------------- markdown
 
+fn rename_revisions(store: &Store) -> Vec<String> {
+    let mut stmt = store
+        .conn()
+        .prepare("SELECT payload FROM revisions WHERE origin = ?1 ORDER BY created_ms")
+        .expect("prepare");
+    let rows = stmt
+        .query_map([super::RENAME_ORIGIN], |r| r.get::<_, String>(0))
+        .expect("query");
+    rows.map(|r| {
+        let payload: serde_json::Value = serde_json::from_str(&r.expect("row")).expect("json");
+        payload["path"].as_str().expect("path").to_string()
+    })
+    .collect()
+}
+
+#[test]
+fn a_rename_is_a_revision_that_carries_the_new_path() {
+    let (_dir, store) = vault();
+    write(&store, "Untitled.md", b"shopping\n");
+    store.reconcile().expect("adopt");
+    let rendered = read(&store, "Untitled.md");
+    assert_eq!(operations_of_kind(&store, crate::operations::OBJECT_REVISED), 0);
+
+    std::fs::rename(store.vault().join("Untitled.md"), store.vault().join("Shopping.md")).expect("rename");
+    let summary = store.reconcile().expect("reconcile");
+    assert_eq!((summary.renames, summary.edits), (1, 0));
+    assert_eq!(rename_revisions(&store), vec!["Shopping.md".to_string()], "the head now names where it is");
+    assert_eq!(operations_of_kind(&store, crate::operations::OBJECT_REVISED), 1, "one operation to carry it");
+
+    // The next projection rewrites the header for the new revision and
+    // leaves the words alone; after that the vault is settled.
+    assert_eq!(store.project().expect("project").written, 1);
+    let after = read(&store, "Shopping.md");
+    assert!(after.ends_with("---\nshopping\n"), "{after}");
+    assert_ne!(after, rendered, "the header carries the rename revision");
+    assert_eq!(store.reconcile().expect("again"), super::ReconcileSummary::default());
+    assert_eq!(rename_revisions(&store).len(), 1, "settled: no second rename");
+
+    // Renamed and edited in one pass: two revisions, the edit on top of
+    // the rename, so the path survives the edit.
+    std::fs::rename(store.vault().join("Shopping.md"), store.vault().join("Groceries.md")).expect("rename");
+    write(&store, "Groceries.md", after.replace("shopping", "shopping, with milk").as_bytes());
+    let summary = store.reconcile().expect("reconcile");
+    assert_eq!((summary.renames, summary.edits), (1, 1));
+    let head: String = store
+        .conn()
+        .query_row("SELECT payload FROM revisions ORDER BY created_ms DESC, revision_id DESC LIMIT 1", [], |r| r.get(0))
+        .expect("head");
+    let head: serde_json::Value = serde_json::from_str(&head).expect("json");
+    assert_eq!(head["path"], "Groceries.md");
+    assert_eq!(head["text"], "shopping, with milk\n");
+}
+
+#[test]
+fn renaming_a_kept_note_records_the_revision_and_no_operation() {
+    let (_dir, store) = vault();
+    write(&store, "Private/diary.md", b"dear diary\n");
+    store.reconcile().expect("adopt");
+    write(&store, &format!("Private/{LOCAL_MARKER}"), b"");
+    store.reconcile().expect("enter local scope");
+    let before = operations_of_kind(&store, crate::operations::OBJECT_REVISED);
+
+    std::fs::rename(store.vault().join("Private/diary.md"), store.vault().join("Private/journal.md")).expect("rename");
+    assert_eq!(store.reconcile().expect("reconcile").renames, 1);
+    assert_eq!(rename_revisions(&store), vec!["Private/journal.md".to_string()]);
+    assert_eq!(operations_of_kind(&store, crate::operations::OBJECT_REVISED), before, "nothing of a kept note leaves");
+}
+
+#[test]
+fn a_rename_made_before_renames_travelled_is_sent_once_on_the_next_pass() {
+    let (_dir, store) = vault();
+    write(&store, "Untitled.md", b"old world\n");
+    store.reconcile().expect("adopt");
+    // The pre-amendment shape, by hand: the file moved and the record
+    // followed it, and no revision was written.
+    std::fs::rename(store.vault().join("Untitled.md"), store.vault().join("World.md")).expect("rename");
+    store.conn().execute("UPDATE projections SET rel_path = 'World.md'", []).expect("old record");
+    assert_eq!(operations_of_kind(&store, crate::operations::OBJECT_REVISED), 0);
+    // Reconcile sees a file that matches its record and reads nothing;
+    // the catch-up is the projection's, which visits every head anyway.
+    assert_eq!(store.reconcile().expect("reconcile"), super::ReconcileSummary::default());
+
+    assert_eq!(store.project().expect("catch up").written, 1, "the header takes the rename revision");
+    assert_eq!(rename_revisions(&store), vec!["World.md".to_string()]);
+    assert_eq!(operations_of_kind(&store, crate::operations::OBJECT_REVISED), 1);
+    assert!(read(&store, "World.md").ends_with("---\nold world\n"));
+    assert_eq!(store.project().expect("again").written, 0, "once");
+    assert_eq!(store.reconcile().expect("settled"), super::ReconcileSummary::default());
+    assert_eq!(rename_revisions(&store).len(), 1);
+}
+
 #[test]
 fn a_plain_markdown_file_is_adopted_with_a_header_and_its_body_kept_byte_for_byte() {
     let (_dir, store) = vault();

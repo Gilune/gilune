@@ -1751,6 +1751,28 @@ gates promises) are ratified. **Next: application-level engineering — see
      were never provable on a runner). RULE: Windows paths in shared or
      desktop code that tests exercise are built as text and compared as
      `File.path`; never `absolutePath` and never `File(parent, child)`.
+   - **Renames travel (2026-10-23, Fable; owner report the morning after
+     1.2.0: Ctrl+N notes arrived as `Untitled.md` and stayed so).** A
+     rename was followed by id locally and raised no operation, so the
+     peer kept the FIRST path it saw — and since adoption, a new file is
+     adopted before the person has typed its title. ADR 0007 amendment
+     2026-10-23: `record_rename` = `move_record` + `rename_as_revision`
+     (head document with `path`, origin `rename`, `Announce::Silent`;
+     `add_revision` withholds the op for kept notes); `project()` compares
+     where a note is with where its head says: record on the head's own
+     revision + different path = OUR unsent rename → catch-up revision
+     (the pre-fix `Untitled` copies fix themselves on the first sync);
+     record on an older revision = an ARRIVAL → `follow_rename` moves the
+     file (target must be free, else occupied notice; `projected_path`
+     refuses escapes); conflicted head → local name stands until an edit
+     resolves (resolver's name wins). NOT in reconcile: a tracked file
+     matching its record takes the stat fast path and reads nothing, so
+     a check there never ran (first attempt; test caught it). Tests:
+     adopt_tests +3, gate_c +4 incl. the THREE-DEVICE wrong-order pull —
+     which taught that a full replica forwards every stream, so "order"
+     is device_id = vault age: make the EDITOR's vault older to pull the
+     edit first (gilune-sync gained rusqlite as a dev-dep to write the
+     pre-fix shape by hand). Kernel-only; no FFI/bindings change.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

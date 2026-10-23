@@ -291,3 +291,52 @@ vault copied while closed restoring completely on another machine.
   it; the same filename made on both devices keeps both; two fresh
   vaults' plugin pages converge without a notice; `cargo test
   --workspace`, clippy and the desktop suite green.
+
+- **2026-10-23 (renames travel).** Found by the owner the morning after
+  the amendment above shipped: a note made with Ctrl+N reached the other
+  device as `Untitled.md` and stayed so. The 2026-10-22 build adopts a new
+  file on the next pass, so the peer received the object under its first
+  name; the rename that followed was, as the decision above says,
+  "a metadata change" — the record followed the file by id and nothing
+  was sent. Notes that existed before sync had their final names when
+  adopted, which is why only new notes showed it.
+
+  **A rename is a revision.** When reconcile follows a moved file, it also
+  writes a revision of the head document with `path` set to the new place
+  (origin `rename`, silent: no words changed, so no processor is told),
+  and so an `object-revised` operation carries the name to every peer the
+  way an edit does. A note kept on this device records the revision and
+  no operation, as every other revision of it. The next projection
+  rewrites the header for the new revision and leaves the words alone.
+
+  **The receiver follows it unless it renamed too.** The projection pass
+  compares where a note is with where its head says it is. They differ in
+  two shapes, and the record tells them apart. A record still on the
+  head's own revision means the file was moved here after that head was
+  projected and nobody was told — a rename made before this amendment —
+  so it is written now as the revision it should have been, once; this is
+  the catch-up, and it is what gives the owner's existing `Untitled`
+  copies their names on the first sync after the update, with nobody
+  touching them. A record on an older revision means the head is new and
+  names a new place: a rename that arrived, and the file moves to it (the
+  target has to be free; an unrelated file there is preserved and the
+  note held where it is with the occupied notice). A conflicted head — a
+  rename or edit made here concurrently is a second head — leaves this
+  device's name standing; the edit that resolves the conflict names the
+  path of the device that made it, and both devices converge on that.
+  Pages are not asked (they name their paths another way); a capture
+  never renamed names none and is untouched.
+
+  **Consequences stated.** A rename made on one device before the update
+  and a rename of the same note made on another after it: the later,
+  recorded rename wins, because the earlier one was never recorded as a
+  revision. The three-device wrong-order pull (the S4 lesson) is in the
+  gate: a device meeting only the editor pulls the edit before the object
+  and its rename, waits on the referent rather than landing the old name,
+  and settles on the next pass. Gate rows: `adopt_tests` (rename is one
+  `object-revised` carrying the path; a kept note's rename sends none; a
+  pre-amendment rename is sent once by the projection pass), `gate_c`
+  (renamed on one device → renamed on the other, incl. rename-and-edit in
+  one pass and an edit back; renamed on both at once keeps each name
+  until an edit resolves it; pre-amendment rename reaches the peer; third
+  device out of order).

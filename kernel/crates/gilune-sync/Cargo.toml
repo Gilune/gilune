@@ -68,3 +68,5 @@ mdns-sd = { version = "0.21", default-features = false }
 
 [dev-dependencies]
 tempfile.workspace = true
+# The pre-amendment shape of a rename is written by hand in one gate_c row.
+rusqlite.workspace = true

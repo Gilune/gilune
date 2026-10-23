@@ -93,6 +93,9 @@ pub(crate) fn with_current_projection_metadata(source: &str, current: &str) -> R
 
 /// Origin recorded for reconciled external document edits.
 pub(crate) const EXTERNAL_EDIT_ORIGIN: &str = "external-edit";
+/// A revision that changes where a note is and nothing else (ADR 0007,
+/// 2026-10-23): the head document with `path` set to the file's new place.
+pub(crate) const RENAME_ORIGIN: &str = "rename";
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct ProjectSummary {
@@ -317,8 +320,8 @@ impl Store {
             }
         }
         ordered.extend(arrived);
-        for (head, row) in ordered {
-            let rel_path = match self.projection_path(&head) {
+        for (mut head, mut row) in ordered {
+            let mut rel_path = match self.projection_path(&head) {
                 Err(KernelError::DocumentInvalid { detail }) => {
                     summary.held_back += 1;
                     crate::alerts::raise(self.conn(), crate::alerts::VAULT_CONTENT_UNREADABLE,
@@ -327,6 +330,39 @@ impl Store {
                 }
                 result => result?,
             };
+            // **Where the note is and where its head says it is** (ADR
+            // 0007, 2026-10-23). When they differ and the head is not
+            // conflicted, the record decides which way to settle it. A
+            // record still on the head's own revision means the file was
+            // moved here after that head was projected and nobody was
+            // told — a rename made before renames travelled — so it is
+            // written now as the revision it should have been, once. A
+            // record on an older revision means the head is new and names
+            // the new place: a rename that arrived, and the file follows
+            // it. A conflicted head — a rename or edit made here at the
+            // same time is a second head — leaves this device's name
+            // standing until the conflict is resolved.
+            if let Some(wanted) = Self::path_named_by(&head.payload) {
+                if let Some(record) = row.take() {
+                    if wanted == record.rel_path || head.conflicted {
+                        row = Some(record);
+                    } else if record.revision_id == head.revision_id {
+                        self.rename_as_revision(&head.object_id, &record.rel_path)?;
+                        if let Some(fresh) = self.live_head(&head.object_id)? {
+                            head = fresh;
+                        }
+                        row = Some(record);
+                    } else {
+                        match self.follow_rename(&head, &record, &wanted)? {
+                            Some(moved) => {
+                                rel_path = moved.clone();
+                                row = Some(Recorded { rel_path: moved, ..record });
+                            }
+                            None => row = Some(record),
+                        }
+                    }
+                }
+            }
             if self.is_quarantined(&rel_path)? || self.has_open_tombstone(&head.object_id)? {
                 summary.held_back += 1;
                 continue;
@@ -1605,16 +1641,111 @@ impl Store {
         })
     }
 
-    /// Follow a file that moved. Files are matched by front-matter id,
-    /// never by name (ADR 0007), so this is a metadata change — and the
-    /// bytes did not move with it, so the stat facts are re-taken rather
-    /// than assumed.
+    /// Follow a file that moved here. Files are matched by front-matter
+    /// id, never by name (ADR 0007), so the record is a metadata change —
+    /// and the rename is then a revision (amendment 2026-10-23), so the
+    /// new name reaches every peer the way an edit does. A deleted
+    /// object's file moving is only the record following it.
     fn record_rename(
         &self,
         object_id: &str,
         previous_rel_path: &str,
         rel_path: &str,
         revision_id: &str,
+    ) -> Result<()> {
+        self.move_record(object_id, previous_rel_path, rel_path, revision_id, ChangeCause::Reconcile)?;
+        if !self.is_deleted(object_id)? {
+            self.rename_as_revision(object_id, rel_path)?;
+        }
+        Ok(())
+    }
+
+    /// The path a head's own document names, when it names one: an
+    /// adopted note's, or the one a rename revision set. Pages name theirs
+    /// another way and are not asked; a capture that was never renamed
+    /// names none.
+    fn path_named_by(payload: &str) -> Option<String> {
+        let value: serde_json::Value = serde_json::from_str(payload).ok()?;
+        if value.get(crate::pages::PAYLOAD_KEY).is_some() {
+            return None;
+        }
+        value.get("path").and_then(|v| v.as_str()).map(str::to_string)
+    }
+
+    /// A rename as a revision: the head document with `path` set to where
+    /// the file is, origin `rename`, and so an operation carrying the new
+    /// name to every peer — or none, for a note kept on this device
+    /// (`add_revision` withholds it). Silent, because a rename changes no
+    /// words: no processor has anything to do with it. The record moves
+    /// onto the new revision as an external edit's does — the file on
+    /// disk is this revision's words, only its header lags — so the
+    /// document reads as managed, and the next projection rewrites the
+    /// header as it does for any revision.
+    fn rename_as_revision(&self, object_id: &str, rel_path: &str) -> Result<()> {
+        let Some(head) = self.live_head(object_id)? else { return Ok(()) };
+        let Ok(mut document) = serde_json::from_str::<serde_json::Value>(&head.payload) else {
+            return Ok(());
+        };
+        if document.get(crate::pages::PAYLOAD_KEY).is_some() || !document.is_object() {
+            return Ok(());
+        }
+        document["path"] = serde_json::Value::String(rel_path.to_string());
+        let payload = document.to_string();
+        let revision_id = ids::new_id();
+        let created_ms = ids::now_ms();
+        self.write_txn(|| {
+            add_revision(
+                self.conn(),
+                object_id,
+                &revision_id,
+                &payload,
+                RENAME_ORIGIN,
+                created_ms,
+                Announce::Silent,
+            )?;
+            self.conn().execute(
+                "UPDATE projections SET revision_id = ?2 WHERE object_id = ?1",
+                rusqlite::params![object_id, revision_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Move this device's file to the path an arrived head names and let
+    /// the record follow. The target has to be free: an unrelated file
+    /// there is preserved and the note is held where it is with the same
+    /// notice a new arrival gets when its path is occupied. A path that
+    /// would leave the vault is not followed at all.
+    fn follow_rename(&self, head: &Head, record: &Recorded, wanted: &str) -> Result<Option<String>> {
+        let Ok(wanted) = self.projected_path(wanted) else { return Ok(None) };
+        let from = self.vault().join(&record.rel_path);
+        let to = self.vault().join(&wanted);
+        if to.exists() {
+            self.report_occupied_projection(&head.object_id, &wanted)?;
+            return Ok(None);
+        }
+        if from.exists() {
+            if let Some(parent) = to.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| KernelError::Io { path: parent.to_path_buf(), source: e })?;
+            }
+            std::fs::rename(&from, &to).map_err(|e| KernelError::Io { path: to.clone(), source: e })?;
+        }
+        self.move_record(&head.object_id, &record.rel_path, &wanted, &record.revision_id, ChangeCause::Sync)?;
+        Ok(Some(wanted))
+    }
+
+    /// The record of where a file is, after it moved — by a hand here
+    /// (`Reconcile`) or by a rename that arrived (`Sync`). The bytes did
+    /// not move with the record, so the stat facts are re-taken rather
+    /// than assumed.
+    fn move_record(
+        &self,
+        object_id: &str,
+        previous_rel_path: &str,
+        rel_path: &str,
+        revision_id: &str,
+        cause: ChangeCause,
     ) -> Result<()> {
         let stat = stat_of(&self.vault().join(rel_path));
         self.write_txn(|| {
@@ -1638,7 +1769,7 @@ impl Store {
                     previous_rel_path: Some(previous_rel_path),
                     object_id: Some(object_id),
                     revision_id: Some(revision_id),
-                    cause: ChangeCause::Reconcile,
+                    cause,
                 },
             )?;
             Ok(())
@@ -1668,7 +1799,7 @@ impl Store {
         }
         Ok(match head.origin.as_str() {
             crate::capture::CAPTURE_ORIGIN => ChangeCause::Capture,
-            EXTERNAL_EDIT_ORIGIN => ChangeCause::ExternalEdit,
+            EXTERNAL_EDIT_ORIGIN | RENAME_ORIGIN => ChangeCause::ExternalEdit,
             origin if origin.starts_with(crate::processor::ORIGIN_PREFIX) => ChangeCause::Processor,
             _ => ChangeCause::LocalEdit,
         })
