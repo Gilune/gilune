@@ -221,8 +221,13 @@ fun installScript(
 /// launcher the per-user installer will have put in place.
 data class Transition(val removeScript: File, val launcher: File)
 
-/// Where Windows registers products installed for all users.
-const val ALL_USERS_UNINSTALL_KEY = """HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall"""
+/// Where Windows Installer records the products installed for all users:
+/// under the machine's own SID, keyed by each product code in its packed
+/// form. Not the HKLM `Uninstall` key — Windows can list a per-user
+/// product there too, and a check reading it finds the per-user copy
+/// that is asking, then offers to uninstall it.
+const val ALL_USERS_PRODUCTS_KEY =
+    """HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products"""
 
 /// PowerShell that uninstalls every Gilune registered for all users. It
 /// needs administrator rights, so when it has none it starts itself again
@@ -233,7 +238,7 @@ const val ALL_USERS_UNINSTALL_KEY = """HKLM:\Software\Microsoft\Windows\CurrentV
 fun removeAllUsersScript(
     log: File,
     msiexec: String = """${'$'}env:SystemRoot\System32\msiexec.exe""",
-    uninstallKey: String = ALL_USERS_UNINSTALL_KEY,
+    productsKey: String = ALL_USERS_PRODUCTS_KEY,
     elevate: Boolean = true,
 ): String {
     val elevation = if (!elevate) "" else """
@@ -243,13 +248,22 @@ fun removeAllUsersScript(
         |    exit ¤elevated.ExitCode
         |}
         |""".trimMargin()
+    // The key names a product by its packed code: the first three groups
+    // reversed, the last eight bytes each with their two digits swapped.
     return """
         |¤ErrorActionPreference = 'Stop'
-        |¤products = @(Get-ItemProperty -Path '$uninstallKey\*' -ErrorAction SilentlyContinue | Where-Object { ¤_.DisplayName -eq 'Gilune' })
+        |function Unpack([string]¤p) {
+        |    ¤r = { param(¤s) -join ¤s[(¤s.Length - 1)..0] }
+        |    ¤tail = -join (16..31 | ForEach-Object { ¤p[¤_ -bxor 1] })
+        |    '{' + (& ¤r ¤p.Substring(0, 8)) + '-' + (& ¤r ¤p.Substring(8, 4)) + '-' + (& ¤r ¤p.Substring(12, 4)) + '-' + ¤tail.Substring(0, 4) + '-' + ¤tail.Substring(4) + '}'
+        |}
+        |¤products = @(Get-ChildItem -Path '${productsKey.replaceFirst("\\", ":\\")}' -ErrorAction SilentlyContinue | Where-Object {
+        |    (Get-ItemProperty -Path (Join-Path ¤_.PSPath 'InstallProperties') -ErrorAction SilentlyContinue).DisplayName -eq 'Gilune'
+        |} | ForEach-Object { Unpack ¤_.PSChildName })
         |if (¤products.Count -eq 0) { exit 0 }
         |$elevation
         |foreach (¤product in ¤products) {
-        |    ¤run = Start-Process -FilePath "$msiexec" -Wait -PassThru -ArgumentList @('/x', ¤product.PSChildName, '/passive', '/norestart', '/l*v', ('"' + '${log.absolutePath}' + '"'))
+        |    ¤run = Start-Process -FilePath "$msiexec" -Wait -PassThru -ArgumentList @('/x', ¤product, '/passive', '/norestart', '/l*v', ('"' + '${log.absolutePath}' + '"'))
         |    if (¤run.ExitCode -notin @(0, 3010)) { exit ¤run.ExitCode }
         |}
         |exit 0
@@ -258,11 +272,12 @@ fun removeAllUsersScript(
 
 /// Whether a Gilune installed for all users is still registered: the copy
 /// a declined uninstall left behind, which no longer updates. Asked only
-/// of a per-user build.
-fun allUsersCopyPresent(): Boolean = runCatching {
+/// of a per-user build. The key is a parameter only so a test can stand
+/// it in.
+fun allUsersCopyPresent(productsKey: String = ALL_USERS_PRODUCTS_KEY): Boolean = runCatching {
     val process = ProcessBuilder(
         System.getenv("SystemRoot").orEmpty() + """\System32\reg.exe""", "query",
-        """HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall""", "/s", "/f", "Gilune", "/d", "/e",
+        productsKey, "/s", "/f", "Gilune", "/d", "/e",
     ).redirectErrorStream(true).start()
     val output = process.inputStream.use { it.readBytes().decodeToString() }
     process.waitFor() == 0 && "Gilune" in output

@@ -936,6 +936,28 @@ Each stage is shippable alone and in order.
   "blocked" afterwards. Gate 13 reads accordingly: the one prompt is the
   app's, worded, once per machine, and never on an update. The per-machine
   package keeps its installer-added rule for as long as it is built.
+- **2026-10-24 (an install started as administrator adds the rule).**
+  Owner: "on corporate laptops you'll often have to do the initial install
+  as an admin, and doing all the rules as part of that initial install is
+  easier." Where elevation goes through a tool such as Admin By Request,
+  the app's own `-Verb RunAs` request may be one the person cannot approve
+  at all, while running the installer as administrator is routine. The
+  per-user package therefore carries the per-machine package's `netsh`
+  steps unchanged, each scheduled on `Privileged AND (…)`: an install
+  someone started as administrator clears every rule for the launcher and
+  adds the Private allow, exactly as the per-machine installer did; an
+  install without rights — a double-click by a standard user, and every
+  in-app update — schedules none of them and touches no rule. The rule
+  names `%LOCALAPPDATA%\Programs\Gilune\Gilune.exe`, a path every update
+  keeps, so it survives updates without elevation. The app's step above is
+  unchanged and remains the route for an install that had no rights; it
+  finds ALLOWED and asks nothing after an administrator install. Cost
+  accepted: an uninstall without rights cannot remove the rule and leaves
+  it naming a launcher that is gone. Evidence: the installer lifecycle run
+  (`.github/linux-windows-build.md`, 24 October 2026) installs as
+  administrator over seeded Block rows, then upgrades, refuses a
+  downgrade and uninstalls under a Basic User token, and installs under
+  that token before an administrator upgrade.
 
 ## Ratification record
 
