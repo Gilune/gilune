@@ -1,5 +1,28 @@
 # Windows artifacts built on Linux
 
+## Firewall rule from an administrator install, 24 October 2026
+
+Owner: on corporate laptops the first install is run as administrator
+anyway (here through Admin By Request, which cannot approve the app's own
+`-Verb RunAs` request), so that install should add the rule; updates must
+still need no administrator. The per-user package now carries the
+per-machine `netsh` steps unchanged, each conditioned `Privileged AND (…)`
+(ADR 0016 and 0019 amendments of this date). The lifecycle test gained
+`MsiWithoutRights`: `runas /trustlevel:0x20000` (Basic User, same account
+and profile), which checks `IsInRole(Administrator)` is false before
+msiexec runs and refuses to judge a run that still had rights.
+
+| Run | Result | Finding |
+| --- | --- | --- |
+| [40077857222](https://github.com/Gilune/gilune/actions/runs/40077857222) | Administrator steps passed; first install without rights refused, 1625 | `Machine policy value 'DisableMsi' is 1`: the hosted Windows Server image refuses non-managed installs without rights although no policy key is set (`installer-policy.txt`: "not set" — the server default). A Windows client with no policy, like the owner's laptop, allows them. The test now sets `DisableMsi=0` on the disposable runner and records the image's value. |
+| [40079319988](https://github.com/Gilune/gilune/actions/runs/40079319988) | **Passed** | `lifecycle.txt`: install as administrator over seeded Block rows adds one Private rule and leaves no Block, repair without a duplicate, launch owning the sync port, uninstall removing every rule, refusal beside the all-users v1.0.3, administrator install then upgrade / downgrade refusal / uninstall without rights keeping the rule (left behind after the uninstall, as designed), install without rights adding none, administrator upgrade adding it. MSI logs: `Privileged = 1` and the add scheduled in `clean-install` and `administrator-upgrade`; `Skipping action: GiluneFirewallAdd (condition is false)` in `upgrade`, `standard-install` and `upgrade-uninstall`. Package tests 27 + MSI regression 8 green. Windows job 2m 27s. |
+
+Gaps: the runner's UAC is off, so "started as administrator" there is a
+full admin token from the start, not Admin By Request's elevation of a UAC
+session — the same `Privileged` condition, not the same route to it. A tool
+that elevates by switching to another account installs Gilune into that
+account's profile; nothing here can detect it.
+
 ## Per-user install, 22 October 2026
 
 Owner, after 1.1.1: the in-app updater asks for administrator approval on
