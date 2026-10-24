@@ -1,9 +1,10 @@
 // Windows Firewall, as the installed app sees it. Sync listens on a port
 // (ADR 0019 § 2), and Windows lets other devices reach it only through an
 // inbound rule for this launcher on the Private profile. A per-machine
-// install adds that rule itself; a per-user install has no elevated moment,
-// so the app asks for it once: `Gilune.exe --allow-firewall`, started with
-// administrator approval. Either way the app can read where it stands,
+// install adds that rule itself, and so does a per-user install someone
+// started as administrator; any other per-user install has no elevated
+// moment, so the app asks for it once: `Gilune.exe --allow-firewall`,
+// started with administrator approval. Either way the app can read where it stands,
 // because Windows keeps every rule as a string under a registry key any
 // user can read, in no display language at all.
 
