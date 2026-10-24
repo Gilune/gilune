@@ -1737,7 +1737,8 @@ gates promises) are ratified. **Next: application-level engineering — see
      for one full run's cost; a failed tag run costs the same AND a tag
      move. **v1.2.0 RELEASED the same evening** —
      https://github.com/Gilune/gilune/releases/tag/v1.2.0 (MSI 138.3 MB,
-     DEB 110.0 MB, debug APK 123.8 MB; tag run 39817480975 on c181e22) =
+     DEB 110.0 MB, debug APK 123.8 MB; tag run 39817480975 on d73ffb2 —
+     id as rewritten 2026-10-24, see the history-rewrite bullet) =
      1.1.2 + PR #20 (per-user Windows install, silent updates, the app's
      own elevated firewall request; `firewallRulesForThisApp` REPLACED
      by WindowsFirewall.kt's registry reader — never re-add the
@@ -1775,7 +1776,8 @@ gates promises) are ratified. **Next: application-level engineering — see
      pre-fix shape by hand). Kernel-only; no FFI/bindings change.
      **v1.2.1 RELEASED (2026-10-23)** = 1.2.0 + PR #26 —
      https://github.com/Gilune/gilune/releases/tag/v1.2.1 (MSI 138.3 MB,
-     DEB 109.9 MB, debug APK 123.8 MB; tag run 39938857749 on c6dd22f,
+     DEB 109.9 MB, debug APK 123.8 MB; tag run 39938857749 on e6afb6e
+     (rewritten id),
      first green on the first try). The owner's existing Untitled copies
      rename themselves on the first sync after both devices update.
    - **People: where pages go + Create connection (2026-10-23, Fable,
@@ -1838,7 +1840,8 @@ gates promises) are ratified. **Next: application-level engineering — see
    - **v1.2.2 RELEASED (2026-10-23, Fable; three PRs merged at once at the
      owner's ask)** — https://github.com/Gilune/gilune/releases/tag/v1.2.2
      (MSI 138.3 MB, DEB 110.0 MB, debug APK 123.9 MB; tag run 39964981192
-     on 2eed7c7, green first time) = 1.2.1 + #28 (installer session: MSI
+     on 4ab92e0 (rewritten id), green first time) = 1.2.1 + #28 (installer
+     session: MSI
      built PER-USER by default — 1.2.1 had still been per-machine, so its
      update asked twice; 1.2.2 is the first per-user package and the
      update onto it is the one transition) + #30 (the owner's fork: task
@@ -1847,6 +1850,33 @@ gates promises) are ratified. **Next: application-level engineering — see
      order #28, #30, then #29 after bringing main in here: the only
      conflict was CLAUDE.md (two status bullets at one anchor; both kept).
      Desktop 908/0/10 on the merged tree before the push.
+   - **History rewritten to remove the work identity (2026-10-24, Fable;
+     owner ask after the public repo listed david-digisteel as a
+     contributor).** 24 commits (2026-10-03 CI round, 2026-10-19 editor/
+     people round as "David McLean", 2026-10-22 installer round incl. the
+     PR #17 merge) and the v1.1.1 tag object carried
+     `d.mclean@voortman.net`, all made before the `--local` identity was
+     set. Fix: `git filter-repo --mailmap`, RANGE-LIMITED (`--refs
+     ^e06550f …`) so the 160 earlier, SSH-signed commits keep their ids —
+     a full pass had renamed every commit because git 2.29's fast-export
+     drops signatures; 92 commits (e06550f's descendants) and 20 refs
+     rewritten, every tree verified identical, zero work-email identities
+     left. Published with the Build workflow DISABLED for the push (a tag
+     push always runs the Release job) and re-enabled after; main + tags
+     v1.0.7–v1.2.3 force-pushed IN PLACE (deleting a tag turns its Release
+     into a draft — never delete-then-recreate), all 12 releases intact;
+     ten merged branches deleted; local worktrees re-pointed via the
+     commit map (identical trees, so uncommitted work untouched); global
+     `includeIf "gitdir/i:D:/CuttingCode/SneddoBuilds/"` now commits as
+     sneddobuilds under that folder with no local config. CONSEQUENCES:
+     every commit id from 2026-10-03 onward changed — short ids in older
+     notes are stale (the three release ids above were corrected; the
+     1.2.x releases are d73ffb2 / e6afb6e / 4ab92e0, v1.2.3 = afa3fdd);
+     the 92 rewritten commits are UNSIGNED (earlier ones keep their SSH
+     signatures); the old objects survive on GitHub behind refs/pull/13–31
+     and by id until the owner asks GitHub Support to purge them — PR
+     pages still show the old author. "claude" remains a listed
+     contributor (authored commits + trailers), deliberately untouched.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
