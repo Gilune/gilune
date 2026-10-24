@@ -315,43 +315,74 @@ class UpdatesTest {
         assertFalse("powershell" in installScript(msi, old, emptyList(), File(temp, "l")), "a per-user install needs no removal step")
     }
 
-    @Test fun theRemovalScriptUninstallsEveryGiluneRegisteredForAllUsers() {
-        if (!System.getProperty("os.name").startsWith("Windows")) return
-        val dir = File(temp, "remove").apply { mkdirs() }
+    /// A stand-in for Windows Installer's UserData key in this user's hive:
+    /// the machine's products under S-1-5-18, a person's under their SID.
+    private class StandInProducts : AutoCloseable {
+        val root = """HKCU\Software\GiluneTest\UserData-${System.nanoTime()}"""
+        val machine = """$root\S-1-5-18\Products"""
+        val user = """$root\S-1-5-21-1-2-3-1001\Products"""
+
+        fun add(products: String, packed: String, name: String) =
+            assertEquals(0, reg("add", """$products\$packed\InstallProperties""", "/v", "DisplayName", "/d", name, "/f"))
+
+        override fun close() { reg("delete", root, "/f") }
+
+        private fun reg(vararg args: String) = ProcessBuilder("reg", *args)
+            .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor()
+    }
+
+    /// Runs the removal script against [products] with a stub msiexec and
+    /// answers the command lines it was given.
+    private fun removalRun(products: String, name: String): List<String> {
+        val dir = File(temp, name).apply { mkdirs() }
         val record = File(dir, "record.txt")
         val stub = File(dir, "stub-msiexec.cmd").apply {
             writeText("@echo off\r\necho msiexec %* >> \"${record.absolutePath}\"\r\nexit /b 0\r\n")
         }
-        // A stand-in for the all-users Uninstall key, in this user's hive.
-        val key = """HKCU\Software\GiluneTest\Uninstall-${System.nanoTime()}"""
-        fun reg(vararg args: String) = ProcessBuilder("reg", *args)
-            .redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start().waitFor()
-        try {
-            assertEquals(0, reg("add", """$key\{AAAA-1}""", "/v", "DisplayName", "/d", "Gilune", "/f"))
-            assertEquals(0, reg("add", """$key\{BBBB-2}""", "/v", "DisplayName", "/d", "Other", "/f"))
-            val script = File(dir, "remove.ps1").apply {
-                writeText(
-                    removeAllUsersScript(
-                        File(dir, "remove.log"), msiexec = stub.absolutePath,
-                        uninstallKey = key.replaceFirst("HKCU\\", "HKCU:\\"), elevate = false,
-                    ).replace("\n", "\r\n"),
-                )
-            }
-            val run = ProcessBuilder(
-                "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath,
-            ).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
-            assertTrue(run.waitFor(60, TimeUnit.SECONDS), "the script finishes")
-            assertEquals(0, run.exitValue())
-            val lines = record.readLines().map { it.trim() }
-            assertEquals(1, lines.size, "only the Gilune product is removed: $lines")
-            assertTrue(lines[0].startsWith("msiexec /x {AAAA-1} /passive /norestart /l*v"), lines[0])
-            // With elevation left in, a run without administrator rights asks
-            // Windows for them, once, by starting itself again.
-            val real = removeAllUsersScript(File(dir, "l"))
-            assertTrue("-Verb RunAs" in real && "\$PSCommandPath" in real && ALL_USERS_UNINSTALL_KEY in real, real)
-        } finally {
-            reg("delete", key, "/f")
+        val script = File(dir, "remove.ps1").apply {
+            writeText(
+                removeAllUsersScript(File(dir, "remove.log"), msiexec = stub.absolutePath, productsKey = products, elevate = false)
+                    .replace("\n", "\r\n"),
+            )
         }
+        val run = ProcessBuilder(
+            "powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script.absolutePath,
+        ).redirectOutput(ProcessBuilder.Redirect.DISCARD).redirectError(ProcessBuilder.Redirect.DISCARD).start()
+        assertTrue(run.waitFor(60, TimeUnit.SECONDS), "the script finishes")
+        assertEquals(0, run.exitValue())
+        return if (record.exists()) record.readLines().map { it.trim() } else emptyList()
+    }
+
+    @Test fun theRemovalScriptUninstallsEveryGiluneRegisteredForAllUsers() {
+        if (!System.getProperty("os.name").startsWith("Windows")) return
+        StandInProducts().use { keys ->
+            // {8FE39D9E-E181-4511-8D22-CA94D3276F66}, packed as Windows keys it.
+            keys.add(keys.machine, "E9D93EF8181E1154D822AC493D72F666", "Gilune")
+            keys.add(keys.machine, "0123456789ABCDEF0123456789ABCDEF", "Other")
+            assertTrue(allUsersCopyPresent(keys.machine))
+            val lines = removalRun(keys.machine, "remove")
+            assertEquals(1, lines.size, "only the Gilune product is removed: $lines")
+            assertTrue(lines[0].startsWith("msiexec /x {8FE39D9E-E181-4511-8D22-CA94D3276F66} /passive /norestart /l*v"), lines[0])
+        }
+        // With elevation left in, a run without administrator rights asks
+        // Windows for them, once, by starting itself again.
+        val real = removeAllUsersScript(File(temp, "l"))
+        assertTrue("-Verb RunAs" in real && "\$PSCommandPath" in real, real)
+        assertTrue("""HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData\S-1-5-18\Products""" in real, real)
+    }
+
+    @Test fun aPerUserGiluneIsNeitherAnAllUsersCopyNorRemoved() {
+        if (!System.getProperty("os.name").startsWith("Windows")) return
+        // The per-user copy asking is registered under its person's SID,
+        // and nothing under the machine's names Gilune: no copy to report,
+        // and the removal must not uninstall the copy that is running.
+        StandInProducts().use { keys ->
+            keys.add(keys.user, "E9D93EF8181E1154D822AC493D72F666", "Gilune")
+            keys.add(keys.machine, "0123456789ABCDEF0123456789ABCDEF", "Other")
+            assertFalse(allUsersCopyPresent(keys.machine))
+            assertEquals(emptyList(), removalRun(keys.machine, "per-user"))
+        }
+        assertTrue("S-1-5-18" in ALL_USERS_PRODUCTS_KEY && "Uninstall" !in ALL_USERS_PRODUCTS_KEY, ALL_USERS_PRODUCTS_KEY)
     }
 
     @Test fun miniJsonReadsWhatGitHubSends() {
