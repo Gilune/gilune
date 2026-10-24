@@ -62,6 +62,17 @@ function Msi([string]$operation, [string]$path, [string]$label, [switch]$ExpectF
 # wait, so the wrapper writes msiexec's exit code to a file this polls for.
 # Its files live in the account's own temp folder: an ACE for Administrators
 # grants a deny-only token nothing, so the results folder may be read-only to it.
+# The hosted image sets DisableMsi=1 ("non-managed installs need an
+# administrator"), which refuses every install without rights with 1625 before
+# the package is read. A laptop without that policy is the case under test, so
+# the runner's value is recorded and lifted for this run.
+$installerPolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Installer'
+if ($perUser) {
+    $hosted = (Get-ItemProperty -Path $installerPolicy -Name DisableMsi -ErrorAction SilentlyContinue).DisableMsi
+    "DisableMsi on the hosted image: $(if ($null -eq $hosted) { 'not set' } else { $hosted })" | Set-Content -LiteralPath (Join-Path $results 'installer-policy.txt')
+    New-Item -Path $installerPolicy -Force | Out-Null
+    Set-ItemProperty -Path $installerPolicy -Name DisableMsi -Value 0 -Type DWord
+}
 $withoutRights = (New-Item -ItemType Directory -Path (Join-Path ([IO.Path]::GetTempPath()) 'gilune-without-rights') -Force).FullName
 function MsiWithoutRights([string]$operation, [string]$path, [string]$label, [switch]$ExpectFailure) {
     $log = Join-Path $withoutRights "$label.log"
