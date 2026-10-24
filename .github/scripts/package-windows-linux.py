@@ -134,16 +134,19 @@ FIREWALL_ADD = (f'advfirewall firewall add rule name="{FIREWALL_RULE}" dir=in ac
                 'enable=yes profile=private program="[INSTALLDIR]Gilune.exe"')
 
 
-def firewall_rules(product, sequence):
+def firewall_rules(product, sequence, only_when=None):
     """Allow the installed launcher through Windows Firewall on private networks.
 
     The rule is added by the installer, running as the system, so the user never
     meets the Windows prompt and a non-administrator can use sync (ADR 0019 § 2:
-    Private profile only). The install owns every rule for its programs from here
-    on: before adding, it deletes the named rule and every rule for the launcher
-    or the earlier launcher's javaw.exe — netsh duplicates by name, and a Block
-    row left by a dismissed prompt on an earlier release wins over any Allow.
-    Uninstall deletes the same set. A product being replaced by a newer one
+    Private profile only). `only_when` is a further condition on every scheduled
+    step: the per-user package passes `Privileged`, so the rule is added only by
+    an install someone started as administrator and an install without that
+    right (the in-app update) touches no rule. The install owns every rule for
+    its programs from here on: before adding, it deletes the named rule and
+    every rule for the launcher or the earlier launcher's javaw.exe — netsh
+    duplicates by name, and a Block row left by a dismissed prompt on an
+    earlier release wins over any Allow. Uninstall deletes the same set. A product being replaced by a newer one
     leaves the rules alone (UPGRADINGPRODUCTCODE) so the ordering of
     RemoveExistingProducts cannot remove what the newer product just added.
     netsh failures never fail the install: without the rule the user is back to
@@ -162,25 +165,32 @@ def firewall_rules(product, sequence):
     # Immediate, in the costing pass, so the path is known before the deferred
     # actions are written into the installation script.
     node(sequence, "Custom", Action="GiluneNetshPath", After="CostFinalize", Before="InstallInitialize")
+
+    def when(condition):
+        return condition if only_when is None else f"{only_when} AND ({condition})"
     previous = "InstallFiles"
     for action, _command in removals:
-        node(sequence, "Custom", Action=action, After=previous).text = "NOT UPGRADINGPRODUCTCODE"
+        node(sequence, "Custom", Action=action, After=previous).text = when("NOT UPGRADINGPRODUCTCODE")
         previous = action
     # Rollback is scheduled before the action it undoes.
-    node(sequence, "Custom", Action="GiluneFirewallRollback", After=previous).text = (
+    node(sequence, "Custom", Action="GiluneFirewallRollback", After=previous).text = when(
         'NOT REMOVE~="ALL"')
-    node(sequence, "Custom", Action="GiluneFirewallAdd", After="GiluneFirewallRollback").text = (
+    node(sequence, "Custom", Action="GiluneFirewallAdd", After="GiluneFirewallRollback").text = when(
         'NOT REMOVE~="ALL"')
 
 
 # Where the app installs. `per-machine` is Program Files with an elevated
 # installer, which adds the firewall rule itself but makes every update ask
 # for administrator approval. `per-user` is %LOCALAPPDATA%\Programs\Gilune
-# with no elevation at all, so the in-app updater installs silently; the
-# firewall rule is then the app's own one-time elevated step (`Gilune.exe
-# --allow-firewall`). A per-user package cannot remove an all-users one, so it
-# refuses to install beside it; the app's updater removes the all-users copy
-# first, with one elevated uninstall.
+# and asks for no elevation, so the in-app updater installs silently. When
+# someone starts it as administrator anyway (the first install on a managed
+# laptop), it adds the same firewall rule; otherwise the rule is the app's
+# own one-time elevated step (`Gilune.exe --allow-firewall`). The rule names
+# a path every update keeps, so updates without elevation leave it in place;
+# an uninstall without elevation cannot remove it and leaves it behind,
+# naming a launcher that is gone. A per-user package cannot remove an
+# all-users one, so it refuses to install beside it; the app's updater
+# removes the all-users copy first, with one elevated uninstall.
 SCOPES = ("per-machine", "per-user")
 ALL_USERS_MESSAGE = ("Gilune is installed for all users of this computer. Remove that copy first, "
                      "from Settings > Apps, or let the installed Gilune update itself.")
@@ -230,9 +240,9 @@ def write_wix(bundle, destination, release, scope):
     # shell reads the file by its extension, so the Id carries one.
     node(product, "Icon", Id=ICON_ID, SourceFile=str(bundle / "gilune.ico"))
     node(product, "Property", Id="ARPPRODUCTICON", Value=ICON_ID)
-    if not per_user:
-        # netsh needs the system; a per-user package has no elevated moment.
-        firewall_rules(product, sequence)
+    # netsh needs the system. A per-machine install always has it; a per-user
+    # one has it only when started as administrator (`Privileged`).
+    firewall_rules(product, sequence, only_when="Privileged" if per_user else None)
     top = node(product, "Directory", Id="TARGETDIR", Name="SourceDir")
     if per_user:
         program = node(node(top, "Directory", Id="LocalAppDataFolder"), "Directory", Id="GiluneUserPrograms", Name="Programs")

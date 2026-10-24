@@ -136,6 +136,36 @@ class WindowsPackageTest(unittest.TestCase):
             self.assertEqual('NOT REMOVE~="ALL"', steps["GiluneFirewallRollback"].text)
             self.assertIsNone(steps["GiluneNetshPath"].text)
 
+    def test_per_user_package_touches_the_firewall_only_when_started_as_administrator(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            bundle = root / "Gilune"
+            bundle.mkdir()
+            (bundle / "gilune.ico").write_text("fixture")
+            trees = {}
+            for scope in package.SCOPES:
+                path = root / (scope + ".wxs")
+                package.write_wix(bundle, path, "1.2.3", scope)
+                trees[scope] = ET.parse(path)
+            # The same actions as the per-machine package: one rule, Private
+            # only, every earlier rule for the programs cleared first.
+            user, machine = ({a.attrib["Id"]: a.attrib for a in trees[t].findall(".//w:CustomAction", NS)}
+                             for t in ("per-user", "per-machine"))
+            self.assertEqual(machine, user)
+            steps = {t: {c.attrib["Action"]: c for c in trees[t].findall(".//w:InstallExecuteSequence/w:Custom", NS)}
+                     for t in package.SCOPES}
+            self.assertEqual(set(steps["per-machine"]), set(steps["per-user"]))
+            # Every scheduled step that runs netsh waits for an install with
+            # administrator rights; the in-app update has none, so it neither
+            # adds nor deletes a rule.
+            for name, step in steps["per-user"].items():
+                with self.subTest(name=name):
+                    if name == "GiluneNetshPath":
+                        self.assertIsNone(step.text, "formatting a path needs no rights")
+                        continue
+                    self.assertEqual(f'Privileged AND ({steps["per-machine"][name].text})', step.text)
+                    self.assertEqual(steps["per-machine"][name].attrib, step.attrib)
+
     def test_per_user_package_needs_no_elevation_and_refuses_an_all_users_copy(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -152,10 +182,7 @@ class WindowsPackageTest(unittest.TestCase):
             user, machine = trees["per-user"], trees["per-machine"]
             self.assertEqual("perUser", user.find(".//w:Package", NS).attrib["InstallScope"])
             self.assertEqual("perMachine", machine.find(".//w:Package", NS).attrib["InstallScope"])
-            # No elevated moment: no custom actions at all, and the files live
-            # under the profile.
-            self.assertEqual([], user.findall(".//w:CustomAction", NS))
-            self.assertTrue(machine.findall(".//w:CustomAction", NS))
+            # The files live under the profile.
             local = user.find(".//w:Directory[@Id='LocalAppDataFolder']", NS)
             self.assertIsNotNone(local)
             programs = local.find("w:Directory", NS)
@@ -351,7 +378,21 @@ class WindowsFileVersionTest(unittest.TestCase):
             directories = {row["Directory"]: row for row in table("Directory")}
             self.assertEqual("LocalAppDataFolder", directories["GiluneUserPrograms"]["Directory_Parent"])
             self.assertEqual("GiluneUserPrograms", directories["INSTALLDIR"]["Directory_Parent"])
-            self.assertEqual([], table("CustomAction"), "a per-user package runs nothing of its own")
+            # The firewall actions exactly as the per-machine package has them,
+            # each scheduled only for an install with administrator rights; the
+            # no-privileges bit above means double-clicking never asks for them.
+            self.assertEqual(custom, {row["Action"]: row for row in table("CustomAction")})
+            user_sequence = {row["Action"]: row for row in table("InstallExecuteSequence")}
+            for name in ("GiluneFirewallRemove", "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher"):
+                self.assertEqual("Privileged AND (NOT UPGRADINGPRODUCTCODE)", user_sequence[name]["Condition"])
+            for name in ("GiluneFirewallAdd", "GiluneFirewallRollback"):
+                self.assertEqual('Privileged AND (NOT REMOVE~="ALL")', user_sequence[name]["Condition"])
+            self.assertEqual("", user_sequence["GiluneNetshPath"]["Condition"])
+            user_order = [int(user_sequence[a]["Sequence"]) for a in (
+                "InstallInitialize", "RemoveExistingProducts", "InstallFiles", "GiluneFirewallRemove",
+                "GiluneFirewallRemoveJavaw", "GiluneFirewallRemoveLauncher", "GiluneFirewallRollback",
+                "GiluneFirewallAdd", "InstallFinalize")]
+            self.assertEqual(user_order, sorted(user_order))
             self.assertEqual({"GILUNE_ALLUSERS"}, {row["Property"] for row in table("AppSearch")})
             self.assertEqual(1 + len(package.JPACKAGE_PRODUCTS), len(table("AppSearch")))
             locators = {row["Key"]: row for row in table("RegLocator")}
@@ -361,6 +402,7 @@ class WindowsFileVersionTest(unittest.TestCase):
                 locator = locators["SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\" + code]
                 self.assertEqual(("2", "DisplayName"), (locator["Root"], locator["Name"]))
             self.assertIn("NOT GILUNE_ALLUSERS", {row["Condition"] for row in table("LaunchCondition")})
+            # The per-machine package's steps stay unconditional on rights.
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallAdd"]["Condition"])
             self.assertEqual('NOT REMOVE~="ALL"', sequence["GiluneFirewallRollback"]["Condition"])
 

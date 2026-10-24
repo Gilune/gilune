@@ -445,3 +445,24 @@ of the following are evidence, not assertions:
   installer added moves to the app (ADR 0019 amendment of the same date).
   Each Windows account on a shared machine installs its own copy, as this
   ADR always implied.
+- **2026-10-24 (custom actions return, for administrator installs only).**
+  "No custom action at all" above is relaxed: the per-user package carries
+  the firewall steps of the per-machine one, scheduled only when the
+  install has administrator rights (`Privileged`), so a managed laptop's
+  first install, started as administrator, adds the rule (ADR 0019
+  amendment of the same date). The package still asks for no elevation
+  (the no-privileges summary bit stays set), and an install without rights
+  — every in-app update — runs no custom action, so `msiexec /passive`
+  still runs without a prompt. Run as administrator, the per-user package
+  installs into that account's own profile: a tool that elevates by
+  switching to a different account installs Gilune for that account, not
+  the person's.
+- **2026-10-24 (the stale all-users check reads the machine's products).**
+  The per-user app's check for a leftover all-users copy, and the script
+  that removes one, read the HKLM `Uninstall` key, where Windows can list a
+  per-user product as well: on the owner's work laptop the per-user 1.2.2
+  found itself, About reported a stale all-users copy, and Remove would
+  have uninstalled the running copy. Both now read Windows Installer's
+  products under the machine's SID
+  (`…\Installer\UserData\S-1-5-18\Products`), which holds all-users
+  installs only.
