@@ -259,13 +259,16 @@ fun decorationAt(
     return onEdge
 }
 
-/// Every pill the registrations claim in `source`, as a source range and the
-/// length of its tag — what a reading surface needs to draw the same pills
-/// the editor does over text it renders itself. Nothing is held back for a
-/// caret: a reader has none.
-fun pillsIn(source: String, decorations: List<EditorDecoration>): List<Pair<IntRange, Int>> =
+/// One pill in source coordinates: its range, how long its tag is, and its
+/// mark item (`<registration>|<key>`, which colours it).
+data class ReadPill(val range: IntRange, val tagLength: Int, val item: String)
+
+/// Every pill the registrations claim in `source` — what a reading surface
+/// needs to draw the same pills the editor does over text it renders
+/// itself. Nothing is held back for a caret: a reader has none.
+fun pillsIn(source: String, decorations: List<EditorDecoration>): List<ReadPill> =
     decorate(source, null, decorations).mapNotNull { span ->
-        span.pillTag?.let { tag -> (span.start until span.start + span.sourceLength) to tag }
+        span.pillTag?.let { tag -> ReadPill(span.start until span.start + span.sourceLength, tag, span.pillItem) }
     }
 
 /// 0-based line holding `offset`, which is clamped into the text first, so
@@ -722,6 +725,8 @@ private class PlacedDecoration(
     val fence: FencedBlock? = null,
     /// A pill's tag length; null for every other kind of span.
     val pillTag: Int? = null,
+    /// A pill's mark item, `<registration>|<key>`, which colours it.
+    val pillItem: String = "",
 ) {
     fun hit(): DecorationHit? =
         decoration?.let { DecorationHit(it, start until start + sourceLength, lineRange) }
@@ -791,6 +796,7 @@ private fun decorate(
                     // A tag that is the whole range, or none of it, is no
                     // pill: it styles as its role does and nothing more.
                     pillTag = (render as? DecorationRender.Pill)?.tagLength?.takeIf { it in 1 until length },
+                    pillItem = (render as? DecorationRender.Pill)?.let { pillItem(decoration.id, it.key) }.orEmpty(),
                 )
             }
         }
@@ -876,7 +882,7 @@ private fun styleDecorations(
             val to = from + span.replacement.length
             val tag = span.pillTag
             if (tag != null) {
-                markPill(from, from + tag, to, palette.pillTag.takeOrElse { palette.marker }, palette.link)
+                markPill(from, from + tag, to, palette.pillTag.takeOrElse { palette.marker }, palette.link, span.pillItem)
                 continue
             }
             val style = span.role.spanStyle(palette) ?: continue

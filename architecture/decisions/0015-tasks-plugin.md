@@ -819,3 +819,26 @@ labels now use the task's own line only.
   caret-line rule on both shells, Read coordinates) and
   `ConnectionPillsUiTest` (the tag's pixels in Read view and the editor,
   absent on the caret's line; fails with the painter disabled).
+
+- **2026-10-26 (pill colours).** Owner, the same day: a colour per
+  connection, set on its page, and grey for a keyword nobody defines.
+  Recognisers stay pure over the line, so colour comes from the index: a
+  registration may declare `PillTones` — a lookup and a function from each
+  hit to `(key, PillTone)` — and `Pill` gains a `key`. Tones are names
+  (`ACCENT`, `BLUE`, `GREEN`, `AMBER`, `RED`, `PURPLE`, `GREY`); the shell
+  turns them into tints of a hue over its surface, so a producer never
+  picks a pixel and both themes read. The shell runs the lookups off the UI
+  thread as the vault cursor moves (`rememberPillTones`); a key the source
+  does not answer is grey, and a registration with no source — or an index
+  still being built — draws the accent, so nothing flashes grey on open.
+  People: the connection page's `colour` property (form field "Pill
+  colour"; `gray` forgiven; a name the pill cannot draw is left out and the
+  pill takes the accent, not a problem fact, so a stray word never disables
+  a connection), indexed as `org.memory.people.definition.colour`
+  (indexer version 4, re-derived on upgrade); retired connections answer
+  nothing and draw grey. Gate: `PillTonesTest` over the real kernel
+  (colour, `gray`, no colour, an undrawable colour, retired, a typo, a
+  changed page, the not-ready and unsourced cases, the form) and two
+  `ConnectionPillsUiTest` rows that find the green, then the grey, tag and
+  none of the accent; all four colour rows fail with every tone forced to
+  the accent.

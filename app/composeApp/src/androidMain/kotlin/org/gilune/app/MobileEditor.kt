@@ -213,6 +213,7 @@ fun mobileEditorDecorations(decorations: List<EditorDecoration>): List<EditorDec
             role = decoration.role,
             firesInsideCodeFences = decoration.firesInsideCodeFences,
             activate = decoration.activate,
+            pillTones = decoration.pillTones,
             recognise = { line ->
                 decoration.recognise(line).filter { match ->
                     match.render !is DecorationRender.Replace || delimitedInLine(line, match.range)
@@ -593,6 +594,7 @@ fun EditScreen(
             EditorBuffer(
                 editor = editor,
                 decorations = decorations,
+                pillTones = rememberPillTones(state, decorations),
                 onFocusChanged = { focused ->
                     bodyFocused = focused
                     if (!focused) completions.dismiss()
@@ -737,6 +739,7 @@ private fun NoteActions(
 private fun EditorBuffer(
     editor: MobileEditorState,
     decorations: List<EditorDecoration>,
+    pillTones: PillToneMap,
     onFocusChanged: (Boolean) -> Unit,
     onToggled: () -> Unit,
     caretLine: Int?,
@@ -762,7 +765,7 @@ private fun EditorBuffer(
         )
     }
     val revealed = remember(dimmed, colours) { dimmed.copy(muted = colours.onSurfaceVariant) }
-    val pills = pillColours()
+    val pills = pillPalette(pillTones)
     var paintLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     val base = MaterialTheme.typography.bodyLarge.copy(color = colours.onSurface)

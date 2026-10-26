@@ -724,7 +724,7 @@ private fun OpenNote(
                     pillTag = colours.onPrimaryContainer,
                 )
             }
-            val pills = pillColours()
+            val pills = pillPalette(rememberPillTones(state, decorations))
             // The raw-line exception follows a caret someone can see: an
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).

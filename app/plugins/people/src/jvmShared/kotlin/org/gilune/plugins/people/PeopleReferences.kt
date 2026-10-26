@@ -87,8 +87,9 @@ fun mentionsInLine(line: String): List<IntRange> {
 /** The connections in one line as the editor draws them: each `keyword:`
  * directly before a mention — spaces or tabs between, nothing else — by the
  * rule [recognisePeople] applies for the index. Answers the whole range,
- * keyword through handle, and how long its `keyword:` tag is. */
-fun connectionsInLine(line: String): List<Pair<IntRange, Int>> = mentionsInLine(line).mapNotNull { mention ->
+ * keyword through handle, how long its `keyword:` tag is, and the keyword
+ * lower-cased — the key its pill is coloured by. */
+fun connectionsInLine(line: String): List<Triple<IntRange, Int, String>> = mentionsInLine(line).mapNotNull { mention ->
     var colon = mention.first
     while (colon > 0 && line[colon - 1] in " \t") colon--
     if (colon == 0 || line[colon - 1] != ':') return@mapNotNull null
@@ -99,7 +100,7 @@ fun connectionsInLine(line: String): List<Pair<IntRange, Int>> = mentionsInLine(
     if (!validToken(keyword) || !boundaryAt(line, keywordStart) || escapedAt(line, keywordStart) || escapedAt(line, keywordEnd)) {
         return@mapNotNull null
     }
-    (keywordStart..mention.last) to (keywordEnd + 1 - keywordStart)
+    Triple(keywordStart..mention.last, keywordEnd + 1 - keywordStart, keyword.lowercase())
 }
 
 private val INLINE_CODE = Regex("`[^`\n]+`")

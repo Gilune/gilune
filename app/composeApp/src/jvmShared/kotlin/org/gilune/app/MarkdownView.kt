@@ -100,8 +100,9 @@ class BlockRenderers(registrations: List<BlockRegistration> = emptyList()) {
 /// Android's floor is 48dp; a pointer needs no such thing, so the default
 /// is the marker column the bullet has always had.
 ///
-/// `pills` are the editor's pills over the same parsed text ([pillsIn]):
-/// a source range and its tag length, drawn here as the editor draws them.
+/// `pills` are the editor's pills over the same parsed text ([pillsIn]),
+/// drawn here as the editor draws them; `pillTones` colours them, as
+/// [rememberPillTones] answers for the vault.
 @Composable
 fun MarkdownBody(
     blocks: List<MdBlock>,
@@ -112,9 +113,11 @@ fun MarkdownBody(
     textStyle: TextStyle = TextStyle.Default,
     blockSpacing: Dp = 10.dp,
     links: ReadLinks = ReadLinks(),
-    pills: List<Pair<IntRange, Int>> = emptyList(),
+    pills: List<ReadPill> = emptyList(),
+    pillTones: PillToneMap = PillToneMap(ready = true),
 ) {
     val colours = MaterialTheme.colorScheme
+    val palette = pillPalette(pillTones)
     val scale = if (textStyle.fontSize.isSpecified) textStyle.fontSize.value / 14f else 1f
     val lineHeight = if (textStyle.lineHeight.isSpecified) textStyle.lineHeight else 22.sp
     CompositionLocalProvider(LocalDocumentTextStyle provides textStyle.takeUnless { it == TextStyle.Default }) {
@@ -127,10 +130,12 @@ fun MarkdownBody(
                             fontSize = headingSize(block.level) * scale,
                             lineHeight = if (textStyle.lineHeight.isSpecified) (headingSize(block.level).value * lineHeight.value / 14f).sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                             fontWeight = FontWeight.SemiBold,
+                            palette = palette,
                         )
                         is MdBlock.Paragraph -> PillText(
                             annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
                             lineHeight = lineHeight,
+                            palette = palette,
                         )
                         is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
                             if (block.task == null) {
@@ -145,7 +150,7 @@ fun MarkdownBody(
                             } else {
                                 TaskGlyph(block.task, block.line, onToggleTask, maxOf(checkboxTarget, 22.dp * scale))
                             }
-                            PillText(annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer), lineHeight = lineHeight)
+                            PillText(annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer), lineHeight = lineHeight, palette = palette)
                         }
                         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                             Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
@@ -154,6 +159,7 @@ fun MarkdownBody(
                                 color = colours.onSurfaceVariant,
                                 lineHeight = lineHeight,
                                 modifier = Modifier.padding(start = 10.dp),
+                                palette = palette,
                             )
                         }
                         // The seam (§ 5). A registered info string draws itself;
@@ -283,7 +289,7 @@ private fun annotate(
     spans: List<Span>,
     linkColour: androidx.compose.ui.graphics.Color,
     links: ReadLinks,
-    pills: List<Pair<IntRange, Int>> = emptyList(),
+    pills: List<ReadPill> = emptyList(),
     pillTagColour: androidx.compose.ui.graphics.Color = linkColour,
 ): AnnotatedString =
     buildAnnotatedString {
@@ -325,7 +331,7 @@ private fun annotate(
                     }
                     // A pill may meet a span boundary, so each part is
                     // marked for the stretch of it this run holds.
-                    for ((range, tag) in pills) {
+                    for ((range, tag, item) in pills) {
                         val tagEnd = range.first + tag
                         for ((part, isTag) in listOf((range.first until tagEnd) to true, (tagEnd..range.last) to false)) {
                             val first = maxOf(part.first, source.first)
@@ -334,7 +340,7 @@ private fun annotate(
                             val from = at + (first - source.first)
                             val to = at + (last - source.first) + 1
                             addStyle(SpanStyle(color = if (isTag) pillTagColour else linkColour), from, to)
-                            addStringAnnotation(if (isTag) PILL_TAG else PILL_BODY, "", from, to)
+                            addStringAnnotation(if (isTag) PILL_TAG else PILL_BODY, item, from, to)
                         }
                     }
                 }

@@ -7,6 +7,7 @@ package org.gilune.app
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.input.OffsetMapping
+import org.gilune.plugins.people.PEOPLE_CONNECTION_STYLE
 import org.gilune.plugins.people.connectionsInLine
 import org.gilune.plugins.people.peopleConnectionDecoration
 import org.gilune.plugins.people.peopleMentionDecoration
@@ -32,9 +33,11 @@ class ConnectionPillsTest {
 
     @Test
     fun aKeywordBeforeAMentionIsAConnection() {
-        val (range, tag) = connectionsInLine(line).single()
+        val (range, tag, keyword) = connectionsInLine(line).single()
         assertEquals("assign: @phil.jackson", line.substring(range.first, range.last + 1))
         assertEquals("assign:".length, tag)
+        assertEquals("assign", keyword)
+        assertEquals("reviewer", connectionsInLine("Reviewer: @alice").single().third, "the colour key is lower-cased")
         assertEquals(1, connectionsInLine("owner:@alice").size, "no space needed after the colon")
         assertEquals(1, connectionsInLine("x assign:\t@alice").size, "a tab will do")
     }
@@ -93,9 +96,10 @@ class ConnectionPillsTest {
     @Test
     fun aReaderGetsThePillsInSourceCoordinates() {
         val source = "Intro\n$line"
-        val (range, tag) = pillsIn(source, people).single()
+        val (range, tag, item) = pillsIn(source, people).single()
         assertEquals("assign: @phil.jackson", source.substring(range.first, range.last + 1))
         assertEquals(7, tag)
+        assertEquals(pillItem(PEOPLE_CONNECTION_STYLE, "assign"), item, "the mark names its colour key")
         assertTrue(pillsIn("```\n$line\n```", people).isEmpty(), "quoted in a fence, nothing is drawn")
     }
 }

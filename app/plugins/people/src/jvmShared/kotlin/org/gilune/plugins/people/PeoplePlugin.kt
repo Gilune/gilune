@@ -18,6 +18,28 @@ const val CONNECTION_KIND = "$PEOPLE_PLUGIN.definition.kind"
 const val KEYWORD = "$PEOPLE_PLUGIN.definition.keyword"
 const val LABEL = "$PEOPLE_PLUGIN.definition.label"
 const val RETIRED = "$PEOPLE_PLUGIN.definition.retired"
+const val COLOUR = "$PEOPLE_PLUGIN.definition.colour"
+
+/// The colours a connection's pill may take, by the name its page writes
+/// (owner, 2026-10-26). No name, or one not on this list, is the pill's
+/// ordinary accent; `gray` is forgiven for `grey`.
+val CONNECTION_COLOURS = listOf("blue", "green", "amber", "red", "purple", "grey")
+
+fun connectionColour(value: String?): String? = when (val name = value?.trim()?.lowercase()) {
+    "gray" -> "grey"
+    in CONNECTION_COLOURS -> name
+    else -> null
+}
+
+fun connectionTone(colour: String?): PillTone = when (connectionColour(colour)) {
+    "blue" -> PillTone.BLUE
+    "green" -> PillTone.GREEN
+    "amber" -> PillTone.AMBER
+    "red" -> PillTone.RED
+    "purple" -> PillTone.PURPLE
+    "grey" -> PillTone.GREY
+    else -> PillTone.ACCENT
+}
 
 /** Whitespace and reserved Markdown/path punctuation are explicit codepoints.
  * Other Unicode, including combining marks and emoji, remains user-authored text. */
@@ -42,10 +64,14 @@ fun connectionDraft(values: Map<String, String>, template: String = "# Notes\n\n
     val keyword = values["keyword"].orEmpty().trim().removeSuffix(":")
     val label = values["label"].orEmpty().trim().ifEmpty { keyword }
     val retired = values["retired"].orEmpty().ifEmpty { "false" }
+    val colourWritten = values["colour"].orEmpty().trim()
+    val colour = connectionColour(colourWritten)
     require(validToken(keyword)) { "Use a connection keyword without spaces or Markdown punctuation." }
     require(retired in listOf("true", "false")) { "Retired must be true or false." }
-    return PageDraft("${casefoldNfc(keyword)}.md", pageTemplateWithProperties(template,
-        mapOf("keyword" to pageJsonString(keyword), "label" to pageJsonString(label), "retired" to retired)), casefoldNfc(keyword))
+    require(colourWritten.isEmpty() || colour != null) { "Colour must be one of ${CONNECTION_COLOURS.joinToString(", ")}, or left empty." }
+    val properties = mapOf("keyword" to pageJsonString(keyword), "label" to pageJsonString(label), "retired" to retired) +
+        (colour?.let { mapOf("colour" to pageJsonString(it)) } ?: emptyMap())
+    return PageDraft("${casefoldNfc(keyword)}.md", pageTemplateWithProperties(template, properties), casefoldNfc(keyword))
 }
 
 fun peopleExtensions(): BundledPluginExtensions {
@@ -58,7 +84,8 @@ fun peopleExtensions(): BundledPluginExtensions {
                 PageRow(value(PERSON_NAME) ?: fallback, value(HANDLE_DISPLAY)?.let { "@$it" }.orEmpty(), value(PROBLEM))
             }, identityPredicate = PERSON_HANDLE, lookupProviderId = PEOPLE_LOOKUP, folderCreateLabel = "Create person"),
         PageCollectionRegistration(CONNECTIONS_PANEL, CONNECTION_TYPE, "person-connection", "People connections", "New connection",
-            listOf(PageField("keyword", "Keyword", hint = "reviewer"), PageField("label", "Display label"), PageField("retired", "Retired", "false", "true or false")), ::connectionDraft,
+            listOf(PageField("keyword", "Keyword", hint = "reviewer"), PageField("label", "Display label"), PageField("retired", "Retired", "false", "true or false"),
+                PageField("colour", "Pill colour", hint = CONNECTION_COLOURS.joinToString(", "))), ::connectionDraft,
             { facts, fallback ->
                 fun value(key: String) = facts.firstOrNull { it.key == key }?.value
                 PageRow(value(LABEL) ?: value(KEYWORD) ?: fallback,
@@ -105,7 +132,9 @@ fun peopleExtensions(): BundledPluginExtensions {
         searchTypes = listOf(
             SearchTypeRegistration("person", "person") { personSearchType() },
             SearchTypeRegistration("person-connection", "person-connection") { connectionSearchType() }),
-        scopedIndexer = ScopedIndexerRegistration(3, emptyList(), createLocal = { PeopleIndexer() }) { PeopleIndexer() }, pageCollections = collections)
+        // Version 4 (2026-10-26) records a connection's pill colour, so
+        // an upgraded vault re-derives the namespace and colours its pills.
+        scopedIndexer = ScopedIndexerRegistration(4, emptyList(), createLocal = { PeopleIndexer() }) { PeopleIndexer() }, pageCollections = collections)
 }
 fun personSearchType() = SearchType("person", indexed = true,
     constraints = listOf(Constraint.FactAt(PERSON_KIND, ConstraintOp.EQ, "person", FactLocality.DOCUMENT_ROOT)), indexNamespaces = listOf(PEOPLE_PLUGIN))
@@ -145,6 +174,9 @@ class PeopleIndexer : ScopedIndexer, LocalScopedIndexer {
                 if (keyword != null && validToken(keyword)) fact(KEYWORD, casefoldNfc(keyword))
                 if (!label.isNullOrBlank()) fact(LABEL, label)
                 if (retired?.kind == "boolean") fact(RETIRED, retired.value!!)
+                // A colour the pill cannot draw is left out, not a problem:
+                // the connection still works, its pill takes the accent.
+                connectionColour(string("colour"))?.let { fact(COLOUR, it) }
                 if (keyword == null || !validToken(keyword) || label.isNullOrBlank() || retired?.kind != "boolean" || string("gilune-id").isNullOrBlank()) {
                     fact(PROBLEM, "Check this connection's keyword, label, retired flag and identity in Markdown.")
                 }
