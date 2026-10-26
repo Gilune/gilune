@@ -16,6 +16,8 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.height
 import org.gilune.plugins.people.CONNECTION_SHEET
 import org.gilune.plugins.people.CONNECTION_TYPE
+import org.gilune.plugins.people.PERSON_SHEET
+import org.gilune.plugins.people.PERSON_TYPE
 import org.junit.Rule
 import org.junit.rules.RuleChain
 import uniffi.gilune_ffi.Gilune
@@ -33,18 +35,21 @@ class PagePropertySheetUiTest {
 
     private lateinit var file: File
 
-    private fun open() {
+    private fun open(
+        name: String = "reviewer.md",
+        source: String = "---\ngilune-type: $CONNECTION_TYPE\ngilune-id: reviewer-page\nkeyword: \"reviewer\"\nlabel: \"Reviewer\"\nretired: false\n---\n# Notes\n",
+    ) {
         val vault = resources.directory("gilune-sheet")
         vault.resolve(".gilune-local").writeText("") // local-only vault: files stay unmanaged (ADR 0007, 2026-10-22)
-        file = vault.resolve("reviewer.md")
-        file.writeText("---\ngilune-type: $CONNECTION_TYPE\ngilune-id: reviewer-page\nkeyword: \"reviewer\"\nlabel: \"Reviewer\"\nretired: false\n---\n# Notes\n")
+        file = vault.resolve(name)
+        file.writeText(source)
         val kernel = resources.own(Gilune.open(vault.path))
         BUNDLED_PLUGIN_EXTENSIONS.registerPlugins(kernel)
         val state = GiluneState(vault.path, resources.scope)
         state.gilune.value = kernel
         state.plugins.addAll(kernel.plugins())
         val editor = EditorState()
-        editor.open(vault.path, "reviewer.md")
+        editor.open(vault.path, name)
         editor.reading = false
         compose.setContent {
             GiluneTheme(dark = false) { Box(Modifier.fillMaxSize()) { NoteEditor(state, editor, Modifier.fillMaxSize()) } }
@@ -114,6 +119,26 @@ class PagePropertySheetUiTest {
         compose.waitForIdle()
         assertEquals(before, file.readText())
         assertFalse(file.readText().contains("label: \"\""))
+    }
+
+    // Owner, 2026-10-26: people pages in the same style as connections.
+    @Test
+    fun aPersonsNameIsEditedInPlaceAndTheHandleOffersRename() {
+        open("alice.md", "---\ngilune-type: $PERSON_TYPE\ngilune-id: alice\nname: \"Alice Smith\"\nhandle: \"alice.smith\"\n---\n# About\n")
+        compose.onNodeWithText("Person", substring = true).assertIsDisplayed()
+        compose.onNodeWithTag("properties-bar").performClick()
+        compose.onNodeWithTag("page-sheet-$PERSON_SHEET").assertIsDisplayed()
+        compose.onNodeWithTag("page-property-handle").assertTextEquals("alice.smith")
+
+        val name = compose.onNodeWithTag("page-property-name")
+        name.performTextReplacement("Alice Jones")
+        name.performKeyInput { pressKey(Key.Enter) }
+        waitForFile("the name is written on Enter") { it.contains("name: \"Alice Jones\"") }
+        assertTrue(file.readText().contains("handle: \"alice.smith\""), "the handle is not touched by a name change")
+        assertTrue(file.readText().endsWith("# About\n"))
+
+        compose.onNodeWithTag("page-property-handle-rename").performClick()
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Rename references").fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

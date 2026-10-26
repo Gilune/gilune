@@ -49,6 +49,22 @@ fun connectionPropertySheet() = PagePropertySheet(
     ),
 )
 
+const val PERSON_SHEET = "$PEOPLE_PLUGIN.person-sheet"
+
+/// What a person's page shows in its properties section (owner,
+/// 2026-10-26: "same style as with connections"): the name to edit, and the
+/// handle to read — every mention is written with it, so changing it goes
+/// through Rename references.
+fun personPropertySheet() = PagePropertySheet(
+    id = PERSON_SHEET,
+    pageTypeId = PERSON_TYPE,
+    title = "Person",
+    properties = listOf(
+        PageProperty.Text("name", "Name", required = true),
+        PageProperty.ReadOnly("handle", "Handle", renameReferences = true),
+    ),
+)
+
 /// Default writes nothing (the property is removed), then the six names.
 fun connectionColourOptions(): List<PageChoiceOption> =
     listOf(PageChoiceOption(null, "Default", PillTone.ACCENT)) +
@@ -138,6 +154,7 @@ fun peopleExtensions(): BundledPluginExtensions {
             PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_CONNECTION_STYLE, "Connections drawn as pills"),
             PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_MENTION_STYLE, "Mentions styled as links"),
             PluginContribution(Slots.EDITOR_DEFINITIONS, PEOPLE_DEFINITION, "Go to a person's page"),
+            PluginContribution(PAGE_PROPERTIES_SLOT, PERSON_SHEET, "Person properties"),
             PluginContribution(PAGE_PROPERTIES_SLOT, CONNECTION_SHEET, "Connection properties"),
             vaultFolderContribution(PEOPLE_FOLDER, "People"),
         ) + operators.map { PluginContribution(Slots.SEARCH_OPERATORS, it.contributionId, it.name) } + collections.flatMap { c ->
@@ -152,7 +169,7 @@ fun peopleExtensions(): BundledPluginExtensions {
         refactorings = listOf(peopleRefactoringRegistration()),
         editorDecorations = listOf(peopleConnectionDecoration(), peopleMentionDecoration()),
         definitions = listOf(peopleDefinitionRegistration()),
-        pagePropertySheets = listOf(connectionPropertySheet()),
+        pagePropertySheets = listOf(personPropertySheet(), connectionPropertySheet()),
         searchOperators = operators,
         searchTypes = listOf(
             SearchTypeRegistration("person", "person") { personSearchType() },
