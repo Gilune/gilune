@@ -73,6 +73,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1062,6 +1063,15 @@ private fun DeleteDialog(
     onDeleted: (String) -> Unit = {},
 ) {
     val isDir = File(state.vaultDir, relPath).isDirectory
+    // Enter answers the question (owner, 2026-10-26): the dialog opened with
+    // nothing focused, so Enter went nowhere until Tab put focus on a button.
+    // Delete takes the focus as it appears; Escape still dismisses. A
+    // requester answers only once attached, so ask over a few frames.
+    val confirm = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        var attempts = 0
+        while (runCatching { confirm.requestFocus() }.isFailure && attempts++ < 5) withFrameNanos { }
+    }
     AlertDialog(
         onDismissRequest = onClose,
         title = { Text("Delete ${relPath.substringAfterLast('/')}?") },
@@ -1074,10 +1084,13 @@ private fun DeleteDialog(
             )
         },
         confirmButton = {
-            Button(onClick = {
-                deleteEntry(state, relPath, onDeleted)
-                onClose()
-            }) { Text("Delete") }
+            Button(
+                onClick = {
+                    deleteEntry(state, relPath, onDeleted)
+                    onClose()
+                },
+                modifier = Modifier.focusRequester(confirm).testTag("delete-confirm"),
+            ) { Text("Delete") }
         },
         dismissButton = { TextButton(onClick = onClose) { Text("Cancel") } },
     )

@@ -90,6 +90,27 @@ class GithubIssuesUiTest {
         }
     }
 
+    // Owner, 2026-10-26: Enter did nothing until Tab put focus on a button.
+    // Delete is focused as the dialog opens, so Enter alone confirms.
+    @Test
+    fun enterConfirmsDeleteWithoutTabbingFirst() = fixture { root, state ->
+        root.resolve("Empty").mkdir()
+        uniffi.gilune_ffi.Gilune.open(root.path).use { kernel ->
+            state.gilune.value = kernel
+            tree(state)
+            val row = compose.onNodeWithTag("vault-entry:Empty")
+            row.performMouseInput { click() }
+            row.performKeyInput { pressKey(Key.Delete) }
+            val confirm = compose.onNodeWithTag("delete-confirm")
+            compose.waitUntil(5_000) { runCatching { confirm.assertIsFocused() }.isSuccess }
+            confirm.performKeyInput { pressKey(Key.Enter) }
+            compose.waitUntil(10_000) { state.message.value == "deleted Empty" }
+            assertFalse(root.resolve("Empty").exists())
+            compose.setContent {}
+            state.gilune.value = null
+        }
+    }
+
     @Test
     fun expandingAFolderDoesNotSelectItAlongsideTheOpenFile() = fixture { _, state ->
         tree(state)
