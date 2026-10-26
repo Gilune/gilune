@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.height
 import org.gilune.plugins.people.CONNECTION_SHEET
 import org.gilune.plugins.people.CONNECTION_TYPE
 import org.junit.Rule
@@ -66,6 +67,18 @@ class PagePropertySheetUiTest {
         compose.onNodeWithText("gilune-id: reviewer-page").assertDoesNotExist()
         compose.onNodeWithTag("page-sheet-raw").performClick()
         compose.onNodeWithText("gilune-id: reviewer-page").assertIsDisplayed()
+    }
+
+    // Owner, 2026-10-26: the rows were uneven — a switch and a Rename button
+    // each brought their own height. Every row now measures the same.
+    @Test
+    fun everyRowIsTheSameHeight() {
+        open()
+        compose.onNodeWithTag("properties-bar").performClick()
+        val heights = listOf("label", "keyword", "retired", "colour").associateWith { key ->
+            compose.onNodeWithTag("page-row-$key").getUnclippedBoundsInRoot().height
+        }
+        assertEquals(1, heights.values.distinct().size, "row heights: $heights")
     }
 
     @Test

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -36,7 +37,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -88,6 +88,9 @@ fun pagePropertyChange(property: PageProperty, value: String?): PropertyChange =
 fun sourceWithChange(source: String, change: PropertyChange): String =
     changeSourceProperties(source, inspectSourceProperties(source).contentVersion, listOf(change)).text
 
+/// One row of a sheet, whatever it holds.
+private val SHEET_ROW = 32.dp
+
 /// The sheet's rows. `onChange` applies an edit; `onRename` opens the
 /// page's Rename references tool, or is null where the surface has none.
 @Composable
@@ -99,9 +102,14 @@ fun PagePropertySheetView(
     modifier: Modifier = Modifier,
 ) {
     val values = remember(source) { sheetValues(source) } ?: return
-    Column(modifier.testTag("page-sheet-${sheet.id}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(modifier.testTag("page-sheet-${sheet.id}"), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         for (property in sheet.properties) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            // Every row is one height whatever its control, so the sheet
+            // reads as an even list (owner, 2026-10-26: the switch and the
+            // Rename button had each brought their own). Only a text row
+            // may grow, to say why a value was refused.
+            val height = if (property is PageProperty.Text) Modifier.heightIn(min = SHEET_ROW) else Modifier.height(SHEET_ROW)
+            Row(height.testTag("page-row-${property.key}"), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     property.label,
                     fontSize = 12.sp,
@@ -113,8 +121,8 @@ fun PagePropertySheetView(
                 when (property) {
                     is PageProperty.Text -> TextValue(property, value.orEmpty(), tag) { onChange(pagePropertyChange(property, it)) }
                     // Scaling a switch does not shrink the space it takes,
-                    // so a short box holds it to the other rows' height.
-                    is PageProperty.Switch -> Box(Modifier.height(28.dp), contentAlignment = Alignment.CenterStart) {
+                    // so the row's height holds it to the others'.
+                    is PageProperty.Switch -> Box(Modifier.height(SHEET_ROW), contentAlignment = Alignment.CenterStart) {
                         Switch(
                             checked = value == "true",
                             onCheckedChange = { onChange(pagePropertyChange(property, it.toString())) },
@@ -126,8 +134,19 @@ fun PagePropertySheetView(
                     }
                     is PageProperty.ReadOnly -> {
                         Text(value.orEmpty(), fontSize = 13.sp, modifier = Modifier.testTag(tag))
+                        // A link, as "All properties" is: a button would
+                        // bring its own taller touch area into the row.
                         if (property.renameReferences && onRename != null) {
-                            TextButton(onClick = onRename, modifier = Modifier.testTag("$tag-rename")) { Text("Rename…", fontSize = 12.sp) }
+                            Text(
+                                "Rename…",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .padding(start = 12.dp)
+                                    .clickable(onClickLabel = "Rename references", onClick = onRename)
+                                    .padding(horizontal = 4.dp, vertical = 4.dp)
+                                    .testTag("$tag-rename"),
+                            )
                         }
                     }
                 }
