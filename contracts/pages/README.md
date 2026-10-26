@@ -264,3 +264,27 @@ People field dispatch. Plugins can instead implement their own pure preparation.
 
 v0.3 extends the definition record and changes the bundled prepare callback to
 accept the template. Regenerate all target bindings from matching native binaries.
+
+## Property sheets (bundled SDK, 2026-10-26)
+
+A `pages.properties` contribution names a `PagePropertySheet`: the page type
+it describes (the page's `gilune-type`), a title, and ordered properties —
+`Text` (optionally required), `Switch` (a boolean), `Choice` (named options,
+each with the value written — null removes the key — and a `PillTone` for its
+swatch) and `ReadOnly` (optionally offering the page's Rename references tool,
+for values other notes name). The host shows the sheet only while the same
+enabled owner declares both the sheet and the page type.
+
+Values are read from the page's own front matter, not the index, so the sheet
+is right the moment the page opens. Every edit is one `PropertyChange`
+through the same source-preserving property edit the Properties form uses,
+applied to the open buffer and saved at once; comments, unknown keys and the
+body survive, and a choice of Default removes its key so the page reads as it
+did before. A sheet is pure data: it receives no host, file or buffer, and it
+writes nothing itself. The desktop draws it in the note's properties bar (the
+bar is titled with the sheet's title, and the raw keys fold under "All
+properties"); Android opens it from Properties, with the raw form a button
+away. People declares the first sheet, for connections: Label (required
+text), Keyword (read-only, Rename…), Retired (switch) and Pill colour (the
+connection colours). No kernel or bindings change: the kernel stores the
+contribution like any other.

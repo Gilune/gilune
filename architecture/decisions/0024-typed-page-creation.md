@@ -49,3 +49,16 @@ retains normal history to prevent reseeding after user changes/deletion. Existin
 catalogues are preserved as a whole. Independent offline runs retain distinct
 objects and surface publication conflicts; no distributed exactly-once guarantee
 is claimed. Initialization preparation is separate from read-only queries.
+
+**2026-10-26 (owner) — property sheets.** A page type may carry a property
+sheet (`pages.properties`), so an existing page's details are edited where the
+page is read rather than only through raw YAML: typed rows (text, switch,
+named choice with a swatch tone, read-only with Rename references), read from
+the page's own front matter and written one property at a time through the
+existing source-preserving property edit. The sheet is pure data owned by the
+page type's plugin; the shell draws it and writes nothing the person did not
+choose. A value other pages reference (a keyword, a handle) is read-only here,
+because changing it is a refactoring across notes, not a one-line edit. The
+first sheet is People's, for connections, and it is where a connection's pill
+colour is chosen (an earlier swatch in the connections list was dropped: that
+list has no navigation entry). No kernel, schema or bindings change.

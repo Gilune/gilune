@@ -26,6 +26,7 @@ class BundledPluginExtensions(
     val refactorings: List<RefactoringRegistration> = emptyList(),
     val editorDecorations: List<EditorDecoration> = emptyList(),
     val definitions: List<DefinitionRegistration> = emptyList(),
+    val pagePropertySheets: List<PagePropertySheet> = emptyList(),
 )
 
 /** "Go to definition" (`Slots.EDITOR_DEFINITIONS`). `definitionAt` is pure:

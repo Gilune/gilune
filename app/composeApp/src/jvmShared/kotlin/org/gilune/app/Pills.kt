@@ -139,8 +139,16 @@ private fun PillTone.hue(accent: Color): Color = when (this) {
 /// drawn.
 @Composable
 fun pillPalette(tones: PillToneMap = PillToneMap(ready = true)): (String) -> PillColours {
+    val byTone = pillToneColours()
+    return remember(byTone, tones) { { item: String -> byTone.getValue(tones.toneOf(item)) } }
+}
+
+/// Every tone's colours in this theme — what a pill draws, and what a
+/// swatch beside a connection shows, so the two never disagree.
+@Composable
+fun pillToneColours(): Map<PillTone, PillColours> {
     val colours = MaterialTheme.colorScheme
-    val byTone = remember(colours) {
+    return remember(colours) {
         PillTone.entries.associateWith { tone ->
             val hue = tone.hue(colours.primary)
             PillColours(
@@ -149,7 +157,6 @@ fun pillPalette(tones: PillToneMap = PillToneMap(ready = true)): (String) -> Pil
             )
         }
     }
-    return remember(byTone, tones) { { item: String -> byTone.getValue(tones.toneOf(item)) } }
 }
 
 /// Whether styled text carries any pill at all, so a surface with none can

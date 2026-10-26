@@ -10,7 +10,9 @@
 package org.gilune.app
 
 import org.gilune.plugin.sdk.FrontMatterEntry
+import org.gilune.plugin.sdk.PagePropertySheet
 import org.gilune.plugin.sdk.Slots
+import uniffi.gilune_ffi.PropertyChange
 import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
@@ -681,7 +683,24 @@ private fun OpenNote(
         // the note's name, not its first line, and both modes show it.
         NoteTitle(state, editor, relPath, onRenamed)
 
-        if (header.frontMatter.isNotEmpty()) PropertiesStrip(header, editor)
+        if (header.frontMatter.isNotEmpty()) {
+            // The page type's own sheet, when a plugin declares one: its
+            // fields above the raw header. An edit is one property change
+            // through the lossless front-matter edit, saved at once.
+            val sheet = BUNDLED_PLUGIN_EXTENSIONS.pagePropertySheet(
+                state.plugins.toList(),
+                header.frontMatter.firstOrNull { it.key == "gilune-type" }?.value?.trim()?.trim('"', '\''),
+            )
+            PropertiesStrip(header, editor, sheet, onRename = { refactoringOpen = true }) { change ->
+                try {
+                    val updated = sourceWithChange(editor.document(), change)
+                    editor.applyProperties(editor.frontMatterRaw, splitNoteRaw(updated).first)
+                    write()
+                } catch (e: Exception) {
+                    state.message.value = "could not change ${change.key}: ${e.message}"
+                }
+            }
+        }
 
         // The editor seams (ADR 0015 § 5). What is composed comes from
         // the registry: the shell's own registrations lead, and the
@@ -1471,10 +1490,21 @@ private fun NoteTitle(
 /// The machine header, shown as properties rather than hidden. It is
 /// contract — an identity the vault and every other tool match on — so
 /// it stays visible and is written back untouched.
+///
+/// A page type with a property sheet (owner, 2026-10-26) shows its title
+/// in the bar and, opened, its fields first; the raw lines follow under
+/// "All properties", as they always read.
 @Composable
-private fun PropertiesStrip(note: Note, editor: EditorState) {
+private fun PropertiesStrip(
+    note: Note,
+    editor: EditorState,
+    sheet: PagePropertySheet? = null,
+    onRename: () -> Unit = {},
+    onChange: (PropertyChange) -> Unit = {},
+) {
     val colours = MaterialTheme.colorScheme
-    val summary = note.frontMatter.firstOrNull { it.key == "gilune-type" }?.value?.substringAfterLast('.')
+    var showRaw by remember(sheet) { mutableStateOf(sheet == null) }
+    val summary = sheet?.title ?: note.frontMatter.firstOrNull { it.key == "gilune-type" }?.value?.substringAfterLast('.')
     val revision = note.frontMatter.firstOrNull { it.key == "gilune-revision" }?.value?.take(8)
     val conflicted = note.frontMatter.any { it.key == "gilune-conflicted" && it.value == "true" }
 
@@ -1482,10 +1512,18 @@ private fun PropertiesStrip(note: Note, editor: EditorState) {
         Modifier
             .fillMaxWidth()
             .background(colours.surfaceVariant)
-            .clickable { editor.showProperties = !editor.showProperties }
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // The bar's own line opens and folds the section; what it opens —
+        // fields to edit — keeps its clicks.
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .clickable { editor.showProperties = !editor.showProperties }
+                .testTag("properties-bar"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Icon(
                 if (editor.showProperties) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
                 contentDescription = "properties",
@@ -1511,14 +1549,34 @@ private fun PropertiesStrip(note: Note, editor: EditorState) {
             }
         }
         if (editor.showProperties) {
-            for (entry in note.frontMatter) {
-                Text(
-                    "${entry.key}: ${entry.value}",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = colours.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+            if (sheet != null) {
+                PagePropertySheetView(
+                    sheet,
+                    editor.document(),
+                    onChange,
+                    onRename,
+                    Modifier.padding(start = 20.dp, top = 6.dp, bottom = 4.dp),
                 )
+                Text(
+                    if (showRaw) "Hide all properties" else "All properties",
+                    fontSize = 11.sp,
+                    color = colours.primary,
+                    modifier = Modifier
+                        .padding(start = 20.dp, top = 2.dp)
+                        .clickable { showRaw = !showRaw }
+                        .testTag("page-sheet-raw"),
+                )
+            }
+            if (showRaw) {
+                for (entry in note.frontMatter) {
+                    Text(
+                        "${entry.key}: ${entry.value}",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = colours.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 20.dp, top = 2.dp),
+                    )
+                }
             }
         }
     }

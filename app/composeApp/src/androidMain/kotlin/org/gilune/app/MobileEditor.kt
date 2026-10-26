@@ -90,6 +90,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -612,8 +613,42 @@ fun EditScreen(
             onAction = { save() },
         )
     }
-    if (propertiesOpen) SourcePropertiesDialog(editor.document(), { propertiesOpen = false }, editor::applyProperties)
-
+    // A page type with a property sheet (owner, 2026-10-26) opens on its
+    // fields; the raw properties are a button away, as before. Each field
+    // edit is applied to the buffer and saved at once.
+    val pageType = remember(editor.frontMatterRaw) { sheetValues(editor.document())?.get("gilune-type") }
+    val sheet = BUNDLED_PLUGIN_EXTENSIONS.pagePropertySheet(state.plugins.toList(), pageType)
+    var rawProperties by remember { mutableStateOf(false) }
+    var renaming by remember { mutableStateOf(false) }
+    if (propertiesOpen) {
+        if (sheet != null && !rawProperties) {
+            AlertDialog(
+                onDismissRequest = { propertiesOpen = false },
+                title = { Text(sheet.title) },
+                text = {
+                    PagePropertySheetView(
+                        sheet,
+                        editor.document(),
+                        onChange = { change ->
+                            try {
+                                val updated = sourceWithChange(editor.document(), change)
+                                editor.applyProperties(editor.frontMatterRaw, splitNoteRaw(updated).first)
+                                save()
+                            } catch (e: Exception) {
+                                state.message.value = "could not change ${change.key}: ${e.message}"
+                            }
+                        },
+                        onRename = { propertiesOpen = false; renaming = true },
+                    )
+                },
+                confirmButton = { TextButton(onClick = { propertiesOpen = false }) { Text("Done") } },
+                dismissButton = { TextButton(onClick = { rawProperties = true }) { Text("All properties") } },
+            )
+        } else {
+            SourcePropertiesDialog(editor.document(), { propertiesOpen = false; rawProperties = false }, editor::applyProperties)
+        }
+    }
+    if (renaming) RefactoringDialog(state, relPath, editor.document()) { renaming = false }
 }
 
 /// Should the editor draw a dictation mic at all (ADR 0017 § 3, § 4)?
