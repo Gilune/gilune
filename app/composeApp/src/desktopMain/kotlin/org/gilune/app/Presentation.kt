@@ -170,6 +170,7 @@ internal fun PresentedNote(
             textStyle = appearance.reading.textStyle,
             blockSpacing = appearance.reading.blockSpacing.dp,
             links = links,
+            pills = remember(editor.text.text, decorations) { pillsIn(editor.text.text, decorations) },
         )
     }
 }

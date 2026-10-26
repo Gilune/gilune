@@ -85,6 +85,7 @@ fun peopleExtensions(): BundledPluginExtensions {
             PluginContribution(Slots.DOCUMENT_VIEWS, PEOPLE_VIEW, "People links"),
             PluginContribution(Slots.DOCUMENT_REFACTORINGS, PEOPLE_REFACTORING, "Rename people and connections"),
             PluginContribution(Slots.SEARCH_TYPES, "person-connection", "People connections"),
+            PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_CONNECTION_STYLE, "Connections drawn as pills"),
             PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_MENTION_STYLE, "Mentions styled as links"),
             PluginContribution(Slots.EDITOR_DEFINITIONS, PEOPLE_DEFINITION, "Go to a person's page"),
             vaultFolderContribution(PEOPLE_FOLDER, "People"),
@@ -98,7 +99,7 @@ fun peopleExtensions(): BundledPluginExtensions {
         editorCompletions = listOf(peopleEditorRegistration()),
         documentViews = listOf(peopleViewRegistration()),
         refactorings = listOf(peopleRefactoringRegistration()),
-        editorDecorations = listOf(peopleMentionDecoration()),
+        editorDecorations = listOf(peopleConnectionDecoration(), peopleMentionDecoration()),
         definitions = listOf(peopleDefinitionRegistration()),
         searchOperators = operators,
         searchTypes = listOf(

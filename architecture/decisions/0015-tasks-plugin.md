@@ -797,3 +797,25 @@ labels now use the task's own line only.
   the scan oracle; the compiled operator and the five-row ordering against
   the real kernel in `FilterBlockTest`; the one-Enter field in `SuggestTest`;
   the field registry's three entries.
+
+- **2026-10-26 (pills).** § 5's decoration seam gains a third rendering,
+  `DecorationRender.Pill(tagLength)`, beside `Replace` and `StyleOnly`: the
+  claimed characters render as themselves (zero-delta, so no offset-table
+  entry and nothing for an IME to trip on), drawn as a two-part pill — the
+  first `tagLength` characters the tag, the rest the body. Like `Replace`
+  it gives way on the caret's line. Its first producer is the People
+  plugin: `keyword: @handle` (owner: connections were not visible enough on
+  task lines), registered ahead of the mention style so the pill takes the
+  mention inside it, by the same rule the index uses (`*assign:* @x` is not
+  a connection and draws plain). The shell carries the two parts as string
+  annotations in the styled text, and every surface that lays the text out
+  — the desktop field, the phone's painted overlay, Read view on both —
+  paints the rounded backgrounds from its own layout (`Pills.kt`). The
+  phone keeps its always-glyph checkboxes and still lets a pill go on the
+  line being written (`plainPillLine`); being zero-delta, that moves
+  nothing. The phone editor now draws every enabled plugin's decorations,
+  as the desktop always has, so mentions are coloured there too. Gate:
+  `ConnectionPillsTest` (what is a connection, where the marks land, the
+  caret-line rule on both shells, Read coordinates) and
+  `ConnectionPillsUiTest` (the tag's pixels in Read view and the editor,
+  absent on the caret's line; fails with the painter disabled).

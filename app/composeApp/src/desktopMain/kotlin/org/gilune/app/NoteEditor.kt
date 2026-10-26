@@ -80,6 +80,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -720,8 +721,10 @@ private fun OpenNote(
                     code = colours.primary,
                     codeBackground = colours.surfaceVariant,
                     link = colours.primary,
+                    pillTag = colours.onPrimaryContainer,
                 )
             }
+            val pills = pillColours()
             // The raw-line exception follows a caret someone can see: an
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
@@ -1175,6 +1178,10 @@ private fun OpenNote(
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = paneHeight)
                             .padding(EDITOR_PADDING)
+                            // Connection pills, painted behind the words
+                            // from the field's own layout — inside the
+                            // padding, so layout space is draw space.
+                            .drawBehind { layout?.let { drawPills(it, pills) } }
                             // Inside the padding, so its space is the text
                             // layout's and a cursor rect needs no shifting.
                             .bringIntoViewRequester(caretView)

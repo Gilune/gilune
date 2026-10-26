@@ -75,6 +75,10 @@ class PeopleEditingTest {
         assertEquals(emptyList(), BUNDLED_PLUGIN_EXTENSIONS.definitions(listOf(installed("disabled"))))
         assertEquals(emptyList(), BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(listOf(installed("disabled"))),
             "switched off, mentions are plain text again")
-        assertEquals(1, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(listOf(installed("enabled"))).size)
+        // The connection pill first, so it takes the mention inside it.
+        assertEquals(
+            listOf(org.gilune.plugins.people.PEOPLE_CONNECTION_STYLE, org.gilune.plugins.people.PEOPLE_MENTION_STYLE),
+            BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(listOf(installed("enabled"))).map { it.id },
+        )
     }
 }

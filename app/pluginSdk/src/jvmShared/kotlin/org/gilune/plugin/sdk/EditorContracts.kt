@@ -14,10 +14,18 @@ enum class DecorationRole { NONE, MUTED, MARKER, LINK, CODE }
 /// the difference. [StyleOnly] is the zero-delta case: the bytes render as
 /// themselves and only the role's span is added, which is all a `due:` token
 /// needs (ADR 0015 § 1).
+///
+/// [Pill] is zero-delta as well (owner, 2026-10-26: a connection such as
+/// `assign: @phil.jackson` should stand out): the bytes render as
+/// themselves, drawn as a two-part pill — the first `tagLength` characters
+/// the tag, the rest the body. Like [Replace] it gives way on the caret's
+/// line, where the words are being written and show as plain text.
 sealed interface DecorationRender {
     data class Replace(val text: String) : DecorationRender
 
     data object StyleOnly : DecorationRender
+
+    data class Pill(val tagLength: Int) : DecorationRender
 }
 
 /// One match a recogniser claims: a half-open range *within its line*, and
