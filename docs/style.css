@@ -103,6 +103,12 @@ body {
   font-weight: 600;
 }
 
+/* The way to the source, set apart from the guide pages it follows. */
+.site-nav a.github {
+  padding-left: 18px;
+  border-left: 1px solid var(--line);
+}
+
 /* ----------------------------------------------------------------- shell */
 
 main {
