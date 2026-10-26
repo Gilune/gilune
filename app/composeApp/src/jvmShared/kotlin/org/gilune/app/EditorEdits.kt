@@ -1,5 +1,7 @@
 // The toolbar's arithmetic (ADR 0017 § 3), kept apart from any screen so
-// every formatting action can be tested without a keyboard.
+// every formatting action can be tested without a keyboard. Shared since
+// 2026-10-26: the desktop's formatting shortcuts (Ctrl+B, Ctrl+I, …) are
+// the same edits, so a note formats identically from a key or a button.
 //
 // § 3: "every formatting action is a composition over shared primitives …
 // nothing writes bytes except through those". The primitive on the modern
@@ -61,27 +63,49 @@ private val EDIT_QUOTE = Regex("""^([ \t]*)(>[ \t]?)""")
 /// what a phone user means by tapping **B** mid-word. With no word either
 /// — an empty line, or the caret on whitespace — the markers are written
 /// empty and the caret lands between them, ready to type into.
+///
+/// Markers are judged by the whole run of their character, not by the
+/// characters next to the text (2026-10-26): `milk` inside `**milk**` is
+/// bold, not italic, so italic there wraps it to `***milk***` rather than
+/// stripping one star and turning the bold into italic.
 fun emphasisEdit(text: String, selection: TextRange, marker: String): BufferEdit {
     val (from, to) = emphasisTarget(text, selection)
     val width = marker.length
-    val wrappedOutside = from >= width &&
-        to + width <= text.length &&
-        text.regionMatches(from - width, marker, 0, width) &&
-        text.regionMatches(to, marker, 0, width)
-    if (wrappedOutside) {
-        val inner = text.substring(from, to)
+    val inner = text.substring(from, to)
+    val outside = minOf(runBefore(text, from, marker[0]), runAfter(text, to, marker[0]))
+    if (carries(outside, marker)) {
         return BufferEdit(from - width, to + width, inner, TextRange(from - width, to - width))
     }
-    val inner = text.substring(from, to)
+    val leading = runAfter(inner, 0, marker[0])
+    val inside = minOf(leading, runBefore(inner, inner.length, marker[0]))
+    // Nothing but markers is the empty pair a first press wrote — `****`
+    // around the caret — and a second press takes exactly that away.
     val wrappedInside = inner.length >= width * 2 &&
-        inner.startsWith(marker) &&
-        inner.endsWith(marker)
+        if (leading == inner.length) inner.length == width * 2 else carries(inside, marker)
     if (wrappedInside) {
         val stripped = inner.substring(width, inner.length - width)
         return BufferEdit(from, to, stripped, TextRange(from, from + stripped.length))
     }
     val written = marker + inner + marker
     return BufferEdit(from, to, written, TextRange(from + width, from + width + inner.length))
+}
+
+/// Whether a run of `run` marker characters holds this marker. A single
+/// `*` is italic only in an odd run — `*x*` and `***x***` — because two of
+/// them are bold; every other marker is there once the run is long enough.
+private fun carries(run: Int, marker: String): Boolean =
+    if (marker == "*") run % 2 == 1 else run >= marker.length
+
+private fun runBefore(text: String, offset: Int, c: Char): Int {
+    var index = offset
+    while (index > 0 && text[index - 1] == c) index--
+    return offset - index
+}
+
+private fun runAfter(text: String, offset: Int, c: Char): Int {
+    var index = offset
+    while (index < text.length && text[index] == c) index++
+    return index - offset
 }
 
 /// What **B** acts on: the selection when there is one, otherwise the word

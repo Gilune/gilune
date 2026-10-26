@@ -147,6 +147,11 @@ shut. Width and collapsed state are device-local facts like the theme
 and persist in the shell's preferences. A gesture that needs the rail
 (Ctrl+F) reopens it.
 
+**2026-10-26 (owner):** the rail toggle moves to **Ctrl+Shift+B**.
+Ctrl+B is bold in the editor, with Ctrl+I italic and the rest of the
+formatting keys the phone toolbar's edits answer; the window sees keys
+before the editor, so the two could not share one key.
+
 **2026-08-31 (owner, via ADR 0015 acceptance):** the fixed slot list
 grows from five to nine. The four new ids are **`editor.decorations`**
 (a line recogniser, its replacement and its activation),

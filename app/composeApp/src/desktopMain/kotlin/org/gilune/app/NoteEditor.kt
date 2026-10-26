@@ -993,6 +993,50 @@ private fun OpenNote(
                 return true
             }
 
+            // Formatting from the keyboard (owner ask, 2026-10-26): the phone
+            // toolbar's own edits, on Obsidian's keys where it has one — so a
+            // note formats identically from a key here or a button there.
+            // Each is one minimal replacement; the selection stays on the
+            // text it wrapped, so pressing the key again takes it off.
+            fun applyFormat(edit: BufferEdit?): Boolean {
+                // Nothing to do (a first line moved up) still answers the
+                // key: it must not fall through to the field or the window.
+                if (edit == null) return true
+                val value = editor.text
+                editor.text = value.copy(
+                    text = value.text.replaceRange(edit.start, edit.end, edit.replacement),
+                    selection = edit.selection,
+                )
+                editor.dirty = true
+                verticalX = null
+                typedHere = false
+                caretMoves++
+                return true
+            }
+            fun formatShortcut(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val text = editor.text.text
+                val selection = editor.text.selection
+                val shift = event.isShiftPressed
+                if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed && !shift) {
+                    return when (event.key) {
+                        Key.DirectionUp -> applyFormat(moveLineEdit(text, selection, up = true))
+                        Key.DirectionDown -> applyFormat(moveLineEdit(text, selection, up = false))
+                        else -> false
+                    }
+                }
+                if (!event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) return false
+                return when {
+                    !shift && event.key == Key.B -> applyFormat(emphasisEdit(text, selection, "**"))
+                    !shift && event.key == Key.I -> applyFormat(emphasisEdit(text, selection, "*"))
+                    !shift && event.key == Key.K -> applyFormat(linkEdit(text, selection))
+                    shift && event.key == Key.X -> applyFormat(emphasisEdit(text, selection, "~~"))
+                    shift && event.key == Key.C -> applyFormat(emphasisEdit(text, selection, "`"))
+                    !shift && event.key == Key.RightBracket -> indentLines(outdent = false)
+                    !shift && event.key == Key.LeftBracket -> indentLines(outdent = true)
+                    else -> false
+                }
+            }
+
             fun moveByLines(lines: Int, extend: Boolean): Boolean {
                 val placed = layout ?: return false
                 val value = editor.text
@@ -1156,6 +1200,7 @@ private fun OpenNote(
                                     event.type != KeyEventType.KeyDown -> false
                                     !completions.visible && goToDefinition(event) -> true
                                     !completions.visible && toggleTask(event) -> true
+                                    !completions.visible && formatShortcut(event) -> true
                                     !completions.visible -> when {
                                         event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
                                         event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)

@@ -198,60 +198,9 @@ class MobileEditorTest {
     }
 
     // ---------------------------------------------------- toolbar arithmetic
-
-    @Test
-    fun boldWrapsTheSelectionAndUnwrapsItAgain() {
-        val wrapped = emphasisEdit("milk and bread", TextRange(0, 4), "**")
-        assertEquals(BufferEdit(0, 4, "**milk**", TextRange(2, 6)), wrapped)
-        assertEquals("**milk** and bread", applied("milk and bread", wrapped))
-
-        val unwrapped = emphasisEdit("**milk** and bread", TextRange(2, 6), "**")
-        assertEquals("milk and bread", applied("**milk** and bread", unwrapped))
-        assertEquals(TextRange(0, 4), unwrapped.selection)
-    }
-
-    @Test
-    fun boldWithNoSelectionTakesTheWordUnderTheCaret() {
-        val edit = emphasisEdit("milk and bread", TextRange(6), "**")
-        assertEquals("milk **and** bread", applied("milk and bread", edit))
-    }
-
-    @Test
-    fun boldOnAnEmptyLineWritesTheMarkersAndSitsBetweenThem() {
-        val edit = emphasisEdit("", TextRange(0), "**")
-        assertEquals("****", applied("", edit))
-        assertEquals(TextRange(2), edit.selection)
-    }
-
-    @Test
-    fun italicAndStrikeAndCodeAreTheSameToggle() {
-        assertEquals("*milk*", applied("milk", emphasisEdit("milk", TextRange(0, 4), "*")))
-        assertEquals("~~milk~~", applied("milk", emphasisEdit("milk", TextRange(0, 4), "~~")))
-        assertEquals("`milk`", applied("milk", emphasisEdit("milk", TextRange(0, 4), "`")))
-    }
-
-    @Test
-    fun theListButtonTogglesABulletOnEveryLineItTouches() {
-        val on = bulletEdit("milk\nbread", TextRange(0, 10))
-        assertEquals("- milk\n- bread", applied("milk\nbread", on))
-        val off = bulletEdit("- milk\n- bread", TextRange(0, 14))
-        assertEquals("milk\nbread", applied("- milk\n- bread", off))
-    }
-
-    @Test
-    fun indentAddsTwoSpacesAndOutdentNeverEatsACharacter() {
-        assertEquals("  milk", applied("milk", indentEdit("milk", TextRange(0), outdent = false)))
-        assertEquals("milk", applied("  milk", indentEdit("  milk", TextRange(0), outdent = true)))
-        // Nothing to remove: the line comes back exactly as it was.
-        assertEquals("milk", applied("milk", indentEdit("milk", TextRange(0), outdent = true)))
-    }
-
-    @Test
-    fun headingsToggleAtTheirOwnLevel() {
-        assertEquals("# Title", applied("Title", headingEdit("Title", TextRange(0), 1)))
-        assertEquals("## Title", applied("# Title", headingEdit("# Title", TextRange(0), 2)))
-        assertEquals("Title", applied("# Title", headingEdit("# Title", TextRange(0), 1)))
-    }
+    // The shell-neutral rows (emphasis, lists, headings, links, moving
+    // lines) live in jvmSharedTest's EditorEditsTest, shared with the
+    // desktop's shortcuts. These use the phone's own decorations.
 
     @Test
     fun theCheckboxButtonMakesALineATaskAndThenTogglesIt() {
@@ -273,31 +222,6 @@ class MobileEditorTest {
         val decorations = mobileEditorDecorations(builtInDecorations() + tasksDecorations("", today))
         val edit = assertNotNull(checkboxEdit("- [ ] milk", TextRange(0), decorations))
         assertEquals("- [x] milk done:2026-09-01", applied("- [ ] milk", edit))
-    }
-
-    @Test
-    fun moveLineSwapsWithItsNeighbourAndCarriesTheCaret() {
-        val down = assertNotNull(moveLineEdit("one\ntwo\nthree", TextRange(1), up = false))
-        assertEquals("two\none\nthree", applied("one\ntwo\nthree", down))
-        assertEquals(TextRange(5), down.selection)
-
-        val up = assertNotNull(moveLineEdit("one\ntwo\nthree", TextRange(5), up = true))
-        assertEquals("two\none\nthree", applied("one\ntwo\nthree", up))
-        // The first line has nowhere to go, and says so rather than
-        // rewriting the document to no effect.
-        assertNull(moveLineEdit("one\ntwo", TextRange(0), up = true))
-        assertNull(moveLineEdit("one\ntwo", TextRange(5), up = false))
-    }
-
-    @Test
-    fun aLinkTakesTheSelectionAsItsLabelAndLandsTheCaretInTheDestination() {
-        val withLabel = linkEdit("see milk", TextRange(4, 8))
-        assertEquals("see [milk]()", applied("see milk", withLabel))
-        assertEquals(TextRange(11), withLabel.selection)
-
-        val empty = linkEdit("", TextRange(0))
-        assertEquals("[]()", applied("", empty))
-        assertEquals(TextRange(1), empty.selection)
     }
 
     @Test

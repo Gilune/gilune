@@ -153,7 +153,7 @@ private class GestureRequests {
     var closeTab by mutableStateOf(0)
     var splitRight by mutableStateOf(0)
 
-    /// Ctrl+B, which the top bar's toggle answers with the same flip.
+    /// Ctrl+Shift+B, which the top bar's toggle answers with the same flip.
     var toggleRail by mutableStateOf(0)
 
     /// Ctrl+E: the note in front into presentation mode, or back to editing.
@@ -233,7 +233,10 @@ fun main() {
                         gestures.quickOpen++
                         true
                     }
-                    event.isCtrlPressed && event.key == Key.B -> {
+                    // Ctrl+Shift+B, since Ctrl+B is bold in a note (owner,
+                    // 2026-10-26); the window sees keys first, so a bare
+                    // Ctrl+B here would never reach the editor.
+                    event.isCtrlPressed && event.isShiftPressed && event.key == Key.B -> {
                         gestures.toggleRail++
                         true
                     }
@@ -531,10 +534,10 @@ private fun DesktopApp(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // The rail's other switch: the same flip Ctrl+B makes, kept
+            // The rail's other switch: the same flip Ctrl+Shift+B makes, kept
             // where the rail is so shutting it never hides its own way
             // back (ADR 0011 amendment).
-            Tooltip(if (railCollapsed) "Show sidebar (Ctrl+B)" else "Hide sidebar (Ctrl+B)") {
+            Tooltip(if (railCollapsed) "Show sidebar (Ctrl+Shift+B)" else "Hide sidebar (Ctrl+Shift+B)") {
                 IconButton(
                     onClick = { setRailCollapsed(!railCollapsed) },
                     modifier = Modifier.size(30.dp),
