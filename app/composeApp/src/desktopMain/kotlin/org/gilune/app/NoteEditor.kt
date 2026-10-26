@@ -1257,7 +1257,7 @@ private fun OpenNote(
                         onDismissRequest = { traceCompletion("popup-dismiss"); completions.dismiss() },
                         properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
                         Box(Modifier.width(360.dp).testTag("suggest-popup")) {
-                            EditorCompletionMenu(completions, state, openRow ?: {})
+                            EditorCompletionMenu(completions, state, openRow ?: {}, maxHeight = 360.dp)
                         }
                     }
                 }

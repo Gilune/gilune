@@ -56,8 +56,8 @@ class PeopleUiDeviceTest {
             Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
         }
         compose.chooseFirstEditorOption("Owner")
-        compose.waitForFirstEditorOption("Alice Smith")
-        assertEquals("Publish /ow", text.text)
+        // The connection lands at once; the person lookup follows its `@`.
+        compose.waitUntil(10_000) { text.text == "Publish owner: @" }
         compose.chooseFirstEditorOption("Alice Smith")
         compose.waitUntil(10_000) { text.text == "Publish owner: @alice.smith " }
     }

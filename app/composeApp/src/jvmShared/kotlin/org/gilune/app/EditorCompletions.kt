@@ -4,11 +4,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.*
 import org.gilune.plugin.sdk.*
@@ -203,16 +206,24 @@ internal fun traceCompletion(event: String, context: EditorContext? = null) {
     }
 }
 
+/** `maxHeight` is the shell's: the desktop popup has room to spare, while the
+ * phone's menu shares the screen with the keyboard. */
 @Composable
-internal fun EditorCompletionMenu(ui: EditorCompletionUi, state: GiluneState, onOpen: (String) -> Unit = {}) {
+internal fun EditorCompletionMenu(ui: EditorCompletionUi, state: GiluneState, onOpen: (String) -> Unit = {},
+    maxHeight: Dp = 210.dp) {
+    // ↑/↓ move the highlight; the list follows it so the chosen row never
+    // scrolls out of sight (owner report, 2026-10-26).
+    val highlighted = remember { BringIntoViewRequester() }
+    LaunchedEffect(ui.selected, ui.offers) { if (ui.offers?.choices?.isNotEmpty() == true) highlighted.bringIntoView() }
     if (ui.visible) Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth().testTag("editor-completions")) {
-        Column(Modifier.heightIn(max = 210.dp).verticalScroll(rememberScrollState()).padding(6.dp)) {
+        Column(Modifier.heightIn(max = maxHeight).verticalScroll(rememberScrollState()).padding(6.dp)) {
             // Retained options must stay under the pointer during a refresh.
             // Inserting a loading row above them changes their click positions.
             if (ui.loading && ui.offers?.choices.isNullOrEmpty()) Text("Finding suggestions…")
             ui.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             ui.offers?.choices?.forEachIndexed { index, choice ->
                 Column(Modifier.fillMaxWidth().background(if (index == ui.selected) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surface)
+                    .then(if (index == ui.selected) Modifier.bringIntoViewRequester(highlighted) else Modifier)
                     .clickable { ui.choose(index) }.padding(8.dp).testTag("completion-$index")) {
                     Text(choice.option.label)
                     if (choice.option.detail.isNotBlank()) Text(choice.option.detail, style = MaterialTheme.typography.bodySmall)
