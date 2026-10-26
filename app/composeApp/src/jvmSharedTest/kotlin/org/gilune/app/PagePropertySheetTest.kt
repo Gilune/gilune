@@ -29,8 +29,19 @@ class PagePropertySheetTest {
         assertEquals(listOf("label", "keyword", "retired", "colour"), sheet.properties.map { it.key })
         assertTrue((sheet.properties[1] as PageProperty.ReadOnly).renameReferences, "a keyword is renamed everywhere, not edited here")
         assertNull(registry.pagePropertySheet(listOf(installed("disabled")), CONNECTION_TYPE), "switched off, the section is raw again")
-        assertNull(registry.pagePropertySheet(listOf(installed()), PERSON_TYPE), "people pages have no sheet yet")
         assertNull(registry.pagePropertySheet(listOf(installed()), null))
+        assertNull(registry.pagePropertySheet(listOf(installed()), "org.memory.note"), "an ordinary note has no sheet")
+    }
+
+    @Test
+    fun aPersonPageHasItsOwnSheet() {
+        val registry = PluginExtensions(listOf(peopleExtensions()))
+        val sheet = assertNotNull(registry.pagePropertySheet(listOf(installed()), PERSON_TYPE))
+        assertEquals("Person", sheet.title)
+        assertEquals(listOf("name", "handle"), sheet.properties.map { it.key })
+        assertTrue((sheet.properties[0] as PageProperty.Text).required, "a person needs a name")
+        assertTrue((sheet.properties[1] as PageProperty.ReadOnly).renameReferences, "mentions are written with the handle")
+        assertNull(registry.pagePropertySheet(listOf(installed("disabled")), PERSON_TYPE))
     }
 
     @Test

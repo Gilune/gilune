@@ -284,7 +284,8 @@ did before. A sheet is pure data: it receives no host, file or buffer, and it
 writes nothing itself. The desktop draws it in the note's properties bar (the
 bar is titled with the sheet's title, and the raw keys fold under "All
 properties"); Android opens it from Properties, with the raw form a button
-away. People declares the first sheet, for connections: Label (required
-text), Keyword (read-only, Rename…), Retired (switch) and Pill colour (the
-connection colours). No kernel or bindings change: the kernel stores the
+away. People declares two sheets: connections — Label (required text),
+Keyword (read-only, Rename…), Retired (switch) and Pill colour (the
+connection colours) — and people — Name (required text) and Handle
+(read-only, Rename…). No kernel or bindings change: the kernel stores the
 contribution like any other.

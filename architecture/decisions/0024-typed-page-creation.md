@@ -61,4 +61,6 @@ choose. A value other pages reference (a keyword, a handle) is read-only here,
 because changing it is a refactoring across notes, not a one-line edit. The
 first sheet is People's, for connections, and it is where a connection's pill
 colour is chosen (an earlier swatch in the connections list was dropped: that
-list has no navigation entry). No kernel, schema or bindings change.
+list has no navigation entry). No kernel, schema or bindings change. The
+same day People added a second sheet, for people: Name to edit, Handle
+read-only with Rename references.
