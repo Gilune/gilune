@@ -180,6 +180,19 @@ class PluginExtensions(implementations: List<BundledPluginExtensions>) {
     /** Editor styling contributed by enabled plugins (`editor.decorations`),
      * after the shell's own and the tasks plugin's. Style-only by convention:
      * a plugin's recogniser names words, it never rewrites them. */
+    /** The property sheet for a page of `pageTypeId`, from the enabled plugin
+     * that declares both the sheet and the page type; null when none does. */
+    internal fun pagePropertySheet(plugins: List<PluginInfo>, pageTypeId: String?): org.gilune.plugin.sdk.PagePropertySheet? {
+        if (pageTypeId.isNullOrBlank()) return null
+        return implementations.firstNotNullOfOrNull { implementation ->
+            val owner = plugins.enabledOwnerOf(implementation) ?: return@firstNotNullOfOrNull null
+            implementation.pagePropertySheets.firstOrNull {
+                it.pageTypeId == pageTypeId && owner.declares(org.gilune.plugin.sdk.PAGE_PROPERTIES_SLOT, it.id) &&
+                    owner.declares(PAGE_TYPES_SLOT, it.pageTypeId)
+            }
+        }
+    }
+
     internal fun editorDecorations(plugins: List<PluginInfo>): List<org.gilune.plugin.sdk.EditorDecoration> = implementations.flatMap { implementation ->
         val owner = plugins.enabledOwnerOf(implementation) ?: return@flatMap emptyList()
         implementation.editorDecorations.filter { owner.declares(Slots.EDITOR_DECORATIONS, it.id) }

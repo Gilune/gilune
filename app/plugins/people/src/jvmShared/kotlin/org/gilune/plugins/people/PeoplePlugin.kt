@@ -31,6 +31,29 @@ fun connectionColour(value: String?): String? = when (val name = value?.trim()?.
     else -> null
 }
 
+const val CONNECTION_SHEET = "$PEOPLE_PLUGIN.connection-sheet"
+
+/// What a connection page shows in its properties section (owner,
+/// 2026-10-26): its label and retired flag to edit, its pill colour to pick,
+/// and its keyword to read — renaming a keyword changes every note that
+/// uses it, so that goes through Rename references.
+fun connectionPropertySheet() = PagePropertySheet(
+    id = CONNECTION_SHEET,
+    pageTypeId = CONNECTION_TYPE,
+    title = "People connection",
+    properties = listOf(
+        PageProperty.Text("label", "Label", required = true),
+        PageProperty.ReadOnly("keyword", "Keyword", renameReferences = true),
+        PageProperty.Switch("retired", "Retired"),
+        PageProperty.Choice("colour", "Pill colour", connectionColourOptions()),
+    ),
+)
+
+/// Default writes nothing (the property is removed), then the six names.
+fun connectionColourOptions(): List<PageChoiceOption> =
+    listOf(PageChoiceOption(null, "Default", PillTone.ACCENT)) +
+        CONNECTION_COLOURS.map { PageChoiceOption(it, it.replaceFirstChar(Char::uppercase), connectionTone(it)) }
+
 fun connectionTone(colour: String?): PillTone = when (connectionColour(colour)) {
     "blue" -> PillTone.BLUE
     "green" -> PillTone.GREEN
@@ -115,6 +138,7 @@ fun peopleExtensions(): BundledPluginExtensions {
             PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_CONNECTION_STYLE, "Connections drawn as pills"),
             PluginContribution(Slots.EDITOR_DECORATIONS, PEOPLE_MENTION_STYLE, "Mentions styled as links"),
             PluginContribution(Slots.EDITOR_DEFINITIONS, PEOPLE_DEFINITION, "Go to a person's page"),
+            PluginContribution(PAGE_PROPERTIES_SLOT, CONNECTION_SHEET, "Connection properties"),
             vaultFolderContribution(PEOPLE_FOLDER, "People"),
         ) + operators.map { PluginContribution(Slots.SEARCH_OPERATORS, it.contributionId, it.name) } + collections.flatMap { c ->
             listOf(PluginContribution(PAGE_COLLECTIONS_SLOT, c.id, c.title)) +
@@ -128,6 +152,7 @@ fun peopleExtensions(): BundledPluginExtensions {
         refactorings = listOf(peopleRefactoringRegistration()),
         editorDecorations = listOf(peopleConnectionDecoration(), peopleMentionDecoration()),
         definitions = listOf(peopleDefinitionRegistration()),
+        pagePropertySheets = listOf(connectionPropertySheet()),
         searchOperators = operators,
         searchTypes = listOf(
             SearchTypeRegistration("person", "person") { personSearchType() },
