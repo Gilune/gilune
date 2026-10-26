@@ -22,6 +22,7 @@
       <a href="workspace.html">Workspace</a>
       <a href="sync.html">Sync</a>
       <a href="plugins.html">Plugins</a>
+      <a class="github" href="https://github.com/Gilune/gilune" aria-label="Gilune on GitHub" title="Gilune on GitHub"><svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
     </nav>
   </div>
 </header>
@@ -36,8 +37,10 @@
   <p>Open <strong>Settings ▸ Plugins ▸ People</strong>. <strong>Where pages go</strong> lists the folder that new people and new connections start in, with <strong>Change…</strong> beside each. The same choice is behind the <strong>Page defaults</strong> button in the People and People connections panels. A changed folder applies to pages made from then on; pages already in the vault stay where they are, and the folder's right-click menu follows the new location.</p>
   <h2>Mention someone or add a connection</h2>
   <p>Type <code>@</code> and part of a name or handle. Choose a result to insert a mention. If there is no page yet, <strong>Create person…</strong> opens a form and returns the new handle to your original note.</p>
-  <p>Type <code>/</code>, or use <strong>Insert…</strong>, to choose a connection and then a person. <code>/ow</code> narrows to Owner. Choosing both writes:</p>
+  <p>Type <code>/</code>, or use <strong>Insert…</strong>, to choose a connection and then a person. <code>/ow</code> narrows to Owner. Choosing it writes <code>owner: @</code> straight away and opens the people list; type part of a name or handle to narrow it. Choosing a person completes the line:</p>
   <pre><code>owner: @alice.smith</code></pre>
+  <p>A connection is drawn as a small pill — the connection's name as a tag, the person beside it — so it stands out on a task line. Put the cursor on the line and it goes back to the words you typed. Read view shows the same pill.</p>
+  <p>Each connection can have its own pill colour. Set <strong>Pill colour</strong> when you create the connection, or add <code>colour: green</code> to its page's properties. The colours are blue, green, amber, red, purple and grey; leave it out for the usual blue tint. A grey pill you didn't choose means the word before the colon isn't a connection Gilune knows — often a typo, or a connection that has been retired.</p>
   <p>The default connections are <code>assign</code> and <code>owner</code>. Add your own through the connections collection. Their names carry the meaning you give them: Gilune imposes no responsibility hierarchy. A plain mention does not imply assignment.</p>
   <p>You can type the same text in any editor. Code examples, escaped references and email addresses do not become connections. Missing or ambiguous handles remain explicit; the lookup will not silently choose the first page.</p>
   <h2>Follow references and search</h2>

@@ -120,6 +120,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.input.ImeAction
@@ -212,6 +213,7 @@ fun mobileEditorDecorations(decorations: List<EditorDecoration>): List<EditorDec
             role = decoration.role,
             firesInsideCodeFences = decoration.firesInsideCodeFences,
             activate = decoration.activate,
+            pillTones = decoration.pillTones,
             recognise = { line ->
                 decoration.recognise(line).filter { match ->
                     match.render !is DecorationRender.Replace || delimitedInLine(line, match.range)
@@ -313,14 +315,16 @@ fun editorStyling(
     decorations: List<EditorDecoration> = builtInDecorations(),
 ): AnnotatedString {
     // The shared transformation, asked with no caret: every line
-    // decorates, which is exactly § 2's always-rendered column.
+    // decorates, which is exactly § 2's always-rendered column. A pill is
+    // the exception — on the line being written it is plain text, as on the
+    // desktop; it is zero-delta, so letting it go moves nothing.
     val base = metricNeutral(
-        MarkdownEditTransformation(dimmed, null, decorations).filter(AnnotatedString(source)).text,
+        MarkdownEditTransformation(dimmed, null, decorations, plainPillLine = caretLine).filter(AnnotatedString(source)).text,
     )
     if (caretLine == null) return base
     val line = lineBoundsIn(base.text, caretLine) ?: return base
     val bright = metricNeutral(
-        MarkdownEditTransformation(revealed, null, decorations).filter(AnnotatedString(source)).text,
+        MarkdownEditTransformation(revealed, null, decorations, plainPillLine = caretLine).filter(AnnotatedString(source)).text,
     )
     return buildAnnotatedString {
         append(base)
@@ -334,7 +338,8 @@ fun editorStyling(
 
 /// Colour, background and decoration survive; size, weight and slant do
 /// not. Nothing here can move a glyph, which is the property the overlay
-/// technique rests on.
+/// technique rests on. Pill marks survive too: they move nothing, and the
+/// overlay paints the pills from them.
 private fun metricNeutral(styled: AnnotatedString): AnnotatedString = buildAnnotatedString {
     append(styled.text)
     for (span in styled.spanStyles) {
@@ -344,6 +349,9 @@ private fun metricNeutral(styled: AnnotatedString): AnnotatedString = buildAnnot
             textDecoration = span.item.textDecoration,
         )
         if (neutral != EMPTY_SPAN) addStyle(neutral, span.start, span.end)
+    }
+    for (mark in styled.getStringAnnotations(0, styled.length)) {
+        if (mark.tag == PILL_TAG || mark.tag == PILL_BODY) addStringAnnotation(mark.tag, mark.item, mark.start, mark.end)
     }
 }
 
@@ -482,13 +490,16 @@ fun EditScreen(
     // menu go, changing no byte either way.
     val plugins = state.plugins.toList()
     val filter = plugins.tasksFilter()
+    // Every enabled plugin's registrations follow, as on the desktop — the
+    // People plugin's connection pills and mention colour among them
+    // (2026-10-26; the phone had drawn neither).
     val decorations = remember(plugins, filter) {
         mobileEditorDecorations(
             if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
                 builtInDecorations() + tasksDecorations(filter)
             } else {
                 builtInDecorations()
-            },
+            } + BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins),
         )
     }
 
@@ -583,6 +594,7 @@ fun EditScreen(
             EditorBuffer(
                 editor = editor,
                 decorations = decorations,
+                pillTones = rememberPillTones(state, decorations),
                 onFocusChanged = { focused ->
                     bodyFocused = focused
                     if (!focused) completions.dismiss()
@@ -727,6 +739,7 @@ private fun NoteActions(
 private fun EditorBuffer(
     editor: MobileEditorState,
     decorations: List<EditorDecoration>,
+    pillTones: PillToneMap,
     onFocusChanged: (Boolean) -> Unit,
     onToggled: () -> Unit,
     caretLine: Int?,
@@ -748,9 +761,12 @@ private fun EditorBuffer(
             code = colours.primary,
             codeBackground = colours.surfaceVariant,
             link = colours.primary,
+            pillTag = colours.onPrimaryContainer,
         )
     }
     val revealed = remember(dimmed, colours) { dimmed.copy(muted = colours.onSurfaceVariant) }
+    val pills = pillPalette(pillTones)
+    var paintLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     val base = MaterialTheme.typography.bodyLarge.copy(color = colours.onSurface)
     val transformation = remember(decorations) { MarkdownOutputTransformation(decorations) }
@@ -812,11 +828,15 @@ private fun EditorBuffer(
         // layout is the field's layout; only colour differs, and colour
         // cannot move a glyph. Semantics are cleared so the note reads as
         // one node rather than two.
+        // Connection pills paint behind it from its own layout, which is the
+        // field's layout, so they sit exactly under the words.
         BasicText(
             text = styled,
             style = base,
+            onTextLayout = { paintLayout = it },
             modifier = Modifier
                 .fillMaxWidth()
+                .drawBehind { paintLayout?.let { drawPills(it, pills) } }
                 .clearAndSetSemantics { }
                 .testTag("note-body-paint"),
         )

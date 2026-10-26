@@ -99,6 +99,10 @@ class BlockRenderers(registrations: List<BlockRegistration> = emptyList()) {
 /// `checkboxTarget` is the tap target the glyph sits in the middle of.
 /// Android's floor is 48dp; a pointer needs no such thing, so the default
 /// is the marker column the bullet has always had.
+///
+/// `pills` are the editor's pills over the same parsed text ([pillsIn]),
+/// drawn here as the editor draws them; `pillTones` colours them, as
+/// [rememberPillTones] answers for the vault.
 @Composable
 fun MarkdownBody(
     blocks: List<MdBlock>,
@@ -109,8 +113,11 @@ fun MarkdownBody(
     textStyle: TextStyle = TextStyle.Default,
     blockSpacing: Dp = 10.dp,
     links: ReadLinks = ReadLinks(),
+    pills: List<ReadPill> = emptyList(),
+    pillTones: PillToneMap = PillToneMap(ready = true),
 ) {
     val colours = MaterialTheme.colorScheme
+    val palette = pillPalette(pillTones)
     val scale = if (textStyle.fontSize.isSpecified) textStyle.fontSize.value / 14f else 1f
     val lineHeight = if (textStyle.lineHeight.isSpecified) textStyle.lineHeight else 22.sp
     CompositionLocalProvider(LocalDocumentTextStyle provides textStyle.takeUnless { it == TextStyle.Default }) {
@@ -118,15 +125,17 @@ fun MarkdownBody(
             Column(modifier, verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
                 for (block in blocks) {
                     when (block) {
-                        is MdBlock.Heading -> Text(
-                            annotate(block.spans, colours.primary, links),
+                        is MdBlock.Heading -> PillText(
+                            annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
                             fontSize = headingSize(block.level) * scale,
                             lineHeight = if (textStyle.lineHeight.isSpecified) (headingSize(block.level).value * lineHeight.value / 14f).sp else androidx.compose.ui.unit.TextUnit.Unspecified,
                             fontWeight = FontWeight.SemiBold,
+                            palette = palette,
                         )
-                        is MdBlock.Paragraph -> Text(
-                            annotate(block.spans, colours.primary, links),
+                        is MdBlock.Paragraph -> PillText(
+                            annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
                             lineHeight = lineHeight,
+                            palette = palette,
                         )
                         is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
                             if (block.task == null) {
@@ -141,15 +150,16 @@ fun MarkdownBody(
                             } else {
                                 TaskGlyph(block.task, block.line, onToggleTask, maxOf(checkboxTarget, 22.dp * scale))
                             }
-                            Text(annotate(block.spans, colours.primary, links), lineHeight = lineHeight)
+                            PillText(annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer), lineHeight = lineHeight, palette = palette)
                         }
                         is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                             Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
-                            Text(
-                                annotate(block.spans, colours.primary, links),
+                            PillText(
+                                annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
                                 color = colours.onSurfaceVariant,
                                 lineHeight = lineHeight,
                                 modifier = Modifier.padding(start = 10.dp),
+                                palette = palette,
                             )
                         }
                         // The seam (§ 5). A registered info string draws itself;
@@ -275,7 +285,13 @@ class ReadLinks(
 /// `[[target]]` and `[[target|shown]]`, not the `![[…]]` of an embed.
 private val WIKI_LINK = Regex("""(?<!!)\[\[([^\]|\n]+)(?:\|([^\]\n]*))?]]""")
 
-private fun annotate(spans: List<Span>, linkColour: androidx.compose.ui.graphics.Color, links: ReadLinks): AnnotatedString =
+private fun annotate(
+    spans: List<Span>,
+    linkColour: androidx.compose.ui.graphics.Color,
+    links: ReadLinks,
+    pills: List<ReadPill> = emptyList(),
+    pillTagColour: androidx.compose.ui.graphics.Color = linkColour,
+): AnnotatedString =
     buildAnnotatedString {
         val open = links.open
         val linkStyle = SpanStyle(color = linkColour, textDecoration = TextDecoration.Underline)
@@ -312,6 +328,20 @@ private fun annotate(spans: List<Span>, linkColour: androidx.compose.ui.graphics
                         val last = minOf(range.last, source.last)
                         if (first > last) continue
                         clickable(ReadLink.Reference(reference), at + (first - source.first), at + (last - source.first) + 1)
+                    }
+                    // A pill may meet a span boundary, so each part is
+                    // marked for the stretch of it this run holds.
+                    for ((range, tag, item) in pills) {
+                        val tagEnd = range.first + tag
+                        for ((part, isTag) in listOf((range.first until tagEnd) to true, (tagEnd..range.last) to false)) {
+                            val first = maxOf(part.first, source.first)
+                            val last = minOf(part.last, source.last)
+                            if (first > last) continue
+                            val from = at + (first - source.first)
+                            val to = at + (last - source.first) + 1
+                            addStyle(SpanStyle(color = if (isTag) pillTagColour else linkColour), from, to)
+                            addStringAnnotation(if (isTag) PILL_TAG else PILL_BODY, item, from, to)
+                        }
                     }
                 }
                 var next = 0

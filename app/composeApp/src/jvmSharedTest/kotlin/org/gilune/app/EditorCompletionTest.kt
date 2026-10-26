@@ -69,17 +69,23 @@ class EditorCompletionTest {
         assertEquals(1uL, kernel.lookup(rows.first().option.unique!!).totalHits)
     }
 
-    @Test fun connectionSelectionKeepsTheBufferUntilAPersonIsChosen() = fixture { _, kernel, registry ->
+    @Test fun connectionSelectionWritesTheConnectionThenNarrowsPeopleByTyping() = fixture { root, kernel, registry ->
+        File(root, "bob.md").writeText("---\ngilune-type: $PERSON_TYPE\ngilune-id: bob\nname: Bob Jones\nhandle: bob.jones\n---\n")
+        kernel.reconcilePath("bob.md")
         val text = "Publish /ow"
-        val owner = loadEditorOffers(kernel, registry, context(text)).choices.single { it.option.continueWith == "owner" }
-        assertNull(owner.option.insertion)
-        val next = context(text + "ali").copy(continuation = EditorContinuation(owner.proposal.start, text.length, "owner", "/ow"))
-        val alice = loadEditorOffers(kernel, registry, next, owner.binding.registration.id).choices.first { it.option.insertion != null }
-        assertEquals("owner: @alice.smith ", alice.option.insertion)
-        assertEquals("Publish owner: @alice.smith ", next.text.replaceRange(alice.proposal.start, alice.proposal.end, alice.option.insertion!!))
-        val create = loadEditorOffers(kernel, registry, next, owner.binding.registration.id).choices.single { it.option.create != null }.option.create!!
-        val result = create.complete!!(inspectSourceText("---\nhandle: alicia\n---\n"))
-        assertEquals("owner: @alicia ", result.insertion)
+        val owner = loadEditorOffers(kernel, registry, context(text)).choices.single { it.option.detail == "owner" }
+        assertNull(owner.option.continueWith)
+        assertEquals("owner: @", owner.option.insertion)
+        val written = text.replaceRange(owner.proposal.start, owner.proposal.end, owner.option.insertion!!)
+        assertEquals("Publish owner: @", written)
+        fun people(typed: String) = loadEditorOffers(kernel, registry, context(written + typed)).choices
+            .filter { it.option.insertion != null }.map { it.option.label }
+        assertEquals(listOf("Alice Smith", "Bob Jones"), people(""))
+        assertEquals(listOf("Bob Jones"), people("bo"))
+        val alice = loadEditorOffers(kernel, registry, context(written + "ali")).choices.first { it.option.insertion != null }
+        assertEquals("Publish owner: @alice.smith ", (written + "ali").replaceRange(alice.proposal.start, alice.proposal.end, alice.option.insertion!!))
+        val create = loadEditorOffers(kernel, registry, context(written + "ali")).choices.single { it.option.create != null }.option.create!!
+        assertEquals("@alicia ", create.complete!!(inspectSourceText("---\nhandle: alicia\n---\n")).insertion)
     }
 
     @Test fun toolbarIncludesBlankParagraphsButExcludesCodeAndMetadata() = fixture { _, kernel, registry ->

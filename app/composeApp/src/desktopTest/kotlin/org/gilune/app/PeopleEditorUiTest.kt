@@ -71,10 +71,30 @@ class PeopleEditorUiTest {
             Column { BasicTextField(text, { text = it }, Modifier.testTag("body")); EditorCompletionMenu(ui, state) }
         }
         compose.chooseFirstEditorOption("Owner")
-        compose.waitForFirstEditorOption("Alice Smith")
-        assertEquals("Publish /ow", text.text)
+        // The connection lands at once; the person lookup follows its `@`.
+        compose.waitUntil(10_000) { text.text == "Publish owner: @" }
         compose.chooseFirstEditorOption("Alice Smith")
         compose.waitUntil(10_000) { text.text == "Publish owner: @alice.smith " }
+    }
+
+    @Test fun movingTheHighlightScrollsItIntoView() = fixture { state, kernel ->
+        val root = java.io.File(state.vaultDir)
+        for (n in 10..29) {
+            root.resolve("p$n.md").writeText("---\ngilune-type: $PERSON_TYPE\ngilune-id: p$n\nname: Person $n\nhandle: person$n\n---\n")
+            kernel.reconcilePath("p$n.md")
+        }
+        lateinit var menu: EditorCompletionUi
+        compose.setContent {
+            menu = rememberEditorCompletions(state, "Hello @person", 13, true) { _, _, _ -> }
+            EditorCompletionMenu(menu, state)
+        }
+        compose.waitUntil(10_000) { compose.onAllNodes(hasTestTag("completion-15")).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("completion-15").assertIsNotDisplayed()
+        compose.runOnIdle { repeat(15) { menu.move(1) } }
+        compose.onNodeWithTag("completion-15").assertIsDisplayed()
+        compose.onNodeWithTag("completion-0").assertIsNotDisplayed()
+        compose.runOnIdle { repeat(15) { menu.move(-1) } }
+        compose.onNodeWithTag("completion-0").assertIsDisplayed()
     }
 
     @Test fun creatingFromLookupReturnsTheNewHandleToTheOriginalEditor() = fixture { state, _ ->

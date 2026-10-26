@@ -80,6 +80,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -720,8 +721,10 @@ private fun OpenNote(
                     code = colours.primary,
                     codeBackground = colours.surfaceVariant,
                     link = colours.primary,
+                    pillTag = colours.onPrimaryContainer,
                 )
             }
+            val pills = pillPalette(rememberPillTones(state, decorations))
             // The raw-line exception follows a caret someone can see: an
             // unfocused buffer has none, so a note opens with every task
             // drawn as a checkbox, ready to be ticked (owner, 2026-08-31).
@@ -993,6 +996,50 @@ private fun OpenNote(
                 return true
             }
 
+            // Formatting from the keyboard (owner ask, 2026-10-26): the phone
+            // toolbar's own edits, on Obsidian's keys where it has one — so a
+            // note formats identically from a key here or a button there.
+            // Each is one minimal replacement; the selection stays on the
+            // text it wrapped, so pressing the key again takes it off.
+            fun applyFormat(edit: BufferEdit?): Boolean {
+                // Nothing to do (a first line moved up) still answers the
+                // key: it must not fall through to the field or the window.
+                if (edit == null) return true
+                val value = editor.text
+                editor.text = value.copy(
+                    text = value.text.replaceRange(edit.start, edit.end, edit.replacement),
+                    selection = edit.selection,
+                )
+                editor.dirty = true
+                verticalX = null
+                typedHere = false
+                caretMoves++
+                return true
+            }
+            fun formatShortcut(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val text = editor.text.text
+                val selection = editor.text.selection
+                val shift = event.isShiftPressed
+                if (event.isAltPressed && !event.isCtrlPressed && !event.isMetaPressed && !shift) {
+                    return when (event.key) {
+                        Key.DirectionUp -> applyFormat(moveLineEdit(text, selection, up = true))
+                        Key.DirectionDown -> applyFormat(moveLineEdit(text, selection, up = false))
+                        else -> false
+                    }
+                }
+                if (!event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) return false
+                return when {
+                    !shift && event.key == Key.B -> applyFormat(emphasisEdit(text, selection, "**"))
+                    !shift && event.key == Key.I -> applyFormat(emphasisEdit(text, selection, "*"))
+                    !shift && event.key == Key.K -> applyFormat(linkEdit(text, selection))
+                    shift && event.key == Key.X -> applyFormat(emphasisEdit(text, selection, "~~"))
+                    shift && event.key == Key.C -> applyFormat(emphasisEdit(text, selection, "`"))
+                    !shift && event.key == Key.RightBracket -> indentLines(outdent = false)
+                    !shift && event.key == Key.LeftBracket -> indentLines(outdent = true)
+                    else -> false
+                }
+            }
+
             fun moveByLines(lines: Int, extend: Boolean): Boolean {
                 val placed = layout ?: return false
                 val value = editor.text
@@ -1131,6 +1178,10 @@ private fun OpenNote(
                             .fillMaxWidth()
                             .defaultMinSize(minHeight = paneHeight)
                             .padding(EDITOR_PADDING)
+                            // Connection pills, painted behind the words
+                            // from the field's own layout — inside the
+                            // padding, so layout space is draw space.
+                            .drawBehind { layout?.let { drawPills(it, pills) } }
                             // Inside the padding, so its space is the text
                             // layout's and a cursor rect needs no shifting.
                             .bringIntoViewRequester(caretView)
@@ -1156,6 +1207,7 @@ private fun OpenNote(
                                     event.type != KeyEventType.KeyDown -> false
                                     !completions.visible && goToDefinition(event) -> true
                                     !completions.visible && toggleTask(event) -> true
+                                    !completions.visible && formatShortcut(event) -> true
                                     !completions.visible -> when {
                                         event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
                                         event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
@@ -1257,7 +1309,7 @@ private fun OpenNote(
                         onDismissRequest = { traceCompletion("popup-dismiss"); completions.dismiss() },
                         properties = androidx.compose.ui.window.PopupProperties(focusable = false)) {
                         Box(Modifier.width(360.dp).testTag("suggest-popup")) {
-                            EditorCompletionMenu(completions, state, openRow ?: {})
+                            EditorCompletionMenu(completions, state, openRow ?: {}, maxHeight = 360.dp)
                         }
                     }
                 }

@@ -31,6 +31,7 @@ import org.gilune.plugin.sdk.DecorationRole
 import org.gilune.plugin.sdk.EditorDecoration
 
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -49,6 +50,8 @@ data class MarkdownPalette(
     val code: Color,
     val codeBackground: Color,
     val link: Color,
+    /// A pill's tag words. Unspecified falls back to [marker].
+    val pillTag: Color = Color.Unspecified,
 )
 
 /// The activation-bearing span drawn under a position: which registration
@@ -171,16 +174,22 @@ fun builtInDecorations(): List<EditorDecoration> = BUILT_IN_DECORATIONS
 /// identity; otherwise every match folds into one table and offsets travel
 /// through one [OffsetMapping]. Styling is always computed against the
 /// *transformed* string, so spans land where the replacements put them.
+///
+/// `plainPillLine` is the phone's half of the caret rule: its glyphs render
+/// on every line (ADR 0017 § 2), but a pill on the line being written still
+/// gives way to plain text. The desktop needs nothing extra — its caret
+/// line already keeps every pill back.
 class MarkdownEditTransformation(
     private val palette: MarkdownPalette,
     private val caretLine: Int? = null,
     private val decorations: List<EditorDecoration> = builtInDecorations(),
     private val blocks: List<EditorBlockDecoration> = emptyList(),
     private val fontScale: Float = 1f,
+    private val plainPillLine: Int? = null,
 ) : VisualTransformation {
     override fun filter(text: AnnotatedString): TransformedText {
         val source = text.text
-        val placed = decorate(source, caretLine, decorations, blocks)
+        val placed = decorate(source, caretLine, decorations, blocks, plainPillLine)
         if (placed.isEmpty()) {
             return TransformedText(styleMarkdown(source, palette, fontScale), OffsetMapping.Identity)
         }
@@ -249,6 +258,18 @@ fun decorationAt(
     }
     return onEdge
 }
+
+/// One pill in source coordinates: its range, how long its tag is, and its
+/// mark item (`<registration>|<key>`, which colours it).
+data class ReadPill(val range: IntRange, val tagLength: Int, val item: String)
+
+/// Every pill the registrations claim in `source` — what a reading surface
+/// needs to draw the same pills the editor does over text it renders
+/// itself. Nothing is held back for a caret: a reader has none.
+fun pillsIn(source: String, decorations: List<EditorDecoration>): List<ReadPill> =
+    decorate(source, null, decorations).mapNotNull { span ->
+        span.pillTag?.let { tag -> ReadPill(span.start until span.start + span.sourceLength, tag, span.pillItem) }
+    }
 
 /// 0-based line holding `offset`, which is clamped into the text first, so
 /// this is total: an offset past the end reports the last line.
@@ -702,6 +723,10 @@ private class PlacedDecoration(
     val lineRange: IntRange,
     val blockId: String? = null,
     val fence: FencedBlock? = null,
+    /// A pill's tag length; null for every other kind of span.
+    val pillTag: Int? = null,
+    /// A pill's mark item, `<registration>|<key>`, which colours it.
+    val pillItem: String = "",
 ) {
     fun hit(): DecorationHit? =
         decoration?.let { DecorationHit(it, start until start + sourceLength, lineRange) }
@@ -717,6 +742,7 @@ private fun decorate(
     caretLine: Int?,
     decorations: List<EditorDecoration>,
     blocks: List<EditorBlockDecoration> = emptyList(),
+    plainPillLine: Int? = null,
 ): List<PlacedDecoration> {
     val collapsed = collapse(source, caretLine, blocks)
     if (decorations.isEmpty()) return collapsed
@@ -749,14 +775,16 @@ private fun decorate(
             if (onCaretLine && decoration.activate != null) continue
             for (match in decoration.recognise(line)) {
                 if (onCaretLine && match.render !is DecorationRender.StyleOnly) continue
+                if (index == plainPillLine && match.render is DecorationRender.Pill) continue
                 val range = match.range
                 if (range.isEmpty() || range.first < 0 || range.last >= line.length) continue
                 if (claimed.any { range.first <= it.last && it.first <= range.last }) continue
                 claimed += range
                 val length = range.last - range.first + 1
-                val replacement = when (val render = match.render) {
+                val render = match.render
+                val replacement = when (render) {
                     is DecorationRender.Replace -> render.text
-                    DecorationRender.StyleOnly -> line.substring(range.first, range.first + length)
+                    DecorationRender.StyleOnly, is DecorationRender.Pill -> line.substring(range.first, range.first + length)
                 }
                 onLine += PlacedDecoration(
                     start = start + range.first,
@@ -765,6 +793,10 @@ private fun decorate(
                     role = decoration.role,
                     decoration = decoration,
                     lineRange = start until start + line.length,
+                    // A tag that is the whole range, or none of it, is no
+                    // pill: it styles as its role does and nothing more.
+                    pillTag = (render as? DecorationRender.Pill)?.tagLength?.takeIf { it in 1 until length },
+                    pillItem = (render as? DecorationRender.Pill)?.let { pillItem(decoration.id, it.key) }.orEmpty(),
                 )
             }
         }
@@ -842,12 +874,19 @@ private fun styleDecorations(
     fontScale: Float,
 ): AnnotatedString {
     val styled = styleMarkdown(transformed, palette, fontScale)
-    if (placed.none { it.role != DecorationRole.NONE }) return styled
+    if (placed.none { it.role != DecorationRole.NONE || it.pillTag != null }) return styled
     return buildAnnotatedString {
         append(styled)
         for ((index, span) in placed.withIndex()) {
+            val from = starts[index]
+            val to = from + span.replacement.length
+            val tag = span.pillTag
+            if (tag != null) {
+                markPill(from, from + tag, to, palette.pillTag.takeOrElse { palette.marker }, palette.link, span.pillItem)
+                continue
+            }
             val style = span.role.spanStyle(palette) ?: continue
-            addStyle(style, starts[index], starts[index] + span.replacement.length)
+            addStyle(style, from, to)
         }
     }
 }

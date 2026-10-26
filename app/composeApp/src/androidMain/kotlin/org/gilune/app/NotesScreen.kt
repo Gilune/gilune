@@ -189,6 +189,10 @@ fun ReadScreen(
                 renderers = renderers,
                 onToggleTask = { line -> toggle(line) },
                 checkboxTarget = TouchTarget,
+                // The editor's pills, drawn here too: every enabled
+                // plugin's decorations, which is where a pill comes from.
+                pills = remember(body, plugins) { pillsIn(body, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)) },
+                pillTones = rememberPillTones(state, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)),
             )
         }
     }

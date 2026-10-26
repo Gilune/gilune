@@ -84,6 +84,25 @@ fun mentionsInLine(line: String): List<IntRange> {
     return mentionTokens(line, line.indices).filter { token -> code.none { token.first in it } }
 }
 
+/** The connections in one line as the editor draws them: each `keyword:`
+ * directly before a mention — spaces or tabs between, nothing else — by the
+ * rule [recognisePeople] applies for the index. Answers the whole range,
+ * keyword through handle, how long its `keyword:` tag is, and the keyword
+ * lower-cased — the key its pill is coloured by. */
+fun connectionsInLine(line: String): List<Triple<IntRange, Int, String>> = mentionsInLine(line).mapNotNull { mention ->
+    var colon = mention.first
+    while (colon > 0 && line[colon - 1] in " \t") colon--
+    if (colon == 0 || line[colon - 1] != ':') return@mapNotNull null
+    val keywordEnd = colon - 1
+    var keywordStart = keywordEnd
+    while (keywordStart > 0 && peopleTokenChar(line[keywordStart - 1])) keywordStart--
+    val keyword = line.substring(keywordStart, keywordEnd)
+    if (!validToken(keyword) || !boundaryAt(line, keywordStart) || escapedAt(line, keywordStart) || escapedAt(line, keywordEnd)) {
+        return@mapNotNull null
+    }
+    Triple(keywordStart..mention.last, keywordEnd + 1 - keywordStart, keyword.lowercase())
+}
+
 private val INLINE_CODE = Regex("`[^`\n]+`")
 
 private fun recognisePeople(view: SourceView, canonical: (String) -> String): List<PersonReference> {

@@ -4,6 +4,7 @@ import org.gilune.plugin.sdk.*
 import uniffi.gilune_ffi.*
 
 const val PEOPLE_MENTION_STYLE = "$PEOPLE_PLUGIN.mention-style"
+const val PEOPLE_CONNECTION_STYLE = "$PEOPLE_PLUGIN.connection-style"
 const val PEOPLE_DEFINITION = "$PEOPLE_PLUGIN.definition"
 const val PEOPLE_FOLDER = "$PEOPLE_PLUGIN.folder"
 
@@ -11,6 +12,33 @@ const val PEOPLE_FOLDER = "$PEOPLE_PLUGIN.folder"
  * spells keystrokes. F12 is Visual Studio's "go to definition". */
 const val DEFAULT_DEFINITION_KEY = "F12"
 private const val DEFINITION_KEY = "goToDefinitionKey"
+
+/** A connection reads as one thing (owner, 2026-10-26): `assign: @phil` is
+ * drawn as a pill, the keyword its tag and the person beside it, and goes
+ * back to plain text on the line being written. Registered ahead of the
+ * mention style, so the pill takes the mention inside it; on the caret's
+ * line the pill gives way and the mention is coloured as any other.
+ *
+ * Each pill is keyed by its keyword and coloured by its connection page's
+ * `colour` (owner, 2026-10-26). A keyword no live page defines — a typo, a
+ * retired connection — is not answered here, so its pill is grey. */
+fun peopleConnectionDecoration() = EditorDecoration(
+    id = PEOPLE_CONNECTION_STYLE,
+    recognise = { line ->
+        connectionsInLine(line).map { (range, tag, keyword) -> DecorationMatch(range, DecorationRender.Pill(tag, keyword)) }
+    },
+    role = DecorationRole.LINK,
+    pillTones = PillTones(
+        LookupRequest(
+            listOf(Constraint.FactAt(CONNECTION_KIND, ConstraintOp.EQ, "connection", FactLocality.DOCUMENT_ROOT)),
+            emptyList(), listOf(KEYWORD), listOf(KEYWORD, COLOUR, RETIRED), listOf(PEOPLE_PLUGIN), 200u, null,
+        ),
+    ) { hit ->
+        fun value(key: String) = hit.facts.firstOrNull { it.predicate == key }?.value
+        val keyword = value(KEYWORD)
+        if (keyword == null || value(RETIRED) == "true") null else keyword.lowercase() to connectionTone(value(COLOUR))
+    },
+)
 
 /** A mention looks like what it is in the editor: a link, styled in place
  * and never rewritten. The words are found by the same rule the index uses,
