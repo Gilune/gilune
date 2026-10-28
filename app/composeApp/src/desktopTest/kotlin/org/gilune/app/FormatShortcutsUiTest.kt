@@ -12,9 +12,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.MouseButton
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performMouseInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.text.TextRange
@@ -113,6 +118,49 @@ class FormatShortcutsUiTest {
 
         press(Key.CtrlLeft.keyCode, Key.LeftBracket.keyCode)
         assertEquals("- two\n- one", editor.text.text)
+    }
+
+    @Test
+    fun ctrlShiftDigitsWriteHeadingsAndListsAndNeverSelectATab() {
+        // Owner ask, 2026-10-27: formatting options. Ctrl+digit alone is
+        // the window's tab key; with Shift it must reach the editor.
+        val editor = editorOn("milk\nbread", TextRange(0, 10))
+
+        press(Key.CtrlLeft.keyCode, Key.ShiftLeft.keyCode, Key.Seven.keyCode)
+        assertEquals("1. milk\n2. bread", editor.text.text)
+
+        press(Key.CtrlLeft.keyCode, Key.ShiftLeft.keyCode, Key.Eight.keyCode)
+        assertEquals("- milk\n- bread", editor.text.text, "a number traded for the bullet")
+
+        compose.runOnIdle { editor.text = TextFieldValue("Title", TextRange(0)) }
+        press(Key.CtrlLeft.keyCode, Key.ShiftLeft.keyCode, Key.Two.keyCode)
+        assertEquals("## Title", editor.text.text)
+
+        press(Key.CtrlLeft.keyCode, Key.ShiftLeft.keyCode, Key.Nine.keyCode)
+        assertEquals("> ## Title", editor.text.text)
+    }
+
+    @Test
+    fun theRightClickMenuOffersTheSameFormattingWithItsKeys() {
+        val editor = editorOn("milk and bread", TextRange(0, 4))
+
+        compose.onNodeWithTag("note-body").performMouseInput { click(center, MouseButton.Secondary) }
+        compose.waitForIdle()
+        compose.onNodeWithText("Ctrl+Shift+7").assertExists()
+        compose.onNodeWithText("Bold").performClick()
+        compose.waitForIdle()
+        assertEquals("**milk** and bread", editor.text.text)
+        assertEquals(TextRange(2, 6), editor.text.selection)
+    }
+
+    @Test
+    fun returnOnANumberedItemCountsOnThroughTheRealEditor() {
+        // Owner, 2026-10-27: "why don't numbered lists auto increment".
+        val editor = editorOn("1. milk\n2. bread", TextRange(7))
+
+        press(Key.Enter.keyCode)
+        assertEquals("1. milk\n2. \n3. bread", editor.text.text)
+        assertEquals(TextRange(11), editor.text.selection)
     }
 
     @Test

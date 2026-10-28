@@ -36,6 +36,7 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -65,6 +66,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.key.key
@@ -72,6 +74,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -143,6 +146,9 @@ private class GestureRequests {
     var newNote by mutableStateOf(0)
     var search by mutableStateOf(0)
     var quickOpen by mutableStateOf(0)
+
+    /// Ctrl+/: the keyboard shortcuts window (Shortcuts.kt).
+    var shortcuts by mutableStateOf(0)
 
     /// Count paired with the direction: true cycles forward.
     var cycleTab by mutableStateOf(0 to true)
@@ -256,6 +262,10 @@ fun main() {
                         gestures.togglePresentation++
                         true
                     }
+                    event.isCtrlPressed && event.key == Key.Slash -> {
+                        gestures.shortcuts++
+                        true
+                    }
                     event.key == Key.Escape && settingsOpen -> {
                         settingsOpen = false
                         true
@@ -263,7 +273,10 @@ fun main() {
                     else -> {
                         // Ctrl+1…9 selects the nth tab of the pane in
                         // front; the digit travels with the request.
-                        val digit = if (event.isCtrlPressed) digitOf(event.key) else null
+                        // Ctrl+Shift+digit is the editor's (headings and
+                        // lists), so only a bare Ctrl counts here.
+                        val bareCtrl = event.isCtrlPressed && !event.isShiftPressed && !event.isAltPressed
+                        val digit = if (bareCtrl) digitOf(event.key) else null
                         if (digit != null) {
                             gestures.selectTab = gestures.selectTab.first + 1 to digit
                             true
@@ -326,6 +339,9 @@ private fun DesktopApp(
     val recorder = remember { DesktopAudioRecorder() }
     val dictation = remember { DesktopAudioRecorder() }
     var recording by remember { mutableStateOf(false) }
+    var shortcutsOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(gestures.shortcuts) { if (gestures.shortcuts > 0) shortcutsOpen = true }
+    if (shortcutsOpen) ShortcutsDialog(state.plugins.toList()) { shortcutsOpen = false }
     val transcription = remember { TranscriptionRuntime() }
     val nemo = remember { NemoHost() }
     KeepTranscriptionAsked(state) { gilune ->
@@ -595,6 +611,16 @@ private fun DesktopApp(
                     Icon(
                         Icons.Default.Refresh,
                         contentDescription = "sync vault",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
+            }
+            Tooltip("Keyboard shortcuts ($SHORTCUTS_KEYS)") {
+                IconButton(onClick = { shortcutsOpen = true }, modifier = Modifier.size(30.dp).testTag("open-shortcuts")) {
+                    Icon(
+                        Icons.Outlined.Keyboard,
+                        contentDescription = "keyboard shortcuts",
                         modifier = Modifier.size(17.dp),
                         tint = colours.onSurfaceVariant,
                     )

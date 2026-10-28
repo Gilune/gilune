@@ -173,9 +173,83 @@ class ListContinuationTest {
         assertNull(decide("\n|"))
     }
 
+    // ------------------------------------------------------- numbered lists
+
     @Test
-    fun orderedListsAreOutOfScopeAsTheyAreForTheCheckbox() {
-        assertNull(decide("1. milk\n|"))
+    fun aNumberedItemContinuesWithTheNextNumber() {
+        // Owner, 2026-10-27: "why don't numbered lists auto increment".
+        assertEquals("2. ", continuation("1. milk\n|"))
+        assertEquals("1. milk\n2. |", press("1. milk\n|"))
+        assertEquals("10. ", continuation("9. milk\n|"))
+    }
+
+    @Test
+    fun theDelimiterIndentationAndSpacingAreTheItemsOwn() {
+        assertEquals("4) ", continuation("3) milk\n|"))
+        assertEquals("  2. ", continuation("  1. milk\n|"))
+        assertEquals("2.  ", continuation("1.  milk\n|"))
+    }
+
+    @Test
+    fun theLaterItemsMoveUpSoTheListStillCounts() {
+        assertEquals(
+            "1. milk\n2. |\n3. bread\n4. eggs\n",
+            press("1. milk\n|\n2. bread\n3. eggs\n"),
+        )
+    }
+
+    @Test
+    fun renumberingStepsOverNestedLinesAndStopsWhereTheListEnds() {
+        assertEquals(
+            "1. milk\n2. |\n3. bread\n   - wholemeal\n\n4. eggs\nprose\n1. another list\n",
+            press("1. milk\n|\n2. bread\n   - wholemeal\n\n3. eggs\nprose\n1. another list\n"),
+        )
+        // Another delimiter is another list.
+        assertEquals("1. milk\n2. |\n1) other\n", press("1. milk\n|\n1) other\n"))
+    }
+
+    @Test
+    fun aDeliberateGapIsKept() {
+        // 5 already counts past the new 3, so it and the rest are left.
+        assertEquals("1. a\n2. b\n3. |\n5. c\n6. d", press("1. a\n2. b\n|\n5. c\n6. d"))
+    }
+
+    @Test
+    fun aListNumberedOneOneOneStaysThatWay() {
+        // CommonMark numbers `1.` `1.` `1.` itself; the writer chose it.
+        assertEquals("1. a\n1. b\n1. |", press("1. a\n1. b\n|"))
+        val decision = decide("1. a\n|\n1. b\n1. c") as ListContinuation.Continue
+        assertEquals("1. ", decision.prefix)
+        assertTrue(decision.renumber.isEmpty())
+    }
+
+    @Test
+    fun returnInsideANumberedItemSplitsIt() {
+        assertEquals("1. milk \n2. |and bread\n3. eggs", press("1. milk \n|and bread\n2. eggs"))
+    }
+
+    @Test
+    fun anEmptyNumberedItemLetsGo() {
+        assertEquals("1. milk\n|", press("1. milk\n2. \n|"))
+    }
+
+    @Test
+    fun anEmptyNestedNumberedItemStepsOutToTheItemItSitsUnder() {
+        // Under a numbered item it takes that item's next number…
+        assertEquals("1. milk\n   1. semi\n2. |", press("1. milk\n   1. semi\n   2. \n|"))
+        // …and under a bullet, the bullet.
+        assertEquals("- milk\n  1. semi\n- |", press("- milk\n  1. semi\n  2. \n|"))
+    }
+
+    @Test
+    fun aNumberedListInAFenceIsText() {
+        assertNull(decide("```\n1. quoted\n|"))
+    }
+
+    @Test
+    fun aNumberWithoutItsSpaceIsNotAnItem() {
+        assertNull(decide("1.milk\n|"))
+        assertNull(decide("1999.\n|"))
     }
 
     @Test

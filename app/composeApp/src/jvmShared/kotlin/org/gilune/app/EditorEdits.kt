@@ -54,6 +54,7 @@ private val EDIT_TASK_LINE = Regex("""^([ \t]*)([-*+])([ \t]+)(\[[ xX]])""")
 private val EDIT_BULLET = Regex("""^([ \t]*)([-*+])([ \t]+)""")
 private val EDIT_HEADING = Regex("""^(#{1,6})([ \t]+)""")
 private val EDIT_QUOTE = Regex("""^([ \t]*)(>[ \t]?)""")
+private val EDIT_NUMBER = Regex("""^([ \t]*)(\d{1,9}[.)])([ \t]+)""")
 
 /// Bold, italic, strikethrough and code, on one rule: the marker is added
 /// when it is absent and taken away when it is already there, so the
@@ -156,13 +157,47 @@ fun checkboxEdit(
 fun bulletEdit(text: String, selection: TextRange): BufferEdit =
     perLine(text, selection) { line ->
         val bullet = EDIT_BULLET.find(line)
-        if (bullet != null) {
-            line.substring(0, bullet.groupValues[1].length) + line.substring(bullet.value.length)
-        } else {
-            val indent = line.takeWhile { it == ' ' || it == '\t' }
-            "$indent- " + line.substring(indent.length)
+        val number = EDIT_NUMBER.find(line)
+        when {
+            bullet != null -> line.substring(0, bullet.groupValues[1].length) + line.substring(bullet.value.length)
+            // A numbered line trades its number for the bullet rather than
+            // wearing both.
+            number != null -> number.groupValues[1] + "- " + line.substring(number.value.length)
+            else -> {
+                val indent = line.takeWhile { it == ' ' || it == '\t' }
+                "$indent- " + line.substring(indent.length)
+            }
         }
     }
+
+/// The numbered-list button (owner ask, 2026-10-27): every line the
+/// selection touches is numbered from 1 — a bullet traded for the number,
+/// blank lines skipped and not counted — and when every one of them is
+/// numbered already, the numbers come off. Toggling off and on again
+/// renumbers, which is also the quick way to straighten a list's count.
+fun numberedEdit(text: String, selection: TextRange): BufferEdit {
+    val from = selection.min.coerceIn(0, text.length)
+    val lines = text.substring(lineStartAt(text, from), lineEndAt(text, selection.max.coerceIn(from, text.length))).split('\n')
+    val off = lines.filter { it.isNotBlank() }.let { written -> written.isNotEmpty() && written.all { EDIT_NUMBER.containsMatchIn(it) } }
+    // The number a line takes is its place among the touched lines with
+    // words on them, so the rewrite stays a pure function of the line.
+    val place = lines.runningFold(0) { count, line -> if (line.isBlank()) count else count + 1 }
+    return perLineIndexed(text, selection) { index, line ->
+        val n = place[index] + 1
+        val number = EDIT_NUMBER.find(line)
+        val bullet = EDIT_BULLET.find(line)
+        when {
+            line.isBlank() -> line
+            off -> line.substring(0, number!!.groupValues[1].length) + line.substring(number.value.length)
+            number != null -> number.groupValues[1] + "$n. " + line.substring(number.value.length)
+            bullet != null -> bullet.groupValues[1] + "$n. " + line.substring(bullet.value.length)
+            else -> {
+                val indent = line.takeWhile { it == ' ' || it == '\t' }
+                "$indent$n. " + line.substring(indent.length)
+            }
+        }
+    }
+}
 
 /// Blockquote, on the same per-line toggle.
 fun quoteEdit(text: String, selection: TextRange): BufferEdit =
@@ -277,15 +312,20 @@ private const val INDENT = "  "
 /// selection is preserved where it can be — a caret keeps its column,
 /// shifted by what was written before it — and otherwise spans the
 /// rewritten block.
-private fun perLine(text: String, selection: TextRange, rewrite: (String) -> String): BufferEdit {
+private fun perLine(text: String, selection: TextRange, rewrite: (String) -> String): BufferEdit =
+    perLineIndexed(text, selection) { _, line -> rewrite(line) }
+
+/// [perLine] with each line's place among the touched lines, from 0.
+private fun perLineIndexed(text: String, selection: TextRange, rewrite: (Int, String) -> String): BufferEdit {
     val from = selection.min.coerceIn(0, text.length)
     val to = selection.max.coerceIn(from, text.length)
     val start = lineStartAt(text, from)
     val end = lineEndAt(text, to)
     val lines = text.substring(start, end).split('\n')
-    val written = lines.joinToString("\n") { rewrite(it) }
+    val rewritten = lines.mapIndexed(rewrite)
+    val written = rewritten.joinToString("\n")
     if (selection.collapsed) {
-        val firstDelta = rewrite(lines.first()).length - lines.first().length
+        val firstDelta = rewritten.first().length - lines.first().length
         return BufferEdit(start, end, written, shifted(selection, end, firstDelta))
     }
     return BufferEdit(start, end, written, TextRange(start, start + written.length))
