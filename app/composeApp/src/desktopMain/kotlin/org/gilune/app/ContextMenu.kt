@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -66,8 +67,21 @@ class SwitchMenuItem(
     onClick: () -> Unit,
 ) : ContextMenuItem(label, onClick)
 
-/// Draws the tree's menu: the default's shape in the theme's colours,
-/// with a `SwitchMenuItem` carrying its switch.
+/// A menu item that names the keystroke doing the same thing at its end
+/// (the editor's formatting, 2026-10-27). `startsGroup` draws a rule above
+/// it; a rule is drawn anyway where these items meet ordinary ones, so the
+/// editor's formatting sits apart from the field's own Cut/Copy/Paste
+/// whichever order Compose gathers them in.
+class ShortcutMenuItem(
+    label: String,
+    val keys: String?,
+    val startsGroup: Boolean = false,
+    onClick: () -> Unit,
+) : ContextMenuItem(label, onClick)
+
+/// Draws the shell's menus — the files list's and the editor's: the
+/// default's shape in the theme's colours, with a `SwitchMenuItem`
+/// carrying its switch and a `ShortcutMenuItem` its keys.
 object GiluneContextMenuRepresentation : ContextMenuRepresentation {
     // The position provider that puts a popup at a point is the one the
     // default representation uses too; it is simply not stable API yet.
@@ -101,7 +115,15 @@ object GiluneContextMenuRepresentation : ContextMenuRepresentation {
                     .widthIn(min = 160.dp),
             ) {
                 @Suppress("UNUSED_VARIABLE") val reread = flipped
+                var previous: ContextMenuItem? = null
                 for (item in items()) {
+                    val shortcut = item as? ShortcutMenuItem
+                    if (previous != null &&
+                        (shortcut?.startsGroup == true || (shortcut != null) != (previous is ShortcutMenuItem))
+                    ) {
+                        HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colours.outlineVariant)
+                    }
+                    previous = item
                     val switch = item as? SwitchMenuItem
                     val enabled = switch?.enabled ?: true
                     val choose: () -> Unit = {
@@ -136,6 +158,10 @@ object GiluneContextMenuRepresentation : ContextMenuRepresentation {
                             fontSize = 13.sp,
                             color = if (enabled) colours.onSurface else colours.onSurfaceVariant,
                         )
+                        if (shortcut?.keys != null) {
+                            Spacer(Modifier.weight(1f).width(24.dp))
+                            Text(shortcut.keys, fontSize = 12.sp, color = colours.onSurfaceVariant)
+                        }
                         if (switch != null) {
                             Spacer(Modifier.weight(1f).width(16.dp))
                             // The row is the switch for semantics and for

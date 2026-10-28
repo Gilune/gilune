@@ -77,6 +77,31 @@ class EditorEditsTest {
     }
 
     @Test
+    fun theNumberedButtonCountsTheLinesItTouchesAndTogglesOff() {
+        // Owner ask, 2026-10-27: formatting options include numbered lists.
+        val on = numberedEdit("milk\n\nbread\n  eggs", TextRange(0, 17))
+        assertEquals("1. milk\n\n2. bread\n  3. eggs", applied("milk\n\nbread\n  eggs", on), "blank lines skipped and uncounted")
+        val off = numberedEdit("1. milk\n2. bread", TextRange(0, 16))
+        assertEquals("milk\nbread", applied("1. milk\n2. bread", off))
+    }
+
+    @Test
+    fun numberingTradesABulletAndStraightensACount() {
+        assertEquals("1. milk\n2. bread", applied("- milk\n- bread", numberedEdit("- milk\n- bread", TextRange(0, 14))))
+        // Partly numbered is not all numbered: the whole run is renumbered.
+        assertEquals("1. milk\n2. bread", applied("5. milk\nbread", numberedEdit("5. milk\nbread", TextRange(0, 13))))
+        // A caret keeps its place in the words.
+        val caret = numberedEdit("milk", TextRange(2))
+        assertEquals("1. milk", applied("milk", caret))
+        assertEquals(TextRange(5), caret.selection)
+    }
+
+    @Test
+    fun theListButtonTradesANumberForTheBullet() {
+        assertEquals("- milk", applied("1. milk", bulletEdit("1. milk", TextRange(0))))
+    }
+
+    @Test
     fun indentAddsTwoSpacesAndOutdentNeverEatsACharacter() {
         assertEquals("  milk", applied("milk", indentEdit("milk", TextRange(0), outdent = false)))
         assertEquals("milk", applied("  milk", indentEdit("  milk", TextRange(0), outdent = true)))

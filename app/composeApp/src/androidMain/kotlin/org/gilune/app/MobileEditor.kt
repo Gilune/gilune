@@ -284,6 +284,11 @@ object ListContinuationTransformation : InputTransformation {
         }
         when (val decision = listContinuation(text, caret)) {
             is ListContinuation.Continue -> {
+                // A numbered list's later numbers, bottom up and all below
+                // the caret, so none of them moves the composing region.
+                for (r in decision.renumber.sortedByDescending { it.range.first }) {
+                    replace(r.range.first, r.range.last + 1, r.number)
+                }
                 replace(caret, caret, decision.prefix)
                 selection = TextRange(caret + decision.prefix.length)
             }

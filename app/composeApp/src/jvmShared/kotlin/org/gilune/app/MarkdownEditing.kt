@@ -313,7 +313,18 @@ sealed interface ListContinuation {
     /// plus a fresh **unchecked** marker when it was a task — is inserted
     /// at the caret. A ticked item continues unticked, because the next
     /// thing you write down is not already done.
-    data class Continue(val prefix: String) : ListContinuation
+    ///
+    /// On a numbered item the prefix carries the next number, and
+    /// [renumber] moves the later items of the same list up by one so the
+    /// list still counts (owner, 2026-10-27): each is a range of digits in
+    /// the buffer as handed in — all of them below the caret's line — and
+    /// the number to write there. Empty for bullets, and for a list
+    /// numbered `1.` `1.` `1.` on purpose, which continues with its own
+    /// number.
+    data class Continue(
+        val prefix: String,
+        val renumber: List<Renumbering> = emptyList(),
+    ) : ListContinuation
 
     /// The list lets go: the half-open source [range] is deleted. It
     /// covers the empty item's own text *and* the newline that was just
@@ -328,6 +339,9 @@ sealed interface ListContinuation {
     /// level shallower, with the caret after it.
     data class Unwrap(val range: IntRange, val keep: String = "") : ListContinuation
 }
+
+/// One later list number rewritten: the digits at [range] become [number].
+data class Renumbering(val range: IntRange, val number: String)
 
 /// The one place both editors decide what Return does to a list, taken
 /// over the buffer **as it stands with the newline already in it**:
@@ -347,10 +361,10 @@ sealed interface ListContinuation {
 /// at `- [ ] |milk` continues (the empty marker stays behind, `milk` moves
 /// down under a new one) and only a genuinely empty item unwraps.
 ///
-/// Ordered lists are out of scope exactly as they are for the checkbox
-/// (see [TASK_MARKER]), and a list quoted inside a fence is text: writing
-/// a marker into somebody's example would be the rendering rule's mistake
-/// made with real bytes.
+/// A numbered item continues with the next number and renumbers the rest
+/// of its list (see [orderedContinuation]). A list quoted inside a fence
+/// is text: writing a marker into somebody's example would be the
+/// rendering rule's mistake made with real bytes.
 fun listContinuation(text: CharSequence, caretAfterNewline: Int): ListContinuation? {
     if (caretAfterNewline <= 0 || caretAfterNewline > text.length) return null
     val previousEnd = caretAfterNewline - 1
@@ -369,6 +383,7 @@ fun listContinuation(text: CharSequence, caretAfterNewline: Int): ListContinuati
     if (inFence) return null
 
     val previous = text.substring(lineStart, previousEnd)
+    ORDERED_ITEM.find(previous)?.let { return orderedContinuation(text, lineStart, previous, it, caretAfterNewline) }
     val bullet = LIST_ITEM.find(previous) ?: return null
     val task = TASK_MARKER.find(previous)
     val marker = task ?: bullet
@@ -402,15 +417,135 @@ fun listContinuation(text: CharSequence, caretAfterNewline: Int): ListContinuati
 data class ContinuedBuffer(val text: String, val caret: Int)
 
 fun ListContinuation.applyTo(text: CharSequence, caret: Int): ContinuedBuffer = when (this) {
-    is ListContinuation.Continue -> ContinuedBuffer(
-        text.substring(0, caret) + prefix + text.substring(caret, text.length),
-        caret + prefix.length,
-    )
+    is ListContinuation.Continue -> {
+        // The later numbers first, from the bottom up, so each range still
+        // means what it meant; they all sit below the caret, so the prefix
+        // goes in last and moves none of them.
+        val written = StringBuilder(text)
+        for (r in renumber.sortedByDescending { it.range.first }) written.replace(r.range.first, r.range.last + 1, r.number)
+        written.insert(caret, prefix)
+        ContinuedBuffer(written.toString(), caret + prefix.length)
+    }
     is ListContinuation.Unwrap -> ContinuedBuffer(
         text.substring(0, range.first) + keep + text.substring(range.last + 1, text.length),
         range.first + keep.length,
     )
 }
+
+/// Return on a numbered item (owner, 2026-10-27: "why don't numbered
+/// lists auto increment"). `previous` is the item's line, starting at
+/// `lineStart`, and `item` its [ORDERED_ITEM] match.
+///
+/// - With text, the list goes on at the next number, behind the item's own
+///   indentation, delimiter (`.` or `)`) and spacing. The later items of
+///   the same list — same indentation and delimiter, past any nested lines
+///   and blank lines between them — move up one each, but only while they
+///   would otherwise repeat a number: the first that already counts past
+///   the new one is left alone, and so is everything after it, so a list
+///   numbered with a deliberate gap keeps its gap.
+/// - A list written `1.` `1.` `1.` (CommonMark numbers it for you) is kept
+///   that way: when the item beside it carries the same number, the new
+///   item does too, and nothing is renumbered.
+/// - Empty, it lets go like a bullet does; nested, it steps out to the
+///   item it sits under, taking that item's next number — or its bullet,
+///   when a numbered list is nested in a bulleted one.
+private fun orderedContinuation(
+    text: CharSequence,
+    lineStart: Int,
+    previous: String,
+    item: MatchResult,
+    caretAfterNewline: Int,
+): ListContinuation {
+    val indent = item.groupValues[1]
+    val number = item.groupValues[2].toLong()
+    val delimiter = item.groupValues[3]
+    val carried = text.substring(caretAfterNewline, lineEndFor(text, caretAfterNewline))
+    if (previous.substring(item.value.length).isBlank() && carried.isBlank()) {
+        if (indent.isEmpty()) return ListContinuation.Unwrap(lineStart until caretAfterNewline)
+        val outer = enclosingItemAbove(text, lineStart, indent.length)
+        val keep = when {
+            outer == null -> indent.dropLevel() + item.value.substring(indent.length)
+            outer.ordered -> outer.indent + (outer.number + 1) + outer.delimiter + outer.spacing
+            else -> outer.indent + outer.delimiter + outer.spacing
+        }
+        return ListContinuation.Unwrap(lineStart until caretAfterNewline, keep = keep)
+    }
+
+    val below = siblingsBelow(text, lineEndFor(text, caretAfterNewline), indent, delimiter)
+    val above = siblingAbove(text, lineStart, indent, delimiter)
+    val lazy = below.firstOrNull()?.second == number || above == number
+    val next = if (lazy) number else number + 1
+    val renumber = buildList {
+        if (lazy) return@buildList
+        var expected = next + 1
+        for ((digits, value) in below) {
+            if (value >= expected) break
+            add(Renumbering(digits, expected.toString()))
+            expected++
+        }
+    }
+    return ListContinuation.Continue(indent + next + delimiter + item.groupValues[4], renumber)
+}
+
+/// A list item's opening, as [enclosingItemAbove] reads it.
+private class ItemOpening(val indent: String, val ordered: Boolean, val number: Long, val delimiter: String, val spacing: String)
+
+/// The nearest item above `lineStart` indented less than `width` — the
+/// one a nested item sits under — or null when a less-indented line that
+/// is not an item comes first.
+private fun enclosingItemAbove(text: CharSequence, lineStart: Int, width: Int): ItemOpening? {
+    var end = lineStart - 1
+    while (end >= 0) {
+        val start = lineStartFor(text, end)
+        val line = text.substring(start, end)
+        end = start - 1
+        if (line.isBlank() || line.leadingWidth() >= width) continue
+        ORDERED_ITEM.find(line)?.let {
+            return ItemOpening(it.groupValues[1], true, it.groupValues[2].toLong(), it.groupValues[3], it.groupValues[4])
+        }
+        LIST_ITEM.find(line)?.let { return ItemOpening(it.groupValues[1], false, 0, it.groupValues[2], it.groupValues[3]) }
+        return null
+    }
+    return null
+}
+
+/// The later items of a numbered list, from the line after `from` (a line
+/// end): each one's digits and value, while lines stay in the list —
+/// blank, indented deeper than `indent`, or a numbered item at exactly
+/// `indent` with the same delimiter.
+private fun siblingsBelow(text: CharSequence, from: Int, indent: String, delimiter: String): List<Pair<IntRange, Long>> = buildList {
+    if (from >= text.length) return@buildList
+    var start = from + 1
+    while (true) {
+        val end = lineEndFor(text, start)
+        val line = text.substring(start, end)
+        if (line.isNotBlank() && line.leadingWidth() <= indent.length) {
+            val sibling = ORDERED_ITEM.find(line)
+            if (sibling == null || sibling.groupValues[1] != indent || sibling.groupValues[3] != delimiter) break
+            val digits = sibling.groups[2]!!.range
+            add((start + digits.first..start + digits.last) to sibling.groupValues[2].toLong())
+        }
+        if (end >= text.length) break
+        start = end + 1
+    }
+}
+
+/// The number of the item just above `lineStart` in the same list, if
+/// there is one — the same walk as [siblingsBelow], upwards, one item.
+private fun siblingAbove(text: CharSequence, lineStart: Int, indent: String, delimiter: String): Long? {
+    var end = lineStart - 1
+    while (end >= 0) {
+        val start = lineStartFor(text, end)
+        val line = text.substring(start, end)
+        end = start - 1
+        if (line.isBlank() || line.leadingWidth() > indent.length) continue
+        val sibling = ORDERED_ITEM.find(line) ?: return null
+        return if (sibling.groupValues[1] == indent && sibling.groupValues[3] == delimiter) sibling.groupValues[2].toLong() else null
+    }
+    return null
+}
+
+private fun String.leadingWidth(): Int = takeWhile { it == ' ' || it == '\t' }.length
 
 // ------------------------------------------------------------- nesting
 
@@ -629,7 +764,9 @@ fun taskLineShortcut(
     return TaskLineEdit(lineStart, line, indent + "- [ ] " + line.substring(indent.length), activated = false, insertAt = indent.length)
 }
 
-private val ORDERED_ITEM = Regex("""^[ \t]*\d+[.)][ \t]""")
+/// A numbered list item: its indentation, number (CommonMark allows up to
+/// nine digits), delimiter and the spacing after it.
+private val ORDERED_ITEM = Regex("""^([ \t]*)(\d{1,9})([.)])([ \t]+)""")
 
 /// Whether the step from one buffer to the next was **one newline typed**:
 /// nothing else inserted, nothing else removed, and the caret left

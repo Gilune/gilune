@@ -70,6 +70,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -997,10 +998,8 @@ private fun OpenNote(
             val taskShortcut = remember(plugins) {
                 if (plugins.any { it.pluginId == TASKS_PLUGIN && it.state == "enabled" }) plugins.tasksShortcut() else null
             }
-            fun toggleTask(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
-                val binding = taskShortcut ?: return false
-                val pressed = keystrokeOf(event) ?: return false
-                if (!keystrokeMatches(binding, pressed)) return false
+            // The key's work, which the right-click menu's Task does too.
+            fun taskShortcutAtCaret(): Boolean {
                 val value = editor.text
                 val edit = taskLineShortcut(value.text, value.selection.end, decorations) ?: return false
                 editor.text = value.copy(
@@ -1013,6 +1012,12 @@ private fun OpenNote(
                 caretMoves++
                 if (edit.activated) write()
                 return true
+            }
+            fun toggleTask(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val binding = taskShortcut ?: return false
+                val pressed = keystrokeOf(event) ?: return false
+                if (!keystrokeMatches(binding, pressed)) return false
+                return taskShortcutAtCaret()
             }
 
             // Formatting from the keyboard (owner ask, 2026-10-26): the phone
@@ -1035,6 +1040,23 @@ private fun OpenNote(
                 caretMoves++
                 return true
             }
+            // The same actions on the body's right-click menu (owner ask,
+            // 2026-10-27: "formatting options for text"), each naming its
+            // key, below the field's own Cut/Copy/Paste.
+            fun formatMenuItems(): List<androidx.compose.foundation.ContextMenuItem> = buildList {
+                for (action in FORMAT_ACTIONS) {
+                    add(ShortcutMenuItem(action.label, action.keys, action.startsGroup) {
+                        applyFormat(action.edit(editor.text.text, editor.text.selection))
+                        runCatching { bodyFocus.requestFocus() }
+                    })
+                }
+                taskShortcut?.let { keys ->
+                    add(ShortcutMenuItem("Task", keys) {
+                        taskShortcutAtCaret()
+                        runCatching { bodyFocus.requestFocus() }
+                    })
+                }
+            }
             fun formatShortcut(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
                 val text = editor.text.text
                 val selection = editor.text.selection
@@ -1047,12 +1069,10 @@ private fun OpenNote(
                     }
                 }
                 if (!event.isCtrlPressed || event.isAltPressed || event.isMetaPressed) return false
+                // Bold to quote are one list (Shortcuts.kt), which the
+                // right-click menu and the shortcuts window read too.
+                keystrokeOf(event)?.let(::formatActionFor)?.let { return applyFormat(it.edit(text, selection)) }
                 return when {
-                    !shift && event.key == Key.B -> applyFormat(emphasisEdit(text, selection, "**"))
-                    !shift && event.key == Key.I -> applyFormat(emphasisEdit(text, selection, "*"))
-                    !shift && event.key == Key.K -> applyFormat(linkEdit(text, selection))
-                    shift && event.key == Key.X -> applyFormat(emphasisEdit(text, selection, "~~"))
-                    shift && event.key == Key.C -> applyFormat(emphasisEdit(text, selection, "`"))
                     !shift && event.key == Key.RightBracket -> indentLines(outdent = false)
                     !shift && event.key == Key.LeftBracket -> indentLines(outdent = true)
                     else -> false
@@ -1166,131 +1186,137 @@ private fun OpenNote(
                             )
                         }
                     }
-                    BasicTextField(
-                        value = editor.text,
-                        onValueChange = { typed ->
-                            // Return on a list line continues the list
-                            // (owner rule, 2026-09-01). It is caught here,
-                            // as a change to the buffer, rather than in
-                            // the preview key handler below, for two
-                            // reasons. An IME is never interrupted: the
-                            // newline is read off the text the keyboard
-                            // committed, so no key is taken out of its
-                            // hands. And the `/` menu keeps its Enter for
-                            // nothing: while a session is live the handler
-                            // consumes the key and the field never sees
-                            // it, so no change arrives and there is
-                            // nothing here to yield.
-                            val changed = continued(editor.text, typed) ?: typed
-                            // Moving the caret is not an edit: only changed
-                            // text may mark the buffer unsaved, or a note
-                            // nobody typed into would sit dirty for ever.
-                            editor.dirty = editor.dirty || changed.text != editor.text.text
-                            if (changed.text != editor.text.text || changed.selection != editor.text.selection) caretMoves++
-                            if (changed.text != editor.text.text || changed.selection != editor.text.selection) verticalX = null
-                            if (changed.text != editor.text.text) typedHere = true
-                            else if (changed.selection != editor.text.selection) typedHere = false
-                            editor.text = changed
+                    CompositionLocalProvider(
+                        androidx.compose.foundation.LocalContextMenuRepresentation provides GiluneContextMenuRepresentation,
+                    ) {
+                        androidx.compose.foundation.ContextMenuDataProvider(items = ::formatMenuItems) {
+                            BasicTextField(
+                                value = editor.text,
+                                onValueChange = { typed ->
+                                    // Return on a list line continues the list
+                                    // (owner rule, 2026-09-01). It is caught here,
+                                    // as a change to the buffer, rather than in
+                                    // the preview key handler below, for two
+                                    // reasons. An IME is never interrupted: the
+                                    // newline is read off the text the keyboard
+                                    // committed, so no key is taken out of its
+                                    // hands. And the `/` menu keeps its Enter for
+                                    // nothing: while a session is live the handler
+                                    // consumes the key and the field never sees
+                                    // it, so no change arrives and there is
+                                    // nothing here to yield.
+                                    val changed = continued(editor.text, typed) ?: typed
+                                    // Moving the caret is not an edit: only changed
+                                    // text may mark the buffer unsaved, or a note
+                                    // nobody typed into would sit dirty for ever.
+                                    editor.dirty = editor.dirty || changed.text != editor.text.text
+                                    if (changed.text != editor.text.text || changed.selection != editor.text.selection) caretMoves++
+                                    if (changed.text != editor.text.text || changed.selection != editor.text.selection) verticalX = null
+                                    if (changed.text != editor.text.text) typedHere = true
+                                    else if (changed.selection != editor.text.selection) typedHere = false
+                                    editor.text = changed
 
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .defaultMinSize(minHeight = paneHeight)
-                            .padding(EDITOR_PADDING)
-                            // Connection pills, painted behind the words
-                            // from the field's own layout — inside the
-                            // padding, so layout space is draw space.
-                            .drawBehind { layout?.let { drawPills(it, pills) } }
-                            // Inside the padding, so its space is the text
-                            // layout's and a cursor rect needs no shifting.
-                            .bringIntoViewRequester(caretView)
-                            // Window coordinates for the caret popup: the
-                            // layout gives a rectangle in the field's own
-                            // space, and this is what puts it on screen.
-                            .onGloballyPositioned { fieldOrigin = it.localToWindow(Offset.Zero) }
-                            .focusRequester(bodyFocus)
-                            // A field the caret has left cannot have a menu
-                            // over its caret.
-                            .onFocusChanged {
-                                traceCompletion("body-focus=${it.isFocused}")
-                                bodyFocused = it.isFocused
-                                if (!it.isFocused) completions.dismiss()
-                            }
-                            // The menu's keys, and **only** while it is up:
-                            // with no session every key is the field's, so
-                            // nothing about ordinary editing changes. The
-                            // popup is not focusable, so this is where its
-                            // keyboard lives (§ 2).
-                            .onPreviewKeyEvent { event ->
-                                when {
-                                    event.type != KeyEventType.KeyDown -> false
-                                    !completions.visible && goToDefinition(event) -> true
-                                    !completions.visible && toggleTask(event) -> true
-                                    !completions.visible && formatShortcut(event) -> true
-                                    !completions.visible -> when {
-                                        event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
-                                        event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
-                                        event.key == Key.DirectionUp -> moveByLines(-1, event.isShiftPressed)
-                                        event.key == Key.Tab -> indentLines(event.isShiftPressed)
-                                        event.key == Key.Enter && event.isShiftPressed -> softBreakAtCaret()
-                                        else -> false
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .defaultMinSize(minHeight = paneHeight)
+                                    .padding(EDITOR_PADDING)
+                                    // Connection pills, painted behind the words
+                                    // from the field's own layout — inside the
+                                    // padding, so layout space is draw space.
+                                    .drawBehind { layout?.let { drawPills(it, pills) } }
+                                    // Inside the padding, so its space is the text
+                                    // layout's and a cursor rect needs no shifting.
+                                    .bringIntoViewRequester(caretView)
+                                    // Window coordinates for the caret popup: the
+                                    // layout gives a rectangle in the field's own
+                                    // space, and this is what puts it on screen.
+                                    .onGloballyPositioned { fieldOrigin = it.localToWindow(Offset.Zero) }
+                                    .focusRequester(bodyFocus)
+                                    // A field the caret has left cannot have a menu
+                                    // over its caret.
+                                    .onFocusChanged {
+                                        traceCompletion("body-focus=${it.isFocused}")
+                                        bodyFocused = it.isFocused
+                                        if (!it.isFocused) completions.dismiss()
                                     }
-                                    event.key == Key.DirectionDown -> { completions.move(1); true }
-                                    event.key == Key.DirectionUp -> { completions.move(-1); true }
-                                    event.key == Key.Enter -> { completions.choose(completions.selected); true }
-                                    event.key == Key.Escape -> { completions.dismiss(); true }
-                                    else -> false
-                                }
-                            }
-
-                            // A tap on a checkbox glyph toggles it and never
-                            // moves the caret, so it is intercepted ahead of
-                            // the field on the initial pass. A tap anywhere
-                            // else passes through untouched.
-                            .pointerInput(editor.openRelPath, decorations) {
-                                awaitEachGesture {
-                                    val down = awaitFirstDown(pass = PointerEventPass.Initial)
-                                    val hit = activationUnder(down.position) ?: return@awaitEachGesture
-                                    down.consume()
-                                    waitForUpOrCancellation(pass = PointerEventPass.Initial)?.consume()
-                                    activate(hit)
-                                }
-                            }
-                            // A glyph answers a click, so it must not look
-                            // like text. Only a move asks the question.
-                            .pointerInput(editor.openRelPath, decorations) {
-                                awaitPointerEventScope {
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        when (event.type) {
-                                            PointerEventType.Move ->
-                                                hoveringActivation =
-                                                    activationUnder(event.changes.last().position) != null
-                                            PointerEventType.Exit -> hoveringActivation = false
-                                            else -> {}
+                                    // The menu's keys, and **only** while it is up:
+                                    // with no session every key is the field's, so
+                                    // nothing about ordinary editing changes. The
+                                    // popup is not focusable, so this is where its
+                                    // keyboard lives (§ 2).
+                                    .onPreviewKeyEvent { event ->
+                                        when {
+                                            event.type != KeyEventType.KeyDown -> false
+                                            !completions.visible && goToDefinition(event) -> true
+                                            !completions.visible && toggleTask(event) -> true
+                                            !completions.visible && formatShortcut(event) -> true
+                                            !completions.visible -> when {
+                                                event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
+                                                event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
+                                                event.key == Key.DirectionUp -> moveByLines(-1, event.isShiftPressed)
+                                                event.key == Key.Tab -> indentLines(event.isShiftPressed)
+                                                event.key == Key.Enter && event.isShiftPressed -> softBreakAtCaret()
+                                                else -> false
+                                            }
+                                            event.key == Key.DirectionDown -> { completions.move(1); true }
+                                            event.key == Key.DirectionUp -> { completions.move(-1); true }
+                                            event.key == Key.Enter -> { completions.choose(completions.selected); true }
+                                            event.key == Key.Escape -> { completions.dismiss(); true }
+                                            else -> false
                                         }
                                     }
-                                }
-                            }
-                            // The field sets an I-beam of its own inside,
-                            // so the override has to reach past it.
-                            .pointerHoverIcon(
-                                if (hoveringActivation) PointerIcon.Hand else PointerIcon.Text,
-                                overrideDescendants = true,
+
+                                    // A tap on a checkbox glyph toggles it and never
+                                    // moves the caret, so it is intercepted ahead of
+                                    // the field on the initial pass. A tap anywhere
+                                    // else passes through untouched.
+                                    .pointerInput(editor.openRelPath, decorations) {
+                                        awaitEachGesture {
+                                            val down = awaitFirstDown(pass = PointerEventPass.Initial)
+                                            val hit = activationUnder(down.position) ?: return@awaitEachGesture
+                                            down.consume()
+                                            waitForUpOrCancellation(pass = PointerEventPass.Initial)?.consume()
+                                            activate(hit)
+                                        }
+                                    }
+                                    // A glyph answers a click, so it must not look
+                                    // like text. Only a move asks the question.
+                                    .pointerInput(editor.openRelPath, decorations) {
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val event = awaitPointerEvent()
+                                                when (event.type) {
+                                                    PointerEventType.Move ->
+                                                        hoveringActivation =
+                                                            activationUnder(event.changes.last().position) != null
+                                                    PointerEventType.Exit -> hoveringActivation = false
+                                                    else -> {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // The field sets an I-beam of its own inside,
+                                    // so the override has to reach past it.
+                                    .pointerHoverIcon(
+                                        if (hoveringActivation) PointerIcon.Hand else PointerIcon.Text,
+                                        overrideDescendants = true,
+                                    )
+                                    // Named so tests can ask for the body without
+                                    // ambiguity against the title field.
+                                    .testTag("note-body"),
+                                onTextLayout = { layout = it },
+                                textStyle = TextStyle(
+                                    fontFamily = appearance.edit.font.family,
+                                    fontSize = appearance.edit.size.sp,
+                                    lineHeight = appearance.edit.lineHeight.sp,
+                                    color = colours.onSurface,
+                                ),
+                                cursorBrush = SolidColor(colours.primary),
+                                visualTransformation = transformation,
                             )
-                            // Named so tests can ask for the body without
-                            // ambiguity against the title field.
-                            .testTag("note-body"),
-                        onTextLayout = { layout = it },
-                        textStyle = TextStyle(
-                            fontFamily = appearance.edit.font.family,
-                            fontSize = appearance.edit.size.sp,
-                            lineHeight = appearance.edit.lineHeight.sp,
-                            color = colours.onSurface,
-                        ),
-                        cursorBrush = SolidColor(colours.primary),
-                        visualTransformation = transformation,
-                    )
+                        }
+                    }
 
                     // The blocks the transformation collapsed, drawn into
                     // the blank lines it left for them. A block whose
