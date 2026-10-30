@@ -152,7 +152,14 @@
 
   <p>Untick it and the <code>done:</code> date comes off again. Ticked tasks drop out
   of the agenda, and you can find them later with a search like
-  <code>type:task done:week</code>.</p>
+  <code>type:task done:thisweek</code> or <code>type:task done:since:-7d</code> — the
+  <a href="search.html">search guide</a> lists every date you can ask for.</p>
+
+  <p>A box ticked somewhere else — in another app, or on a device without Gilune's
+  editor — has no <code>done:</code> date written on it. Gilune still knows roughly when
+  it was finished: the day it noticed the line change. Searches for <code>done:</code>
+  use that day, and nothing is added to your note. A task that was already ticked
+  when Gilune first saw the note has no finish date at all.</p>
 
   <h2 id="global-filter">Choosing which checkboxes count</h2>
 

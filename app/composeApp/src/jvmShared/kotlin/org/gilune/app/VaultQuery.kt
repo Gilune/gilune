@@ -21,7 +21,18 @@ import uniffi.gilune_ffi.TextTarget
 
 const val SEARCH_PAGE_SIZE = 50u
 
-internal class KernelSearch(val request: SearchRequest, val extension: SearchExtension?, val itemScoped: Boolean = false) {
+/// A compiled query, with the account of itself a reader needs (owner,
+/// 2026-10-30): [explanations] say what relative terms resolved to — "done
+/// 26 Oct – 1 Nov 2026" — and [problems] say why a term can match nothing,
+/// so an empty result is never mistaken for an answer. The same lists serve
+/// the search box, a filter block and any program that runs a query.
+internal class KernelSearch(
+    val request: SearchRequest,
+    val extension: SearchExtension?,
+    val itemScoped: Boolean = false,
+    val explanations: List<String> = emptyList(),
+    val problems: List<String> = emptyList(),
+) {
     fun prepare(gilune: Gilune): uniffi.gilune_ffi.SearchQuery = gilune.prepareSearch(request, itemScoped, extension)
 
     fun page(gilune: Gilune, cursor: String? = null): SearchPage =
@@ -72,6 +83,7 @@ internal fun compileSearch(
             pluginPredicate { extractor?.invoke(document.asPluginNote())?.map { it.number.toUInt() }.orEmpty() }
     }
     val positive = parsed.terms.filterNot { it.negated }
+    val accounts = parsed.terms.mapNotNull { term -> term.term.explain()?.let { term to it } }
     return KernelSearch(
         SearchRequest(
             clauses = clauses,
@@ -87,6 +99,10 @@ internal fun compileSearch(
             maxLines = maxLines.coerceIn(0, 200).toUInt(),
             cursor = null,
         ), extension, parsed.type.itemScoped,
+        explanations = accounts.mapNotNull { (term, account) ->
+            account.description?.let { if (term.negated) "not $it" else it }
+        },
+        problems = accounts.mapNotNull { (_, account) -> account.problem },
     )
 }
 

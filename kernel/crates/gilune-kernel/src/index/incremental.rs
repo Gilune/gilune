@@ -56,7 +56,15 @@ impl NoteIndexer for Local {
         true
     }
     fn index_scoped(&self, path: &str, source: &TextSnapshot) -> Result<Vec<ScopedFact>, String> {
-        let inputs = inputs(source);
+        self.index_scoped_with_history(path, source, &[])
+    }
+    fn index_scoped_with_history(
+        &self,
+        path: &str,
+        source: &TextSnapshot,
+        history: &[Option<i64>],
+    ) -> Result<Vec<ScopedFact>, String> {
+        let inputs = inputs(source, history);
         // Do not hold a lock across foreign code. Concurrent/reentrant calls may
         // evict the optimisation; they cannot borrow another source's output.
         let previous = self
@@ -88,7 +96,9 @@ impl NoteIndexer for Local {
         }
         if !changed.is_empty() {
             let selected: std::collections::BTreeSet<_> = changed.iter().map(key).collect();
-            let facts = self.inner.index_scoped_locations(path, source, &changed)?;
+            let facts = self
+                .inner
+                .index_scoped_locations_with_history(path, source, &changed, history)?;
             for fact in facts {
                 let at = key(&fact.location);
                 if !selected.contains(&at) {
@@ -120,7 +130,10 @@ impl NoteIndexer for Local {
     }
 }
 
-fn inputs(source: &TextSnapshot) -> BTreeMap<Key, Fingerprint> {
+/// A location's input includes the line history of the lines it covers
+/// (ADR 0025): a line whose date changed while its text did not must be
+/// derived again, or a cached fact would keep the old date.
+fn inputs(source: &TextSnapshot, history: &[Option<i64>]) -> BTreeMap<Key, Fingerprint> {
     let _profile = crate::update_profile::span("local_input_diff", "");
     let layout = source.layout();
     let mut seed = Sha256::new();
@@ -133,19 +146,25 @@ fn inputs(source: &TextSnapshot) -> BTreeMap<Key, Fingerprint> {
     for line in &layout.lines {
         result.insert(
             (1, line.number as u64),
-            fingerprint(source, &seed, 1, &[line.range]),
+            fingerprint(source, &seed, 1, &[line.range], history),
         );
     }
     for item in &layout.items {
         result.insert(
             (2, item.key),
-            fingerprint(source, &seed, 2, &item.own_ranges),
+            fingerprint(source, &seed, 2, &item.own_ranges, history),
         );
     }
     result
 }
 
-fn fingerprint(source: &TextSnapshot, seed: &Sha256, kind: u8, ranges: &[ByteSpan]) -> Fingerprint {
+fn fingerprint(
+    source: &TextSnapshot,
+    seed: &Sha256,
+    kind: u8,
+    ranges: &[ByteSpan],
+    history: &[Option<i64>],
+) -> Fingerprint {
     let mut hash = seed.clone();
     hash.update([kind]);
     // Include parser eligibility, not just raw text: a distant fence or link
@@ -168,6 +187,16 @@ fn fingerprint(source: &TextSnapshot, seed: &Sha256, kind: u8, ranges: &[ByteSpa
             }
         }
         hash.update(u64::MAX.to_le_bytes());
+        if !history.is_empty() {
+            let lines = &source.layout().lines;
+            let first = lines.partition_point(|l| l.range.end <= range.start);
+            for (index, line) in lines.iter().enumerate().skip(first) {
+                if line.range.start >= range.end && line.range.start != range.start {
+                    break;
+                }
+                hash.update(history.get(index).copied().flatten().unwrap_or(-1).to_le_bytes());
+            }
+        }
     }
     hash.finalize().into()
 }

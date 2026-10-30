@@ -29,7 +29,8 @@ const val TASKS_INDEX_NAMESPACE = TASKS_PLUGIN
 
 /// Change what these facts mean and change this: the namespace, and only
 /// this namespace, is then derived again from the beginning of the feed.
-const val TASKS_INDEXER_VERSION = 3L
+/// Version 4 (2026-10-30) adds [TASK_COMPLETED_PREDICATE].
+const val TASKS_INDEXER_VERSION = 4L
 
 /// `open` or `done`, read off the checkbox marker. Every task line has
 /// exactly one, which is what makes `type:task` a question the index can
@@ -37,6 +38,14 @@ const val TASKS_INDEXER_VERSION = 3L
 const val TASK_STATE_PREDICATE = "$TASKS_PLUGIN.state"
 const val TASK_DUE_PREDICATE = "$TASKS_PLUGIN.due"
 const val TASK_DONE_PREDICATE = "$TASKS_PLUGIN.done"
+/// When a ticked task was completed (owner, 2026-10-30): its written
+/// `done:` date, or — when the line carries none, because it was ticked in
+/// another app — the day the kernel's line history says the line reached
+/// its current text (ADR 0025). Absent when neither is known: a tick made
+/// before Gilune first adopted the note stays undated rather than taking
+/// the adoption day. `done:` queries ask this; nothing is written to the
+/// note.
+const val TASK_COMPLETED_PREDICATE = "$TASKS_PLUGIN.completed"
 /// The priority word a line states, `high` or `low`; absent for the
 /// ordinary level (ADR 0015 amendment 2026-10-23).
 const val TASK_PRIORITY_PREDICATE = "$TASKS_PLUGIN.priority"
@@ -54,6 +63,7 @@ fun taskPredicateKinds(): List<PredicateKind> = listOf(
     PredicateKind(TASK_STATE_PREDICATE, ValueKind.TEXT),
     PredicateKind(TASK_DUE_PREDICATE, ValueKind.DATE),
     PredicateKind(TASK_DONE_PREDICATE, ValueKind.DATE),
+    PredicateKind(TASK_COMPLETED_PREDICATE, ValueKind.DATE),
     PredicateKind(TASK_PRIORITY_PREDICATE, ValueKind.TEXT),
     PredicateKind(TASK_ORDER_PREDICATE, ValueKind.TEXT),
 )
@@ -86,7 +96,11 @@ fun taskFacts(text: String): List<Fact> {
         val at = (index + 1).toUInt()
         facts += Fact(at, TASK_STATE_PREDICATE, if (marker == 'x') TASK_STATE_DONE else TASK_STATE_OPEN)
         taskDateIn(line, DUE_FIELD)?.let { facts += Fact(at, TASK_DUE_PREDICATE, it) }
-        taskDateIn(line, DONE_FIELD)?.let { facts += Fact(at, TASK_DONE_PREDICATE, it) }
+        taskDateIn(line, DONE_FIELD)?.let {
+            facts += Fact(at, TASK_DONE_PREDICATE, it)
+            // This body-only path has no line history: a written date only.
+            facts += Fact(at, TASK_COMPLETED_PREDICATE, it)
+        }
         val priority = taskPriorityIn(line)
         priority?.let { facts += Fact(at, TASK_PRIORITY_PREDICATE, it.token) }
         facts += Fact(at, TASK_ORDER_PREDICATE, taskOrderKey(priority, taskDateIn(line, DUE_FIELD)))
@@ -119,11 +133,31 @@ class TasksScopedIndexer : ScopedIndexer, uniffi.gilune_ffi.LocalScopedIndexer {
             buildList {
                 add(ScopedFact(location, TASK_STATE_PREDICATE, if (marker == 'x') TASK_STATE_DONE else TASK_STATE_OPEN))
                 taskDateIn(own, DUE_FIELD)?.let { add(ScopedFact(location, TASK_DUE_PREDICATE, it)) }
-                taskDateIn(own, DONE_FIELD)?.let { add(ScopedFact(location, TASK_DONE_PREDICATE, it)) }
+                val written = taskDateIn(own, DONE_FIELD)
+                written?.let { add(ScopedFact(location, TASK_DONE_PREDICATE, it)) }
+                val completed = written ?: if (marker == 'x') inferredCompletion(source, item) else null
+                completed?.let { add(ScopedFact(location, TASK_COMPLETED_PREDICATE, it)) }
                 val priority = taskPriorityIn(own)
                 priority?.let { add(ScopedFact(location, TASK_PRIORITY_PREDICATE, it.token)) }
                 add(ScopedFact(location, TASK_ORDER_PREDICATE, taskOrderKey(priority, taskDateIn(own, DUE_FIELD))))
             }
         }
     }
+}
+
+/// The day the item's checkbox line reached its current text, from the
+/// kernel's line history (ADR 0025) — when a tick made elsewhere happened,
+/// for a line whose `[x]` carries no date. Null when the history does not
+/// know: a snapshot built outside indexing, or a line already present when
+/// Gilune adopted the note. In this device's own calendar, as every other
+/// day the plugin resolves is.
+internal fun inferredCompletion(
+    source: SourceTextSnapshot,
+    item: uniffi.gilune_ffi.SourceItem,
+    zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+): String? {
+    val start = item.ownRanges.firstOrNull()?.start ?: item.range.start
+    val line = source.lines.firstOrNull { start >= it.range.start && (start < it.range.end || it.range.start == it.range.end) }
+    val since = line?.sinceMs ?: return null
+    return java.time.Instant.ofEpochMilli(since).atZone(zone).toLocalDate().toString()
 }

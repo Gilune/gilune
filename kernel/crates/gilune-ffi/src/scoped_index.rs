@@ -49,10 +49,19 @@ impl index::NoteIndexer for LocalAdapter {
         source: &gilune_kernel::documents::TextSnapshot,
         locations: &[gilune_kernel::documents::Location],
     ) -> Result<Vec<core::ScopedFact>, String> {
+        self.index_scoped_locations_with_history(path, source, locations, &[])
+    }
+    fn index_scoped_locations_with_history(
+        &self,
+        path: &str,
+        source: &gilune_kernel::documents::TextSnapshot,
+        locations: &[gilune_kernel::documents::Location],
+        history: &[Option<i64>],
+    ) -> Result<Vec<core::ScopedFact>, String> {
         self.0
             .index_locations(
                 path.into(),
-                source.into(),
+                SourceTextSnapshot::with_history(source, history),
                 locations.iter().cloned().map(Into::into).collect(),
             )
             .map(|facts| {
@@ -82,9 +91,17 @@ impl index::NoteIndexer for Adapter {
         rel_path: &str,
         source: &gilune_kernel::documents::TextSnapshot,
     ) -> Result<Vec<core::ScopedFact>, String> {
+        self.index_scoped_with_history(rel_path, source, &[])
+    }
+    fn index_scoped_with_history(
+        &self,
+        rel_path: &str,
+        source: &gilune_kernel::documents::TextSnapshot,
+        history: &[Option<i64>],
+    ) -> Result<Vec<core::ScopedFact>, String> {
         let wire = {
             let _profile = gilune_kernel::update_profile::span("snapshot_to_wire", "");
-            source.into()
+            SourceTextSnapshot::with_history(source, history)
         };
         let facts = {
             let _profile = gilune_kernel::update_profile::span("ffi_callback_roundtrip", "");

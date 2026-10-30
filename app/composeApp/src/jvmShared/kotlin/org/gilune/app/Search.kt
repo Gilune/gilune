@@ -211,6 +211,10 @@ internal sealed interface Term {
     /// one-sided contract, and the same reasoning: never fewer anchors
     /// than [matches] would keep.
     fun compile(negated: Boolean): Compiled = Compiled.Scan
+
+    /// What the term resolved to, or why it can match nothing
+    /// ([SearchOperator.explain]); null for terms that say what they mean.
+    fun explain(): org.gilune.plugin.sdk.SearchExplanation? = null
 }
 
 private class TextTerm(private val text: String) : Term {
@@ -232,6 +236,7 @@ private class OperatorTerm(private val operator: SearchOperator, private val arg
     override val bodyNeedle get() = operator.bodyNeedle(argument)
     override val nameNeedle get() = operator.nameNeedle(argument)
     override fun compile(negated: Boolean) = operator.compile(argument, negated)
+    override fun explain() = operator.explain(argument)
 }
 
 /// `[key:value]`, or `[key]` when `value` is null. The key is the whole

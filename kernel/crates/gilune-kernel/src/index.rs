@@ -38,7 +38,7 @@ use std::sync::Arc;
 /// vault's: this database is derived, so a version it does not recognise
 /// is discarded rather than migrated (constitution rule 12 governs the
 /// record, and this is not the record).
-pub const SCHEMA_VERSION: i64 = 13;
+pub const SCHEMA_VERSION: i64 = 14;
 
 pub mod lookup;
 pub(crate) mod positions;
@@ -48,6 +48,8 @@ mod targets;
 mod text_writer;
 mod writer;
 pub mod incremental;
+pub(crate) mod history;
+pub use history::LineHistory;
 
 /// The kernel's own namespace, holding the note text every full-text
 /// query is answered from. Reserved: a plugin cannot register it, and it
@@ -136,6 +138,30 @@ pub trait NoteIndexer: Send + Sync {
         _locations: &[gilune_document::Location],
     ) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
         Err("local scoped input is not implemented".into())
+    }
+
+    /// [`Self::index_scoped`] with the note's line history (ADR 0025):
+    /// `history[i]` is when the source's `i`th body line reached its
+    /// current text, aligned with `source.layout().lines`; empty when
+    /// unknown. Implementations that do not read history keep the default.
+    fn index_scoped_with_history(
+        &self,
+        rel_path: &str,
+        source: &gilune_document::TextSnapshot,
+        _history: &[Option<i64>],
+    ) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
+        self.index_scoped(rel_path, source)
+    }
+
+    /// [`Self::index_scoped_locations`] with the note's line history.
+    fn index_scoped_locations_with_history(
+        &self,
+        rel_path: &str,
+        source: &gilune_document::TextSnapshot,
+        locations: &[gilune_document::Location],
+        _history: &[Option<i64>],
+    ) -> std::result::Result<Vec<scoped::ScopedFact>, String> {
+        self.index_scoped_locations(rel_path, source, locations)
     }
 }
 
@@ -488,6 +514,7 @@ DROP TABLE IF EXISTS source_maps;
 DROP TABLE IF EXISTS fact_sources;
 DROP TABLE IF EXISTS predicate_kinds;
 DROP TABLE IF EXISTS namespaces;
+DROP TABLE IF EXISTS line_history;
 DROP TABLE IF EXISTS index_meta;
 ";
 
@@ -783,6 +810,7 @@ struct NoteText {
     body: String,
     front_matter: Vec<(String, String)>,
     snapshot: std::sync::OnceLock<std::result::Result<gilune_document::TextSnapshot, String>>,
+    history: std::sync::OnceLock<LineHistory>,
 }
 
 impl NoteText {
@@ -826,6 +854,7 @@ impl Notes {
                     front_matter: front_matter_of(&text),
                     source: text,
                     snapshot: Default::default(),
+                    history: Default::default(),
                 })),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
                 Err(error) => Err(format!("cannot index {rel_path}: {error}")),
@@ -1553,7 +1582,13 @@ impl Store {
                             "plugin_call_including_adapter",
                             &registration.namespace,
                         );
-                        registration.indexer.index_scoped(rel_path, snapshot)?
+                        let history = note.history.get_or_init(|| {
+                            let _profile = crate::update_profile::span("line_history", "");
+                            self.line_history(rel_path, &note.body)
+                        });
+                        registration
+                            .indexer
+                            .index_scoped_with_history(rel_path, snapshot, history)?
                     };
                     let _profile = crate::update_profile::span(
                         "validate_scoped_facts",

@@ -107,3 +107,12 @@ CREATE TRIGGER facts_update INSTEAD OF UPDATE ON facts BEGIN
             AND NOT (NEW.item_key IS NOT NULL AND NEW.line IS NOT NULL)),
         value=NEW.value,num=NEW.num,typed=NEW.typed WHERE id=OLD.rowid;
 END;
+-- Line history (ADR 0025): one object's replayed revisions, cached so the
+-- next change extends it rather than replaying from the beginning.
+CREATE TABLE line_history (
+    object_id TEXT PRIMARY KEY,
+    revisions INTEGER NOT NULL,
+    last_created INTEGER NOT NULL,
+    last_revision TEXT NOT NULL,
+    lines TEXT NOT NULL
+);

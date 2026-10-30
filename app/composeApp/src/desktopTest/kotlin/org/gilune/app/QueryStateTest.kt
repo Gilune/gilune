@@ -8,6 +8,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +44,26 @@ class QueryStateTest {
         compose.runOnIdle { query.value = "missing" }
         compose.waitUntil(5_000) { compose.onAllNodesWithText("0/0").fetchSemanticsNodes().isNotEmpty() }
         compose.onNodeWithText("53/53").assertDoesNotExist()
+    }
+
+    @Test
+    fun theLineUnderASearchSaysWhichDaysItTookAndWhyAValueMeansNothing() {
+        val vault = IndexedVault()
+        vault.write("list.md", "- [ ] a due:2026-10-01")
+        val state = GiluneState(vault.dir, CoroutineScope(Dispatchers.Default))
+        state.gilune.value = vault.gilune
+        state.plugins.add(installedTasksPlugin())
+        val query = mutableStateOf("type:task due:2026-10")
+        compose.setContent {
+            val page = rememberPagedSearch(state, query.value, searchTypesFor(state.plugins))
+            QueryAccount(page.listing.explanations, page.listing.problems)
+        }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("due 1 Oct – 31 Oct 2026").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("query-problem").assertDoesNotExist()
+        compose.runOnIdle { query.value = "type:task due:2026-10-1x" }
+        compose.waitUntil(5_000) { compose.onAllNodesWithTag("query-problem").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithTag("query-explanation").assertDoesNotExist()
+        compose.onNodeWithText("due: Unknown date", substring = true).assertIsDisplayed()
     }
 
     @Test

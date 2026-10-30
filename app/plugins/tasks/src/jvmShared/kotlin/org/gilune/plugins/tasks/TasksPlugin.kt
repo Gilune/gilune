@@ -310,19 +310,31 @@ fun tasksShortcutKey(settings: String): String = tasksShortcutSetting(settings) 
 fun List<PluginInfo>.tasksShortcut(): String =
     tasksShortcutKey(firstOrNull { it.pluginId == TASKS_PLUGIN }?.settings.orEmpty())
 
+/// The day weeks start on for `thisweek`, `lastweek` and `thisworkweek`
+/// (owner, 2026-10-30): Monday unless the settings say Sunday.
+fun tasksWeekStart(settings: String): WeekStart = WeekStart.of(jsonString(settings, TASK_WEEK_START_KEY))
+
+/// The week start as the settings hold it: null when none is stored, which
+/// means Monday — so a write that carries it through never pins the default.
+fun tasksWeekStartSetting(settings: String): WeekStart? =
+    jsonString(settings, TASK_WEEK_START_KEY)?.let { stored -> WeekStart.entries.firstOrNull { it.token == stored } }
+
 /// The settings document the tasks plugin stores, written here so the
-/// writer, [tasksFilter], [tasksPanelEnabled] and [tasksShortcut] cannot
-/// drift apart. Every key is written every time: a caller changing one
-/// holds the others, so toggling the panel can never drop the filter or
-/// the shortcut someone set. A null `shortcut` is the default, and is left
-/// out rather than written down.
-fun tasksSettingsDocument(filter: String, panel: Boolean = true, shortcut: String? = null): String =
+/// writer, [tasksFilter], [tasksPanelEnabled], [tasksShortcut] and
+/// [tasksWeekStart] cannot drift apart. Every key is written every time: a
+/// caller changing one holds the others, so toggling the panel can never
+/// drop the filter, the shortcut or the week start someone set. A null
+/// `shortcut` or `weekStart` is the default, and is left out rather than
+/// written down.
+fun tasksSettingsDocument(filter: String, panel: Boolean = true, shortcut: String? = null, weekStart: WeekStart? = null): String =
     """{"$TASK_FILTER_KEY":"${escapeJsonString(filter)}","$TASK_PANEL_KEY":$panel""" +
-        (shortcut?.let { ""","$TASK_SHORTCUT_KEY":"${escapeJsonString(it)}"""" } ?: "") + "}"
+        (shortcut?.let { ""","$TASK_SHORTCUT_KEY":"${escapeJsonString(it)}"""" } ?: "") +
+        (weekStart?.let { ""","$TASK_WEEK_START_KEY":"${it.token}"""" } ?: "") + "}"
 
 private const val TASK_FILTER_KEY = "filter"
 private const val TASK_PANEL_KEY = "panel"
 private const val TASK_SHORTCUT_KEY = "taskShortcut"
+private const val TASK_WEEK_START_KEY = "weekStart"
 
 
 /** All executable search/field/index registrations belong to the domain module.
@@ -358,7 +370,7 @@ fun tasksExtensions(): BundledPluginExtensions = BundledPluginExtensions(
         }
     }),
     searchTypes = listOf(SearchTypeRegistration("task", TASK_SEARCH_TYPE) { settings ->
-        taskSearchType(jsonString(settings, TASK_FILTER_KEY).orEmpty())
+        taskSearchType(jsonString(settings, TASK_FILTER_KEY).orEmpty(), tasksWeekStart(settings))
     }),
     suggestionProviders = listOf(
         SuggestionProviderRegistration(DATE_VALUES_PROVIDER) { key, _ -> dateValues(key) },

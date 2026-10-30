@@ -10,6 +10,7 @@ package org.gilune.app
 
 import org.gilune.plugins.tasks.TASKS_INDEX_NAMESPACE
 import org.gilune.plugins.tasks.TASKS_PLUGIN
+import org.gilune.plugins.tasks.TASK_COMPLETED_PREDICATE
 import org.gilune.plugins.tasks.TASK_DONE_PREDICATE
 import org.gilune.plugins.tasks.TASK_DUE_PREDICATE
 import org.gilune.plugins.tasks.TASK_ORDER_PREDICATE
@@ -47,6 +48,7 @@ class TasksIndexerTest {
                 Triple(1u, TASK_STATE_PREDICATE, TASK_STATE_DONE),
                 Triple(1u, TASK_DUE_PREDICATE, "2026-09-01"),
                 Triple(1u, TASK_DONE_PREDICATE, "2026-09-02"),
+                Triple(1u, TASK_COMPLETED_PREDICATE, "2026-09-02"),
                 Triple(1u, TASK_ORDER_PREDICATE, "2|2026-09-01"),
             ),
             facts("- [x] file the return due:2026-09-01 done:2026-09-02"),

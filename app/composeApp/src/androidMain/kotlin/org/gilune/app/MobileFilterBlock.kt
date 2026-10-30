@@ -98,11 +98,13 @@ fun MobileFilterBlock(
         when (result) {
             is FilterResult.Hint -> HintRow(result.text)
             is FilterResult.Tasks -> {
+                result.account?.let { HintRow(it) }
                 if (result.rows.isEmpty()) HintRow(FILTER_NO_MATCHES)
                 for (row in result.rows) TaskRow(row, today, onOpen) { toggleTaskResult(state, it) }
                 MoreRow(result.more)
             }
             is FilterResult.Notes -> {
+                result.account?.let { HintRow(it) }
                 if (result.rows.isEmpty()) HintRow(FILTER_NO_MATCHES)
                 for (row in result.rows) NoteRowView(row, onOpen)
                 MoreRow(result.more)

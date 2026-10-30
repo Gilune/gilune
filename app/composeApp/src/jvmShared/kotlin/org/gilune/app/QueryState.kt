@@ -15,6 +15,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.layout.Column
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
@@ -82,7 +87,39 @@ internal data class SearchListing(
     val next: String? = null,
     val loading: Boolean = false,
     val error: String? = null,
+    /// What relative terms took, and why a term matches nothing
+    /// ([KernelSearch.explanations], [KernelSearch.problems]).
+    val explanations: List<String> = emptyList(),
+    val problems: List<String> = emptyList(),
 )
+
+/// The account a query gives of itself, under the box that ran it: the
+/// days a relative date took, in a quiet line, and any term that can match
+/// nothing, in the error colour — so an empty list is never read as "there
+/// was nothing" when the question itself was wrong.
+@Composable
+internal fun QueryAccount(explanations: List<String>, problems: List<String>, modifier: Modifier = Modifier) {
+    if (explanations.isEmpty() && problems.isEmpty()) return
+    val colours = MaterialTheme.colorScheme
+    Column(modifier) {
+        if (explanations.isNotEmpty()) {
+            Text(
+                explanations.joinToString(" · "),
+                fontSize = 11.sp,
+                color = colours.onSurfaceVariant,
+                modifier = Modifier.testTag("query-explanation"),
+            )
+        }
+        problems.forEach { problem ->
+            Text(
+                problem,
+                fontSize = 11.sp,
+                color = colours.error,
+                modifier = Modifier.testTag("query-problem"),
+            )
+        }
+    }
+}
 
 internal class PagedSearch(val listing: SearchListing, val more: () -> Unit)
 
@@ -105,11 +142,14 @@ internal fun rememberPagedSearch(state: GiluneState, query: String, types: List<
         val previous = listing
         listing = previous.copy(loading = true, error = null)
         if (wanted == 0) delay(180)
+        var account = previous.explanations to previous.problems
         if (reader == null) {
             val prepared = executeQuery {
-                compileSearch(query, operators = searchOperatorsFor(plugins, day), types = types, today = day)?.prepare(open)
+                compileSearch(query, operators = searchOperatorsFor(plugins, day), types = types, today = day)
+                    ?.let { compiled -> (compiled.explanations to compiled.problems) to compiled.prepare(open) }
             }
-            reader = prepared.value
+            reader = prepared.value?.second
+            account = prepared.value?.first ?: (emptyList<String>() to emptyList())
             if (prepared.error != null) { listing = previous.copy(loading = false, error = prepared.error); return@LaunchedEffect }
         }
         val current = reader
@@ -124,13 +164,14 @@ internal fun rememberPagedSearch(state: GiluneState, query: String, types: List<
                 if (!page.indexComplete) throw SearchIndexPending(page.issues)
                 SearchListing(hits = (if (append) previous.hits else emptyList()) + page.hits.map { it.displayHit() },
                     total = page.totalHits ?: previous.total.takeIf { previous.generation == page.generation },
-                    generation = page.generation, next = page.nextCursor)
+                    generation = page.generation, next = page.nextCursor,
+                    explanations = account.first, problems = account.second)
             }
         }
         listing = result.value?.let { page ->
             if (page.generation == listing.generation && page.total == null) page.copy(total = listing.total, countError = listing.countError)
             else page
-        } ?: previous.copy(loading = false, error = result.error)
+        } ?: previous.copy(loading = false, error = result.error, explanations = account.first, problems = account.second)
     }
     LaunchedEffect(reader, listing.generation) {
         val current = reader ?: return@LaunchedEffect
