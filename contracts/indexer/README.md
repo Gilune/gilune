@@ -325,3 +325,16 @@ compare local and complete results across edits, shifted locations, nesting,
 metadata, Unicode and code exclusions. See the
 [implementation report](../../architecture/research/local-input-publication-2026-09-06.md)
 for measurements and remaining whole-document storage costs.
+
+## Line history (ADR 0028)
+
+A scoped indexer's snapshot carries, on each `SourceLine`, `since_ms`: when
+that body line reached its current text, from the kernel's replay of the
+note's revisions. Null for a line whose date is unknown — present when Gilune
+adopted the note, or on disk but not yet recorded — and null everywhere a
+snapshot is built outside indexing (`inspect_source_text`, editors). It is
+derived, device-local and best-effort: a fact built on it is an
+interpretation, never the record. Native implementations opt in through
+`index_scoped_with_history` / `index_scoped_locations_with_history`; the
+defaults drop it. The local-incremental wrapper includes a location's line
+dates in its fingerprint, so a date change re-derives that location.

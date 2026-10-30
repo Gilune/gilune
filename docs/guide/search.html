@@ -188,9 +188,18 @@
 
   <h3>Due and done dates</h3>
 
-  <p><code>due:</code> and <code>done:</code> take exactly the same set of values.
-  <code>due:</code> is the date you set on a task; <code>done:</code> is the date it
-  was ticked.</p>
+  <p><code>due:</code> and <code>done:</code> take exactly the same values.
+  <code>due:</code> is the date you set on a task. <code>done:</code> is when it was
+  finished: the <code>done:</code> date on the line if it has one, and otherwise the
+  day Gilune saw the box get ticked — so a task ticked in another app still has a
+  finish date. Nothing is written into your note to work that out.</p>
+
+  <p>Every value is worked out each time the search runs, so a saved query never
+  goes stale. Under the search box, a quiet line says which days your query took —
+  <em>done 26 Oct – 1 Nov 2026</em> — and a value Gilune cannot read is named in red,
+  with a suggestion when it looks like a typo.</p>
+
+  <h4>A day</h4>
 
   <div class="table-wrap">
   <table>
@@ -204,10 +213,96 @@
         <td><code>type:task due:2026-09-04</code></td>
       </tr>
       <tr>
-        <td><code>today</code></td>
-        <td>Today, worked out each time you run the search — so a saved query never
-        goes stale.</td>
-        <td><code>type:task due:today</code></td>
+        <td><code>today</code>, <code>yesterday</code>, <code>tomorrow</code></td>
+        <td>The day you would expect.</td>
+        <td><code>type:task done:yesterday</code></td>
+      </tr>
+      <tr>
+        <td><code>-7d</code>, <code>+3d</code>, <code>-2w</code>, <code>-1m</code>,
+        <code>-1y</code></td>
+        <td>Counted from today in days, weeks, months or years.</td>
+        <td><code>type:task due:+3d</code></td>
+      </tr>
+      <tr>
+        <td><code>lastmonday</code> … <code>lastsunday</code></td>
+        <td>The most recent one, today included.</td>
+        <td><code>type:task done:since:lastsunday</code></td>
+      </tr>
+      <tr>
+        <td><code>monday</code> … <code>sunday</code></td>
+        <td>The <em>next</em> one, never today — as in the <code>/</code> menu.</td>
+        <td><code>type:task due:friday</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h4>A period</h4>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Value</th><th>What it matches</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>thisweek</code>, <code>thisworkweek</code></td>
+        <td>The whole calendar week, or its Monday to Friday. Weeks start on Monday
+        unless you change it in the Tasks plugin's settings.</td>
+        <td><code>type:task done:thisweek</code></td>
+      </tr>
+      <tr>
+        <td><code>thismonth</code>, <code>thisquarter</code>, <code>thisyear</code></td>
+        <td>The whole month, quarter or year.</td>
+        <td><code>type:task done:thismonth</code></td>
+      </tr>
+      <tr>
+        <td><code>lastweek</code>, <code>lastmonth</code>, <code>lastquarter</code>,
+        <code>lastyear</code></td>
+        <td>The one before.</td>
+        <td><code>type:task done:lastweek</code></td>
+      </tr>
+      <tr>
+        <td><code>2026-09</code>, <code>2026-Q3</code>, <code>2026</code></td>
+        <td>That month, quarter or year.</td>
+        <td><code>type:task done:2026-Q3</code></td>
+      </tr>
+      <tr>
+        <td><code>thismonth-1m</code>, <code>thisweek+1w</code></td>
+        <td>An offset after a period moves the whole period: last month, next week.</td>
+        <td><code>type:task due:thisweek+1w</code></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <p>A minus or plus sign always means counting: no name contains one, so
+  <code>thismonth-1m</code> can only mean "this month, one month back".</p>
+
+  <h4>Comparing and ranges</h4>
+
+  <div class="table-wrap">
+  <table>
+    <thead>
+      <tr><th>Value</th><th>What it matches</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>since:…</code>, <code>until:…</code></td>
+        <td>From the start of that day or period onwards, or up to its end — both
+        <em>including</em> it.</td>
+        <td><code>type:task done:since:-7d</code></td>
+      </tr>
+      <tr>
+        <td><code>after:…</code>, <code>before:…</code></td>
+        <td>After it or before it, <em>not</em> including it. <code>before:thisweek</code>
+        is everything up to last Sunday.</td>
+        <td><code>type:task due:before:today</code></td>
+      </tr>
+      <tr>
+        <td><code>…..…</code></td>
+        <td>From the start of the first to the end of the second.</td>
+        <td><code>type:task done:2026-07..2026-09</code></td>
       </tr>
       <tr>
         <td><code>overdue</code></td>
@@ -216,7 +311,8 @@
       </tr>
       <tr>
         <td><code>week</code></td>
-        <td>Today and the six days after it — seven days counting today.</td>
+        <td>Today and the six days after it — the next seven days, not the calendar
+        week.</td>
         <td><code>type:task due:week</code></td>
       </tr>
       <tr>
@@ -225,26 +321,18 @@
         date".</td>
         <td><code>type:task due:none</code></td>
       </tr>
-      <tr>
-        <td><code>before:…</code></td>
-        <td>Earlier than that day, <em>not</em> including it.</td>
-        <td><code>type:task due:before:2026-10-01</code></td>
-      </tr>
-      <tr>
-        <td><code>after:…</code></td>
-        <td>Later than that day, <em>not</em> including it.</td>
-        <td><code>type:task due:after:today</code></td>
-      </tr>
     </tbody>
   </table>
   </div>
 
-  <p>After <code>before:</code> and <code>after:</code> you can write a date as
-  <code>YYYY-MM-DD</code>, or use <code>today</code>, <code>tomorrow</code>, or a
-  weekday name such as <code>monday</code>. A weekday always means its <em>next</em>
-  occurrence and never today. Two-word phrases will not work here, because a space
-  starts a new term — <code>due:after:next week</code> is not a query, but
-  <code>due:after:monday</code> is.</p>
+  <p>A space always starts a new term, so <code>due:after:next week</code> is not a
+  query; <code>due:after:thisweek</code> is.</p>
+
+  <p>When a box was ticked before Gilune first saw the note — a list you brought in
+  from elsewhere, already ticked — nobody knows when it was finished, so it has no
+  finish date: <code>type:task is:done done:none</code> lists those. A box ticked in
+  another app is dated when Gilune next looked at the note, which may be later than
+  the moment you ticked it if Gilune was closed.</p>
 
   <h3>Ticked or not</h3>
 
@@ -291,8 +379,12 @@
         <td>Open work tasks that have a date on them.</td>
       </tr>
       <tr>
-        <td><code>type:task done:week</code></td>
-        <td>What did I actually finish?</td>
+        <td><code>type:task done:thisweek</code></td>
+        <td>What did I actually finish this week?</td>
+      </tr>
+      <tr>
+        <td><code>type:task done:since:-7d</code></td>
+        <td>What did I finish in the last seven days?</td>
       </tr>
       <tr>
         <td><code>type:task is:open due:none [project]</code></td>
@@ -308,10 +400,12 @@
     <li><strong>A keyword nobody recognises becomes an ordinary search.</strong> Type
     <code>colour:blue</code> and Gilune looks for the text <em>colour:blue</em> rather
     than throwing your results away. A typo costs you nothing.</li>
-    <li><strong>But a bad value inside a real date keyword matches nothing.</strong>
-    <code>due:soonish</code> has asked a date question that cannot be answered, so it
-    returns no results rather than quietly searching for the word. The same goes for
-    a date that does not exist, like <code>due:2026-02-30</code>.</li>
+    <li><strong>But a bad value inside a real date keyword matches nothing, and says
+    so.</strong> <code>due:soonish</code> has asked a date question that cannot be
+    answered, so it returns no results rather than quietly searching for the word —
+    and the line under the search box names it, with a suggestion when it looks like
+    a typo (<code>thismnth</code> — did you mean <code>thismonth</code>?). The same goes
+    for a date that does not exist, like <code>due:2026-02-30</code>.</li>
     <li><strong>There is no <em>or</em>, and no brackets for grouping.</strong> Every
     term has to match. To ask an either/or question, run two searches.</li>
     <li><strong>Plain words do not search properties.</strong> Use

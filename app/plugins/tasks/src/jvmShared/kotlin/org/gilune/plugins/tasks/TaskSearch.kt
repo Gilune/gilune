@@ -14,6 +14,7 @@ package org.gilune.plugins.tasks
 
 import org.gilune.plugin.sdk.CandidateLine
 import org.gilune.plugin.sdk.Compiled
+import org.gilune.plugin.sdk.SearchExplanation
 import org.gilune.plugin.sdk.SearchOperator
 import org.gilune.plugin.sdk.SearchType
 import org.gilune.plugin.sdk.SearchedNote
@@ -41,10 +42,13 @@ const val TASK_SEARCH_TYPE = "task"
 /// every recognised item carries a state fact. The kernel applies the global
 /// case-sensitive text filter to the item's own content, excluding nested items.
 /// [taskLines] remains a legacy scan oracle; indexed item search never invokes it.
-fun taskSearchType(filter: String = ""): SearchType = SearchType(
+fun taskSearchType(filter: String = "", weekStart: WeekStart = WeekStart.MONDAY): SearchType = SearchType(
     key = TASK_SEARCH_TYPE,
     operators = { today ->
-        listOf(DateFieldOperator(DUE_FIELD, today), DateFieldOperator(DONE_FIELD, today), MARKER_OPERATOR, PRIORITY_OPERATOR)
+        listOf(
+            DateFieldOperator(DUE_FIELD, today, weekStart), DateFieldOperator(DONE_FIELD, today, weekStart),
+            MARKER_OPERATOR, PRIORITY_OPERATOR,
+        )
     },
     extract = { note -> taskLines(note, filter) },
     constraints = buildList {
@@ -90,7 +94,7 @@ fun kernelTaskRows(hits: List<uniffi.gilune_ffi.SearchHit>): List<TaskHit> = hit
             ?.value?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
         val level = item.facts.firstOrNull { it.key == TASK_PRIORITY_PREDICATE }?.value
         TaskHit(hit.relPath, hit.name, item.firstLine.toInt(), item.text,
-            date(TASK_DUE_PREDICATE), date(TASK_DONE_PREDICATE),
+            date(TASK_DUE_PREDICATE), date(TASK_COMPLETED_PREDICATE) ?: date(TASK_DONE_PREDICATE),
             TaskPriority.entries.firstOrNull { it.token == level })
     }
 }
@@ -140,55 +144,66 @@ private fun taskLines(note: SearchedNote, filter: String): List<CandidateLine> {
 private const val MARKER_FIELD = "is"
 
 /// `due:` and `done:`, the two § 1 stores and the only dates this type
-/// scopes. Under the narrowed-note rule the note handed to [matches]
-/// **is one line**, so reading its body reads the task line.
+/// scopes. Every value is resolved by [resolveDateQuestion] — the one date
+/// language, so `thisweek` means the same days in a search, a filter block
+/// and anything else that asks — to a span of days, or to "no date".
+///
+/// `done:` asks the **completion** date: the written `done:` token, or, for
+/// a line ticked in another app, the day the line history says it was
+/// ticked (ADR 0025). `due:` asks the written due date only.
+///
+/// Under the narrowed-note rule the note handed to [matches] is one line;
+/// the read sees written tokens only, which is why the kernel's answer —
+/// every compiled value is exact — is the one that counts.
 ///
 /// No needle hooks: the operator filters, it does not highlight — the
 /// line is the hit, and emphasising the date it was selected by would say
 /// nothing the row does not already show.
-private class DateFieldOperator(override val name: String, private val today: LocalDate) : SearchOperator {
+private class DateFieldOperator(
+    override val name: String,
+    private val today: LocalDate,
+    private val weekStart: WeekStart,
+) : SearchOperator {
     private val token = tokenPattern(name)
-    private val predicate = if (name == DUE_FIELD) TASK_DUE_PREDICATE else TASK_DONE_PREDICATE
+    private val predicate = if (name == DUE_FIELD) TASK_DUE_PREDICATE else TASK_COMPLETED_PREDICATE
 
-    override fun matches(note: SearchedNote, argument: String): Boolean =
-        dateMatches(dateIn(note.body, token), argument, today)
+    private fun question(argument: String): DateQuestion? =
+        try { resolveDateQuestion(argument, today, weekStart) } catch (_: DateValueError) { null }
 
-    /// The value forms, as constraints on the indexed date (ADR 0020
-    /// § 2.4). `none` is the interesting one and it is the reason
-    /// `NotExists` exists at all: the plugin's own operator asks whether
-    /// a token is **absent**, which nothing else in the operator set can
-    /// say, and its negation is the plainest possible `Exists`.
-    ///
-    /// Every other negation is left to the read. `-due:week` is "not
-    /// between two dates", whose complement is a disjunction, and a
-    /// conjunction cannot hold one — so it narrows nothing and the note
-    /// decides, which is exactly the fallback this seam is built around.
-    override fun compile(argument: String, negated: Boolean): Compiled {
-        val value = argument.trim().lowercase(Locale.ROOT)
-        if (value == NONE_VALUE) {
-            val op = if (negated) ConstraintOp.EXISTS else ConstraintOp.NOT_EXISTS
-            return Compiled.Exact(listOf(taskFact(predicate, op, "")))
-        }
-        if (negated) return Compiled.Scan
-        return when {
-            value == TODAY_VALUE -> on(ConstraintOp.EQ, today)
-            value == OVERDUE_VALUE -> on(ConstraintOp.LT, today)
-            value == WEEK_VALUE -> Compiled.Exact(
-                listOf(
-                    taskFact(predicate, ConstraintOp.GE, today.toString()),
-                    taskFact(predicate, ConstraintOp.LE, today.plusDays(WEEK_DAYS).toString()),
-                ),
-            )
-            value.startsWith(BEFORE_VALUE) ->
-                boundary(value, BEFORE_VALUE, today)?.let { on(ConstraintOp.LT, it) } ?: Compiled.Never
-            value.startsWith(AFTER_VALUE) ->
-                boundary(value, AFTER_VALUE, today)?.let { on(ConstraintOp.GT, it) } ?: Compiled.Never
-            else -> isoDate(value)?.let { on(ConstraintOp.EQ, it) } ?: Compiled.Never
+    override fun matches(note: SearchedNote, argument: String): Boolean {
+        val date = dateIn(note.body, token)
+        return when (val question = question(argument)) {
+            null -> false
+            DateQuestion.None -> date == null
+            is DateQuestion.Span -> date != null && question.contains(date)
         }
     }
 
-    private fun on(op: ConstraintOp, date: LocalDate) =
-        Compiled.Exact(listOf(taskFact(predicate, op, date.toString())))
+    /// Every value compiles exactly, as a span on the indexed date (ADR 0020
+    /// § 2.4): the host negates a whole term itself, so `-done:thisweek` is
+    /// the complement the kernel computes, undated tasks included. `none`
+    /// is absence, the reason `NotExists` exists at all. A value that means
+    /// nothing is [Compiled.Never], and [explain] says why.
+    override fun compile(argument: String, negated: Boolean): Compiled {
+        val question = question(argument) ?: return if (negated) Compiled.Scan else Compiled.Never
+        return when (question) {
+            DateQuestion.None ->
+                Compiled.Exact(listOf(taskFact(predicate, if (negated) ConstraintOp.EXISTS else ConstraintOp.NOT_EXISTS, "")))
+            is DateQuestion.Span -> if (negated) Compiled.Scan else Compiled.Exact(
+                listOfNotNull(
+                    question.from?.let { taskFact(predicate, ConstraintOp.GE, it.toString()) },
+                    question.to?.let { taskFact(predicate, ConstraintOp.LE, it.toString()) },
+                ),
+            )
+        }
+    }
+
+    /// "done 26 Oct – 1 Nov 2026", or why the value names no date.
+    override fun explain(argument: String): SearchExplanation = try {
+        SearchExplanation(description = "$name ${describeDateQuestion(resolveDateQuestion(argument, today, weekStart))}")
+    } catch (error: DateValueError) {
+        SearchExplanation(problem = "$name: ${error.message}")
+    }
 }
 
 /// `is:` — the checkbox itself, the one thing about a task that is not a
@@ -257,52 +272,6 @@ private val PRIORITY_OPERATOR = object : SearchOperator {
     }
 }
 
-/// § 4's value forms, and the whole of them:
-///
-/// - `YYYY-MM-DD` — that day exactly
-/// - `today` — the evaluator's day, so the query never rots
-/// - `overdue` — **strictly** before today; today is not overdue
-/// - `week` — today through today + 6, both ends included
-/// - `none` — the line carries no such token. `-due:none` is therefore
-///   "has a due date", which is why no `has`/`no` keywords exist
-/// - `before:<when>` / `after:<when>` — both **exclusive**, so
-///   `before:2026-09-05` does not match the 5th and `after:2026-09-05`
-///   does not either
-///
-/// `<when>` is anything [resolveDatePhrase] resolves — an ISO date, or a
-/// relative word: `before:today`, `after:tomorrow`, `after:monday`, where
-/// a weekday is its **next** occurrence and never today (owner request,
-/// 2026-08-31, closing the gap to "due before today"). Resolution happens
-/// at evaluation against the day the query runs, like every other
-/// relative word here, so no query stores a date that rots. The resolver's
-/// multi-word phrases ("next week") cannot reach here — the DSL splits a
-/// query on whitespace — and the truncated `before:next` is simply a
-/// value it does not resolve.
-///
-/// Anything else matches **nothing**. A typo inside a known operator is
-/// an empty result, not a text search: the DSL's degradation rule is
-/// about an unknown *keyword*, and `due:soonish` has asked a date
-/// question that cannot be answered by pretending it was prose.
-private fun dateMatches(date: LocalDate?, argument: String, today: LocalDate): Boolean {
-    val value = argument.trim().lowercase(Locale.ROOT)
-    return when {
-        value == NONE_VALUE -> date == null
-        date == null -> false
-        value == TODAY_VALUE -> date == today
-        value == OVERDUE_VALUE -> date < today
-        value == WEEK_VALUE -> !date.isBefore(today) && !date.isAfter(today.plusDays(WEEK_DAYS))
-        value.startsWith(BEFORE_VALUE) -> boundary(value, BEFORE_VALUE, today)?.let { date < it } == true
-        value.startsWith(AFTER_VALUE) -> boundary(value, AFTER_VALUE, today)?.let { date > it } == true
-        else -> isoDate(value)?.let { date == it } == true
-    }
-}
-
-/// The day a `before:`/`after:` value names, or null if it names none —
-/// [resolveDatePhrase] is the one resolver, so the operator and the `/`
-/// menu accept the same words and validate an ISO date the same way.
-private fun boundary(value: String, prefix: String, today: LocalDate): LocalDate? =
-    resolveDatePhrase(value.removePrefix(prefix), today)
-
 /// The marker values, and the whole of them: `open` is `[ ]`, `done` is
 /// `[x]` or `[X]`. Case-insensitive on both sides — the value as typed
 /// and the marker as written — and anything else matches nothing, by the
@@ -369,18 +338,8 @@ fun taskOrderKey(priority: TaskPriority?, dueIso: String?): String =
 
 private const val NONE_VALUE = "none"
 private const val NORMAL_VALUE = "normal"
-private const val TODAY_VALUE = "today"
-private const val OVERDUE_VALUE = "overdue"
-private const val WEEK_VALUE = "week"
-private const val BEFORE_VALUE = "before:"
-private const val AFTER_VALUE = "after:"
 private const val OPEN_VALUE = "open"
 private const val DONE_VALUE = "done"
-
-/// `week` is today plus the six days after it — seven days counting
-/// today, which is what "the next seven days" means to a person reading
-/// their own agenda.
-private const val WEEK_DAYS = 6L
 
 /// § 1's token: `key:` plus an ISO date, whitespace-separated and
 /// position-independent, never parsed from the end backwards. Mirrors

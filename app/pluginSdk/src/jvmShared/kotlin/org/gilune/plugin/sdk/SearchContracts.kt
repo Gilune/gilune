@@ -53,7 +53,21 @@ interface SearchOperator {
     /// The host applies whole-term negation, so it calls this with false.
     /// The parameter remains for source compatibility with existing plugins.
     fun compile(argument: String, negated: Boolean): Compiled = Compiled.Scan
+
+    /// What the term turned out to mean, for whoever reads the results — a
+    /// person under the search box, or a program running the query (owner,
+    /// 2026-10-30). Relative values depend on the day and on settings the
+    /// reader cannot see, so `thisweek` should say which days it took; and a
+    /// value that means nothing should say so, rather than leave an empty
+    /// result to be read as "nothing happened". Null says nothing.
+    fun explain(argument: String): SearchExplanation? = null
 }
+
+/// One term's account of itself. `description` is what it resolved to,
+/// e.g. "done 26 Oct – 1 Nov 2026"; `problem` is why it can match nothing,
+/// e.g. "Unknown date ‘thismnth’ — did you mean thismonth?". A term with a
+/// problem compiles to [Compiled.Never], so the two always agree.
+data class SearchExplanation(val description: String? = null, val problem: String? = null)
 
 /// What a term says to the index.
 sealed interface Compiled {

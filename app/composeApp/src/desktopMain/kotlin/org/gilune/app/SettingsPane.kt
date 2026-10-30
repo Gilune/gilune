@@ -16,6 +16,9 @@ import org.gilune.plugins.tasks.tasksSettingsDocument
 import org.gilune.plugins.tasks.DEFAULT_TASK_SHORTCUT
 import org.gilune.plugins.tasks.tasksShortcutKey
 import org.gilune.plugins.tasks.tasksShortcutSetting
+import org.gilune.plugins.tasks.WeekStart
+import org.gilune.plugins.tasks.tasksWeekStart
+import org.gilune.plugins.tasks.tasksWeekStartSetting
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -564,6 +567,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
     val saved = remember(plugin.settings) { listOf(plugin).tasksFilter() }
     val panelOn = remember(plugin.settings) { listOf(plugin).tasksPanelEnabled() }
     val shortcut = remember(plugin.settings) { tasksShortcutSetting(plugin.settings) }
+    val weekStart = remember(plugin.settings) { tasksWeekStartSetting(plugin.settings) }
     var filter by remember(plugin.settings) { mutableStateOf(saved) }
     Text("Global filter", style = MaterialTheme.typography.titleSmall)
     Text(
@@ -595,7 +599,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
                     } else {
                         "only checkbox lines containing $wanted are tasks"
                     },
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn, shortcut)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn, shortcut, weekStart)) }
             },
             // An empty filter is a legitimate value — the shipped default
             // — so only "no change" disables the button.
@@ -622,7 +626,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
             onCheckedChange = { show ->
                 state.pluginAction(
                     if (show) "the agenda panel is in the rail" else "the agenda panel is off",
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show, shortcut)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show, shortcut, weekStart)) }
             },
         )
         Text("Show the agenda panel", fontSize = 13.sp)
@@ -641,7 +645,35 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
     // The filter and the panel switch travel with the write, as above.
     KeystrokeSetting(tasksShortcutKey(plugin.settings), DEFAULT_TASK_SHORTCUT, "task-shortcut-key") { key ->
         state.pluginAction("the task shortcut is now ${key ?: DEFAULT_TASK_SHORTCUT}") {
-            it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, key))
+            it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, key, weekStart))
+        }
+    }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Weeks start on", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "What thisweek, lastweek and thisworkweek mean in a search or a " +
+            "filter block. Nothing in your vault changes either way.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    val effective = tasksWeekStart(plugin.settings)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        WeekStart.entries.forEach { choice ->
+            val label = choice.token.replaceFirstChar { it.uppercase() }
+            RadioButton(
+                selected = effective == choice,
+                onClick = {
+                    if (effective != choice) state.pluginAction("weeks start on $label") {
+                        // Monday is the default and is left out, not written down.
+                        val stored = choice.takeIf { it != WeekStart.MONDAY }
+                        it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, shortcut, stored))
+                    }
+                },
+                modifier = Modifier.testTag("week-start-${choice.token}"),
+            )
+            Text(label, fontSize = 13.sp, modifier = Modifier.padding(end = 12.dp))
         }
     }
 }

@@ -141,3 +141,21 @@ fn failed_callbacks_and_path_changes_cannot_reuse_unverified_output() {
     indexer.index_scoped("b.md", &snapshot("- new\n")).unwrap();
     assert_eq!(selected.load(Ordering::SeqCst), 4);
 }
+
+#[test]
+fn a_line_whose_date_changed_is_derived_again_though_its_text_did_not() {
+    // ADR 0025: a cached fact may carry a date read from the line history,
+    // so the history is part of what a location's input is.
+    let (indexer, selected, _) = fixture();
+    let source = snapshot("- [x] a\n- [ ] b\n");
+    let lines = source.layout().lines.len();
+    let mut history = vec![None; lines];
+    indexer.index_scoped_with_history("a.md", &source, &history).unwrap();
+    selected.store(0, Ordering::SeqCst);
+    indexer.index_scoped_with_history("a.md", &source, &history).unwrap();
+    assert_eq!(selected.load(Ordering::SeqCst), 0, "nothing changed, nothing derived");
+    history[0] = Some(1_000);
+    selected.store(0, Ordering::SeqCst);
+    indexer.index_scoped_with_history("a.md", &source, &history).unwrap();
+    assert_eq!(selected.load(Ordering::SeqCst), 2, "the dated line and the item on it, nothing else");
+}

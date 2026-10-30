@@ -315,7 +315,8 @@ class FilterBlockTest {
         assertEquals(1, filterBlockLines(FilterResult.Hint("anything")))
         assertEquals(1, filterBlockLines(FilterResult.Tasks(emptyList(), 0)), "no matches is still a line saying so")
         assertEquals(1, filterBlockLines(FilterResult.Notes(emptyList(), 0)))
-        assertEquals(2, filterBlockLines(run("type:task\ndue:week")), "two rows, two lines")
+        assertEquals(3, filterBlockLines(run("type:task\ndue:week")), "the days the week took, then two rows")
+        assertEquals(1, filterBlockLines(run("type:task\ndue:tomorow")), "a value that means nothing is one line saying why")
         assertEquals(1, filterBlockLines(run("type:note\nmilk")))
         assertEquals(4, filterBlockLines(FilterResult.Notes(List(3) { NoteRow("n", "n.md") }, 2)))
     }

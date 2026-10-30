@@ -55,14 +55,17 @@ const val FILTER_MAX_ROWS = 500
 /// How many editor lines a collapsed block reserves: **one per row it
 /// draws**, one more for the footer — `+N more`, and `Show fewer` once the
 /// block has been opened — and never fewer than one: a block with no
-/// matches still says so. The transformation reserves exactly this many
+/// matches still says so — and one for the account line, when the query
+/// resolved a relative date. The transformation reserves exactly this many
 /// blank lines and the overlay draws exactly this many rows into them, so
 /// the two cannot disagree and nothing below the block mis-sits.
 fun filterBlockLines(result: FilterResult, expanded: Boolean = false, flipped: Set<String> = emptySet()): Int = when (result) {
     is FilterResult.Hint -> 1
-    is FilterResult.Tasks -> maxOf(result.rows.size, 1) + (if (result.more > 0 || expanded) 1 else 0) +
+    is FilterResult.Tasks -> (if (result.account != null) 1 else 0) +
+        maxOf(result.rows.size, 1) + (if (result.more > 0 || expanded) 1 else 0) +
         result.rows.sumOf { row -> if (result.detailOpen(row, flipped)) result.details[row.detailKey()]?.lineCount ?: 0 else 0 }
-    is FilterResult.Notes -> maxOf(result.rows.size, 1) + if (result.more > 0 || expanded) 1 else 0
+    is FilterResult.Notes -> (if (result.account != null) 1 else 0) +
+        maxOf(result.rows.size, 1) + if (result.more > 0 || expanded) 1 else 0
 }
 
 /// Whether a row's detail is showing: open by default under `show:notes`,
@@ -114,15 +117,17 @@ sealed interface FilterResult {
 
     /// `details` holds what sits under each row that has any, by
     /// [detailKey]; `showDetails` is the block's `show:notes` — every row
-    /// opens unless a person folds it.
+    /// opens unless a person folds it. `account` is the days a relative
+    /// date took ("done 26 Oct – 1 Nov 2026"), drawn above the rows.
     data class Tasks(
         val rows: List<TaskHit>,
         val more: Int,
         val details: Map<String, TaskDetail> = emptyMap(),
         val showDetails: Boolean = false,
+        val account: String? = null,
     ) : FilterResult
 
-    data class Notes(val rows: List<NoteRow>, val more: Int) : FilterResult
+    data class Notes(val rows: List<NoteRow>, val more: Int, val account: String? = null) : FilterResult
 }
 
 /// The block's text as one query. **Line-joining is the AND rule**: the
@@ -211,6 +216,9 @@ fun evaluateFilterBlock(
         maxLines = if (task) 1 else 0, pageSize = cap.coerceIn(1, 500).toUInt(),
         groupByNote = !task, sortPredicate = if (task) TASK_ORDER_PREDICATE else "")
         ?: return FilterResult.Hint(FILTER_NO_MATCHES)
+    // A term that can match nothing says so instead of an empty list.
+    if (compiled.problems.isNotEmpty()) return FilterResult.Hint(compiled.problems.joinToString(" "))
+    val account = compiled.explanations.takeIf { it.isNotEmpty() }?.joinToString(" · ")
     val page = compiled.page(gilune).requireComplete()
     if (task) {
         val found = kernelTaskRows(page.hits).take(cap.coerceAtLeast(0))
@@ -218,10 +226,10 @@ fun evaluateFilterBlock(
         // A subtask under a listed parent is shown there, not as a row too.
         val rows = withoutListedSubtasks(found, details)
         return FilterResult.Tasks(rows, (page.totalHits - found.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt(),
-            details = details, showDetails = filterShowsNotes(block))
+            details = details, showDetails = filterShowsNotes(block), account = account)
     }
     val rows = page.hits.take(cap.coerceAtLeast(0)).map { NoteRow(it.name, it.relPath) }
-    return FilterResult.Notes(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt())
+    return FilterResult.Notes(rows, (page.totalHits - rows.size.toULong()).coerceAtMost(Int.MAX_VALUE.toULong()).toInt(), account)
 }
 
 private fun registeredTypes(types: List<SearchType>): String {

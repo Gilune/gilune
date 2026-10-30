@@ -137,6 +137,7 @@ fun SearchPanel(
             )
         }
 
+        QueryAccount(search.listing.explanations, search.listing.problems, Modifier.padding(horizontal = 12.dp))
         QueryNotice(search.listing.loading, search.listing.error, state::retrySearchIndex)
         if (search.listing.generation != null && search.listing.total == null) {
             Text(if (search.listing.countError == null) "Counting results…" else "Total unavailable")

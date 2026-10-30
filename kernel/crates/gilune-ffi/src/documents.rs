@@ -64,6 +64,11 @@ pub struct SourceValueNode {
 pub struct SourceLine {
     pub number: u32,
     pub range: SourceSpan,
+    /// When the line reached its current text, in milliseconds since the
+    /// epoch, from the note's line history (ADR 0025). Only indexers are
+    /// given it; null everywhere else, and for a line whose date is unknown.
+    #[uniffi(default = None)]
+    pub since_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, uniffi::Record)]
@@ -98,6 +103,18 @@ pub struct SourceMetadataEntry {
     pub value_range: SourceSpan,
 }
 
+impl SourceTextSnapshot {
+    /// The snapshot an indexer is handed: every line carries its date from
+    /// the line history, aligned by position.
+    pub(crate) fn with_history(source: &core::TextSnapshot, history: &[Option<i64>]) -> Self {
+        let mut wire = Self::from(source);
+        for (line, since) in wire.lines.iter_mut().zip(history) {
+            line.since_ms = *since;
+        }
+        wire
+    }
+}
+
 impl From<&core::TextSnapshot> for SourceTextSnapshot {
     fn from(value: &core::TextSnapshot) -> Self {
         let layout = value.layout();
@@ -119,6 +136,7 @@ impl From<&core::TextSnapshot> for SourceTextSnapshot {
                 .map(|line| SourceLine {
                     number: line.number,
                     range: line.range.into(),
+                    since_ms: None,
                 })
                 .collect(),
             items: layout

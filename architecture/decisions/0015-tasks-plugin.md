@@ -842,3 +842,16 @@ labels now use the task's own line only.
   `ConnectionPillsUiTest` rows that find the green, then the grey, tag and
   none of the accent; all four colour rows fail with every tone forced to
   the accent.
+
+### The date language, and completion without a written date — 2026-10-30
+
+Owner: `due:` and `done:` take the date language of [ADR 0028](0028-line-history-and-task-dates.md)
+— days, rolling offsets (`-7d`), calendar periods (`thisweek`, `lastmonth`,
+`2026-Q3`), `since:`/`until:` beside `before:`/`after:`, ranges `a..b` — with
+a `weekStart` setting (Monday unless set to Sunday). § 4's "a malformed value
+matches nothing" stands, and the search box and filter blocks now say which
+days a value took and why a value means nothing. `done:` asks a new indexed
+fact, `org.memory.tasks.completed`: the written `done:` date, else the day
+the kernel's line history says a ticked line reached its text. The
+`done:`-stamping on tick (§ 1) is unchanged — inference only covers ticks
+made where nobody stamped.

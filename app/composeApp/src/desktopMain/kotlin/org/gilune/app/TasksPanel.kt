@@ -331,6 +331,7 @@ fun FilterBlockLines(
         when (result) {
             is FilterResult.Hint -> FilterTextLine(result.text, rowHeight, italic = true)
             is FilterResult.Tasks -> {
+                result.account?.let { FilterTextLine(it, rowHeight, italic = true) }
                 if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
                 for (row in result.rows) {
                     val detail = result.details[row.detailKey()]
@@ -342,6 +343,7 @@ fun FilterBlockLines(
                 FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
             }
             is FilterResult.Notes -> {
+                result.account?.let { FilterTextLine(it, rowHeight, italic = true) }
                 if (result.rows.isEmpty()) FilterTextLine(FILTER_NO_MATCHES, rowHeight, italic = true)
                 for (row in result.rows) NoteHitLine(row, onOpen, rowHeight, maxRowWidth)
                 FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
@@ -536,6 +538,7 @@ fun FilterBlockView(
         when (result) {
             is FilterResult.Hint -> FilterNoteRow(result.text)
             is FilterResult.Tasks -> {
+                result.account?.let { FilterNoteRow(it) }
                 if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
                 for (row in result.rows) {
                     val key = row.detailKey()
@@ -545,6 +548,7 @@ fun FilterBlockView(
                 FilterFooter(result.more, cap > FILTER_ROW_CAP, onMore = readMore, onFewer = { cap = FILTER_ROW_CAP }, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp))
             }
             is FilterResult.Notes -> {
+                result.account?.let { FilterNoteRow(it) }
                 if (result.rows.isEmpty()) FilterNoteRow(FILTER_NO_MATCHES)
                 for (row in result.rows) NoteHitRow(row, onOpen)
                 FilterFooter(result.more, cap > FILTER_ROW_CAP, onMore = readMore, onFewer = { cap = FILTER_ROW_CAP }, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp))

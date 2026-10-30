@@ -32,6 +32,7 @@ technologies can be rejected without weakening the product principles.
 | [0025](0025-compact-index-targets.md) | Private source-qualified target/predicate IDs shared by independent fact producers | Implemented; query/update measurements recorded |
 | [0026](0026-shared-editor-and-document-refactoring.md) | Independent editor/view contributions and durable reviewed document refactoring | Implemented; validation in People delivery plan |
 | [0027](0027-realtime-inline-dictation-on-desktop.md) | Realtime inline dictation on the desktop: provisional words outside the buffer, engine choice | Accepted; S0–S3 delivered (live Whisper dictation; Transcription (NVIDIA NeMo) plugin) |
+| [0028](0028-line-history-and-task-dates.md) | Line history (when each line reached its text) and the `due:`/`done:` date language | Accepted; delivered 2026-10-30 |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or
