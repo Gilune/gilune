@@ -340,3 +340,13 @@ vault copied while closed restoring completely on another machine.
   one pass and an edit back; renamed on both at once keeps each name
   until an edit resolves it; pre-amendment rename reaches the peer; third
   device out of order).
+- **2026-10-30 (ADR 0029 § 3): a moved recording is followed, not adopted.**
+  Renaming or moving a voice note renames its recording with it (the rail
+  pairs them by stem), and reconcile used to adopt the moved file as a new
+  attachment while the source kept its old, now empty, path. Before adopting
+  a non-note file, reconcile now looks for a live source whose blob has
+  exactly these bytes and whose recorded path no longer holds them, and
+  re-records that blob at the new path (device-local; nothing is sent). A
+  copy — the old path still holds the bytes — is adopted as before. A
+  source's `gilune-blob` header and `![[name]]` link are drawn from where
+  its blob is held on this device. Gate rows in `reprocess/tests.rs`.

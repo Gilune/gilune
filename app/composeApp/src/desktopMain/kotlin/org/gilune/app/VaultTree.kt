@@ -72,6 +72,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -100,6 +101,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.gilune.plugin.sdk.Slots
+import kotlinx.coroutines.launch
 import java.io.File
 import org.gilune.plugin.sdk.PagePreset
 
@@ -369,15 +372,25 @@ private class TreeActions(
     /// 2026-10-22). Null while the vault's sync switch is off: then
     /// nothing leaves anyway, and the menu says nothing it cannot mean.
     val localScope: ((VaultEntry, Boolean) -> Unit)?,
+    /// "Transcribe again" on a recording beside its note (ADR 0029).
+    val transcribeRecording: (String) -> Unit,
+    /// Load a recording from outside the vault into a new note in the
+    /// given folder. Null while no plugin offers to record speech: then
+    /// nothing would turn it into words, and the menu does not offer it.
+    val loadRecording: ((String) -> Unit)?,
 ) {
+    fun loadRecordingItem(folder: String) =
+        loadRecording?.let { load -> ContextMenuItem("Transcribe a recording…") { load(folder) } }
+
     fun pageMenuItems(folder: String) = pageCollections.filter { File(it.folder) == File(folder) }.map { collection ->
         ContextMenuItem(collection.binding.collection.folderCreateLabel!!) { createPage(collection.copy(folder = folder)) }
     }
 
     /// What the vault root offers: the same creation a folder's menu has.
-    fun rootMenuItems() = listOf(
+    fun rootMenuItems() = listOfNotNull(
         ContextMenuItem("New note") { newNote("") },
         ContextMenuItem("New folder") { newFolder("") },
+        loadRecordingItem(""),
     ) + pageMenuItems("")
 }
 
@@ -426,6 +439,8 @@ private fun VaultTreeContent(
     var moveRevision by remember { mutableStateOf(0) }
     val folderCollections = rememberFolderPageCollections(state)
     var creatingPage by remember { mutableStateOf<FolderPageCollection?>(null) }
+    var transcribingAgain by remember { mutableStateOf<TranscribeAgain?>(null) }
+    val recordings = rememberCoroutineScope()
     val drag = remember(state.vaultDir) { VaultTreeDrag() }
     val list = rememberLazyListState()
     val entries = remember(state.vaultCursor.value, state.refreshCount.value, state.vaultDir, tree.expanded.toList(), moveRevision) {
@@ -503,6 +518,17 @@ private fun VaultTreeContent(
         pageCollections = folderCollections,
         createPage = { creatingPage = it },
         localScope = if (showLocalScopeToggle(state.syncStatus.value)) ::setLocalScope else null,
+        transcribeRecording = { relPath ->
+            recordings.launch { transcribeRecordingAt(state, relPath, { transcribingAgain = it }, onOpen) }
+        },
+        loadRecording = if (state.plugins.contributes(Slots.CAPTURE_ACTIONS, RECORD_VOICE_ACTION)) {
+            { folder ->
+                chooseRecordingFile()?.let { file ->
+                    reveal(folder)
+                    recordings.launch { loadRecordingFile(state, file, folder, onOpen) }
+                }
+            }
+        } else null,
     )
 
     val dragModifier = treeDragModifier(drag, tree, list) { entry, directory ->
@@ -614,6 +640,9 @@ private fun VaultTreeContent(
         }
     }
 
+    transcribingAgain?.let { request ->
+        TranscribeAgainDialog(state, request, onClose = { transcribingAgain = null })
+    }
     val doomed = deleting
     if (doomed != null) {
         DeleteDialog(state, doomed, onClose = { deleting = null; moveRevision++ }, onDeleted = onDeleted)
@@ -648,7 +677,7 @@ private fun TreeRow(
     val rowModifier = Modifier.testTag("vault-entry:${entry.relPath}")
         .onGloballyPositioned { drag.rows[entry] = it.boundsInRoot() }
     if (entry.kind == VaultEntryKind.ATTACHMENT) {
-        AttachmentRow(entry, vaultDir, rowModifier)
+        AttachmentRow(entry, vaultDir, actions, rowModifier)
         return
     }
     val colours = MaterialTheme.colorScheme
@@ -666,7 +695,10 @@ private fun TreeRow(
             }
             add(ContextMenuItem("New note") { actions.newNote(parentDir) })
             add(ContextMenuItem("New folder") { actions.newFolder(parentDir) })
-            if (entry.isDir) addAll(actions.pageMenuItems(entry.relPath))
+            if (entry.isDir) {
+                actions.loadRecordingItem(entry.relPath)?.let(::add)
+                addAll(actions.pageMenuItems(entry.relPath))
+            }
             add(ContextMenuItem("Rename") { actions.rename(entry) })
             add(ContextMenuItem("Delete") { actions.delete(entry.relPath) })
             // The entry's own sync switch, while the vault syncs at all:
@@ -788,10 +820,15 @@ private fun TreeRow(
 /// opened here — the editor edits notes, and the file itself belongs to
 /// whichever application owns its type.
 @Composable
-private fun AttachmentRow(entry: VaultEntry, vaultDir: String, modifier: Modifier = Modifier) {
+private fun AttachmentRow(entry: VaultEntry, vaultDir: String, actions: TreeActions, modifier: Modifier = Modifier) {
     val colours = MaterialTheme.colorScheme
     ContextMenuArea(items = {
-        listOf(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
+        buildList {
+            if (entry.relPath.substringAfterLast('.', "").lowercase() in LOADABLE_RECORDING_SUFFIXES) {
+                add(ContextMenuItem("Transcribe again") { actions.transcribeRecording(entry.relPath) })
+            }
+            add(ContextMenuItem("Reveal in Explorer") { revealInExplorer(vaultDir, entry) })
+        }
     }) {
         Row(
             modifier

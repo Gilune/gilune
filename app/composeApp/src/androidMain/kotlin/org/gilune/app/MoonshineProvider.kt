@@ -338,7 +338,7 @@ fun runMoonshineJobs(
                 .onFailure { Log.w(TAG, "claim failed", it) }
                 .getOrNull() ?: break
             claim.use { held ->
-                pass = when (val action = providerAction(held.job().subjectPayload)) {
+                pass = when (val action = providerAction(held.job().subjectPayload, held.job().eventPayload)) {
                     is ProviderAction.NothingToDo -> {
                         gilune.submitOutput(held, emptyList())
                         pass.copy(skipped = pass.skipped + 1)

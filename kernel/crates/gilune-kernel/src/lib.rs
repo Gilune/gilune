@@ -24,6 +24,7 @@ pub mod plugins;
 mod probe;
 pub mod processor;
 pub mod query;
+pub mod reprocess;
 pub mod revisions;
 pub mod search;
 mod search_text;

@@ -1442,7 +1442,8 @@ impl Store {
         front.push_str(&format!("gilune-schema: {}\n", head.type_schema));
         front.push_str(&format!("gilune-revision: {}\n", head.revision_id));
         front.push_str(&format!("gilune-created-ms: {}\n", head.created_ms));
-        if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
+        let local_blob = self.recording_path_here(&head.object_id, &payload)?;
+        if let Some(blob_rel) = local_blob.as_deref() {
             front.push_str(&format!("gilune-blob: {blob_rel}\n"));
         }
         if head.conflicted {
@@ -1462,7 +1463,7 @@ impl Store {
 
         let body = if let Some(text) = payload.get("text").and_then(|v| v.as_str()) {
             text.to_string()
-        } else if let Some(blob_rel) = payload.get("rel_path").and_then(|v| v.as_str()) {
+        } else if let Some(blob_rel) = local_blob.as_deref() {
             let name = blob_rel.rsplit('/').next().unwrap_or(blob_rel);
             if payload.get("media").and_then(|v| v.as_str()) == Some("txt") {
                 probe::file_read();
@@ -1491,6 +1492,39 @@ impl Store {
             format!("```json\n{}\n```\n", head.payload)
         };
         Ok(Some(front + &body))
+    }
+
+    /// Where this object's preserved bytes are **on this device**: the
+    /// document's `rel_path`, unless a recording was moved and followed
+    /// (`follow_moved_recording`), in which case the blob row knows
+    /// better. Only a source's recording is followed, so only a source
+    /// asks; a text capture and everything else keep the document's word.
+    fn recording_path_here(
+        &self,
+        object_id: &str,
+        payload: &serde_json::Value,
+    ) -> Result<Option<String>> {
+        let Some(recorded) = payload.get("rel_path").and_then(|v| v.as_str()) else {
+            return Ok(None);
+        };
+        if payload.get("media").and_then(|v| v.as_str()) == Some("txt") {
+            return Ok(Some(recorded.to_string()));
+        }
+        let here: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT b.rel_path FROM blobs b JOIN objects o ON o.object_id = b.object_id
+                 WHERE b.object_id = ?1 AND b.state = 'ready' AND o.type_id = ?2
+                 ORDER BY b.rowid DESC LIMIT 1",
+                rusqlite::params![object_id, crate::capture::SOURCE_TYPE],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                e => Err(e),
+            })?;
+        Ok(Some(here.unwrap_or_else(|| recorded.to_string())))
     }
 
     /// Whether this object's bytes are content still crossing from

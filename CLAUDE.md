@@ -1877,6 +1877,48 @@ gates promises) are ratified. **Next: application-level engineering — see
      and by id until the owner asks GitHub Support to purge them — PR
      pages still show the old author. "claude" remains a listed
      contributor (authored commits + trailers), deliberately untouched.
+   - **Recordings again + desktop log (2026-10-30, ADR 0029; desktop
+     only, phone later by owner choice).** Kernel `reprocess.rs`:
+     `process_again` = a NEW `source-ready` event (payload `again: true`)
+     + jobs in one txn — runs are keyed per event, so that is the only
+     way to a second answer; `source_for_file` (+ `text_edited`: head text
+     ≠ newest `processor:` revision's text). PRE-EXISTING DEFECT FIXED:
+     renaming a voice note renamed its wav (stem pairing) and the kernel
+     kept the old path + adopted the moved wav as a duplicate attachment;
+     reconcile now follows a moved source recording by digest when its
+     recorded path is empty (copies stay copies), projection draws
+     `gilune-blob`/`![[…]]` from the local blob row. Providers'
+     wordless gate yields to `again` (`providerAction(subject, event)`).
+     Desktop: rail recording row ▸ Transcribe again (confirm dialog when
+     edited); top-bar audio-file button + folder/root menu ▸ Transcribe a
+     recording… (javax.sound WAV/AIFF/AU, own down-mix + resampler →
+     16 kHz mono; MP3/M4A refused; note named after the file, moved into
+     the folder). LOG: `%LOCALAPPDATA%\Gilune\logs\gilune.log` (1 MiB +
+     one rolled file), `GiluneLog.sink` + uncaught handler, every
+     GiluneState failure message also logged; Settings ▸ About ▸ Show the
+     log file. `RecordingsEndToEndTest` drives the real NeMo loop
+     (`runNemoJobs`) with a stand-in engine — reuse it for provider rows.
+   - **Speaker labels (2026-10-30, ADR 0030; desktop only, same PR as
+     0029).** Owner chose "who spoke when" added at transcription, not
+     live. Plugin `org.memory.speakers` (opt-in: installed DISABLED;
+     blobs.read + network.request), models via sherpa-onnx's own
+     diarization (already in the jar): pyannote seg 3.0 + WeSpeaker
+     ResNet34-LM, 34 MB in `models\speakers`, SHA-256s PINNED BY US (the
+     release publishes none). Whisper asks a uniffi foreign trait
+     `SpeakerLabeller` set per handle (`set_speaker_labeller`; bindings
+     CHANGED) and decodes in word mode (token timestamps, max_len 1,
+     split on word) only while one is set; NeMo's loop takes
+     `labelled = speakers.labelling(engines)` (`transcribeTimed`;
+     streaming = one stream, no resets). Attached captures (dictation)
+     never labelled. Shared `labelSpeakers`: SENTENCE goes to the voice it
+     overlaps most (whisper's word times are loose at pauses — word-by-
+     word put `Go`/`instead.` on the wrong person), ≥3-word interruption
+     runs kept, <2 speakers ⇒ plain. Settings: plugin screen with phase,
+     "Works with" list, count; a "Speaker labels" line on each
+     transcriber screen. Measured on TTS: two voices 8/8 turns, one voice
+     stays one, three voices 7/8 auto and WORSE with count fixed at 3.
+     Model rows env-gated: `GILUNE_TEST_SPEAKER_MODELS` (folder of the two
+     downloads) + `GILUNE_TEST_SPEAKER_WAV`.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

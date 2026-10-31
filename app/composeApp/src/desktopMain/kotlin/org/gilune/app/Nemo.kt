@@ -26,12 +26,14 @@ import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
+import org.gilune.plugin.sdk.jsonBoolean
 import uniffi.gilune_ffi.ClaimedJob
 import uniffi.gilune_ffi.Gilune
 import uniffi.gilune_ffi.LiveLine
 import uniffi.gilune_ffi.LiveTranscriptionInterface
 import uniffi.gilune_ffi.OutputTarget
 import uniffi.gilune_ffi.ProposedOutput
+import uniffi.gilune_ffi.TimedWord
 import java.io.File
 import java.io.InputStream
 import java.security.DigestInputStream
@@ -41,7 +43,7 @@ import java.security.MessageDigest
 /// machine's models folder, beside whisper's files.
 fun nemoModelsRoot(): File = File(localGiluneDir("models"), "nemo")
 
-private const val READY_MARKER = ".ready"
+internal const val READY_MARKER = ".ready"
 
 /// Whether a model is unpacked and complete. The marker is written last, so
 /// a download or an unpack that stopped part-way never reads as a model.
@@ -61,37 +63,51 @@ fun installNemoModel(
 ) {
     root.mkdirs()
     val archive = File(root, "${model.archive}.tar.bz2.part")
-    val digest = MessageDigest.getInstance("SHA-256")
-    var done = 0L
     try {
-        DigestInputStream(open(model.url), digest).use { input ->
-            archive.outputStream().use { output ->
-                val buffer = ByteArray(1 shl 16)
-                var announced = 0L
-                while (true) {
-                    val read = input.read(buffer)
-                    if (read < 0) break
-                    output.write(buffer, 0, read)
-                    done += read
-                    if (done - announced >= 4_000_000) {
-                        announced = done
-                        onProgress(done)
-                    }
-                }
-            }
-        }
-        val actual = digest.digest().joinToString("") { "%02x".format(it) }
-        check(done == model.bytes) { "the ${model.name} download was ${done} bytes, not ${model.bytes}" }
-        check(actual == model.sha256) { "the ${model.name} download does not match its published checksum" }
+        fetchVerified(model.url, model.name, model.bytes, model.sha256, archive, onProgress, open)
         unpack(archive, root, model.archive)
     } finally {
         archive.delete()
     }
 }
 
+/// Stream `url` into `into` through a digest. A size or SHA-256 that
+/// differs from the one expected throws, and the caller deletes the file.
+internal fun fetchVerified(
+    url: String,
+    name: String,
+    bytes: Long,
+    sha256: String,
+    into: File,
+    onProgress: (Long) -> Unit,
+    open: (String) -> InputStream,
+) {
+    val digest = MessageDigest.getInstance("SHA-256")
+    var done = 0L
+    DigestInputStream(open(url), digest).use { input ->
+        into.outputStream().use { output ->
+            val buffer = ByteArray(1 shl 16)
+            var announced = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read < 0) break
+                output.write(buffer, 0, read)
+                done += read
+                if (done - announced >= 4_000_000) {
+                    announced = done
+                    onProgress(done)
+                }
+            }
+        }
+    }
+    val actual = digest.digest().joinToString("") { "%02x".format(it) }
+    check(done == bytes) { "the $name download was $done bytes, not $bytes" }
+    check(actual == sha256) { "the $name download does not match its published checksum" }
+}
+
 /// Unpack `<folder>/...` entries into `root/<folder>`, refusing anything
 /// that would land outside it.
-private fun unpack(archive: File, root: File, folder: String) {
+internal fun unpack(archive: File, root: File, folder: String) {
     val staging = File(root, "$folder.unpacking")
     staging.deleteRecursively()
     staging.mkdirs()
@@ -122,7 +138,7 @@ private fun File.pick(part: String): String =
 /// The kernel's source type, as `whisper.rs` and the phone's provider spell it.
 private const val SOURCE_TYPE = "org.memory.source"
 
-private fun pcmToFloats(bytes: ByteArray, from: Int = 0): FloatArray {
+internal fun pcmToFloats(bytes: ByteArray, from: Int = 0): FloatArray {
     val count = (bytes.size - from) / 2
     return FloatArray(count) { i ->
         val lo = bytes[from + 2 * i].toInt() and 0xff
@@ -232,6 +248,41 @@ class NemoEngines(
         }
     }
 
+    /// A whole recording's words with when each was said, and its plain
+    /// text, for speaker labels (ADR 0030). A streaming model hears the
+    /// recording as one stream here — no endpoint resets — so every time
+    /// counts from the start of the recording.
+    fun transcribeTimed(pcm: ByteArray): Pair<String, List<TimedWord>> {
+        val recordingMs = pcm.size / 32
+        return when (model.kind) {
+            NemoKind.WHOLE_RECORDING -> withOffline { recognizer ->
+                val stream = recognizer.createStream()
+                try {
+                    stream.acceptWaveform(pcmToFloats(pcm), WAV_SAMPLE_RATE)
+                    recognizer.decode(stream)
+                    val result = recognizer.getResult(stream)
+                    result.text.trim() to
+                        wordsFromTokens(result.tokens, result.timestamps, result.durations, recordingMs)
+                } finally {
+                    stream.release()
+                }
+            }
+            NemoKind.STREAMING -> withOnline { recognizer ->
+                val stream = recognizer.createStream()
+                try {
+                    stream.acceptWaveform(pcmToFloats(pcm), WAV_SAMPLE_RATE)
+                    stream.acceptWaveform(FloatArray(WAV_SAMPLE_RATE / 2), WAV_SAMPLE_RATE)
+                    stream.inputFinished()
+                    while (recognizer.isReady(stream)) recognizer.decode(stream)
+                    val result = recognizer.getResult(stream)
+                    result.text.trim() to wordsFromTokens(result.tokens, result.timestamps, null, recordingMs)
+                } finally {
+                    stream.release()
+                }
+            }
+        }
+    }
+
     private fun release() {
         online?.release()
         offline?.release()
@@ -284,14 +335,23 @@ class SherpaLiveSession(private val engines: NemoEngines) : LiveTranscriptionInt
 /// decisions as the phone's provider (`providerAction`, `transcriptDocument`
 /// in shared code), the same compare-and-set on the subject's head, and
 /// every failure ending in `failJob` — backoff, then quarantine.
-fun runNemoJobs(gilune: Gilune, transcribe: (ByteArray) -> String, limit: Int = 25): ProviderPass {
+///
+/// `labelled`, when given, transcribes a recording with its speakers named
+/// (ADR 0030); it is never used for an attached capture — dictation into a
+/// note is one person at their cursor.
+fun runNemoJobs(
+    gilune: Gilune,
+    transcribe: (ByteArray) -> String,
+    limit: Int = 25,
+    labelled: ((ByteArray) -> String)? = null,
+): ProviderPass {
     var pass = ProviderPass()
     while (pass.claimed < limit) {
         val claim = runCatching { gilune.claimJob(NEMO_PROCESSOR) }
             .onFailure { GiluneLog.warn("the NeMo provider could not claim a job", it) }
             .getOrNull() ?: break
         claim.use { held ->
-            pass = when (val action = providerAction(held.job().subjectPayload)) {
+            pass = when (val action = providerAction(held.job().subjectPayload, held.job().eventPayload)) {
                 is ProviderAction.NothingToDo -> {
                     gilune.submitOutput(held, emptyList())
                     pass.copy(skipped = pass.skipped + 1)
@@ -300,7 +360,10 @@ fun runNemoJobs(gilune: Gilune, transcribe: (ByteArray) -> String, limit: Int = 
                     gilune.failJob(held, action.why)
                     pass.copy(failed = pass.failed + 1)
                 }
-                ProviderAction.Decode -> transcribeClaim(gilune, held, transcribe, pass)
+                ProviderAction.Decode -> {
+                    val attached = jsonBoolean(held.job().subjectPayload, "attached") == true
+                    transcribeClaim(gilune, held, if (attached || labelled == null) transcribe else labelled, pass)
+                }
             }
         }
     }

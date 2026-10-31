@@ -185,6 +185,9 @@ pub struct WhisperTranscriber {
     /// skips whisper's detection pass, which costs a full encoder run —
     /// worth ~20% on short clips. Comes from the plugin's settings.
     language: String,
+    /// Who names the speakers, when a shell has said (ADR 0030). Empty
+    /// means the plain transcript, decoded exactly as before.
+    speakers: crate::SpeakerSlot,
 }
 
 impl WhisperTranscriber {
@@ -204,7 +207,18 @@ impl WhisperTranscriber {
     ) -> Result<Self, String> {
         let engine = Arc::new(WhisperEngine::new(model_path, idle_ms)?);
         sweep_while_alive(&engine, sweep_interval);
-        Ok(Self { engine, language: language.to_string() })
+        Ok(Self {
+            engine,
+            language: language.to_string(),
+            speakers: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    /// Ask `slot`'s labeller, if any, to name the speakers in this
+    /// transcriber's transcripts.
+    pub(crate) fn with_speakers(mut self, slot: crate::SpeakerSlot) -> Self {
+        self.speakers = slot;
+        self
     }
 
     /// The engine behind this transcriber, so a host can observe whether
@@ -214,6 +228,52 @@ impl WhisperTranscriber {
     }
 
     fn transcribe(&self, samples: &[f32]) -> Result<String, String> {
+        self.decode(samples, false, |state| {
+            let mut text = String::new();
+            for i in 0..state.full_n_segments() {
+                if let Some(segment) = state.get_segment(i) {
+                    text.push_str(segment.to_str_lossy().map_err(|e| e.to_string())?.trim());
+                    text.push(' ');
+                }
+            }
+            Ok(clean_transcript(&text))
+        })
+    }
+
+    /// The transcript and its words with their times, for a speaker
+    /// labeller. whisper.cpp's word mode: token timestamps on, every
+    /// segment cut to one word (`max_len` 1, split on word boundaries) —
+    /// which changes how the decoded text is cut up, never what is
+    /// decoded. A word that is only a non-speech marker is no word.
+    fn transcribe_words(&self, samples: &[f32]) -> Result<(String, Vec<crate::TimedWord>), String> {
+        self.decode(samples, true, |state| {
+            let mut raw = String::new();
+            let mut words = Vec::new();
+            for i in 0..state.full_n_segments() {
+                if let Some(segment) = state.get_segment(i) {
+                    let text = segment.to_str_lossy().map_err(|e| e.to_string())?;
+                    raw.push_str(text.trim());
+                    raw.push(' ');
+                    let word = clean_transcript(&text);
+                    if word.is_empty() {
+                        continue;
+                    }
+                    // Centiseconds from the start of the recording.
+                    let start_ms = (segment.start_timestamp().max(0) * 10) as u32;
+                    let end_ms = ((segment.end_timestamp().max(0) * 10) as u32).max(start_ms);
+                    words.push(crate::TimedWord { text: word, start_ms, end_ms });
+                }
+            }
+            Ok((clean_transcript(&raw), words))
+        })
+    }
+
+    fn decode<T>(
+        &self,
+        samples: &[f32],
+        words: bool,
+        read: impl FnOnce(&whisper_rs::WhisperState) -> Result<T, String>,
+    ) -> Result<T, String> {
         let lease = self.engine.lease()?;
         let mut state = lease.ctx.create_state().map_err(|e| e.to_string())?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
@@ -222,6 +282,11 @@ impl WhisperTranscriber {
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
         params.set_language(Some(&self.language));
+        if words {
+            params.set_token_timestamps(true);
+            params.set_max_len(1);
+            params.set_split_on_word(true);
+        }
         // whisper.cpp defaults to 4 threads however many cores exist;
         // it stops scaling usefully around 8.
         let threads = std::thread::available_parallelism()
@@ -229,14 +294,35 @@ impl WhisperTranscriber {
             .unwrap_or(4);
         params.set_n_threads(threads as std::os::raw::c_int);
         state.full(params, samples).map_err(|e| e.to_string())?;
-        let mut text = String::new();
-        for i in 0..state.full_n_segments() {
-            if let Some(segment) = state.get_segment(i) {
-                text.push_str(segment.to_str_lossy().map_err(|e| e.to_string())?.trim());
-                text.push(' ');
-            }
+        read(&state)
+    }
+
+    /// The note's text for this recording: split into speakers when a
+    /// labeller is set and says so, otherwise the plain transcript. An
+    /// attached capture is dictation into a note somebody is writing, so
+    /// it is never labelled — one person, and a label at their cursor
+    /// would be noise.
+    fn text_for(&self, document: &serde_json::Value, wav: Vec<u8>, samples: &[f32]) -> Result<String, String> {
+        let labeller = if gilune_kernel::capture::is_attached(document) {
+            None
+        } else {
+            self.speakers.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        };
+        let Some(labeller) = labeller else {
+            return self.transcribe(samples);
+        };
+        let (plain, words) = self.transcribe_words(samples)?;
+        if words.is_empty() {
+            return Ok(plain);
         }
-        Ok(clean_transcript(&text))
+        Ok(match labeller.label(wav, words) {
+            Ok(Some(labelled)) if !labelled.trim().is_empty() => labelled,
+            Ok(_) => plain,
+            Err(e) => {
+                eprintln!("gilune: speaker labels skipped: {e}");
+                plain
+            }
+        })
     }
 }
 
@@ -627,7 +713,7 @@ impl Processor for WhisperTranscriber {
         if samples.len() < 16_000 / 10 {
             return Err("recording shorter than 100 ms".to_string());
         }
-        document["text"] = serde_json::Value::String(self.transcribe(&samples)?);
+        document["text"] = serde_json::Value::String(self.text_for(&document, bytes, &samples)?);
         Ok(vec![ProposedOutput {
             // The revised document is still the subject's own, so it keeps
             // the subject's type; both fields are ignored either way.
