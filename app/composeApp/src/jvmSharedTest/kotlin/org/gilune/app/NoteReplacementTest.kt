@@ -1,4 +1,4 @@
-// Replacing across notes on the refactoring journal (ADR 0029 § 4). The
+// Replacing across notes on the refactoring journal (ADR 0031 § 4). The
 // step past the obvious: front matter that holds the pattern is left alone;
 // a note that changed after the preview, or has unsaved edits, is refused
 // while the rest are written; the search narrows the scope; and undo puts

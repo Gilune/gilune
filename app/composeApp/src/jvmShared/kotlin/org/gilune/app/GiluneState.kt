@@ -385,6 +385,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                     else -> "found ${found.size} devices"
                 }
             } catch (e: Throwable) {
+                GiluneLog.warn("looking for devices failed: ${e.message}", e)
                 message.value = "looking for devices failed: ${e.message}"
             } finally {
                 discovering.value = false
@@ -427,6 +428,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 refreshSync()
                 message.value = describe
             } catch (e: Throwable) {
+                GiluneLog.warn("$describe failed: ${e.message}", e)
                 message.value = "$describe failed: ${e.message}"
             }
         }
@@ -483,6 +485,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 lastSyncRound.value = round
                 message.value = roundSummary(round)
             } catch (e: Throwable) {
+                GiluneLog.warn("device sync failed: ${e.message}", e)
                 message.value = "device sync failed: ${e.message}"
             } finally {
                 syncing.value = false
@@ -503,6 +506,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 refreshSync()
                 message.value = "paired with ${peer.name.ifBlank { found.fingerprint }}"
             } catch (e: Throwable) {
+                GiluneLog.warn(foundPairingFailure(found, e.message ?: "no reason given"), e)
                 message.value = foundPairingFailure(found, e.message ?: "no reason given")
             }
         }
@@ -550,6 +554,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 // usable before this begins.
                 resumeSyncInBackground(g)
             } catch (e: Throwable) {
+                GiluneLog.warn("failed to open vault: ${e.message}", e)
                 message.value = "failed to open vault: ${e.message}"
             }
         }
@@ -627,6 +632,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                             p.trouble()
                 }
             } catch (e: Throwable) {
+                GiluneLog.warn("sync failed: ${e.message}", e)
                 message.value = "sync failed: ${e.message}"
             }
         }
@@ -641,6 +647,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 refresh()
                 message.value = "captured"
             } catch (e: Throwable) {
+                GiluneLog.warn("capture failed: ${e.message}", e)
                 message.value = "capture failed: ${e.message}"
             }
         }
@@ -663,35 +670,100 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     /// Speech becomes a note of its own: the audio commits durably, the
     /// transcript becomes the note's body (ADR 0013), and the note opens.
     fun captureAudio(audio: RecordedAudio, onOpenNote: ((String) -> Unit)? = null) {
+        captureWav(wavBytes(audio), "voice", place = null, onOpenNote = onOpenNote)
+    }
+
+    /// A recording made elsewhere becomes a voice note exactly as the
+    /// microphone's does (ADR 0029): the same capture commit, the same
+    /// transcription, the same note. `wav` is already the canonical shape
+    /// the transcribers read — converting is the shell's, since reading an
+    /// audio file is a platform's business.
+    ///
+    /// `place` runs once the note exists and returns where it ended up:
+    /// the desktop names it after the file and moves it into the folder
+    /// it was asked for. Moving a note moves its recording with it, which
+    /// the kernel follows by the recording's bytes.
+    fun captureRecording(wav: ByteArray, place: ((String) -> String?)? = null, onOpenNote: ((String) -> Unit)? = null) {
+        captureWav(wav, "recording", place, onOpenNote)
+    }
+
+    private fun captureWav(
+        wav: ByteArray,
+        what: String,
+        place: ((String) -> String?)?,
+        onOpenNote: ((String) -> Unit)?,
+    ) {
         val g = gilune.value ?: return
         scope.launch(Dispatchers.IO) {
             try {
-                val wav = wavBytes(audio)
                 val receipt = writeChunked(g.beginCapture("wav"), wav)
-                message.value = "voice captured (${wav.size / 1024} KiB); transcribing…"
+                message.value = "$what captured (${wav.size / 1024} KiB); transcribing…"
                 val p = processAll(g)
                 g.project()
                 refresh()
                 message.value = when {
-                    p.outputs > 0 -> "spoken note ready"
+                    p.outputs > 0 -> if (what == "voice") "spoken note ready" else "$what transcribed"
                     // Either route's failure, because a person who has just
                     // spoken cares that the words are not coming yet, not
                     // which engine was asked for them.
                     p.anyFailed ->
-                        "voice captured; transcription failed (will retry)" +
+                        "$what captured; transcription failed (will retry)" +
                             providerFailureSuffix(p.providerFailure)
                     // Before the suffix existed this said plain "voice
                     // captured", which is true and reads as complete — the
                     // words were never coming.
-                    else -> "voice captured" + p.trouble()
+                    else -> "$what captured" + p.trouble()
                 }
-                if (onOpenNote != null) {
-                    recent.firstOrNull { it.objectId == receipt.sourceId }
-                        ?.projectionRelPath
-                        ?.let(onOpenNote)
+                var note = recent.firstOrNull { it.objectId == receipt.sourceId }?.projectionRelPath
+                if (note != null && place != null) {
+                    val placed = runCatching { place(note) }
+                        .onFailure { GiluneLog.warn("could not place the note for $note", it) }
+                        .getOrNull()
+                    if (placed != null && placed != note) {
+                        g.reconcile()
+                        g.project()
+                        refresh()
+                        note = placed
+                    }
+                }
+                if (onOpenNote != null && note != null) onOpenNote(note)
+            } catch (e: Throwable) {
+                GiluneLog.warn("$what capture failed", e)
+                message.value = "$what capture failed: ${e.message}"
+            }
+        }
+    }
+
+    /// The capture behind a vault file — a voice note's recording — or
+    /// null when the file is not one. A database read, plus one hash of
+    /// the file when it has moved: callers ask off the UI thread.
+    fun sourceForFile(relPath: String): uniffi.gilune_ffi.SourceFile? =
+        gilune.value?.sourceForFile(relPath)
+
+    /// Transcribe a recording again (ADR 0029). The new words replace the
+    /// note's text — the caller has already asked, when that text was
+    /// somebody's own — and the old text stays in the note's history.
+    fun transcribeAgain(objectId: String) {
+        val g = gilune.value ?: return
+        scope.launch(Dispatchers.IO) {
+            try {
+                if (g.processAgain(objectId) == 0L) {
+                    message.value = "nothing can transcribe it: switch a transcription plugin on in Settings ▸ Plugins"
+                    return@launch
+                }
+                message.value = "transcribing again…"
+                val p = processAll(g)
+                g.project()
+                refresh()
+                message.value = when {
+                    p.outputs > 0 -> "transcribed again"
+                    p.anyFailed ->
+                        "transcribing again failed (will retry)" + providerFailureSuffix(p.providerFailure)
+                    else -> "transcribed again: no new words came back" + p.trouble()
                 }
             } catch (e: Throwable) {
-                message.value = "voice capture failed: ${e.message}"
+                GiluneLog.warn("transcribing again failed", e)
+                message.value = "transcribing again failed: ${e.message}"
             }
         }
     }
@@ -732,6 +804,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                         p.trouble()
                 }
             } catch (e: Throwable) {
+                GiluneLog.warn("dictation failed: ${e.message}", e)
                 message.value = "dictation failed: ${e.message}"
             }
         }
@@ -755,6 +828,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 refresh()
                 message.value = initializationProblems.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: describe
             } catch (e: Throwable) {
+                GiluneLog.warn("$describe failed: ${e.message}", e)
                 message.value = "$describe failed: ${e.message}"
             }
         }
@@ -794,6 +868,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                             p.trouble()
                     }
             } catch (e: Throwable) {
+                GiluneLog.warn("catch-up failed: ${e.message}", e)
                 message.value = "catch-up failed: ${e.message}"
             }
         }

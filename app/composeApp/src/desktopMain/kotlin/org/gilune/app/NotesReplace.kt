@@ -1,4 +1,4 @@
-// Replace across notes, in the Search panel (ADR 0029 § 4): the panel's
+// Replace across notes, in the Search panel (ADR 0031 § 4): the panel's
 // query says which notes, these rows say what to change. Shown only while
 // the find and replace plugin contributes them; the work itself is
 // NoteReplacement.kt's, on the refactoring journal.

@@ -1,4 +1,4 @@
-// The bar over a note that finds and replaces in its body (ADR 0029 § 3).
+// The bar over a note that finds and replaces in its body (ADR 0031 § 3).
 // Its state lives on the tab's editor, so each tab keeps its own pattern;
 // what the pattern matches, and stepping and replacing, are the note
 // editor's, because they move its selection and write its buffer.

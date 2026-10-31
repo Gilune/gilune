@@ -211,7 +211,7 @@ class EditorState : LiveDocumentBuffer {
     /// The dictation landing in this note as it is spoken, or null.
     var live by mutableStateOf<LiveDictation?>(null)
 
-    /// The find bar over this tab's note (ADR 0029 § 3).
+    /// The find bar over this tab's note (ADR 0031 § 3).
     val find = FindState()
 
     /// The note's front-matter block exactly as it was read, fences
@@ -783,7 +783,7 @@ private fun OpenNote(
                 editor.focusBody = false
                 editor.resumeEditing = false
             }
-            // Find and replace, while its plugin is on (ADR 0029 § 3). The
+            // Find and replace, while its plugin is on (ADR 0031 § 3). The
             // current match is the selection, so stepping is selecting and
             // Esc leaves the caret on it.
             val find = editor.find

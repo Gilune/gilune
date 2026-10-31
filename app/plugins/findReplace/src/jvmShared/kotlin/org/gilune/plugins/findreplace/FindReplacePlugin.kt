@@ -1,4 +1,4 @@
-// The plugin as the host sees it (ADR 0029 § 1, § 5): its declaration, the
+// The plugin as the host sees it (ADR 0031 § 1, § 5): its declaration, the
 // two shell-published slots it fills, and its keys — every one a setting
 // with a default, so a person can rebind any of them.
 

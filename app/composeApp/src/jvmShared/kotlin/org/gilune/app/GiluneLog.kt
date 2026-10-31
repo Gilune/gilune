@@ -4,8 +4,9 @@
 // name `android.util.Log` — and until this round the consequence was that
 // shared code with something to report simply swallowed it. A hook is the
 // smallest thing that fixes that without the shared set learning what a
-// platform is: the Android shell points it at `Log.w`, the desktop leaves
-// it alone and gets `System.err`.
+// platform is: the Android shell points it at `Log.w`, the desktop at its
+// log file (`DesktopLog`, ADR 0029) — a packaged desktop app has no
+// console, so `System.err`, the fallback, reaches nobody there.
 //
 // Deliberately **not** a user-facing surface. Anything a person has to act
 // on goes on `GiluneState.message`; this is for the second half of a

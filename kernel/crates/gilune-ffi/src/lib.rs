@@ -835,6 +835,32 @@ impl gilune_kernel::index::NoteIndexer for IndexerAdapter {
     }
 }
 
+/// One word of a transcript and when it was said, in milliseconds from the
+/// start of the recording (ADR 0030).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct TimedWord {
+    pub text: String,
+    pub start_ms: u32,
+    pub end_ms: u32,
+}
+
+/// Names who said what in a recording (ADR 0030), implemented by a shell
+/// that carries a speaker model. Given the recording — a canonical Gilune
+/// WAV, header and all — and the transcriber's words with their times, it
+/// answers with the note's text split into speakers, or `None` to keep the
+/// plain transcript: one voice, no model, or nothing to say.
+///
+/// Never a reason to lose words: an error, like `None`, leaves the plain
+/// transcript to be written.
+#[uniffi::export(with_foreign)]
+pub trait SpeakerLabeller: Send + Sync {
+    fn label(&self, wav: Vec<u8>, words: Vec<TimedWord>) -> FfiResult<Option<String>>;
+}
+
+/// The labeller a handle's transcriber asks, shared with the transcriber so
+/// a shell can set or clear it after transcription is enabled.
+pub(crate) type SpeakerSlot = Arc<Mutex<Option<Arc<dyn SpeakerLabeller>>>>;
+
 /// Opt-in full-source input, including exact front matter and newlines.
 /// Pure callback with no store access; fact lines remain body-relative.
 /// Changing from body input requires an indexer-version change.
@@ -1209,6 +1235,18 @@ pub struct SourceSummary {
     pub interpreted: bool,
 }
 
+/// A source as the file holding its preserved bytes sees it — what a
+/// shell needs to offer "transcribe again" (ADR 0029).
+#[derive(Debug, Clone, uniffi::Record)]
+pub struct SourceFile {
+    pub object_id: String,
+    /// Its note, when it has one; an attached capture (dictation) has none.
+    pub projection_rel_path: Option<String>,
+    /// The text is not what a processor last wrote, so running again
+    /// would replace somebody's words: ask first.
+    pub text_edited: bool,
+}
+
 #[derive(Debug, Clone, uniffi::Record)]
 pub struct TombstoneProposal {
     pub proposal_id: String,
@@ -1481,6 +1519,10 @@ pub struct Gilune {
     /// of weights alive to be observed.
     #[cfg(feature = "whisper")]
     whisper: Mutex<std::sync::Weak<whisper::WhisperEngine>>,
+    /// Who the transcriber asks to name speakers, if anyone (ADR 0030).
+    /// Per handle, like `external`: whether this process carries a speaker
+    /// model is a fact about the process.
+    speakers: SpeakerSlot,
 }
 
 /// Not part of the FFI surface — no `uniffi::export` here, so bindings
@@ -1590,7 +1632,16 @@ impl Gilune {
             sync: Mutex::new(None),
             #[cfg(feature = "whisper")]
             whisper: Mutex::new(std::sync::Weak::new()),
+            speakers: Arc::new(Mutex::new(None)),
         }))
+    }
+
+    /// Set, or clear with `None`, who names the speakers in this handle's
+    /// transcripts (ADR 0030). Takes effect from the next job, and on a
+    /// transcriber enabled before or after this call. Only whisper asks
+    /// here; an app-side transcriber calls its labeller itself.
+    pub fn set_speaker_labeller(&self, labeller: Option<Arc<dyn SpeakerLabeller>>) {
+        *self.speakers.lock().unwrap_or_else(|e| e.into_inner()) = labeller;
     }
 
     /// Accept the local speech-to-text model. Desktop builds only
@@ -1634,7 +1685,8 @@ impl Gilune {
                 })
                 .unwrap_or_else(|| "auto".to_string());
             let transcriber = whisper::WhisperTranscriber::new(&model_path, &language)
-                .map_err(|detail| GiluneError::Invalid { detail })?;
+                .map_err(|detail| GiluneError::Invalid { detail })?
+                .with_speakers(self.speakers.clone());
             *self.whisper.lock().unwrap_or_else(|e| e.into_inner()) =
                 std::sync::Arc::downgrade(transcriber.engine());
             let mut processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
@@ -2189,6 +2241,25 @@ impl Gilune {
     /// Deliberate, and safe to repeat. Returns how many were queued.
     pub fn backfill_jobs(&self) -> FfiResult<i64> {
         Ok(self.store().backfill_jobs()?)
+    }
+
+    /// The source whose preserved bytes are the vault file at `rel_path`
+    /// — a voice note's recording, found by path or, once moved, by its
+    /// bytes — or `None` when the file is not one (ADR 0029).
+    pub fn source_for_file(&self, rel_path: String) -> FfiResult<Option<SourceFile>> {
+        Ok(self.store().source_for_file(&rel_path)?.map(|s| SourceFile {
+            object_id: s.object_id,
+            projection_rel_path: s.projection_rel_path,
+            text_edited: s.text_edited,
+        }))
+    }
+
+    /// Ask every enabled processor subscribed to sources to run over this
+    /// one again — a person's "transcribe again". Returns the jobs
+    /// queued; zero means nothing subscribed is switched on. The answer
+    /// arrives on the next processing pass, like any other.
+    pub fn process_again(&self, object_id: String) -> FfiResult<i64> {
+        Ok(self.store().process_again(&object_id)?)
     }
 
     // ------------------------------------------------------------ sync

@@ -105,7 +105,7 @@ internal fun shortcutGroups(plugins: List<PluginInfo>): List<ShortcutGroup> = bu
             listOf(
                 Shortcut("Ctrl+N", "New note"),
                 Shortcut("Ctrl+P", "Open a note by name"),
-                // Ctrl+F is find and replace's while it is on (ADR 0029 § 5).
+                // Ctrl+F is find and replace's while it is on (ADR 0031 § 5).
                 Shortcut(if (findReplaceOn(plugins)) "Ctrl+Shift+F" else "Ctrl+F", "Search the vault"),
                 Shortcut("Ctrl+Shift+B", "Show or hide the sidebar"),
                 Shortcut("Ctrl+E", "Read the note in front, or go back to editing"),

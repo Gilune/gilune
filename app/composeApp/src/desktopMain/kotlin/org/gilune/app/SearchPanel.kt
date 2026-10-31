@@ -83,7 +83,7 @@ fun SearchPanel(
 ) {
     val colours = MaterialTheme.colorScheme
     var query by remember { mutableStateOf(initialQuery) }
-    // Replace across notes (ADR 0029 § 4), while its plugin contributes
+    // Replace across notes (ADR 0031 § 4), while its plugin contributes
     // the rows: the query above them becomes which notes to change.
     val replaceOffered = state.plugins.pluginContributes(FIND_REPLACE_PLUGIN, Slots.SEARCH_REPLACE)
     var replaceShown by remember { mutableStateOf(false) }

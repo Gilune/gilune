@@ -1,4 +1,4 @@
-// Find and replace (ADR 0029): one matching language for the bar over a
+// Find and replace (ADR 0031): one matching language for the bar over a
 // note and for replacing across notes, pure over strings so every shell
 // answers a pattern the same way. The host draws, steps and writes; this
 // file only says where a pattern matches and what each match becomes.

@@ -154,6 +154,61 @@
   being worked on. The recording itself is kept and still plays; there simply were no
   words in it.</p>
 
+  <h2>Transcribing a recording again</h2>
+
+  <p>If the words came out wrong — you have since switched to a better model, or set
+  the spoken language — you can have the recording heard again. In the sidebar, click
+  the little arrow beside the note to show its recording, right-click the recording
+  and choose <strong>Transcribe again</strong>. The new words replace the note's
+  text.</p>
+
+  <p>If you have changed the note's text since it was transcribed, Gilune asks before
+  replacing it. Your current text is kept in the note's history inside Gilune, but
+  nothing in the app shows that history yet, so copy anything you want to keep before
+  you say yes.</p>
+
+  <h2>Transcribing a recording made somewhere else</h2>
+
+  <p>A recording from your phone's voice recorder, a meeting tool or anywhere else can
+  become a note too. Click the <strong>audio file</strong> button beside the microphone
+  in the top bar and choose the recording. Gilune makes a note named after the file in
+  your <strong>Captures</strong> folder, transcribes it and opens it. To put the note
+  straight into a particular folder, right-click that folder in the sidebar and choose
+  <strong>Transcribe a recording…</strong> instead.</p>
+
+  <p>Gilune reads WAV and AIFF recordings, whatever their quality or number of
+  channels, and converts them to the form its transcribers use; the converted copy is
+  what sits beside the note, and the file you chose is left where it was. MP3 and M4A
+  files are not read yet — convert them to WAV first. On the phone, this is not
+  available yet.</p>
+
+  <h2>Who said what (desktop)</h2>
+
+  <p>When a recording has more than one person speaking — a meeting, an interview, a
+  conversation — Gilune can split its note by speaker:</p>
+
+  <pre><code>**Speaker 1:** Right, shall we start with the budget?
+
+**Speaker 2:** Yes — I've got the numbers from last week.</code></pre>
+
+  <p>Switch it on under <strong>Settings ▸ Plugins ▸ Speaker labels</strong> and allow it
+  network access; it downloads two small models (34 MB together) once and runs them on your
+  computer. That screen also lists which transcribers it works with — on the desktop, both
+  Whisper and NVIDIA NeMo, with any of their models — and each transcriber's own screen says
+  whether it supports speaker labels.</p>
+
+  <p>Labels are added when a recording is transcribed, after you stop: the words still
+  appear as you speak, and the speakers are worked out from the whole recording at the
+  end. A recording with one voice reads exactly as before, with no label, and dictating
+  into a note you are writing is never labelled. Gilune works out how many people are
+  speaking; if it keeps finding the wrong number in your recordings, enter it in
+  <strong>Number of speakers</strong>. To label a recording made before you
+  switched this on, use <strong>Transcribe again</strong> on it.</p>
+
+  <p>Speakers are numbered in the order they first speak; rename them in the note however
+  you like. Voices that sound alike, or people talking over each other, can be split
+  wrongly. On the phone, speaker labels are not available yet.</p>
+
   <h2>Catching up on recordings that were missed</h2>
 
   <p>If you recorded something while transcription was switched off, or before you had
@@ -172,8 +227,18 @@
   been filed. Move them wherever you like — they are ordinary notes.</p>
 
   <p>The audio file sits next to its note and shows up under it in the sidebar when you
-  click the little arrow. Deleting a note leaves its recording on disk deliberately:
-  the recording is the original, and Gilune does not throw originals away.</p>
+  click the little arrow. Renaming or moving the note in Gilune takes the recording with
+  it. Deleting a note leaves its recording on disk deliberately: the recording is the
+  original, and Gilune does not throw originals away.</p>
+
+  <h2>When something goes wrong</h2>
+
+  <p>On the desktop, Gilune writes its warnings and errors to a log file on your
+  computer — on Windows,
+  <code>%LOCALAPPDATA%\Gilune\logs\gilune.log</code>. Nothing in it is sent anywhere.
+  <strong>Settings ▸ About ▸ Show the log file</strong> opens the folder; if a
+  transcription fails or something else misbehaves, that file says what happened, and
+  it is the thing to attach when you report a problem.</p>
 
   <h2>If the microphone button is not there</h2>
 

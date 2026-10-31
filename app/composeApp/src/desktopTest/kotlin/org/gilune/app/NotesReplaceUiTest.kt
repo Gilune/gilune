@@ -1,4 +1,4 @@
-// Replace across notes in the Search panel (ADR 0029 § 4), through the
+// Replace across notes in the Search panel (ADR 0031 § 4), through the
 // real panel and kernel. The step past the obvious: an untick leaves that
 // note alone, Undo puts the rest back, and with the plugin off the panel is
 // plain search with no way in.

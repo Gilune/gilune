@@ -1,4 +1,4 @@
-// The matching language of find and replace (ADR 0029 § 2). The step past
+// The matching language of find and replace (ADR 0031 § 2). The step past
 // the obvious: a literal replacement keeps its `$`, a regex one fills its
 // groups; whole word holds at accented letters; a pattern that can only
 // match nothing finds nothing; a bad pattern is said, not thrown.

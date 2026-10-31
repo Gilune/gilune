@@ -1,4 +1,4 @@
-# ADR 0029: Find and replace
+# ADR 0031: Find and replace
 
 Date: 2026-10-31
 Status: **Accepted** (owner, 2026-10-31) — editor-convention keys, all three

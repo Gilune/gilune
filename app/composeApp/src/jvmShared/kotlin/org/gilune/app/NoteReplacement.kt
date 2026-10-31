@@ -1,4 +1,4 @@
-// Replacing across notes (ADR 0029 § 4) on ADR 0026's journal: the host
+// Replacing across notes (ADR 0031 § 4) on ADR 0026's journal: the host
 // reads the notes in scope, shows every match, and — asked — writes one
 // reviewed plan whose entries are body-only edits against the very bytes the
 // preview read. Applying, refusing unsaved buffers, and undo are the

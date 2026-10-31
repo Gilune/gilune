@@ -26,7 +26,7 @@ object Slots {
     /// the caret is on, the host runs its lookup and opens the answer.
     const val EDITOR_DEFINITIONS = "editor.definitions"
 
-    /// Find and replace (ADR 0029): the bar over a note, and the replace
+    /// Find and replace (ADR 0031): the bar over a note, and the replace
     /// rows under the Search panel's query. Shell-drawn; present only while
     /// an enabled plugin contributes them.
     const val EDITOR_FIND = "editor.find"

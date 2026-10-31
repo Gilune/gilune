@@ -101,7 +101,7 @@ internal fun applyDocumentRefactoring(kernel: Gilune, vault: String, registry: P
     var plan = kernel.refactoringPlan(planId)
     if (plan.state == "completed") return plan
     val token = requireNotNull(plan.reviewToken) { "Discovery has not completed." }
-    // Undo plans and text replacements (ADR 0029 § 4) have no defining page
+    // Undo plans and text replacements (ADR 0031 § 4) have no defining page
     // or identifier lookups to re-check: the journal's version checks are
     // the whole of their guard.
     val generic = plan.provider == "memory:refactoring.undo" || plan.provider == org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN

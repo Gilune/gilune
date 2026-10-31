@@ -1,4 +1,4 @@
-// The find bar over a note (ADR 0029 § 3), through the real editor. The
+// The find bar over a note (ADR 0031 § 3), through the real editor. The
 // step past the obvious: typing finds from where the caret was, stepping
 // wraps, Replace on an unselected match only selects it, Replace all is
 // one Ctrl+Z, a bad pattern is said, and with the plugin off there is no

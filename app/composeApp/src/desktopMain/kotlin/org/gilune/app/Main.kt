@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Keyboard
+import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -168,7 +169,7 @@ private class GestureRequests {
     /// Ctrl+E: the note in front into presentation mode, or back to editing.
     var togglePresentation by mutableStateOf(0)
 
-    /// Find and replace (ADR 0029 § 5): the plugin's keys as its settings
+    /// Find and replace (ADR 0031 § 5): the plugin's keys as its settings
     /// bind them, empty while it is off, written by the app as the plugin
     /// list changes so this handler — outside the app — can match them.
     var findKeys: List<Pair<FindReplaceKey, String>> = emptyList()
@@ -199,6 +200,7 @@ private class Shutdown {
 }
 
 fun main() {
+    DesktopLog.install()
     System.getProperty("compose.application.resources.dir")?.let { resources ->
         val existing = System.getProperty("jna.library.path")
         System.setProperty(
@@ -376,6 +378,15 @@ private fun DesktopApp(
     KeepTranscriptionAsked(state) { gilune ->
         withContext(Dispatchers.IO) { startTranscription(state, gilune, transcription, nemo) }
     }
+    // Speaker labels (ADR 0030) follow their plugin: switched on, allowed
+    // to download, or a changed speaker count each ask again.
+    val speakers = remember { SpeakerHost() }
+    val speakerKey = state.plugins.firstOrNull { it.pluginId == SPEAKERS_PLUGIN }
+        ?.let { Triple(it.state, it.granted.toSet(), it.settings) }
+    LaunchedEffect(state.gilune.value, speakerKey) {
+        val gilune = state.gilune.value ?: return@LaunchedEffect
+        withContext(Dispatchers.IO) { startSpeakerLabels(state, gilune, speakers) }
+    }
     val colours = MaterialTheme.colorScheme
     val density = LocalDensity.current
 
@@ -541,7 +552,9 @@ private fun DesktopApp(
         // Transcription (NVIDIA NeMo) writes saved transcripts app-side
         // (ADR 0027 S3): every processing pass on this handle gives it the
         // jobs queued for it, when its model is loaded.
-        state.externalProcessing = { gilune -> nemo.engines?.let { runNemoJobs(gilune, it::transcribe) } ?: ProviderPass() }
+        state.externalProcessing = { gilune ->
+            nemo.engines?.let { runNemoJobs(gilune, it::transcribe, labelled = speakers.labelling(it)) } ?: ProviderPass()
+        }
         state.syncSetup = { gilune ->
             val identity = identityDir()
             identity.mkdirs()
@@ -559,6 +572,7 @@ private fun DesktopApp(
             // switched off when whisper is already writing the notes, and
             // never switched on except by a person.
             registerNemoOnHandle(gilune)
+            registerSpeakersOnHandle(gilune)
             state.refresh()
             // The starting folders the enabled plugins declare, each once
             // per vault on this machine — after the open, because only the
@@ -675,6 +689,27 @@ private fun DesktopApp(
                     )
                 }
             }
+            // A recording made elsewhere becomes a note the way speech
+            // does, so it sits beside the microphone and goes with it
+            // (ADR 0029). Its note joins the new recordings in Captures.
+            if (micOffered) Tooltip("Transcribe a recording…") {
+                val loading = rememberCoroutineScope()
+                IconButton(
+                    onClick = {
+                        chooseRecordingFile()?.let { file ->
+                            loading.launch { loadRecordingFile(state, file, folder = null, onOpen = ::openNote) }
+                        }
+                    },
+                    modifier = Modifier.size(30.dp).testTag("load-recording"),
+                ) {
+                    Icon(
+                        Icons.Outlined.AudioFile,
+                        contentDescription = "transcribe a recording",
+                        modifier = Modifier.size(17.dp),
+                        tint = colours.onSurfaceVariant,
+                    )
+                }
+            }
             Tooltip("Sync vault") {
                 IconButton(onClick = { state.sync() }, modifier = Modifier.size(30.dp)) {
                     Icon(
@@ -763,7 +798,7 @@ private fun DesktopApp(
                 if (railCollapsed && railRaw >= RAIL_SHUT_AT) setRailCollapsed(false)
                 if (!railCollapsed) railWidth = railRaw.coerceIn(RAIL_MIN, RAIL_MAX)
             }
-            CompositionLocalProvider(LocalTranscription provides transcription, LocalNemo provides nemo) {
+            CompositionLocalProvider(LocalTranscription provides transcription, LocalNemo provides nemo, LocalSpeakers provides speakers) {
                 PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
             }
         }
@@ -798,7 +833,9 @@ private fun DesktopApp(
         }
     }
 
-    if (settingsOpen) {
+    // Settings sits outside the content's provider, so it is handed the
+    // speaker host itself: its screen shows that host's state.
+    if (settingsOpen) CompositionLocalProvider(LocalSpeakers provides speakers) {
         SettingsPane(
             state = state,
             vaultDir = vaultDir,
