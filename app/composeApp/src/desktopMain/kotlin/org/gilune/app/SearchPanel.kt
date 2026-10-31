@@ -14,12 +14,17 @@
 package org.gilune.app
 
 import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
+import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
+import androidx.compose.material.icons.filled.FindReplace
+import androidx.compose.ui.platform.testTag
 
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -74,9 +79,22 @@ fun SearchPanel(
     onOpen: (String) -> Unit,
     modifier: Modifier = Modifier,
     initialQuery: String = "",
+    replaceRequests: Int = 0,
 ) {
     val colours = MaterialTheme.colorScheme
     var query by remember { mutableStateOf(initialQuery) }
+    // Replace across notes (ADR 0029 § 4), while its plugin contributes
+    // the rows: the query above them becomes which notes to change.
+    val replaceOffered = state.plugins.pluginContributes(FIND_REPLACE_PLUGIN, Slots.SEARCH_REPLACE)
+    var replaceShown by remember { mutableStateOf(false) }
+    var replaceFocus by remember { mutableStateOf(0) }
+    LaunchedEffect(replaceRequests) {
+        if (replaceRequests > 0) {
+            replaceShown = true
+            replaceFocus++
+        }
+    }
+    val replacing = replaceOffered && replaceShown
     val focusManager = LocalFocusManager.current
     // Built from the plugin list on every composition, so enabling or
     // removing a plugin changes the language on the next keystroke — no
@@ -129,14 +147,50 @@ fun SearchPanel(
                 decorationBox = { inner ->
                     Box(contentAlignment = Alignment.CenterStart) {
                         if (query.isEmpty()) {
-                            Text("search vault…", fontSize = 12.sp, color = colours.onSurfaceVariant)
+                            Text(
+                                if (replacing) "which notes (blank: all)…" else "search vault…",
+                                fontSize = 12.sp,
+                                color = colours.onSurfaceVariant,
+                            )
                         }
                         inner()
                     }
                 },
             )
+            if (replaceOffered) {
+                Tooltip(if (replacing) "Hide replace" else "Replace across notes") {
+                    Icon(
+                        Icons.Default.FindReplace,
+                        contentDescription = "Replace across notes",
+                        modifier = Modifier
+                            .size(16.dp)
+                            .clickable { replaceShown = !replaceShown; if (replaceShown) replaceFocus++ }
+                            .testTag("search-toggle-replace"),
+                        tint = if (replacing) colours.primary else colours.onSurfaceVariant,
+                    )
+                }
+            }
         }
 
+        if (replacing) {
+            QueryAccount(search.listing.explanations, search.listing.problems, Modifier.padding(horizontal = 12.dp))
+            NotesReplace(state, query, replaceFocus, onOpen, Modifier.weight(1f))
+        } else {
+            SearchResults(state, search, query, types.any { it.key == TASK_SEARCH_TYPE }, onOpen)
+        }
+    }
+
+    // The window switches panel and then asks for focus; asking again
+    // from inside costs nothing and covers the case where the field had
+    // not been attached yet when it did.
+    LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
+}
+
+@Composable
+private fun ColumnScope.SearchResults(state: GiluneState, search: PagedSearch, query: String, taskForms: Boolean, onOpen: (String) -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    val hits = search.listing.hits
+    run {
         QueryAccount(search.listing.explanations, search.listing.problems, Modifier.padding(horizontal = 12.dp))
         QueryNotice(search.listing.loading, search.listing.error, state::retrySearchIndex)
         if (search.listing.generation != null && search.listing.total == null) {
@@ -148,7 +202,7 @@ fun SearchPanel(
             }
         }
         when {
-            query.isBlank() -> QueryForms(types.any { it.key == TASK_SEARCH_TYPE })
+            query.isBlank() -> QueryForms(taskForms)
             hits.isEmpty() && (search.listing.loading || search.listing.error != null) -> Unit
             hits.isEmpty() -> Text(
                 "nothing matches",
@@ -161,11 +215,6 @@ fun SearchPanel(
             }
         }
     }
-
-    // The window switches panel and then asks for focus; asking again
-    // from inside costs nothing and covers the case where the field had
-    // not been attached yet when it did.
-    LaunchedEffect(Unit) { runCatching { searchFocus.requestFocus() } }
 }
 
 @Composable
@@ -221,7 +270,7 @@ private fun HitRows(hit: SearchHit, onOpen: (String) -> Unit, reveal: (NoteLine)
 /// The matched spans, emphasised in place. Offsets are into the line as
 /// the search read it, so the line is shown untrimmed; they are clamped
 /// regardless, since a range past the end must not take the panel down.
-private fun emphasised(text: String, ranges: List<IntRange>, colour: Color): AnnotatedString =
+internal fun emphasised(text: String, ranges: List<IntRange>, colour: Color): AnnotatedString =
     buildAnnotatedString {
         append(text)
         val style = SpanStyle(color = colour, fontWeight = FontWeight.SemiBold)

@@ -30,4 +30,4 @@ dependencyResolutionManagement {
 rootProject.name = "gilune-app"
 include(":composeApp")
 
-include(":kernelBindings", ":pluginSdk", ":plugins:tasks", ":plugins:people", ":plugins:contractFixture")
+include(":kernelBindings", ":pluginSdk", ":plugins:tasks", ":plugins:people", ":plugins:findReplace", ":plugins:contractFixture")

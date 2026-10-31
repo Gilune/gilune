@@ -5,6 +5,7 @@ import org.gilune.plugin.sdk.SuggestField
 import org.gilune.plugins.tasks.TASK_FIELDS_SLOT
 import org.gilune.plugins.tasks.tasksExtensions
 import org.gilune.plugins.people.peopleExtensions
+import org.gilune.plugins.findreplace.findReplaceExtensions
 
 import java.time.LocalDate
 import uniffi.gilune_ffi.Gilune
@@ -12,7 +13,7 @@ import uniffi.gilune_ffi.PluginInfo
 
 /** Application composition root: this is where the build chooses which
  * domain implementations it ships. Resolvers and renderers do not choose. */
-val BUNDLED_PLUGIN_EXTENSIONS = PluginExtensions(listOf(tasksExtensions(), peopleExtensions()))
+val BUNDLED_PLUGIN_EXTENSIONS = PluginExtensions(listOf(tasksExtensions(), peopleExtensions(), findReplaceExtensions()))
 
 fun searchTypesFor(plugins: List<PluginInfo>): List<SearchType> =
     BUNDLED_PLUGIN_EXTENSIONS.searchTypes(plugins)

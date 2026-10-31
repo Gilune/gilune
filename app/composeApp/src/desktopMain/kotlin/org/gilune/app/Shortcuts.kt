@@ -12,6 +12,10 @@
 
 package org.gilune.app
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -22,6 +26,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
@@ -36,14 +41,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
+import org.gilune.plugins.findreplace.FindReplaceKey
+import org.gilune.plugins.findreplace.findReplaceKey
 import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksShortcut
 import uniffi.gilune_ffi.PluginInfo
@@ -93,7 +105,8 @@ internal fun shortcutGroups(plugins: List<PluginInfo>): List<ShortcutGroup> = bu
             listOf(
                 Shortcut("Ctrl+N", "New note"),
                 Shortcut("Ctrl+P", "Open a note by name"),
-                Shortcut("Ctrl+F", "Search the vault"),
+                // Ctrl+F is find and replace's while it is on (ADR 0029 § 5).
+                Shortcut(if (findReplaceOn(plugins)) "Ctrl+Shift+F" else "Ctrl+F", "Search the vault"),
                 Shortcut("Ctrl+Shift+B", "Show or hide the sidebar"),
                 Shortcut("Ctrl+E", "Read the note in front, or go back to editing"),
                 Shortcut(SHORTCUTS_KEYS, "Keyboard shortcuts"),
@@ -139,12 +152,19 @@ internal fun shortcutGroups(plugins: List<PluginInfo>): List<ShortcutGroup> = bu
         byPlugin.getOrPut(pluginName(plugins, TASKS_PLUGIN)) { mutableListOf() } +=
             Shortcut(plugins.tasksShortcut(), "Make the line a task, or tick it")
     }
+    if (findReplaceOn(plugins)) {
+        byPlugin.getOrPut(pluginName(plugins, FIND_REPLACE_PLUGIN)) { mutableListOf() } +=
+            FindReplaceKey.entries.map { Shortcut(plugins.findReplaceKey(it), it.label) }
+    }
     for (binding in BUNDLED_PLUGIN_EXTENSIONS.definitions(plugins)) {
         byPlugin.getOrPut(pluginName(plugins, binding.pluginId)) { mutableListOf() } +=
             Shortcut(binding.key, binding.registration.label)
     }
     for ((name, shortcuts) in byPlugin) add(ShortcutGroup(name, shortcuts))
 }
+
+private fun findReplaceOn(plugins: List<PluginInfo>) =
+    plugins.any { it.pluginId == FIND_REPLACE_PLUGIN && it.state == "enabled" }
 
 private fun pluginName(plugins: List<PluginInfo>, id: String): String =
     plugins.firstOrNull { it.pluginId == id }?.name?.takeIf { it.isNotBlank() } ?: id
@@ -189,23 +209,15 @@ internal fun ShortcutsDialog(plugins: List<PluginInfo>, onDismiss: () -> Unit) {
                         val rows = group.shortcuts.filter { it.matches(filter) }
                         if (rows.isEmpty()) continue
                         shown += rows.size
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text(group.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = colours.primary)
-                            for (row in rows) {
-                                Row(
-                                    Modifier.fillMaxWidth().testTag("shortcut:${row.keys}"),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Text(row.action, fontSize = 13.sp, modifier = Modifier.weight(1f))
-                                    Spacer(Modifier.width(16.dp))
-                                    Text(
-                                        row.keys,
-                                        fontSize = 12.sp,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = colours.onSurfaceVariant,
-                                    )
-                                }
-                            }
+                        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                            Text(
+                                group.title,
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp,
+                                color = colours.primary,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            )
+                            for (row in rows) ShortcutRow(row)
                         }
                     }
                     if (shown == 0) {
@@ -221,4 +233,33 @@ internal fun ShortcutsDialog(plugins: List<PluginInfo>, onDismiss: () -> Unit) {
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+/// One row; the row under the pointer is shaded so the eye can follow it
+/// across the gap to its keys.
+@Composable
+private fun ShortcutRow(row: Shortcut) {
+    val colours = MaterialTheme.colorScheme
+    val interaction = remember { MutableInteractionSource() }
+    val hovered by interaction.collectIsHoveredAsState()
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(4.dp))
+            .background(if (hovered) colours.surfaceContainerHighest else Color.Transparent)
+            .hoverable(interaction)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .semantics { if (hovered) stateDescription = "hovered" }
+            .testTag("shortcut:${row.keys}"),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(row.action, fontSize = 13.sp, modifier = Modifier.weight(1f))
+        Spacer(Modifier.width(16.dp))
+        Text(
+            row.keys,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            color = colours.onSurfaceVariant,
+        )
+    }
 }
