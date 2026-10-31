@@ -325,6 +325,9 @@ impl Store {
             }
             match rows.iter().find(|b| !b.deleted) {
                 None => {
+                    if self.follow_moved_recording(&file.rel_path)?.is_some() {
+                        continue;
+                    }
                     if self.adopt_attachment(&file.rel_path)? {
                         adopted += 1;
                     }
@@ -337,6 +340,70 @@ impl Store {
             }
         }
         Ok((adopted, revised))
+    }
+
+    /// A recording somebody moved, followed to where it went: the source
+    /// whose preserved bytes are exactly this file's, and whose recorded
+    /// path no longer holds them, now records this path. Returns the
+    /// source's id, or `None` when the file is not a moved recording.
+    ///
+    /// **Why**: renaming a voice note renames its recording too, because
+    /// the rail pairs the two by stem. Before this, the kernel kept
+    /// reading the old path — so a processor asked for the recording
+    /// found nothing — and adopted the moved file as a second, unrelated
+    /// attachment, carrying the same bytes to every device twice.
+    ///
+    /// Matched by digest, as a note is matched by its id: a name says
+    /// nothing about which recording a file is. A **copy** is not a move —
+    /// while the recorded path still holds the bytes, the file is left to
+    /// be adopted like any other. The new path is this device's alone;
+    /// the source's document is not revised, so nothing is sent.
+    pub(crate) fn follow_moved_recording(&self, rel_path: &str) -> Result<Option<String>> {
+        let path = self.vault().join(rel_path);
+        let Some(stat) = stat_of(&path) else { return Ok(None) };
+        let sha256 = crate::blobs::digest_of(&path)?;
+        let mut stmt = self.conn().prepare(
+            "SELECT b.blob_id, b.object_id, b.rel_path
+             FROM blobs b JOIN objects o ON o.object_id = b.object_id
+             WHERE b.sha256 = ?1 AND b.state = 'ready' AND o.deleted = 0
+               AND o.type_id = ?2
+             ORDER BY b.rowid DESC",
+        )?;
+        let candidates = stmt
+            .query_map(rusqlite::params![sha256, crate::capture::SOURCE_TYPE], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        for (blob_id, object_id, recorded) in candidates {
+            if recorded == rel_path {
+                return Ok(Some(object_id));
+            }
+            if self.vault().join(&recorded).exists() {
+                continue;
+            }
+            self.write_txn(|| {
+                let conn = self.conn();
+                conn.execute(
+                    "UPDATE blobs SET rel_path = ?2, mtime_ns = ?3, recorded_ns = ?4
+                     WHERE blob_id = ?1",
+                    rusqlite::params![blob_id, rel_path, stat.mtime_ns, now_ns()],
+                )?;
+                changes::record(
+                    conn,
+                    Change {
+                        kind: ChangeKind::Moved,
+                        rel_path,
+                        previous_rel_path: Some(&recorded),
+                        object_id: Some(&object_id),
+                        revision_id: None,
+                        cause: ChangeCause::Reconcile,
+                    },
+                )?;
+                Ok(())
+            })?;
+            return Ok(Some(object_id));
+        }
+        Ok(None)
     }
 
     /// Blob rows at a path, newest first, with their object's standing.

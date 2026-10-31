@@ -187,7 +187,7 @@ fun SettingsPane(
                                 if (plugin == null) {
                                     PluginsManager(state) { pane = Pane.Plugin(it) }
                                 } else {
-                                    PluginScreen(state, plugin, onOpenNote)
+                                    PluginScreen(state, plugin, onOpenNote) { pane = Pane.Plugin(it) }
                                 }
                             }
                         }
@@ -309,7 +309,12 @@ private fun PluginsManager(state: GiluneState, onOpenPlugin: (String) -> Unit) {
 /// to, what it adds — and the switches that take any of it away.
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PluginScreen(state: GiluneState, plugin: PluginInfo, onOpenNote: (String) -> Unit = {}) {
+private fun PluginScreen(
+    state: GiluneState,
+    plugin: PluginInfo,
+    onOpenNote: (String) -> Unit = {},
+    onOpenPlugin: (String) -> Unit = {},
+) {
     val colours = MaterialTheme.colorScheme
     val on = plugin.state == "enabled"
 
@@ -399,6 +404,16 @@ private fun PluginScreen(state: GiluneState, plugin: PluginInfo, onOpenNote: (St
     if (plugin.pluginId == NEMO_PLUGIN) {
         HorizontalDivider(color = colours.outlineVariant)
         NemoSettings(state, plugin)
+    }
+
+    if (plugin.pluginId in TRANSCRIPTION_PROVIDERS) {
+        HorizontalDivider(color = colours.outlineVariant)
+        SpeakerSupport(state, plugin.pluginId, onOpenPlugin)
+    }
+
+    if (plugin.pluginId == SPEAKERS_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        SpeakerSettings(state, onOpenPlugin)
     }
 
     if (plugin.pluginId == TASKS_PLUGIN) {
@@ -901,7 +916,32 @@ private fun AboutSection(state: GiluneState, vaultDir: String, updater: Updater?
         lineHeight = 18.sp,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    LogsSection()
     if (updater != null) UpdatesSection(updater)
+}
+
+/// Where the log is, and the way to it (ADR 0029). Nothing is sent
+/// anywhere: a person who wants help opens the folder and attaches the file.
+@Composable
+private fun LogsSection() {
+    val log = DesktopLog.file
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Text("Logs", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Gilune writes its warnings and errors to a file on this computer: " +
+            "${log.current.path}. Nothing is sent anywhere. If something goes wrong, " +
+            "that file says what happened — attach it when you report a problem.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    OutlinedButton(
+        onClick = {
+            log.directory.mkdirs()
+            revealInExplorer(if (log.current.exists()) log.current else log.directory)
+        },
+        modifier = Modifier.testTag("open-log-folder"),
+    ) { Text("Show the log file") }
 }
 
 /// A plugin's switch. Switching a transcriber on switches any other one
@@ -986,5 +1026,151 @@ private fun NemoSettings(state: GiluneState, plugin: PluginInfo) {
             modifier = Modifier.testTag("nemo-live"),
         )
         Text("Show words as I dictate", fontSize = 13.sp)
+    }
+}
+
+/// The transcribers on this computer that can name speakers (ADR 0030).
+/// Every desktop transcriber can: each reports when its words were said.
+/// The phone's cannot yet, and are not listed here.
+internal val SPEAKER_LABEL_TRANSCRIBERS = listOf(TRANSCRIPTION_PLUGIN, NEMO_PLUGIN)
+
+/// Whether a transcriber supports speaker labels, said on its own screen,
+/// with the way to the setting.
+@Composable
+private fun SpeakerSupport(state: GiluneState, transcriber: String, onOpenPlugin: (String) -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    val installed = state.plugins.firstOrNull { it.pluginId == SPEAKERS_PLUGIN }
+    val on = state.plugins.speakerLabelsOn()
+    Text("Speaker labels", style = MaterialTheme.typography.titleSmall)
+    Text(
+        when {
+            transcriber !in SPEAKER_LABEL_TRANSCRIBERS -> "Not supported by this transcriber."
+            on -> "Supported, and switched on: a recording with more than one voice is split into " +
+                "paragraphs that start Speaker 1, Speaker 2 and so on."
+            installed == null -> "Supported, but the Speaker labels plugin is not installed."
+            else -> "Supported. Switch on Speaker labels to have recordings with more than one voice " +
+                "split by speaker."
+        },
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+        modifier = Modifier.testTag("speaker-support"),
+    )
+    if (installed != null) {
+        TextButton(onClick = { onOpenPlugin(SPEAKERS_PLUGIN) }) { Text("Speaker labels settings", fontSize = 12.sp) }
+    }
+}
+
+/// The Speaker labels plugin's own settings: what it does, whether its
+/// models are here, which transcribers it works with, and how many people
+/// speak.
+@Composable
+private fun SpeakerSettings(state: GiluneState, onOpenPlugin: (String) -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    val host = LocalSpeakers.current
+    val plugins = state.plugins.toList()
+    Text("What it does", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "When a recording has more than one voice, its note is split into paragraphs that start " +
+            "Speaker 1, Speaker 2 and so on. Labels are added when a recording is transcribed, after " +
+            "you stop; dictating into a note you are writing is never labelled. A recording with one " +
+            "voice reads exactly as before. To label a recording made before this was on, right-click " +
+            "it and choose Transcribe again.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    Text(
+        when (val phase = host.phase) {
+            SpeakerPhase.Off -> "Switched off."
+            SpeakerPhase.NeedsConsent ->
+                "Waiting for permission to download the speaker models ($SPEAKER_MODELS_SIZE): allow " +
+                    "$NETWORK_CAPABILITY above."
+            is SpeakerPhase.Downloading -> "Downloading the speaker models — ${phase.percent}% of $SPEAKER_MODELS_SIZE…"
+            SpeakerPhase.Ready -> "Ready: the speaker models are on this computer."
+            is SpeakerPhase.Failed -> "Not ready: ${phase.why}"
+        },
+        fontSize = 13.sp,
+        modifier = Modifier.testTag("speaker-phase"),
+    )
+    Text(
+        "Models: ${SPEAKER_SEGMENTATION.name} (${SPEAKER_SEGMENTATION.licence}) and " +
+            "${SPEAKER_EMBEDDING.name} (${SPEAKER_EMBEDDING.licence}), $SPEAKER_MODELS_SIZE together, " +
+            "run on this computer and checked against a recorded checksum before use.",
+        fontSize = 11.sp,
+        lineHeight = 16.sp,
+        color = colours.onSurfaceVariant,
+    )
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Works with", style = MaterialTheme.typography.titleSmall)
+    val active = plugins.activeTranscriber()
+    for (id in TRANSCRIPTION_PROVIDERS) {
+        val transcriber = plugins.firstOrNull { it.pluginId == id } ?: continue
+        val supported = id in SPEAKER_LABEL_TRANSCRIBERS
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.testTag("speaker-works-with-$id"),
+        ) {
+            Text(
+                if (supported) "✓" else "–",
+                fontSize = 13.sp,
+                color = if (supported) colours.primary else colours.onSurfaceVariant,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(transcriber.name + if (id == active) " — writing your notes" else "", fontSize = 13.sp)
+                Text(
+                    when (id) {
+                        TRANSCRIPTION_PLUGIN -> "Every model."
+                        NEMO_PLUGIN -> "All three models."
+                        else -> "Not supported yet."
+                    },
+                    fontSize = 11.sp,
+                    color = colours.onSurfaceVariant,
+                )
+            }
+            TextButton(onClick = { onOpenPlugin(id) }) { Text("Open", fontSize = 11.sp) }
+        }
+    }
+    Text(
+        "On the phone, speaker labels are not available yet.",
+        fontSize = 11.sp,
+        color = colours.onSurfaceVariant,
+    )
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Number of speakers", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Leave it blank and Gilune works out how many people are speaking. If it keeps finding " +
+            "the wrong number in your recordings — two for an interview, say — enter it. It " +
+            "applies to every recording until you change it.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    val saved = plugins.speakerCount()
+    var typed by remember(saved) { mutableStateOf(saved?.toString().orEmpty()) }
+    val parsed = typed.trim().takeIf { it.isNotEmpty() }?.toIntOrNull()
+    val valid = typed.isBlank() || parsed in 1..MAX_SPEAKER_COUNT
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        androidx.compose.material3.OutlinedTextField(
+            value = typed,
+            onValueChange = { typed = it.filter(Char::isDigit).take(2) },
+            singleLine = true,
+            placeholder = { Text("automatic") },
+            isError = !valid,
+            modifier = Modifier.width(120.dp).testTag("speaker-count"),
+        )
+        Button(
+            enabled = valid && parsed != saved,
+            onClick = {
+                state.pluginAction(
+                    if (parsed == null) "speaker count: automatic" else "speaker count: $parsed",
+                ) { it.setPluginSettings(SPEAKERS_PLUGIN, speakersSettingsDocument(parsed)) }
+            },
+            modifier = Modifier.testTag("speaker-count-save"),
+        ) { Text("Save", fontSize = 12.sp) }
+        if (!valid) Text("1 to $MAX_SPEAKER_COUNT, or blank", fontSize = 11.sp, color = colours.error)
     }
 }

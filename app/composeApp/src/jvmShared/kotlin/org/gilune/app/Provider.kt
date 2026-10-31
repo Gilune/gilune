@@ -29,17 +29,27 @@ sealed interface ProviderAction {
 /// other already wrote. It narrows rather than closes — two engines
 /// decoding the same silent-so-far capture at once still race — and only
 /// the shell's one-active rule stops that.
-fun providerAction(subjectPayload: String): ProviderAction {
+///
+/// **Except when somebody asked** (ADR 0029). "Transcribe again" is a new
+/// event whose payload says `again`, and the gate exists to stop a
+/// catch-up overwriting words nobody asked to replace — a person asking is
+/// the opposite case, so the request decodes whatever the note holds.
+fun providerAction(subjectPayload: String, eventPayload: String = ""): ProviderAction {
     val document = runCatching { JSONObject(subjectPayload) }.getOrNull()
         ?: return ProviderAction.Fault("the subject's document could not be read")
     if (document.optString("media") != "wav") {
         return ProviderAction.NothingToDo("not a recording")
     }
-    if (document.optString("text").isNotBlank()) {
+    if (document.optString("text").isNotBlank() && !askedAgain(eventPayload)) {
         return ProviderAction.NothingToDo("already has words")
     }
     return ProviderAction.Decode
 }
+
+/// The kernel's `reprocess::AGAIN_KEY`, read off the event that queued the
+/// job. A payload that does not parse asked nothing.
+private fun askedAgain(eventPayload: String): Boolean =
+    runCatching { JSONObject(eventPayload).optBoolean("again", false) }.getOrDefault(false)
 
 /// The subject's document with the transcript in it — **whisper's shape,
 /// field for field**: parse the head document, replace `text`, keep
