@@ -19,6 +19,8 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
+
 import org.gilune.plugins.tasks.TASKS_RAIL_PANEL
 
 import androidx.compose.foundation.ContextMenuArea
@@ -242,6 +244,7 @@ fun RailPanels(
     onDeleted: (String) -> Unit = {},
     onLocalScope: (String, Boolean) -> Boolean = { _, _ -> false },
     navigation: NavigationVisibility = Prefs.navigation,
+    replaceRequests: Int = 0,
 ) {
     val colours = MaterialTheme.colorScheme
     // The rail's upper region as ADR 0011 always described it: a declared
@@ -268,7 +271,10 @@ fun RailPanels(
             RailTab(Icons.Outlined.Description, "files", active == RailPanel.FILES) {
                 tree.railPanel = RailPanel.FILES
             }
-            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH, shortcut = "Ctrl+F") {
+            // Vault search answers Ctrl+Shift+F, and Ctrl+F too while find
+            // and replace is off (ADR 0031 § 5).
+            val searchKey = if (state.plugins.any { it.pluginId == FIND_REPLACE_PLUGIN && it.state == "enabled" }) "Ctrl+Shift+F" else "Ctrl+F"
+            RailTab(Icons.Default.Search, "search", active == RailPanel.SEARCH, shortcut = searchKey) {
                 tree.railPanel = RailPanel.SEARCH
             }
             for (destination in destinations) {
@@ -287,7 +293,7 @@ fun RailPanels(
         HorizontalDivider(color = colours.outlineVariant)
         when (active.key) {
             RailPanel.SEARCH.key ->
-                SearchPanel(state, searchFocus, onOpen, Modifier.weight(1f), initialSearchQuery)
+                SearchPanel(state, searchFocus, onOpen, Modifier.weight(1f), initialSearchQuery, replaceRequests)
             TASKS_RAIL_PANEL -> TasksPanel(state, onOpen, Modifier.weight(1f))
             // FILES, and — defensively — a key some contribution named
             // that this host has no panel for. A rail always shows

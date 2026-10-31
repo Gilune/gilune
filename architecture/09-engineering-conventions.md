@@ -90,6 +90,17 @@ Applied as boundary discipline, not object-orientation ritual:
   (S1 proves the drop crosses — code may rely on it).
 - ktlint defaults.
 
+## Keyboard shortcuts
+
+Owner rule, 2026-10-31: **every keyboard shortcut is reassignable**, unless
+a decision explicitly says otherwise for that key. A new key ships with a
+default and a setting (a plugin's keys on its settings screen, through the
+shared keystroke control; `Keystrokes.kt` is the one spelling for recording
+and matching), and the shortcuts window shows the binding as it stands, not
+the default. The shell's own keys that predate this rule are not yet
+reassignable; they need a shell keymap and are tracked as debt, not as an
+exception.
+
 ## Desktop footprint
 
 An idle app is measured, not assumed. Gilune's desktop process sat at

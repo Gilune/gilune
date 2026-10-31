@@ -14,6 +14,9 @@
 package org.gilune.app
 
 import org.gilune.plugin.sdk.Slots
+import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
+import org.gilune.plugins.findreplace.FindReplaceKey
+import org.gilune.plugins.findreplace.findReplaceKey
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -165,6 +168,20 @@ private class GestureRequests {
 
     /// Ctrl+E: the note in front into presentation mode, or back to editing.
     var togglePresentation by mutableStateOf(0)
+
+    /// Find and replace (ADR 0031 § 5): the plugin's keys as its settings
+    /// bind them, empty while it is off, written by the app as the plugin
+    /// list changes so this handler — outside the app — can match them.
+    var findKeys: List<Pair<FindReplaceKey, String>> = emptyList()
+
+    /// Count paired with the action a find key asked for.
+    var find by mutableStateOf(0 to FindReplaceKey.FIND)
+
+    fun findAction(event: androidx.compose.ui.input.key.KeyEvent): FindReplaceKey? {
+        if (findKeys.isEmpty()) return null
+        val pressed = keystrokeOf(event) ?: return null
+        return findKeys.firstOrNull { keystrokeMatches(it.second, pressed) }?.first
+    }
 }
 
 /// The row above the letters only: the numeric keypad sends keys of its
@@ -227,12 +244,24 @@ fun main() {
             icon = painterResource("gilune-logo-v2.png"),
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
             onPreviewKeyEvent = { event ->
+                // The plugin's keys come first: they are the person's to
+                // bind, so a binding they chose is the one that answers.
+                val findAction = if (event.type == KeyEventType.KeyDown) gestures.findAction(event) else null
                 when {
                     event.type != KeyEventType.KeyDown -> false
+                    // A binding being recorded in settings gets every key.
+                    KeystrokeCapture.listening -> false
+                    findAction != null -> {
+                        gestures.find = gestures.find.first + 1 to findAction
+                        true
+                    }
                     event.isCtrlPressed && event.key == Key.N -> {
                         gestures.newNote++
                         true
                     }
+                    // Ctrl+Shift+F searches the vault; so does Ctrl+F while
+                    // find and replace is off (with it on, Ctrl+F is its
+                    // find key unless rebound, matched above).
                     event.isCtrlPressed && event.key == Key.F -> {
                         gestures.search++
                         true
@@ -445,6 +474,46 @@ private fun DesktopApp(
     }
     LaunchedEffect(gestures.toggleRail) {
         if (gestures.toggleRail > 0) setRailCollapsed(!railCollapsed)
+    }
+    // Find and replace's keys reach the window's handler through the
+    // gestures, read afresh whenever the plugin list changes — switching
+    // the plugin off or rebinding a key takes effect at once.
+    val livePlugins = state.plugins.toList()
+    LaunchedEffect(livePlugins) {
+        gestures.findKeys =
+            if (livePlugins.any { it.pluginId == FIND_REPLACE_PLUGIN && it.state == "enabled" }) {
+                FindReplaceKey.entries.map { it to livePlugins.findReplaceKey(it) }
+            } else emptyList()
+    }
+    var replaceInNotes by remember { mutableStateOf(0) }
+    LaunchedEffect(gestures.find) {
+        val (count, action) = gestures.find
+        if (count == 0) return@LaunchedEffect
+        // The note in front, unless settings stand over it.
+        val editor = if (settingsOpen) null else tabs.activeEditor
+        val noteBar = livePlugins.pluginContributes(FIND_REPLACE_PLUGIN, Slots.EDITOR_FIND)
+        when (action) {
+            FindReplaceKey.FIND, FindReplaceKey.REPLACE ->
+                // With no note open there is nothing to find in, and the
+                // vault is the next best place to look.
+                if (editor == null || !noteBar) gestures.search++ else {
+                    editor.reading = false
+                    val value = editor.text
+                    editor.find.show(action == FindReplaceKey.REPLACE, value.text.substring(value.selection.min, value.selection.max))
+                }
+            FindReplaceKey.REPLACE_IN_NOTES ->
+                if (livePlugins.pluginContributes(FIND_REPLACE_PLUGIN, Slots.SEARCH_REPLACE)) {
+                    if (railCollapsed) {
+                        setRailCollapsed(false)
+                        withFrameNanos {}
+                        withFrameNanos {}
+                    }
+                    tree.railPanel = RailPanel.SEARCH
+                    replaceInNotes++
+                }
+            FindReplaceKey.NEXT -> editor?.find?.step(true)
+            FindReplaceKey.PREVIOUS -> editor?.find?.step(false)
+        }
     }
     LaunchedEffect(gestures.search) {
         if (gestures.search > 0) {
@@ -697,6 +766,7 @@ private fun DesktopApp(
                     onRenamed = { old, new -> tabs.noteRenamed(old, new) },
                     onDeleted = { tabs.noteDeleted(it) },
                     onLocalScope = { rel, local -> tabs.noteLocalScope(rel, local) },
+                    replaceRequests = replaceInNotes,
                 )
             }
             DragDivider(

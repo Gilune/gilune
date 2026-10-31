@@ -101,10 +101,13 @@ internal fun applyDocumentRefactoring(kernel: Gilune, vault: String, registry: P
     var plan = kernel.refactoringPlan(planId)
     if (plan.state == "completed") return plan
     val token = requireNotNull(plan.reviewToken) { "Discovery has not completed." }
-    val undo = plan.provider == "memory:refactoring.undo"
-    val config = if (undo) emptyMap() else refactoringConfiguration(plan.configuration)
+    // Undo plans and text replacements (ADR 0031 § 4) have no defining page
+    // or identifier lookups to re-check: the journal's version checks are
+    // the whole of their guard.
+    val generic = plan.provider == "memory:refactoring.undo" || plan.provider == org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
+    val config = if (generic) emptyMap() else refactoringConfiguration(plan.configuration)
     fun currentProvider() {
-        if (undo) return
+        if (generic) return
         val binding = registry.refactorings(kernel.plugins()).singleOrNull { it.registration.id == plan.provider }
         check(binding != null && binding.registration.version == plan.providerVersion && binding.owner.settings == config.getValue("settings")) {
             "The provider or its configuration changed. Applied edits are retained; prepare a new preview to continue."
@@ -131,7 +134,7 @@ internal fun applyDocumentRefactoring(kernel: Gilune, vault: String, registry: P
         if (cancelled()) { kernel.setRefactoringCancelled(planId, true); return false }
         if (entry.state != "pending" || entry.id in excluded || (selected != null && entry.id !in selected)) return entry.state == "applied"
         currentProvider()
-        if (!undo && entry.relPath != definition) {
+        if (!generic && entry.relPath != definition) {
             check(kernel.documentSnapshot(config.getValue("definition")).source.version == config.getValue("definitionVersion")) {
                 "The defining document changed after preview. Prepare a new plan."
             }

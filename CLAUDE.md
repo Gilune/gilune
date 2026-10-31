@@ -1919,6 +1919,29 @@ gates promises) are ratified. **Next: application-level engineering — see
      stays one, three voices 7/8 auto and WORSE with count fixed at 3.
      Model rows env-gated: `GILUNE_TEST_SPEAKER_MODELS` (folder of the two
      downloads) + `GILUNE_TEST_SPEAKER_WAV`.
+   - **Find and replace + reassignable-keys rule (2026-10-31, Opus;
+     ADR 0031 Accepted via the owner's answers).** Bundled plugin
+     `org.memory.find-replace` (`app/plugins/findReplace`: pure matching
+     core — case/whole-word/regex, `$1` only in regex mode, empty matches
+     skipped — plus declaration and five key settings). Desktop: bar over
+     the note (`FindBar.kt`, state per tab on `EditorState.find`; the
+     current match IS the selection; matches shaded via `getPathForRange`
+     through the transformation's offset map; Replace all = one buffer
+     edit = one Ctrl+Z, UI-tested); replace across notes = rows inside the
+     Search panel (no new rail icon — owner: rail getting busy; the query
+     is the scope) on ADR 0026's journal (`NoteReplacement.kt`; body-only
+     byte spans; refuses unsaved buffers and notes changed since the
+     preview; `applyDocumentRefactoring` treats the provider like undo —
+     no defining page). Keys: Ctrl+F find, Ctrl+H replace, Ctrl+Shift+H
+     across notes, F3/Shift+F3, all plugin settings; vault search moved to
+     Ctrl+Shift+F (Ctrl+F again while the plugin is off). **Owner rule
+     adopted: every shortcut is reassignable** (09 § Keyboard shortcuts);
+     shell keys predating it need a shell keymap — debt. Found in passing:
+     the window's key handler ate keys a settings recorder was listening
+     for (no Ctrl+E-style binding could be recorded) — `KeystrokeCapture`
+     now stands it aside. Shortcuts window rows shade on hover. Phone: no
+     surface yet (core shared). Gaps: discovery scans files (no index
+     narrowing); live screenshot validation not done.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

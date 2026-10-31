@@ -41,9 +41,12 @@
   It looks at names only, which is what makes it quick.</p>
 
   <p><strong>To search what your notes say</strong>, press <kbd>Ctrl</kbd> +
-  <kbd>F</kbd>. This opens the Search panel in the sidebar, and it is where the query
-  language below applies. If the sidebar is collapsed, the shortcut reopens it for
-  you.</p>
+  <kbd>Shift</kbd> + <kbd>F</kbd>. This opens the Search panel in the sidebar, and it
+  is where the query language below applies. If the sidebar is collapsed, the shortcut
+  reopens it for you. (<kbd>Ctrl</kbd> + <kbd>F</kbd> finds words in the note you are
+  writing — see <a href="#find-and-replace">Find and replace</a>. If you switch the
+  Find and replace plugin off, <kbd>Ctrl</kbd> + <kbd>F</kbd> searches the vault
+  again.)</p>
 
   <figure>
     <img src="../assets/search-tasks.png" alt="The search panel in the sidebar, showing results grouped by note with the matching lines quoted underneath.">
@@ -393,6 +396,52 @@
     </tbody>
   </table>
   </div>
+
+  <h2 id="find-and-replace">Find and replace</h2>
+
+  <p>Search tells you <em>which notes</em> are about something. Find and replace is
+  for <em>exact words</em>: where they are in a note, and changing them.</p>
+
+  <p><strong>In the note you are writing</strong>, press <kbd>Ctrl</kbd> + <kbd>F</kbd>.
+  A bar opens above the note. Type, and every match is shaded, with the one you are on
+  shaded more strongly and the count beside the box (<em>2 of 5</em>).
+  <kbd>Enter</kbd> or <kbd>F3</kbd> goes to the next match and <kbd>Shift</kbd> +
+  <kbd>Enter</kbd> or <kbd>Shift</kbd> + <kbd>F3</kbd> to the one before; both carry on
+  round from the end to the start. <kbd>Esc</kbd> closes the bar and leaves the cursor
+  on the match. If you had a few words selected, they are already in the box.</p>
+
+  <p>Press <kbd>Ctrl</kbd> + <kbd>H</kbd> (or the arrow at the left of the bar) for a
+  second box to replace with. <strong>Replace</strong> changes the match you are on and
+  moves to the next; <strong>All</strong> changes every one at once, and one
+  <kbd>Ctrl</kbd> + <kbd>Z</kbd> in the note puts them all back.</p>
+
+  <p>Three switches sit beside the box: <strong>Aa</strong> matches capitals exactly,
+  <strong>W</strong> matches whole words only (so <code>cat</code> does not find
+  <code>catalogue</code>), and <strong>.*</strong> treats what you type as a regular
+  expression — <code>^</code> and <code>$</code> mean the start and end of a line, and
+  in the replacement <code>$1</code> puts back what the first bracketed part matched.
+  Without <strong>.*</strong>, everything you type is taken literally, a
+  <code>$</code> included. Find and replace looks at the words of the note, never its
+  name or its properties.</p>
+
+  <p><strong>Across many notes</strong>, press <kbd>Ctrl</kbd> + <kbd>Shift</kbd> +
+  <kbd>H</kbd>, or the replace button beside the Search box. The search box now says
+  <em>which</em> notes to change — leave it empty for all of them, or type any search,
+  such as <code>path:Work</code> — and two boxes below it say what to find and what to
+  put instead. Every note with a match is listed with its matching lines, and each has
+  a tick box, so you can leave a note out. <strong>Replace in</strong> changes the
+  ticked notes; <strong>Undo</strong> beside the result puts them back.</p>
+
+  <p>A note with changes you have not saved yet is left out and says so — save it and
+  it joins the list. A note that changes after the list was drawn (in another app,
+  say) is not touched either; the result tells you which notes were skipped and why.
+  Every replace across notes is also kept under <strong>Rename references…</strong> in a note's
+  ⋯ menu, among the previous operations, where it can be looked at or undone later.</p>
+
+  <p>Find and replace is a plugin, on by default. Switch it off in
+  <strong>Settings ▸ Plugins</strong> and the bar, the replace rows and its keys go
+  away. Every one of its keys can be changed on its own page there: press
+  <strong>Change</strong> beside a key, then the keys you want.</p>
 
   <h2>When a query does not do what you expected</h2>
 
