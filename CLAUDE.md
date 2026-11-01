@@ -1981,6 +1981,21 @@ gates promises) are ratified. **Next: application-level engineering — see
      decision: jlink trimming (all
      languages must stay — Gilune will be translated — which leaves only
      ~7 MB to gain), ProGuard (reflection/JNI risk).
+   - **Desktop memory, where it goes (2026-11-01, owner: 367 MB is a lot
+     for plain text).** Method: probe copies of the INSTALLED app started
+     with `JAVA_TOOL_OPTIONS` (the in-process launcher's JVM honours it:
+     NMT, `-Dgilune.vault`, `-Dgilune.probe`, renderer flags — a value
+     with a SPACE splits the option and the launcher shows an error box
+     titled "Gilune"), measured, closed by their own PID; jcmd 17 from
+     Adoptium attaches. Empty vault, small window: 324 MB = Skia Direct3D
+     ~150 + Java2D's Direct3D 35 + JVM ~100 + other native ~40. Java2D's
+     pipeline is OFF now (both launch paths; 09 § Desktop footprint).
+     Renderer re-measured full-screen (5120×1440): Direct3D stays. JVM
+     trims measured and rejected (C1-only −7 MB, Xms16m nothing). An
+     open 1,500-line note costs ~90 MB, mostly native Skia paragraph
+     layout of the WHOLE buffer — live, not leaked. Probe tab layouts
+     persist per vault: an "empty" probe reopens the last probe's notes.
+     Not yet tested: whether closing a tab gives that memory back.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

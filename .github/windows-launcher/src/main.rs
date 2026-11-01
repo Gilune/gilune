@@ -270,6 +270,9 @@ fn launch(root: &Path) -> std::io::Result<i32> {
         "-Xms32m",
         "-Xmx768m",
         "-XX:CICompilerCount=2",
+        // Java2D's own Direct3D pipeline: Compose draws through Skia's
+        // device, never this one, which cost 35 MB and 16 threads idle.
+        "-Dsun.java2d.d3d=false",
         "-Dcompose.application.configure.swing.globals=true",
         concat!("-Djpackage.app-version=", env!("GILUNE_APP_VERSION")),
     ]

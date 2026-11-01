@@ -129,7 +129,30 @@ had not spoken. The rules that follow from it:
   is a question about the file, and answering it must stay cheap.
 - The renderer is not a footprint lever. Direct3D costs ≈135 MB private
   over `SOFTWARE`, and that is the price of the app drawing properly
-  (owner decision 2026-09-04).
+  (owner decision 2026-09-04). Re-measured against every alternative
+  Skiko 0.9.4 offers (2026-11-01, probe copies of the installed 1.3.2, a
+  1,500-line note scrolled by 300 wheel notches in a window the size of
+  the owner's 5120×1440 screen): Direct3D sustained 75–83 fps at 413–417
+  MB idle; OpenGL 45–49 fps at 417–420 MB; `SOFTWARE_FAST` 39–43 fps at
+  292 MB. Software drew with *less* CPU (122% of a core against 135–147%)
+  — the cost is Compose's text layout, not rasterising — but half the
+  frames on a wide screen. Vulkan falls back to Direct3D on Windows;
+  `skiko.buffering` and `skiko.vsync.enabled` changed nothing measurable;
+  this Skiko exposes no limit on Skia's GPU cache. In a small window
+  OpenGL looked cheaper (306–320 MB against 372–375); that is window
+  size, not a saving.
+- **Java2D's Direct3D pipeline is off** (`-Dsun.java2d.d3d=false`, in
+  the Gradle `jvmArgs` and the Windows launcher, held together by
+  `DesktopLaunchArgumentsTest`). Compose draws through Skia's own
+  device and never through Java2D's, which cost 35 MB private and 16
+  threads on an idle window (2026-11-01). The only Swing left is the two
+  `JFileChooser` dialogs, which Java2D then draws with GDI.
+- **An open note costs memory in proportion to its length.** The editor
+  lays out the whole buffer through Skia's paragraph engine, not the
+  visible lines: a 1,500-line note held ~90 MB more than an empty
+  window (Java heap +12 MB, the rest native Skia layout objects that
+  survive a full GC — live, not leaked). An editor that lays out only
+  what is on screen is the lever, and a large one.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it

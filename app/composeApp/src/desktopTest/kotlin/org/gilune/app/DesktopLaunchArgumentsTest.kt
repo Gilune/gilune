@@ -106,8 +106,33 @@ class DesktopLaunchArgumentsTest {
         // bookkeeping alone had committed 75 MB of native memory for a
         // heap using 13, sized from a 16 GB default maximum.
         val shared = code("application {")
-        listOf("-XX:+UseSerialGC", "-Xms32m", "-Xmx768m", "-XX:CICompilerCount=2").forEach {
+        FOOTPRINT_FLAGS.forEach {
             assertTrue(shared.contains(it), "$it is what makes the installed app cost 376 MB")
         }
+    }
+
+    @Test
+    fun theWindowsLauncherPassesTheSameFootprintFlags() {
+        // The MSI's Gilune.exe hosts the JVM itself and never reads the
+        // build file's list, so a flag added there alone reached the Linux
+        // package and dev runs but not Windows.
+        val launcher = File(buildFile().parentFile.parentFile.parentFile, ".github/windows-launcher/src/main.rs")
+        assertTrue(launcher.isFile, "the Windows launcher is not where it was: $launcher")
+        val code = launcher.readLines().joinToString("\n") { it.substringBefore("//") }
+        FOOTPRINT_FLAGS.forEach {
+            assertTrue(code.contains("\"$it\""), "the Windows launcher does not pass $it")
+        }
+    }
+
+    private companion object {
+        // Measured: SerialGC, the heap bounds and CICompilerCount on
+        // 2026-09-04; sun.java2d.d3d=false (35 MB, 16 threads) on 2026-11-01.
+        val FOOTPRINT_FLAGS = listOf(
+            "-XX:+UseSerialGC",
+            "-Xms32m",
+            "-Xmx768m",
+            "-XX:CICompilerCount=2",
+            "-Dsun.java2d.d3d=false",
+        )
     }
 }
