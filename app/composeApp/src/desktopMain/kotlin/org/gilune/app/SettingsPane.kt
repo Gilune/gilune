@@ -945,6 +945,45 @@ private fun AppearanceSection(theme: ThemeChoice, onThemeChange: (ThemeChoice) -
             Text(choice.name, fontSize = 13.sp)
         }
     }
+    var gpuDrawing by remember { mutableStateOf(Prefs.gpuDrawing) }
+    DrawingSetting(gpuDrawing) {
+        gpuDrawing = it
+        Prefs.gpuDrawing = it
+    }
+}
+
+/// The renderer choice (`Rendering.kt`). It is read once, when the window
+/// is made, so the line says when it takes effect and whether that has
+/// happened yet: `atStart` is what this run is drawing with.
+@Composable
+internal fun DrawingSetting(
+    gpuDrawing: Boolean,
+    atStart: Boolean = Prefs.gpuDrawingAtStart,
+    onChange: (Boolean) -> Unit,
+) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    Text("Drawing", style = MaterialTheme.typography.titleSmall)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text("Draw with the graphics card", Modifier.weight(1f), fontSize = 12.sp)
+        Switch(
+            checked = gpuDrawing,
+            onCheckedChange = onChange,
+            modifier = Modifier.testTag("gpu-drawing"),
+        )
+    }
+    Text(
+        buildString {
+            append(
+                "Smoother scrolling on large screens, for about 120 MB more memory. " +
+                    "Off, Gilune draws on the processor and stays lighter.",
+            )
+            if (gpuDrawing != atStart) append(" Takes effect when Gilune next starts.")
+        },
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.testTag("gpu-drawing-note"),
+    )
 }
 
 @Composable

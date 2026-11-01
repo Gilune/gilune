@@ -14,10 +14,9 @@ package org.gilune.app
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
@@ -55,7 +54,10 @@ internal fun PresentedNote(
 ) {
     val appearance = LocalNoteAppearance.current
     val plugins = state.plugins.toList()
-    val scroll = rememberScrollState()
+    val scroll = rememberLazyListState()
+    // Blocks are laid out as they scroll in and dropped as they leave;
+    // once the list is still, their native memory is asked back.
+    LaunchedEffect(scroll.isScrollInProgress) { if (!scroll.isScrollInProgress) NativeGarbage.soon() }
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
     // The keys live here — Esc back to editing, the arrows to scroll — so
@@ -142,8 +144,8 @@ internal fun PresentedNote(
                 val step = when (event.key) {
                     Key.DirectionDown -> 60f
                     Key.DirectionUp -> -60f
-                    Key.PageDown -> scroll.viewportSize * 0.9f
-                    Key.PageUp -> -scroll.viewportSize * 0.9f
+                    Key.PageDown -> scroll.layoutInfo.viewportSize.height * 0.9f
+                    Key.PageUp -> -scroll.layoutInfo.viewportSize.height * 0.9f
                     else -> null
                 }
                 when {
@@ -158,13 +160,13 @@ internal fun PresentedNote(
         // `filter` is the table's only entry, and every other fence is the
         // code box it has always been. Reading the vault cursor inside the
         // registration is what makes a block recompute when the vault
-        // moves rather than per keystroke (§ 4).
-        MarkdownBody(
+        // moves rather than per keystroke (§ 4). Lazy, so a long note
+        // lays out only what is on screen (ADR 0032 stage 1).
+        LazyMarkdownBody(
             remember(editor.text.text) { parseMarkdown(editor.text.text) },
-            Modifier
-                .fillMaxSize()
-                .verticalScroll(scroll)
-                .padding(horizontal = 18.dp, vertical = 14.dp),
+            Modifier.fillMaxSize(),
+            state = scroll,
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
             renderers = BlockRenderers(listOf(filterBlockRegistration(state, plugins, onOpen = openNote))),
             onToggleTask = ::toggle,
             textStyle = appearance.reading.textStyle,

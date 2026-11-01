@@ -183,6 +183,16 @@ fun builtInDecorations(): List<EditorDecoration> = BUILT_IN_DECORATIONS
 /// on every line (ADR 0017 § 2), but a pill on the line being written still
 /// gives way to plain text. The desktop needs nothing extra — its caret
 /// line already keeps every pill back.
+///
+/// `styleWindow` is the range of *transformed* offsets near the screen
+/// (ADR 0032 stage 3): colours are drawn there only, and everything that
+/// moves text — replacements, collapsed blocks, wrap-changing spans — stays
+/// whole-document, so the offset mapping and every line's position are the
+/// same whatever the window. Null styles everything.
+///
+/// The result is kept for the last text asked about: a field and the
+/// editor's own geometry questions ask for the same text several times a
+/// frame, and each answer used to re-parse the whole note.
 class MarkdownEditTransformation(
     private val palette: MarkdownPalette,
     private val caretLine: Int? = null,
@@ -190,12 +200,20 @@ class MarkdownEditTransformation(
     private val blocks: List<EditorBlockDecoration> = emptyList(),
     private val fontScale: Float = 1f,
     private val plainPillLine: Int? = null,
+    private val styleWindow: IntRange? = null,
 ) : VisualTransformation {
+    @Volatile private var last: Pair<String, TransformedText>? = null
+
     override fun filter(text: AnnotatedString): TransformedText {
         val source = text.text
+        last?.let { (seen, result) -> if (seen === source || seen == source) return result }
+        return transform(source).also { last = source to it }
+    }
+
+    private fun transform(source: String): TransformedText {
         val placed = decorate(source, caretLine, decorations, blocks, plainPillLine)
         if (placed.isEmpty()) {
-            return TransformedText(styleMarkdown(source, palette, fontScale), OffsetMapping.Identity)
+            return TransformedText(styleMarkdown(source, palette, fontScale, styleWindow), OffsetMapping.Identity)
         }
         val starts = transformedStarts(placed)
         val transformed = applyDecorations(source, placed)
@@ -208,7 +226,7 @@ class MarkdownEditTransformation(
         } else {
             DecorationOffsetMapping(table, source.length, transformed.length)
         }
-        return TransformedText(styleDecorations(transformed, placed, starts, palette, fontScale), mapping)
+        return TransformedText(styleDecorations(transformed, placed, starts, palette, fontScale, styleWindow), mapping)
     }
 }
 
@@ -1094,14 +1112,17 @@ private fun styleDecorations(
     starts: List<Int>,
     palette: MarkdownPalette,
     fontScale: Float,
+    window: IntRange? = null,
 ): AnnotatedString {
-    val styled = styleMarkdown(transformed, palette, fontScale)
+    val styled = styleMarkdown(transformed, palette, fontScale, window)
     if (placed.none { it.role != DecorationRole.NONE || it.pillTag != null }) return styled
     return buildAnnotatedString {
         append(styled)
         for ((index, span) in placed.withIndex()) {
             val from = starts[index]
             val to = from + span.replacement.length
+            // Every role and pill is colour alone: off the window, nothing.
+            if (window != null && (to < window.first || from > window.last)) continue
             val tag = span.pillTag
             if (tag != null) {
                 markPill(from, from + tag, to, palette.pillTag.takeOrElse { palette.marker }, palette.link, span.pillItem)
@@ -1192,10 +1213,23 @@ private val STRIKE = Regex("""~~[^~\n]+~~""")
 private val LINK = Regex("""\[([^\]\n]*)]\(([^)\n]*)\)""")
 private val WIKI = Regex("""!?\[\[[^\]\n]+]]""")
 
-fun styleMarkdown(source: String, palette: MarkdownPalette, fontScale: Float = 1f): AnnotatedString =
+/// `window`, when given, is the range of offsets near the screen (ADR 0032
+/// stage 3). Lines outside it keep only the spans that change how a line
+/// wraps — font size, weight and slant — so off-screen text lays out
+/// exactly as it will when it scrolls in; their colours are left off. Each
+/// span is a native style object Skia rebuilds on every keystroke, and a
+/// long note's colours are thousands of them.
+fun styleMarkdown(
+    source: String,
+    palette: MarkdownPalette,
+    fontScale: Float = 1f,
+    window: IntRange? = null,
+): AnnotatedString =
     buildAnnotatedString {
         append(source)
         val mutedStyle = SpanStyle(color = palette.muted)
+        val boldStyle = SpanStyle(fontWeight = FontWeight.Bold)
+        val italicStyle = SpanStyle(fontStyle = FontStyle.Italic)
         var offset = 0
         var inFrontMatter = false
         var frontMatterClosed = false
@@ -1205,14 +1239,15 @@ fun styleMarkdown(source: String, palette: MarkdownPalette, fontScale: Float = 1
             val end = start + line.length
             offset = end + 1
             val trimmed = line.trim()
+            val coloured = window == null || (end >= window.first && start <= window.last)
 
             if (index == 0 && trimmed == "---") {
                 inFrontMatter = true
-                addStyle(mutedStyle, start, end)
+                if (coloured) addStyle(mutedStyle, start, end)
                 continue
             }
             if (inFrontMatter && !frontMatterClosed) {
-                addStyle(mutedStyle, start, end)
+                if (coloured) addStyle(mutedStyle, start, end)
                 if (trimmed == "---") {
                     inFrontMatter = false
                     frontMatterClosed = true
@@ -1221,11 +1256,11 @@ fun styleMarkdown(source: String, palette: MarkdownPalette, fontScale: Float = 1
             }
             if (trimmed.startsWith("```")) {
                 inFence = !inFence
-                addStyle(mutedStyle, start, end)
+                if (coloured) addStyle(mutedStyle, start, end)
                 continue
             }
             if (inFence) {
-                addStyle(SpanStyle(color = palette.code), start, end)
+                if (coloured) addStyle(SpanStyle(color = palette.code), start, end)
                 continue
             }
 
@@ -1238,41 +1273,51 @@ fun styleMarkdown(source: String, palette: MarkdownPalette, fontScale: Float = 1
                     else -> 14.sp
                 }
                 addStyle(
-                    SpanStyle(color = palette.heading, fontWeight = FontWeight.Bold, fontSize = size * fontScale),
+                    if (coloured) {
+                        SpanStyle(color = palette.heading, fontWeight = FontWeight.Bold, fontSize = size * fontScale)
+                    } else {
+                        SpanStyle(fontWeight = FontWeight.Bold, fontSize = size * fontScale)
+                    },
                     start,
                     end,
                 )
-                addStyle(mutedStyle, start, start + level)
+                if (coloured) addStyle(mutedStyle, start, start + level)
             }
             val quote = line.startsWith(">")
             if (quote) {
-                addStyle(SpanStyle(color = palette.muted, fontStyle = FontStyle.Italic), start, end)
+                addStyle(if (coloured) SpanStyle(color = palette.muted, fontStyle = FontStyle.Italic) else italicStyle, start, end)
             }
             LIST_MARKER.find(line)?.let { m ->
                 addStyle(
-                    SpanStyle(color = palette.marker, fontWeight = FontWeight.Bold),
+                    if (coloured) SpanStyle(color = palette.marker, fontWeight = FontWeight.Bold) else boldStyle,
                     start + m.groupValues[1].length,
                     start + m.value.length,
                 )
             }
 
-            for (m in CODE_SPAN.findAll(line)) {
-                addStyle(
-                    SpanStyle(color = palette.code, background = palette.codeBackground),
-                    start + m.range.first,
-                    start + m.range.last + 1,
-                )
+            if (coloured) {
+                for (m in CODE_SPAN.findAll(line)) {
+                    addStyle(
+                        SpanStyle(color = palette.code, background = palette.codeBackground),
+                        start + m.range.first,
+                        start + m.range.last + 1,
+                    )
+                }
             }
             for (m in BOLD.findAll(line)) {
-                addStyle(SpanStyle(fontWeight = FontWeight.Bold), start + m.range.first, start + m.range.last + 1)
+                addStyle(boldStyle, start + m.range.first, start + m.range.last + 1)
+                if (!coloured) continue
                 addStyle(mutedStyle, start + m.range.first, start + m.range.first + 2)
                 addStyle(mutedStyle, start + m.range.last - 1, start + m.range.last + 1)
             }
             for (m in ITALIC.findAll(line)) {
-                addStyle(SpanStyle(fontStyle = FontStyle.Italic), start + m.range.first, start + m.range.last + 1)
+                addStyle(italicStyle, start + m.range.first, start + m.range.last + 1)
+                if (!coloured) continue
                 addStyle(mutedStyle, start + m.range.first, start + m.range.first + 1)
                 addStyle(mutedStyle, start + m.range.last, start + m.range.last + 1)
             }
+            if (!coloured) continue
+
             for (m in STRIKE.findAll(line)) {
                 addStyle(
                     SpanStyle(textDecoration = TextDecoration.LineThrough),
@@ -1299,3 +1344,23 @@ fun styleMarkdown(source: String, palette: MarkdownPalette, fontScale: Float = 1
             }
         }
     }
+
+/// The style window an editor should draw with (ADR 0032 stage 3), given
+/// the one it has and the offsets now on screen. It reaches one screenful
+/// beyond the visible text on each side and stays put until the visible
+/// text leaves its inner half, so scrolling restyles the note about once a
+/// screen rather than every frame. Offsets are the laid-out (transformed)
+/// text's; `length` is that text's length.
+fun nextStyleWindow(current: IntRange?, visible: IntRange, length: Int): IntRange {
+    val span = (visible.last - visible.first).coerceAtLeast(1)
+    if (current != null) {
+        val topHeld = current.first == 0 || visible.first >= current.first + span / 2
+        val bottomHeld = current.last >= length || visible.last <= current.last - span / 2
+        if (topHeld && bottomHeld) return current
+    }
+    return (visible.first - span).coerceAtLeast(0)..(visible.last + span).coerceAtMost(length)
+}
+
+/// The window a note is first drawn with, before its layout can say what is
+/// on screen: the top of the note, about two tall screens of text.
+const val INITIAL_STYLE_WINDOW_CHARS = 8_000

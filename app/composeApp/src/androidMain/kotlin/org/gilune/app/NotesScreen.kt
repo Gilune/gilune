@@ -25,8 +25,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -166,34 +164,32 @@ fun ReadScreen(
             .onFailure { state.message.value = "could not save: ${it.message}" }
     }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Text(noteTitle(relPath), style = MaterialTheme.typography.titleLarge)
-        DocumentLinksButton(state, content, onOpenNote)
-        RefactoringButton(state, relPath, content)
-        if (content.isEmpty()) {
-            Text(
-                "This note is empty.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = colours.onSurfaceVariant,
-            )
-        } else {
-            MarkdownBody(
-                blocks,
-                modifier = Modifier.fillMaxWidth().testTag("note-body"),
-                renderers = renderers,
-                onToggleTask = { line -> toggle(line) },
-                checkboxTarget = TouchTarget,
-                // The editor's pills, drawn here too: every enabled
-                // plugin's decorations, which is where a pill comes from.
-                pills = remember(body, plugins) { pillsIn(body, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)) },
-                pillTones = rememberPillTones(state, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)),
-            )
-        }
-    }
+    // Lazy, so a long note lays out only the blocks on screen (ADR 0032
+    // stage 1); what sat above the body scrolls away with it as before.
+    LazyMarkdownBody(
+        if (content.isEmpty()) emptyList() else blocks,
+        modifier = modifier.fillMaxSize().testTag("note-body"),
+        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+        header = {
+            Column(Modifier.padding(bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(noteTitle(relPath), style = MaterialTheme.typography.titleLarge)
+                DocumentLinksButton(state, content, onOpenNote)
+                RefactoringButton(state, relPath, content)
+                if (content.isEmpty()) {
+                    Text(
+                        "This note is empty.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colours.onSurfaceVariant,
+                    )
+                }
+            }
+        },
+        renderers = renderers,
+        onToggleTask = { line -> toggle(line) },
+        checkboxTarget = TouchTarget,
+        // The editor's pills, drawn here too: every enabled
+        // plugin's decorations, which is where a pill comes from.
+        pills = remember(body, plugins) { pillsIn(body, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)) },
+        pillTones = rememberPillTones(state, BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)),
+    )
 }

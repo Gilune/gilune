@@ -127,9 +127,80 @@ had not spoken. The rules that follow from it:
   costing tens of megabytes loads on the first job that needs it and is
   dropped when none has for a while (ADR 0018, 2026-09-04). "Available"
   is a question about the file, and answering it must stay cheap.
-- The renderer is not a footprint lever. Direct3D costs ≈135 MB private
-  over `SOFTWARE`, and that is the price of the app drawing properly
-  (owner decision 2026-09-04).
+- **The window draws on the CPU by default** (owner decision 2026-11-01,
+  overturning 2026-09-04's "the renderer is not a footprint lever").
+  `Rendering.kt` sets `skiko.renderApi=SOFTWARE_FAST` in `main` unless a
+  renderer was named at launch; **Settings ▸ Appearance ▸ Draw with the
+  graphics card** (device pref `gpuDrawing`, read at start) gives Skiko
+  its own choice back. Measured against every alternative
+  Skiko 0.9.4 offers (2026-11-01, probe copies of the installed 1.3.2, a
+  1,500-line note scrolled by 300 wheel notches in a window the size of
+  the owner's 5120×1440 screen): Direct3D sustained 75–83 fps at 413–417
+  MB idle; OpenGL 45–49 fps at 417–420 MB; `SOFTWARE_FAST` 39–43 fps at
+  292 MB. Software drew with *less* CPU (122% of a core against 135–147%)
+  — the cost is Compose's text layout, not rasterising — but half the
+  frames on a wide screen. Vulkan falls back to Direct3D on Windows;
+  `skiko.buffering` and `skiko.vsync.enabled` changed nothing measurable;
+  this Skiko exposes no limit on Skia's GPU cache. In a small window
+  OpenGL looked cheaper (306–320 MB against 372–375); that is window
+  size, not a saving. Memory won: ~120 MB for half the frames on the
+  widest screen, and the processor path used less CPU.
+- **Java2D's Direct3D pipeline is off** (`-Dsun.java2d.d3d=false`, in
+  the Gradle `jvmArgs` and the Windows launcher, held together by
+  `DesktopLaunchArgumentsTest`). Compose draws through Skia's own
+  device and never through Java2D's, which cost 35 MB private and 16
+  threads on an idle window (2026-11-01). The only Swing left is the two
+  `JFileChooser` dialogs, which Java2D then draws with GDI.
+- **An open note costs memory in proportion to its length.** The editor
+  lays out the whole buffer through Skia's paragraph engine, not the
+  visible lines: a 1,500-line note held ~90 MB more than an empty
+  window (Java heap +12 MB, the rest native Skia layout objects that
+  survive a full GC — live, not leaked). An editor that lays out only
+  what is on screen is the lever, and a large one. A background tab
+  costs its text and nothing more: three more tabs of a 64 KB note moved
+  the live Java heap by −137 to +380 KB after a full GC and kept no Skia
+  layout (only each pane's front tab is composed).
+  Split further (same 64 KB, processor drawing): plain text in the
+  editor +22 MB; the same bytes as styled Markdown +70 MB — ~6,300
+  style runs at ~7.5 KB native each; **Read mode +136 MB**, because
+  `MarkdownBody` is a plain `Column` that composes and lays out every
+  block, on screen or not (38,919 live Skia objects). **Fixed by ADR 0032
+  stage 1**: presentation mode and the phone's Read view draw through
+  `LazyMarkdownBody`, which composes only the blocks near the screen.
+  Re-measured with the installed 1.3.2 against a copy of it carrying the
+  new jar (two runs each, full GC, private bytes): empty window 138–140
+  MB both; the 64 KB note presented 280 MB before, 153–155 MB after —
+  **+141 MB → +13–15 MB**. `MarkdownBody` stays for short fixed previews
+  only; a whole note never goes through it.
+- **The launcher runs on the Segment Heap** (ADR 0032 stage 2;
+  `.github/windows-launcher/gilune.manifest`, the launcher's only
+  manifest). Measured 2026-11-01 against a launcher identical but for the
+  manifest, four runs each. At rest it held 182 MB against 193–217 MB. It
+  did not cure typing's cost: after typing into the long note, both heaps
+  kept +115–237 MB through a full GC and 3 minutes. That memory is held,
+  not merely unreturned.
+- **Native layout memory is the app's to free** (ADR 0032, 2026-11-01;
+  this corrects that day's earlier note, measured in the test JVM).
+
+  The cause: every keystroke lays the whole buffer out again as Skia
+  paragraphs, about 10 MB for the 64 KB note. A Skia object's memory is
+  freed only when the Java collector finds its wrapper dead. A small,
+  quiet heap rarely collects, and after typing it did not collect at all.
+
+  The rules:
+  - **`NativeGarbage` collects** once 4 MB of thrown-away layout has piled
+    up, and when editing pauses. Every surface that swaps layouts in and
+    out reports to it.
+  - **Skia's paragraph cache stays off.** It keyed copies by text, never
+    hit for an editor, and held ~45 MB in the real app.
+  - **The heap gives memory back** after a collection (Min/MaxHeapFreeRatio
+    10/30).
+  - **A small young generation is not the lever.** Layouts are promoted
+    before they die, so only a full collection frees them.
+
+  What remains: typing into a 64 KB note still peaks at 250–297 MB. That
+  is one whole-note layout per keystroke, and it needs ADR 0032 stage 4's
+  slice field. The full table is in the ADR.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it

@@ -1981,6 +1981,65 @@ gates promises) are ratified. **Next: application-level engineering — see
      decision: jlink trimming (all
      languages must stay — Gilune will be translated — which leaves only
      ~7 MB to gain), ProGuard (reflection/JNI risk).
+   - **Desktop memory, where it goes (2026-11-01, owner: 367 MB is a lot
+     for plain text).** Method: probe copies of the INSTALLED app started
+     with `JAVA_TOOL_OPTIONS` (the in-process launcher's JVM honours it:
+     NMT, `-Dgilune.vault`, `-Dgilune.probe`, renderer flags — a value
+     with a SPACE splits the option and the launcher shows an error box
+     titled "Gilune"), measured, closed by their own PID; jcmd 17 from
+     Adoptium attaches. Empty vault, small window: 324 MB = Skia Direct3D
+     ~150 + Java2D's Direct3D 35 + JVM ~100 + other native ~40. Java2D's
+     pipeline is OFF now (both launch paths; 09 § Desktop footprint).
+     Renderer re-measured full-screen (5120×1440): D3D 75–83 fps, software
+     39–43 fps at ~120 MB less — owner chose SOFTWARE as the default
+     (`Rendering.kt`; Settings ▸ Appearance ▸ Draw with the graphics card,
+     restart to apply; an explicit -Dskiko.renderApi still wins). JVM
+     trims measured and rejected (C1-only −7 MB, Xms16m nothing). An
+     open 1,500-line note costs ~90 MB, mostly native Skia paragraph
+     layout of the WHOLE buffer — live, not leaked. Probe tab layouts
+     persist per vault: an "empty" probe reopens the last probe's notes.
+     A BACKGROUND tab costs ~its text (live heap ±0.4 MB for 3 tabs of a
+     64 KB note; no Skia layouts) — an earlier "3 MB a tab" was run-to-run
+     noise in private bytes, which wobble ±10 MB. Not yet tested: whether
+     closing the front tab gives its layout memory back. The plan to make
+     an open note cost what is on screen is **ADR 0032 (Proposed)**:
+     lazy presentation mode → Segment Heap launcher manifest → style only
+     the visible window (count colour-only runs first) → block-windowed
+     editor only behind a spike. Staging RATIFIED by the owner
+     2026-11-01. **Stage 1 DONE**: `LazyMarkdownBody` for presentation +
+     phone Read; 64 KB note presented +141 MB → +13–15 MB (measured by
+     swapping the built `composeApp-desktop.jar` into a scratch copy of
+     the installed app — valid while the install's commit is the
+     branch base and FFI is unchanged). **Stage 2 DONE**: Segment Heap
+     manifest on the launcher (`gilune.manifest`, RT_MANIFEST via the
+     package script's rc). At rest 182 vs 193–217 MB; it does NOT fix
+     typing (+115–237 MB kept on both heaps after GC + 3 min = memory
+     still HELD). Probe `type:<rel>` appends 150 letters from inside the
+     app (no keystrokes) for such measurements; the scratch scripts check
+     the process heap signature (0xDDEEDDEE segment / 0xFFEEFFEE NT) via
+     PEB+0x30 → heap+0x10. Local launcher build: llvm-rc (MSYS_NO_PATHCONV)
+     + `cargo rustc --release -- -C link-arg=<res>`. **Owner target
+     (2026-11-01): base ~130 MB, a note open AND being edited at base +
+     50; leave the empty-window base alone unless it affects editing.**
+     **Typing memory FOUND and mostly fixed**: Skia native layouts freed
+     only by a Java GC that a quiet heap never ran → `NativeGarbage`
+     (desktopMain: GC per 4 MB of replaced layout + on pause), Skia
+     paragraph cache OFF (copied every text, never hit; reached by
+     reflection, `NativeGarbageTest` guards it), heap free ratios 10/30,
+     stage 3 style window + one-entry transformation cache. Now: 6 KB
+     note typing peak 180 MB (+46), 64 KB note open 170 / presented 142 /
+     after typing 186 — but the 64 KB TYPING PEAK is still 250–297 MB
+     (whole-note layout per keystroke, ~330 ms UI time each): needs stage
+     4's SLICE FIELD (ADR 0032: one BasicTextField over the visible part
+     of the buffer, measured spacers WITH one line of context either
+     side + scroll anchoring, own undo; ~a dozen NoteEditor geometry
+     functions to move to slice coordinates). Failed angles, don't retry:
+     ParagraphStyle chunking (adds an empty line per boundary), small
+     young gen (layouts get promoted), GC per keystroke on a whole-note
+     layout (+100 still). Scratch probes: idleprobe(2).ps1 (samples
+     private + CleanableImpl count, -Dumps for thread dumps),
+     holdprobe.ps1 (histograms + NMT), shots.ps1 (PrintWindow + posted
+     wheel, no focus change).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

@@ -201,6 +201,7 @@ private class Shutdown {
 
 fun main() {
     DesktopLog.install()
+    chooseRenderer()
     System.getProperty("compose.application.resources.dir")?.let { resources ->
         val existing = System.getProperty("jna.library.path")
         System.setProperty(
@@ -360,6 +361,10 @@ private fun DesktopApp(
     onVaultChange: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    // Skia's paragraph cache never hits for an editor and holds a copy of
+    // every text it laid out (NativeGarbage, ADR 0032).
+    val fontResolver = androidx.compose.ui.platform.LocalFontFamilyResolver.current
+    LaunchedEffect(fontResolver) { NativeGarbage.disableParagraphCache(fontResolver) }
     val state = remember { GiluneState(vaultDir, scope) }
     // The document region's whole state: the pane tree, its tabs and one
     // buffer per open note, restored from where this vault was left.
@@ -584,7 +589,7 @@ private fun DesktopApp(
             }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
-            // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>,
+            // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>, type:<rel>,
             // props:<rel>, search:<query>, panel:<key> and
             // split:<rel>;<rel>. View state belongs to a tab, so a probe
             // flips it on the tab the open returned.
@@ -599,6 +604,25 @@ private fun DesktopApp(
                         .forEach { openNote(it) }
                 probe.startsWith("read:") -> {
                     tabs.open(probe.removePrefix("read:")).editor.reading = true
+                }
+                // type:<rel> opens the note, waits 15 s for the app to
+                // settle, then appends 150 letters to its end, one every
+                // 40 ms, through the buffer the field draws. A memory
+                // measurement can watch typing this way without sending a
+                // keystroke to any window (ADR 0032). The field is not
+                // focused, so every line is decorated: close to typing,
+                // not identical.
+                probe.startsWith("type:") -> {
+                    val editor = tabs.open(probe.removePrefix("type:")).editor
+                    scope.launch {
+                        delay(15_000)
+                        repeat(150) { typed ->
+                            val text = editor.text.text + ('a' + typed % 26)
+                            editor.text = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+                            editor.dirty = true
+                            delay(40)
+                        }
+                    }
                 }
                 probe.startsWith("search:") -> {
                     // A screenshot of the search panel needs the rail,
