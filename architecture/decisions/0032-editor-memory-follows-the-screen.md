@@ -180,6 +180,26 @@ Expected: styled +70 MB moves toward the plain +22 MB, by the colour-only
 share of the runs. Each keystroke's dead layout shrinks by the same
 proportion.
 
+**Delivered 2026-11-01, with what the investigation found** (its numbers are
+in the "Where typing's memory went" section below). Built as specified:
+
+- `styleWindow` on the transformation, and `nextStyleWindow` for the
+  hysteresis;
+- the editor follows `bodyScroll` and the field's layout;
+- the window starts at the top 8,000 characters;
+- a one-entry cache in `filter`.
+
+Tests pin the invariant: whatever the window, the text, the offset mapping
+and every wrap-changing span are identical, and colour stays inside the
+window's lines. Falsified with the window ignored.
+
+Screenshots of a probe scrolled to the top, line ~800 and the end show
+every line coloured.
+
+On its own the window was a small win: live Skia objects at rest fell from
+12.9k to 7.3k, and typing barely moved. The colour runs were not the cost;
+the typing cost lay elsewhere.
+
 ### Stage 4 — lay out only what can be seen (spike first)
 
 This stage applies only if the targets are still missed after stages 1–3.
@@ -220,6 +240,52 @@ The spike must pass all of these before the stage is accepted, on a
 If the spike fails, the fallback is ADR 0012's own sanctioned outcome: a
 **size threshold** above which the editor drops colour styling. Its value
 is measured, not guessed.
+
+**Refined 2026-11-01, after stages 1–3: the slice field.** Stages 1–3 met
+the targets for ordinary notes. The long note still peaked at ~+130 MB while
+typed into, because each keystroke lays out all 64 KB again. That costs
+~330 ms of UI-thread time per keystroke, and the layout's working memory
+does not shrink however promptly the dead layouts are collected. Two
+cheaper ideas were measured and failed:
+
+- **Splitting the text into paragraph ranges** (so Skia shapes one piece
+  at a time) adds an empty line at every boundary: 565 lines against 558.
+- **Collecting after every keystroke** still peaked at +100 MB.
+
+A note of ~150 lines typed into at the same speed peaks at base + 50, and
+that is the size of one slice. So the slice is what memory needs.
+
+The smaller form of the block-windowed editor keeps **one
+`BasicTextField`**, but its value is a slice of the buffer:
+
+- **The slice** runs from one line start to another. It covers the
+  visible text plus a screenful either side, and always the whole
+  selection and any IME composition. It never cuts a fenced block.
+- **Spacers** above and below the field are as tall as the text outside
+  it. That text is measured with the same transformation and width, a
+  chunk at a time, and cached until the text or the width changes.
+- **Every edit** writes the slice back into the one buffer.
+- **The slice moves** only when nothing is composing and no pointer is
+  held, so a drag or an IME session never sees the field's text shift
+  under it.
+
+What it costs, from reading `NoteEditor.kt`:
+
+- **Undo and redo become the editor's own**, kept against the buffer. The
+  field's built-in history would restore an old slice.
+- **Ctrl+A** selects the buffer (the slice grows to hold it).
+- **Every function that mixes the buffer's text with the field's layout
+  works in slice coordinates** through one mapping. That is
+  `menuTokenUnder`, `caretAnchor`, `formatMenuItems`, `moveByLines`, caret
+  follow, the reveal pulse, find shading, collapsed blocks, the date chip,
+  the suggest popup anchor, and checkbox and hover hit tests: about a
+  dozen functions.
+- **Overlays drawn in the scroll box** (pulse, chip, collapsed blocks) add
+  the top spacer.
+- **Notes below a size threshold** keep the whole-buffer field, where they
+  already meet the target.
+
+The pass list above still gates it.
 
 ## Alternatives considered
 

@@ -8,7 +8,7 @@
 //
 // So the editor reports each layout it replaces, sized by its text, and a
 // collection is asked for once the layouts thrown away add up to
-// [BUDGET_BYTES], and once more when editing pauses. A full collection of
+// [BUDGET_BYTES] (4 MB), and once more when editing pauses. A full collection of
 // this app's ~20 MB heap takes 25–40 ms, on this thread rather than the UI's.
 //
 // Skia's paragraph cache is switched off as well. It keeps a copy of every
@@ -28,7 +28,9 @@ internal object NativeGarbage {
     const val SETTLE_MS = 1_000L
 
     /// How much thrown-away layout is let pile up before collecting.
-    const val BUDGET_BYTES = 16L shl 20
+    /// Measured on fast typing into a 6 KB note: 16 MB peaked at 196 MB,
+    /// 8 MB at 188, 4 MB at 180 (base + 50) for no CPU that showed.
+    const val BUDGET_BYTES = 4L shl 20
 
     /// Native bytes a laid-out character costs, roughly: a relayout of the
     /// 64 KB note left ~10–13 MB behind.
