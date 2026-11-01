@@ -179,17 +179,28 @@ had not spoken. The rules that follow from it:
   did not cure typing's cost: after typing into the long note, both heaps
   kept +115–237 MB through a full GC and 3 minutes. That memory is held,
   not merely unreturned.
-- **Typing in a long note churns native memory.** Every keystroke lays
-  the whole buffer out again as one Skia paragraph, and the old one's
-  native memory waits for the collector to run its cleaner — which a
-  small, mostly idle heap rarely does. With the app's own flags, 150
-  characters typed into that note took the process 175 → 372 MB, and
-  270 MB after a full GC (the allocator keeps its high-water mark).
-  Skia's paragraph cache is not it (13 entries throughout, 36 MB).
-  Forcing a GC every 10 keystrokes did not help (peak 401 MB): cleaners
-  run asynchronously and the allocator does not shrink. The levers are
-  smaller layouts — fewer style runs, or an editor that lays out only
-  what is on screen.
+- **Native layout memory is the app's to free** (ADR 0032, 2026-11-01;
+  this corrects that day's earlier note, measured in the test JVM).
+
+  The cause: every keystroke lays the whole buffer out again as Skia
+  paragraphs, about 10 MB for the 64 KB note. A Skia object's memory is
+  freed only when the Java collector finds its wrapper dead. A small,
+  quiet heap rarely collects, and after typing it did not collect at all.
+
+  The rules:
+  - **`NativeGarbage` collects** once 4 MB of thrown-away layout has piled
+    up, and when editing pauses. Every surface that swaps layouts in and
+    out reports to it.
+  - **Skia's paragraph cache stays off.** It keyed copies by text, never
+    hit for an editor, and held ~45 MB in the real app.
+  - **The heap gives memory back** after a collection (Min/MaxHeapFreeRatio
+    10/30).
+  - **A small young generation is not the lever.** Layouts are promoted
+    before they die, so only a full collection frees them.
+
+  What remains: typing into a 64 KB note still peaks at 250–297 MB. That
+  is one whole-note layout per keystroke, and it needs ADR 0032 stage 4's
+  slice field. The full table is in the ADR.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it

@@ -287,6 +287,75 @@ What it costs, from reading `NoteEditor.kt`:
 
 The pass list above still gates it.
 
+**Spike evidence for the spacers (2026-11-01, throwaway test, deleted).**
+The 1,500-line note was measured with the editor's own style and
+transformation at widths 420 and 900, whole and in pieces:
+
+- **Pieces measured alone** keep the line count exactly. Their heights,
+  though, lose 3–11 px at every piece boundary to line-height trimming at a
+  layout's edges: 136 px over 50 pieces.
+- **Pieces measured with one line of context on either side**, taking each
+  piece's advance from line top to line top, came out exact for
+  150-line pieces at width 420 (line 900 at 25,197 px both ways, total
+  41,997 both ways). At width 900 they were 6–9 px short over the whole
+  note; 40-line pieces were 15–25 px short. That is sub-pixel rounding at
+  each boundary.
+
+So the spacers are measured with context, and moving the slice also
+anchors the scroll. The first visible line keeps its screen position, and
+the scroll offset absorbs whatever the measurement missed.
+
+Offsets in the transformed layout must go through the transformation's
+mapping: a checkbox is one glyph for three source characters. The spike's
+first figures were wrong for exactly that reason.
+
+## Where typing's memory went (2026-11-01)
+
+Owner target, set mid-investigation: an empty window at ~130 MB, and a note
+open and being edited at **base + 50**. Found with the `type:` probe, class
+histograms, NMT and thread dumps:
+
+- **Java grew ~25 MB while typing** (the JIT, briefly), and its heap stayed
+  fixed. The rest was Skia's native text layouts.
+- **Each relayout of the 64 KB note costs ~330 ms of UI-thread time and
+  leaves ~10 MB native behind.** That memory is freed only when the Java
+  collector finds the wrapper dead. A small heap allocates slowly, so
+  collections came far apart. Once typing stopped none ran at all, and
+  75–100k dead Skia objects stayed waiting (+100–160 MB).
+- **Skia's paragraph cache copied every text it laid out, keyed by the
+  text.** An editor makes a new text with every keystroke, so it never
+  hit, and it held ~45 MB.
+- **The serial collector kept 59 MB of heap committed for 18 MB of live
+  objects.**
+- **A small young generation does not help.** Layouts survive long enough
+  to be promoted, so only a full collection frees them.
+
+Fixes:
+
+- **`NativeGarbage`:** a full collection once 4 MB of thrown-away layout has
+  piled up, and again when editing pauses, a note is put away, or
+  presentation stops scrolling. Each takes 25–40 ms, off the UI thread.
+- **Skia's paragraph cache switched off**, with a test that fails if Compose
+  moves it.
+- **`-XX:MinHeapFreeRatio=10 -XX:MaxHeapFreeRatio=30`** on both launch
+  paths.
+
+Final measurements (probe copies with the 4 MB budget; the empty window
+was 134 MB):
+
+| Scenario | Before | After |
+|---|---|---|
+| 6 KB note open | — | 142 MB (+8) |
+| 6 KB note, typing peak | 271 MB | **180 MB (+46)** |
+| 6 KB note after typing | 162 MB | 156 MB |
+| 64 KB note open | 183 MB | 170 MB (+36) |
+| 64 KB note presented | 280 MB | 142 MB (+8) |
+| 64 KB note, typing peak | 370–490 MB | **250–297 MB — over target** |
+| 64 KB note after typing | 296–340 MB | 186 MB (+52) |
+
+The long note's typing peak is the one figure over target. It needs
+stage 4's slice field.
+
 ## Alternatives considered
 
 ### A custom text surface

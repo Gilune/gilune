@@ -2018,8 +2018,28 @@ gates promises) are ratified. **Next: application-level engineering — see
      app (no keystrokes) for such measurements; the scratch scripts check
      the process heap signature (0xDDEEDDEE segment / 0xFFEEFFEE NT) via
      PEB+0x30 → heap+0x10. Local launcher build: llvm-rc (MSYS_NO_PATHCONV)
-     + `cargo rustc --release -- -C link-arg=<res>`. Next: find what holds
-     the typing memory, then stage 3.
+     + `cargo rustc --release -- -C link-arg=<res>`. **Owner target
+     (2026-11-01): base ~130 MB, a note open AND being edited at base +
+     50; leave the empty-window base alone unless it affects editing.**
+     **Typing memory FOUND and mostly fixed**: Skia native layouts freed
+     only by a Java GC that a quiet heap never ran → `NativeGarbage`
+     (desktopMain: GC per 4 MB of replaced layout + on pause), Skia
+     paragraph cache OFF (copied every text, never hit; reached by
+     reflection, `NativeGarbageTest` guards it), heap free ratios 10/30,
+     stage 3 style window + one-entry transformation cache. Now: 6 KB
+     note typing peak 180 MB (+46), 64 KB note open 170 / presented 142 /
+     after typing 186 — but the 64 KB TYPING PEAK is still 250–297 MB
+     (whole-note layout per keystroke, ~330 ms UI time each): needs stage
+     4's SLICE FIELD (ADR 0032: one BasicTextField over the visible part
+     of the buffer, measured spacers WITH one line of context either
+     side + scroll anchoring, own undo; ~a dozen NoteEditor geometry
+     functions to move to slice coordinates). Failed angles, don't retry:
+     ParagraphStyle chunking (adds an empty line per boundary), small
+     young gen (layouts get promoted), GC per keystroke on a whole-note
+     layout (+100 still). Scratch probes: idleprobe(2).ps1 (samples
+     private + CleanableImpl count, -Dumps for thread dumps),
+     holdprobe.ps1 (histograms + NMT), shots.ps1 (PrintWindow + posted
+     wheel, no focus change).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
