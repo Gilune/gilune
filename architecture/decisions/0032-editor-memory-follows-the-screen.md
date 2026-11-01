@@ -1,9 +1,9 @@
 # ADR 0032: Editor memory follows the screen, not the note
 
 Date: 2026-11-01
-Status: **Proposed** — owner asked for the plan before any code
-(2026-11-01). Each stage below is gated on its own measurement; stage 4 is
-gated on a spike.
+Status: **Proposed — staging ratified** (owner, 2026-11-01: "Ok let's do
+it"). Each stage below is gated on its own measurement; stage 4 is gated on
+a spike. Accepted when the targets are met.
 
 ## Context
 
@@ -85,6 +85,20 @@ Things to keep working:
 
 This also benefits the phone, whose Notes Read view draws through the same
 `MarkdownBody`. Expected: +136 MB → near the plain-editor figure.
+
+**Delivered 2026-11-01; target met.** `LazyMarkdownBody` (jvmShared
+`MarkdownView.kt`) shares one per-block renderer with `MarkdownBody`.
+Presentation (`Presentation.kt`) and the phone's Read view
+(`NotesScreen.kt`) use it; their title and buttons are its header item.
+Presentation's arrow and Page keys scroll the list.
+
+Measured with the same probe method, two runs each: the 64 KB note
+presented went from +141 MB to **+13–15 MB** over an empty window.
+
+`PresentationModeUiTest.aLongNoteComposesOnlyWhatIsOnScreenAndPageDownStillScrolls`
+pins the behaviour. It was falsified against the old column, which
+composed all 2,000 blocks. The phone was not measured or run on a device;
+it compiles.
 
 ### Stage 2 — the allocator gives memory back
 

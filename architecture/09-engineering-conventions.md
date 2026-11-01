@@ -164,7 +164,14 @@ had not spoken. The rules that follow from it:
   editor +22 MB; the same bytes as styled Markdown +70 MB — ~6,300
   style runs at ~7.5 KB native each; **Read mode +136 MB**, because
   `MarkdownBody` is a plain `Column` that composes and lays out every
-  block, on screen or not (38,919 live Skia objects).
+  block, on screen or not (38,919 live Skia objects). **Fixed by ADR 0032
+  stage 1**: presentation mode and the phone's Read view draw through
+  `LazyMarkdownBody`, which composes only the blocks near the screen.
+  Re-measured with the installed 1.3.2 against a copy of it carrying the
+  new jar (two runs each, full GC, private bytes): empty window 138–140
+  MB both; the 64 KB note presented 280 MB before, 153–155 MB after —
+  **+141 MB → +13–15 MB**. `MarkdownBody` stays for short fixed previews
+  only; a whole note never goes through it.
 - **Typing in a long note churns native memory.** Every keystroke lays
   the whole buffer out again as one Skia paragraph, and the old one's
   native memory waits for the collector to run its cleaner — which a

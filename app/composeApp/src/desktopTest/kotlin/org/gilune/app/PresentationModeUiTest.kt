@@ -165,4 +165,22 @@ class PresentationModeUiTest {
         assertEquals(TextRange(14), editor.text.selection, "the caret is where it was left")
         compose.onNodeWithTag("note-body").assertExists()
     }
+
+    /// ADR 0032 stage 1: a long note composes the blocks on screen, not
+    /// all of them — the plain column it replaced laid out every block and
+    /// cost +136 MB for a 64 KB note. The keys still reach the far end.
+    @Test
+    fun aLongNoteComposesOnlyWhatIsOnScreenAndPageDownStillScrolls() {
+        presentOnly((1..2000).joinToString("\n\n") { "paragraph number $it" } + "\n")
+        compose.onNode(hasText("paragraph number 1", substring = false)).assertExists()
+        val drawn = compose.onAllNodes(hasText("paragraph number", substring = true)).fetchSemanticsNodes().size
+        assertTrue(drawn in 1..100, "only the screenful is composed, not 2,000 blocks: $drawn")
+        compose.onNode(hasText("paragraph number 2000")).assertDoesNotExist()
+
+        repeat(5) {
+            compose.onNodeWithTag("presented-note").performKeyInput { pressKey(Key.PageDown) }
+            compose.waitForIdle()
+        }
+        compose.onNode(hasText("paragraph number 1", substring = false)).assertDoesNotExist()
+    }
 }

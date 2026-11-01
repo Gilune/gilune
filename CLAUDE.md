@@ -2005,7 +2005,13 @@ gates promises) are ratified. **Next: application-level engineering — see
      an open note cost what is on screen is **ADR 0032 (Proposed)**:
      lazy presentation mode → Segment Heap launcher manifest → style only
      the visible window (count colour-only runs first) → block-windowed
-     editor only behind a spike. Nothing built yet.
+     editor only behind a spike. Staging RATIFIED by the owner
+     2026-11-01. **Stage 1 DONE**: `LazyMarkdownBody` for presentation +
+     phone Read; 64 KB note presented +141 MB → +13–15 MB (measured by
+     swapping the built `composeApp-desktop.jar` into a scratch copy of
+     the installed app — valid while the install's commit is the
+     branch base and FFI is unchanged). Next: stage 2 (Segment Heap
+     manifest on the launcher).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
