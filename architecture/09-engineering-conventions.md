@@ -160,6 +160,22 @@ had not spoken. The rules that follow from it:
   costs its text and nothing more: three more tabs of a 64 KB note moved
   the live Java heap by −137 to +380 KB after a full GC and kept no Skia
   layout (only each pane's front tab is composed).
+  Split further (same 64 KB, processor drawing): plain text in the
+  editor +22 MB; the same bytes as styled Markdown +70 MB — ~6,300
+  style runs at ~7.5 KB native each; **Read mode +136 MB**, because
+  `MarkdownBody` is a plain `Column` that composes and lays out every
+  block, on screen or not (38,919 live Skia objects).
+- **Typing in a long note churns native memory.** Every keystroke lays
+  the whole buffer out again as one Skia paragraph, and the old one's
+  native memory waits for the collector to run its cleaner — which a
+  small, mostly idle heap rarely does. With the app's own flags, 150
+  characters typed into that note took the process 175 → 372 MB, and
+  270 MB after a full GC (the allocator keeps its high-water mark).
+  Skia's paragraph cache is not it (13 entries throughout, 36 MB).
+  Forcing a GC every 10 keystrokes did not help (peak 401 MB): cleaners
+  run asynchronously and the allocator does not shrink. The levers are
+  smaller layouts — fewer style runs, or an editor that lays out only
+  what is on screen.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it
