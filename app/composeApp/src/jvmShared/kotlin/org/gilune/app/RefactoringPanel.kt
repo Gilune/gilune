@@ -89,7 +89,10 @@ internal fun RefactoringDialog(state: GiluneState, path: String, source: String,
                                 excluded = excluded, cancelled = cancel::get, progress = { entry -> scope.launch { progress = entry.relPath; refresh++ } }) }
                         }) { Text("Apply reviewed changes / resume") }
                         if (selectedPlan.applied > 0uL) TextButton(onClick = { run { kernel.prepareRefactoringUndo(selectedPlan.id) } }) { Text("Preview undo") }
-                        if (selectedPlan.provider != "memory:refactoring.undo") TextButton(onClick = {
+                        // A text replace has no defining page to look again
+                        // from; its own panel prepares a fresh one.
+                        if (selectedPlan.provider != "memory:refactoring.undo" &&
+                            selectedPlan.provider != org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN) TextButton(onClick = {
                             run {
                                 val config = refactoringConfiguration(selectedPlan.configuration)
                                 val binding = BUNDLED_PLUGIN_EXTENSIONS.refactorings(kernel.plugins()).single { it.registration.id == selectedPlan.provider }

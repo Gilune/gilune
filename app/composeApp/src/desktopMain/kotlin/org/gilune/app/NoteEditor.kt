@@ -20,6 +20,15 @@ import org.gilune.plugins.tasks.tasksShortcut
 import org.gilune.plugins.tasks.tasksDateShortcut
 import org.gilune.plugins.tasks.tasksWeekStart
 import org.gilune.plugin.sdk.TokenMenuItem
+import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
+import org.gilune.plugins.findreplace.FindMatch
+import org.gilune.plugins.findreplace.FindOutcome
+import org.gilune.plugins.findreplace.FindReplaceKey
+import org.gilune.plugins.findreplace.applyMatches
+import org.gilune.plugins.findreplace.findMatches
+import org.gilune.plugins.findreplace.findReplaceKey
+import org.gilune.plugins.findreplace.matches
+import org.gilune.plugins.findreplace.stepMatch
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
@@ -227,6 +236,9 @@ class EditorState : LiveDocumentBuffer {
 
     /// The dictation landing in this note as it is spoken, or null.
     var live by mutableStateOf<LiveDictation?>(null)
+
+    /// The find bar over this tab's note (ADR 0031 § 3).
+    val find = FindState()
 
     /// The note's front-matter block exactly as it was read, fences
     /// included. Written back untouched unless the properties editor
@@ -799,8 +811,24 @@ private fun OpenNote(
                 editor.focusBody = false
                 editor.resumeEditing = false
             }
-            val line =
-                if (bodyFocused) caretLine(editor.text.text, editor.text.selection.start) else null
+            // Find and replace, while its plugin is on (ADR 0031 § 3). The
+            // current match is the selection, so stepping is selecting and
+            // Esc leaves the caret on it.
+            val find = editor.find
+            val finding = find.open && plugins.pluginContributes(FIND_REPLACE_PLUGIN, Slots.EDITOR_FIND)
+            val findOutcome = if (finding) remember(editor.text.text, find.query) { findMatches(editor.text.text, find.query) } else null
+            val found = findOutcome?.matches.orEmpty()
+            val currentMatch = found.indexOfFirst { it.start == editor.text.selection.min && it.end == editor.text.selection.max }
+                .takeIf { it >= 0 }
+
+            // The caret's line shows raw Markdown; while the bar holds the
+            // focus, the current match's line does, so a match inside a
+            // checkbox or a closed filter block can be seen.
+            val line = when {
+                bodyFocused -> caretLine(editor.text.text, editor.text.selection.start)
+                currentMatch != null -> caretLine(editor.text.text, found[currentMatch].start)
+                else -> null
+            }
 
             // T4 in Edit mode (owner, 2026-09-01): a `filter` block behaves
             // like a checkbox — rendered until the caret is placed within
@@ -1297,6 +1325,83 @@ private fun OpenNote(
                 write()
             }
 
+            fun selectMatch(match: FindMatch) {
+                editor.text = editor.text.copy(selection = TextRange(match.start, match.end))
+                verticalX = null
+                typedHere = false
+                caretMoves++
+            }
+            // Forward from the end of the selection, back from its start,
+            // so a selected match steps to its neighbour and wraps at the
+            // ends.
+            fun stepFind(forward: Boolean) {
+                val selection = editor.text.selection
+                val at = stepMatch(found, if (forward) selection.max else selection.min, forward) ?: return
+                selectMatch(found[at])
+            }
+            // The current match becomes its replacement and the next one is
+            // selected; with no current match it only steps to one, so the
+            // first press shows what the second will change.
+            fun replaceCurrent() {
+                val text = editor.text.text
+                val outcome = findMatches(text, find.query, find.replacement)
+                if (outcome is FindOutcome.Invalid) { state.message.value = outcome.reason; return }
+                val match = outcome.matches.firstOrNull { it.start == editor.text.selection.min && it.end == editor.text.selection.max }
+                    ?: return stepFind(true)
+                val replaced = text.replaceRange(match.start, match.end, match.replacement!!)
+                val after = match.start + match.replacement!!.length
+                val next = findMatches(replaced, find.query).matches.let { list -> stepMatch(list, after, true)?.let(list::get) }
+                editor.text = TextFieldValue(replaced, next?.let { TextRange(it.start, it.end) } ?: TextRange(after))
+                editor.dirty = true
+                caretMoves++
+            }
+            // One buffer edit, so one Ctrl+Z puts every match back.
+            fun replaceEverywhere() {
+                val text = editor.text.text
+                val outcome = findMatches(text, find.query, find.replacement)
+                if (outcome is FindOutcome.Invalid) { state.message.value = outcome.reason; return }
+                if (outcome.matches.isEmpty()) return
+                val replaced = applyMatches(text, outcome.matches)
+                val caret = editor.text.selection.min.coerceAtMost(replaced.length)
+                editor.text = TextFieldValue(replaced, TextRange(caret))
+                editor.dirty = true
+                caretMoves++
+                val count = outcome.matches.size
+                state.message.value = "replaced $count ${if (count == 1) "match" else "matches"} — Ctrl+Z in the note puts them back"
+            }
+            // Typing in the bar selects the first match from where the
+            // search began, so the pattern finds as it is typed.
+            LaunchedEffect(finding, find.pattern.text, find.options) {
+                if (!finding || found.isEmpty() || currentMatch != null) return@LaunchedEffect
+                stepMatch(found, editor.text.selection.min, forward = true)?.let { selectMatch(found[it]) }
+            }
+            LaunchedEffect(find.steps) { if (find.steps.first > 0 && finding) stepFind(find.steps.second) }
+            LaunchedEffect(find.closed) { if (find.closed > 0) runCatching { bodyFocus.requestFocus() } }
+            val stepKeys = remember(plugins) { plugins.findReplaceKey(FindReplaceKey.NEXT) to plugins.findReplaceKey(FindReplaceKey.PREVIOUS) }
+            if (finding) {
+                FindBar(
+                    find,
+                    FindStatus(found.size, currentMatch, (findOutcome as? FindOutcome.Invalid)?.reason),
+                    onStep = ::stepFind,
+                    onReplace = ::replaceCurrent,
+                    onReplaceAll = ::replaceEverywhere,
+                    stepKeys = { event ->
+                        val pressed = keystrokeOf(event)
+                        when {
+                            pressed == null -> false
+                            keystrokeMatches(stepKeys.first, pressed) -> { stepFind(true); true }
+                            keystrokeMatches(stepKeys.second, pressed) -> { stepFind(false); true }
+                            else -> false
+                        }
+                    },
+                )
+            }
+            val matchMapping = remember(finding, transformation, editor.text.text) {
+                if (finding) transformation.filter(AnnotatedString(editor.text.text)).offsetMapping else null
+            }
+            val matchShade = colours.primary.copy(alpha = 0.16f)
+            val currentShade = colours.primary.copy(alpha = 0.42f)
+
             // The input surface is the pane, not the text: a short note
             // still fills it, so a click anywhere lands the caret.
             BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -1371,6 +1476,20 @@ private fun OpenNote(
                                     // from the field's own layout — inside the
                                     // padding, so layout space is draw space.
                                     .drawBehind { layout?.let { drawPills(it, pills) } }
+                                    // Every find match shaded behind its words,
+                                    // the current one more strongly.
+                                    .drawBehind {
+                                        val placed = layout ?: return@drawBehind
+                                        val mapping = matchMapping ?: return@drawBehind
+                                        val limit = placed.layoutInput.text.length
+                                        found.forEachIndexed { index, match ->
+                                            val start = mapping.originalToTransformed(match.start).coerceIn(0, limit)
+                                            val end = mapping.originalToTransformed(match.end).coerceIn(start, limit)
+                                            if (end > start) {
+                                                drawPath(placed.getPathForRange(start, end), if (index == currentMatch) currentShade else matchShade)
+                                            }
+                                        }
+                                    }
                                     // Inside the padding, so its space is the text
                                     // layout's and a cursor rect needs no shifting.
                                     .bringIntoViewRequester(caretView)
@@ -1400,6 +1519,7 @@ private fun OpenNote(
                                             !completions.visible && formatShortcut(event) -> true
                                             !completions.visible -> when {
                                                 event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
+                                                event.key == Key.Escape && finding -> { find.close(); true }
                                                 event.key == Key.DirectionDown -> moveByLines(1, event.isShiftPressed)
                                                 event.key == Key.DirectionUp -> moveByLines(-1, event.isShiftPressed)
                                                 event.key == Key.Tab -> indentLines(event.isShiftPressed)

@@ -429,6 +429,11 @@ private fun PluginScreen(
         PeopleSettings(state, plugin)
     }
 
+    if (plugin.pluginId == org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN) {
+        HorizontalDivider(color = colours.outlineVariant)
+        FindReplaceSettings(state, plugin)
+    }
+
     // Where a plugin's pages go. The page defaults that decide it were
     // reachable only from a small button in the rail panel; the owner
     // looked here first (2026-10-23) and found nothing. One source of
@@ -792,6 +797,36 @@ private fun WherePagesGo(state: GiluneState, collections: List<BoundPageCollecti
     }
 }
 
+/// Every key find and replace answers, each the person's to rebind
+/// (ADR 0031 § 5).
+@Composable
+private fun FindReplaceSettings(state: GiluneState, plugin: PluginInfo) {
+    val colours = MaterialTheme.colorScheme
+    Text("Keys", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Find and replace work in the note in front; replacing across notes opens " +
+            "in the Search panel. Press Change, then the key or combination you want; Esc cancels.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    for (key in org.gilune.plugins.findreplace.FindReplaceKey.entries) {
+        Text(key.label, fontSize = 13.sp)
+        KeystrokeSetting(
+            org.gilune.plugins.findreplace.findReplaceKey(plugin.settings, key),
+            key.default,
+            "find-replace-key:${key.setting}",
+        ) { bound ->
+            state.pluginAction("${key.label.lowercase()} is now ${bound ?: key.default}") {
+                it.setPluginSettings(
+                    plugin.pluginId,
+                    org.gilune.plugins.findreplace.findReplaceSettingsDocument(plugin.settings, key, bound),
+                )
+            }
+        }
+    }
+}
+
 /// A plugin-owned keystroke: the binding as it stands, Change to record the
 /// next keystroke pressed (spelled the way the editor matches it, Esc
 /// cancels), and Reset back to the plugin's default — `save(null)`.
@@ -800,6 +835,10 @@ private fun KeystrokeSetting(current: String, default: String, tag: String, save
     val colours = MaterialTheme.colorScheme
     var listening by remember { mutableStateOf(false) }
     val field = remember { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.DisposableEffect(listening) {
+        KeystrokeCapture.listening = listening
+        onDispose { if (listening) KeystrokeCapture.listening = false }
+    }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Box(
             Modifier

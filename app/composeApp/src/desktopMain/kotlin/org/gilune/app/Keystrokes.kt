@@ -40,3 +40,11 @@ internal fun keystroke(code: Int, ctrl: Boolean, alt: Boolean, shift: Boolean, m
 /// spaces around the `+` are forgiven, so a hand-edited `ctrl + e` works.
 fun keystrokeMatches(binding: String, pressed: String): Boolean =
     binding.split('+').joinToString("+") { it.trim() }.equals(pressed, ignoreCase = true)
+
+/// Set while a settings row is recording a binding, so the window's own
+/// shortcuts stand aside and the keystroke reaches the recorder — or no key
+/// the window answers (Ctrl+F, Ctrl+N…) could ever be chosen.
+object KeystrokeCapture {
+    @Volatile
+    var listening: Boolean = false
+}

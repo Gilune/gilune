@@ -20,6 +20,10 @@ removing one takes away its buttons without touching a word you wrote.
 - **Dictate at the cursor** while writing, straight into the note you have open.
 - **Local transcription** — your voice never leaves the machine, and the original
   recording is always kept beside the note.
+- **Recordings you can redo** — transcribe a recording again, or turn an audio file
+  from elsewhere into a note (desktop).
+- **Speaker labels** — a conversation comes back as one paragraph per speaker,
+  worked out on your machine (desktop, optional).
 - **Plain Markdown files** in a folder you choose, styled as you type without ever
   changing the bytes on disk.
 - **Autosave** — there is no save button and never a lost paragraph.
@@ -39,7 +43,8 @@ removing one takes away its buttons without touching a word you wrote.
 The user guide lives at **[gilune.github.io/gilune](https://gilune.github.io/gilune/)**.
 
 - [Capture &amp; voice](https://gilune.github.io/gilune/guide/capture.html) — making
-  notes by speaking, dictating at the cursor, and how local transcription is set up.
+  notes by speaking, dictating at the cursor, transcribing a recording again or one
+  made elsewhere, speaker labels, and how local transcription is set up.
 - [Tasks](https://gilune.github.io/gilune/guide/tasks.html) — the `/` menu for due
   dates, the agenda, and live filter blocks.
 - [Search](https://gilune.github.io/gilune/guide/search.html) — the complete query

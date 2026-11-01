@@ -5,6 +5,7 @@
 
 package org.gilune.app
 
+import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
 import uniffi.gilune_ffi.PluginInfo
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -51,6 +52,20 @@ class ShortcutsTest {
         // The due date shortcut shows its own binding too, once rebound.
         val rebound = plugin("org.memory.tasks", "Tasks", "enabled", """{"dateShortcut":"Alt+D"}""")
         assertEquals(listOf("Ctrl+L", "Alt+D"), shortcutGroups(listOf(rebound)).first { it.title == "Tasks" }.shortcuts.map { it.keys })
+    }
+
+    @Test
+    fun findAndReplaceListsItsKeysAsBoundAndMovesVaultSearchAside() {
+        val off = shortcutGroups(listOf(plugin(FIND_REPLACE_PLUGIN, "Find and replace", "disabled", "")))
+        assertNull(off.firstOrNull { it.title == "Find and replace" })
+        assertEquals("Ctrl+F", off.single { it.title == "General" }.shortcuts.single { it.action == "Search the vault" }.keys)
+
+        val on = shortcutGroups(listOf(plugin(FIND_REPLACE_PLUGIN, "Find and replace", "enabled", """{"replaceKey":"Ctrl+R"}""")))
+        val group = assertNotNull(on.firstOrNull { it.title == "Find and replace" })
+        assertEquals(listOf("Ctrl+F", "Ctrl+R", "Ctrl+Shift+H", "F3", "Shift+F3"), group.shortcuts.map { it.keys })
+        assertEquals("Ctrl+Shift+F", on.single { it.title == "General" }.shortcuts.single { it.action == "Search the vault" }.keys)
+        val claimed = on.flatMap { it.shortcuts }.map { it.keys }.filter { it !in keystrokeRows }
+        assertEquals(claimed, claimed.distinct(), "a key named twice with find and replace on")
     }
 
     @Test

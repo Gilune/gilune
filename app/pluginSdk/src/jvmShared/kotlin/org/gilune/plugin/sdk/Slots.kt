@@ -26,6 +26,12 @@ object Slots {
     /// the caret is on, the host runs its lookup and opens the answer.
     const val EDITOR_DEFINITIONS = "editor.definitions"
 
+    /// Find and replace (ADR 0031): the bar over a note, and the replace
+    /// rows under the Search panel's query. Shell-drawn; present only while
+    /// an enabled plugin contributes them.
+    const val EDITOR_FIND = "editor.find"
+    const val SEARCH_REPLACE = "search.replace"
+
     /// A folder a vault starts with because a plugin uses it. The host
     /// creates each one once per vault on a machine; one the user deletes
     /// stays deleted. Config: `{"folder":"Name"}`.
