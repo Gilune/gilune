@@ -159,9 +159,15 @@ class NemoHost {
 val LocalNemo = staticCompositionLocalOf { NemoHost() }
 
 /// Bring up Transcription (NVIDIA NeMo): the chosen model downloaded with
-/// consent and verified, then loaded once here, off the capture path, so
-/// the first dictation does not wait for it.
-private fun bringUpNemo(state: GiluneState, gilune: Gilune, runtime: TranscriptionRuntime, nemo: NemoHost) {
+/// consent and verified. Loading it is left to the first job or dictation
+/// that needs it (09 § Desktop footprint).
+internal fun bringUpNemo(
+    state: GiluneState,
+    gilune: Gilune,
+    runtime: TranscriptionRuntime,
+    nemo: NemoHost,
+    root: File = nemoModelsRoot(),
+) {
     val plugins = gilune.plugins()
     val installed = plugins.first { it.pluginId == NEMO_PLUGIN }
     val model = plugins.nemoModel()
@@ -169,7 +175,7 @@ private fun bringUpNemo(state: GiluneState, gilune: Gilune, runtime: Transcripti
     runtime.failure = null
     runtime.needsConsent = false
     runtime.model = null
-    if (!nemoModelPresent(model)) {
+    if (!nemoModelPresent(model, root)) {
         if (NETWORK_CAPABILITY !in installed.granted) {
             runtime.phase = TranscriptionPhase.Absent
             runtime.needsConsent = true
@@ -181,7 +187,7 @@ private fun bringUpNemo(state: GiluneState, gilune: Gilune, runtime: Transcripti
         runtime.percent = 0
         state.message.value = "downloading ${model.name} (${model.size}, one time)…"
         val fetched = runCatching {
-            installNemoModel(model, onProgress = { done ->
+            installNemoModel(model, root, onProgress = { done ->
                 val percent = (done * 100 / model.bytes).toInt()
                 runtime.percent = percent
                 state.message.value = "downloading ${model.name} — $percent% of ${model.size}"
@@ -195,17 +201,12 @@ private fun bringUpNemo(state: GiluneState, gilune: Gilune, runtime: Transcripti
         }
     }
     val current = nemo.engines
-    val engines = if (current != null && current.model == model) current else NemoEngines(model, File(nemoModelsRoot(), model.archive))
+    val engines = if (current != null && current.model == model) current else NemoEngines(model, File(root, model.archive))
     nemo.replace(engines)
-    val loaded = runCatching {
-        if (model.kind == NemoKind.STREAMING) engines.withOnline { } else engines.withOffline { }
-    }
-    if (loaded.isFailure) {
-        runtime.phase = TranscriptionPhase.Failed
-        runtime.failure = loaded.exceptionOrNull()?.message
-        state.message.value = "${model.name} could not be loaded (${runtime.failure}); captures still work"
-        return
-    }
+    // Ready means the files are here, not that the model is in memory: it
+    // loads at the first dictation or recording (~3 s for Nemotron) and
+    // leaves after ten idle minutes. Loading it here held ~700 MB for
+    // every session in which nobody spoke (owner, 2026-11-01).
     runtime.phase = TranscriptionPhase.Ready
     state.message.value = "vault: ${gilune.vaultPath()} — ${model.name} ready"
     // Recordings that waited for the model have jobs queued; this runs them.
