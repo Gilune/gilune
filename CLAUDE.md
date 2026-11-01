@@ -1960,6 +1960,27 @@ gates promises) are ratified. **Next: application-level engineering — see
      now stands it aside. Shortcuts window rows shade on hover. Phone: no
      surface yet (core shared). Gaps: discovery scans files (no index
      narrowing); live screenshot validation not done.
+   - **v1.3.1 released (2026-11-01)** = 1.3.0 + #40/#41/#42; proven by
+     a full manual run (`-f version=1.3.1 -f dry_run_release=true`,
+     Android instrumented suite green) BEFORE the tag; tag run green
+     first time. MSI 139.0 MB, DEB 110.7 MB, debug APK 124.4 MB.
+   - **Smaller installer (2026-11-01, owner ask; only the cheap,
+     risk-free items).** Measured from the unpacked 1.3.1 MSI (table in
+     `.github/linux-windows-build.md` § Installer size): stock JRE ~40 MB
+     of the MSI, the extended-icons jar ~34 MB, other jars ~48 MB. Done:
+     `compose.materialIconsExtended` replaced by
+     `material-icons-core:1.7.3`; the 34 non-core icons copied verbatim
+     (package line only, Apache header kept) into
+     `jvmShared/.../app/icons` with a README = the add-an-icon procedure;
+     `IconSourcesTest` (dependency absent in every build file, each copy
+     licensed + named + imported; falsified by breaking each);
+     `copy_runtime` drops `classes_nocoops.jsa` (`UNUSED_RUNTIME_FILES`;
+     package test reads `-Xmx` from the launcher). 09 § Desktop footprint
+     records the rules. MEASURED (branch MSI-only run 41308473803): MSI
+     139.0 → 99.6 MB, installed 231.5 → 182.8 MB. NOT done by owner
+     decision: jlink trimming (all
+     languages must stay — Gilune will be translated — which leaves only
+     ~7 MB to gain), ProGuard (reflection/JNI risk).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

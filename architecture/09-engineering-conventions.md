@@ -130,6 +130,25 @@ had not spoken. The rules that follow from it:
 - The renderer is not a footprint lever. Direct3D costs ≈135 MB private
   over `SOFTWARE`, and that is the price of the app drawing properly
   (owner decision 2026-09-04).
+- **Download size is measured per part, not guessed** (2026-11-01, the
+  1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
+  compress further in an installer, so a jar's size is roughly what it
+  adds to the download. Two rules came out of it:
+  - **Icons: the core set plus copies, never the extended set.** The
+    extended Material icons are a 36 MB jar of ~2,000 icons; the app drew
+    34 of them. Those are copied into `jvmShared/.../app/icons`, whose
+    README is the procedure for adding one, and `IconSourcesTest` keeps
+    the dependency out and every copy licensed and in use.
+  - **The MSI drops runtime files the app never reads** —
+    `UNUSED_RUNTIME_FILES` in `.github/scripts/package-windows-linux.py`,
+    each with its reason. Today that is `classes_nocoops.jsa` (the
+    class cache for heaps above 32 GB, unreachable under `-Xmx768m`;
+    2.7 MB).
+  - Not done, measured: trimming the runtime with jlink saves ~7 MB of
+    the MSI if every language is kept (the owner's requirement — Gilune
+    will be translated), against the risk of a module that is only
+    loaded at run time going missing. ProGuard is off for the same kind
+    of risk (JNA, the bindings and sherpa-onnx find code by name).
 
 ## Tests
 

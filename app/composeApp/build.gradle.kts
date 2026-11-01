@@ -69,7 +69,10 @@ kotlin {
                 implementation(project(":plugins:people"))
                 implementation(project(":plugins:findReplace"))
                 implementation(compose.material3)
-                implementation(compose.materialIconsExtended)
+                // Core icons only: the extended set is a 36 MB jar for the few
+                // dozen icons we draw, so those are copied into
+                // jvmShared/.../app/icons (README there says how to add one).
+                implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.9.0")
                 implementation("org.jetbrains:markdown:0.7.3")
@@ -101,7 +104,7 @@ kotlin {
                 implementation(project(":plugins:people"))
                 implementation(project(":plugins:findReplace"))
                 implementation(compose.material3)
-                implementation(compose.materialIconsExtended)
+                implementation("org.jetbrains.compose.material:material-icons-core:1.7.3")
                 implementation("androidx.activity:activity-compose:1.9.3")
                 implementation("androidx.core:core-ktx:1.15.0")
                 implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")

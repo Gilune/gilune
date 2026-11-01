@@ -39,9 +39,9 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.Keyboard
-import androidx.compose.material.icons.outlined.AudioFile
-import androidx.compose.material.icons.outlined.Mic
+import org.gilune.app.icons.Keyboard
+import org.gilune.app.icons.AudioFile
+import org.gilune.app.icons.Mic
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
