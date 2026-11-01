@@ -161,7 +161,7 @@ private const val TASKS_MARKER_LENGTH = 3
 /// setting read by every recogniser here, so the vault never disagrees
 /// with itself; empty — the shipped default — means every GFM checklist
 /// item is a task.
-private fun isTaskLine(line: String, filter: String): Boolean =
+internal fun isTaskLine(line: String, filter: String): Boolean =
     TASKS_TASK_LINE.containsMatchIn(line) && (filter.isEmpty() || line.contains(filter))
 
 /// The three characters of the marker, or null on a line that is not a
@@ -206,9 +206,11 @@ private fun tokenDecoration(
     pattern: Regex,
     role: DecorationRole,
     filter: String,
+    menu: ((line: String, today: LocalDate) -> org.gilune.plugin.sdk.TokenMenu?)? = null,
 ): EditorDecoration = EditorDecoration(
     id = id,
     role = role,
+    menu = menu,
     // The seam's default, named rather than inherited because § 1 turns
     // on it: a documented example must never become somebody's agenda.
     firesInsideCodeFences = false,
@@ -257,9 +259,20 @@ private fun doneStamper(filter: String, today: LocalDate): EditorDecoration = Ed
 ///
 /// `today` is resolved when the registry is built, not at the click, so a
 /// session held open across midnight stamps the day it opened; re-resolving
-/// would need a supplier the seam does not carry.
-fun tasksDecorations(filter: String = "", today: LocalDate = LocalDate.now()): List<EditorDecoration> = listOf(
-    tokenDecoration("org.memory.tasks.due", DUE_TOKEN, DecorationRole.MARKER, filter),
+/// would need a supplier the seam does not carry. The due date's menu is
+/// the exception: the seam hands it the day the menu opens.
+///
+/// The due registration carries the plugin's one menu ([dueDateMenu]): it
+/// postpones a dated task and dates an undated one, and `weekStart` names
+/// its "Next Monday" — or Sunday, as the settings say.
+fun tasksDecorations(
+    filter: String = "",
+    today: LocalDate = LocalDate.now(),
+    weekStart: WeekStart = WeekStart.MONDAY,
+): List<EditorDecoration> = listOf(
+    tokenDecoration("org.memory.tasks.due", DUE_TOKEN, DecorationRole.MARKER, filter) { line, day ->
+        dueDateMenu(line, day, filter, weekStart)
+    },
     tokenDecoration("org.memory.tasks.done", DONE_TOKEN, DecorationRole.MUTED, filter),
     tokenDecoration("org.memory.tasks.priority-high", PRIORITY_HIGH_TOKEN, DecorationRole.MARKER, filter),
     tokenDecoration("org.memory.tasks.priority-low", PRIORITY_LOW_TOKEN, DecorationRole.MUTED, filter),
@@ -310,6 +323,28 @@ fun tasksShortcutKey(settings: String): String = tasksShortcutSetting(settings) 
 fun List<PluginInfo>.tasksShortcut(): String =
     tasksShortcutKey(firstOrNull { it.pluginId == TASKS_PLUGIN }?.settings.orEmpty())
 
+/// The keystroke that opens the due-date menu on the caret's task line
+/// (ADR 0015 amendment 2026-10-31). Obsidian Tasks binds none; D for date,
+/// with Shift because Ctrl+D is "duplicate line" in enough editors that a
+/// hand might reach for it expecting that.
+const val DEFAULT_DATE_SHORTCUT = "Ctrl+Shift+D"
+
+/// The date shortcut as the settings hold it: null when none is stored,
+/// which means [DEFAULT_DATE_SHORTCUT] — [tasksShortcutSetting]'s rule.
+fun tasksDateShortcutSetting(settings: String): String? =
+    jsonString(settings, TASK_DATE_SHORTCUT_KEY)?.trim()?.takeIf { it.isNotEmpty() }
+
+/// The keystroke the editor listens for.
+fun tasksDateShortcutKey(settings: String): String = tasksDateShortcutSetting(settings) ?: DEFAULT_DATE_SHORTCUT
+
+fun List<PluginInfo>.tasksDateShortcut(): String =
+    tasksDateShortcutKey(firstOrNull { it.pluginId == TASKS_PLUGIN }?.settings.orEmpty())
+
+/// The week start for the due-date menu's "Next Monday", read from the
+/// plugin's settings as every other task reader does.
+fun List<PluginInfo>.tasksWeekStart(): WeekStart =
+    tasksWeekStart(firstOrNull { it.pluginId == TASKS_PLUGIN }?.settings.orEmpty())
+
 /// The day weeks start on for `thisweek`, `lastweek` and `thisworkweek`
 /// (owner, 2026-10-30): Monday unless the settings say Sunday.
 fun tasksWeekStart(settings: String): WeekStart = WeekStart.of(jsonString(settings, TASK_WEEK_START_KEY))
@@ -320,21 +355,29 @@ fun tasksWeekStartSetting(settings: String): WeekStart? =
     jsonString(settings, TASK_WEEK_START_KEY)?.let { stored -> WeekStart.entries.firstOrNull { it.token == stored } }
 
 /// The settings document the tasks plugin stores, written here so the
-/// writer, [tasksFilter], [tasksPanelEnabled], [tasksShortcut] and
-/// [tasksWeekStart] cannot drift apart. Every key is written every time: a
-/// caller changing one holds the others, so toggling the panel can never
-/// drop the filter, the shortcut or the week start someone set. A null
-/// `shortcut` or `weekStart` is the default, and is left out rather than
-/// written down.
-fun tasksSettingsDocument(filter: String, panel: Boolean = true, shortcut: String? = null, weekStart: WeekStart? = null): String =
+/// writer, [tasksFilter], [tasksPanelEnabled], [tasksShortcut],
+/// [tasksDateShortcut] and [tasksWeekStart] cannot drift apart. Every key
+/// is written every time: a caller changing one holds the others, so
+/// toggling the panel can never drop the filter, a shortcut or the week
+/// start someone set. A null `shortcut`, `weekStart` or `dateShortcut` is
+/// the default, and is left out rather than written down.
+fun tasksSettingsDocument(
+    filter: String,
+    panel: Boolean = true,
+    shortcut: String? = null,
+    weekStart: WeekStart? = null,
+    dateShortcut: String? = null,
+): String =
     """{"$TASK_FILTER_KEY":"${escapeJsonString(filter)}","$TASK_PANEL_KEY":$panel""" +
         (shortcut?.let { ""","$TASK_SHORTCUT_KEY":"${escapeJsonString(it)}"""" } ?: "") +
-        (weekStart?.let { ""","$TASK_WEEK_START_KEY":"${it.token}"""" } ?: "") + "}"
+        (weekStart?.let { ""","$TASK_WEEK_START_KEY":"${it.token}"""" } ?: "") +
+        (dateShortcut?.let { ""","$TASK_DATE_SHORTCUT_KEY":"${escapeJsonString(it)}"""" } ?: "") + "}"
 
 private const val TASK_FILTER_KEY = "filter"
 private const val TASK_PANEL_KEY = "panel"
 private const val TASK_SHORTCUT_KEY = "taskShortcut"
 private const val TASK_WEEK_START_KEY = "weekStart"
+private const val TASK_DATE_SHORTCUT_KEY = "dateShortcut"
 
 
 /** All executable search/field/index registrations belong to the domain module.

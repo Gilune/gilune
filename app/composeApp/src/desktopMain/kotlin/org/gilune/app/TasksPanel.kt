@@ -24,6 +24,16 @@ import org.gilune.plugins.tasks.tasksFilter
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.filled.KeyboardDoubleArrowRight
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
+import org.gilune.plugin.sdk.TokenMenu
+import org.gilune.plugin.sdk.TokenMenuItem
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -204,13 +214,16 @@ fun TaskHitRow(
     detail: TaskDetail? = null,
     open: Boolean = false,
     onFlip: (() -> Unit)? = null,
+    rowMenu: TaskRowMenu? = null,
 ) {
     val colours = MaterialTheme.colorScheme
+    val hover = remember { MutableInteractionSource() }
     Column(modifier.fillMaxWidth()) {
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 6.dp)
+            .hoverable(hover)
             .clip(RoundedCornerShape(5.dp))
             .background(colours.surface)
             .let { if (onOpen == null) it else it.clickable { reveal?.invoke(hit.noteLine()); onOpen(hit.relPath) } }
@@ -247,6 +260,7 @@ fun TaskHitRow(
                 modifier = Modifier.padding(top = 1.dp),
             )
         }
+        if (rowMenu != null) TaskRowMenuArrow(hit, rowMenu, hover, 16.dp, Modifier.padding(top = 1.dp))
         if (detail != null) Box(Modifier.padding(top = 1.dp)) { TaskDetailMarker(detail, open, onFlip) }
     }
     if (open && detail != null) TaskDetailRows(hit, detail, onToggle, onOpen, reveal)
@@ -261,6 +275,45 @@ private fun dueColour(due: LocalDate, today: LocalDate): Color = when {
     due < today -> MaterialTheme.colorScheme.error
     due == today -> MaterialTheme.colorScheme.primary
     else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+/// What a task row needs to offer its line's menu (ADR 0015 amendment
+/// 2026-10-31): the menu a row's line has, and what choosing an item does.
+/// Only `filter` block rows carry one — they already change their task —
+/// while the agenda panel's rows still only navigate.
+class TaskRowMenu(
+    val menuFor: (TaskHit) -> TokenMenu?,
+    val choose: (TaskHit, TokenMenuItem) -> Unit,
+)
+
+/// The menu for rows of this vault: the line's own, as the editor would
+/// offer it, written through the same guard as the row's checkbox.
+fun taskRowMenu(state: GiluneState, plugins: List<PluginInfo>): TaskRowMenu =
+    TaskRowMenu({ taskResultMenu(plugins, it) }, { hit, item -> applyTaskResultMenu(state, hit, item) })
+
+/// The arrow on a task row: shown while the row is hovered or its menu is
+/// open, and kept in the row's layout either way so nothing shifts when it
+/// appears. A dated task gets the postpone arrow; an undated one a
+/// calendar, since its menu adds a date rather than moving one.
+@Composable
+private fun TaskRowMenuArrow(hit: TaskHit, rowMenu: TaskRowMenu, rowHover: MutableInteractionSource, size: Dp, modifier: Modifier = Modifier) {
+    val hovered by rowHover.collectIsHoveredAsState()
+    var request by remember(hit) { mutableStateOf<TokenMenu?>(null) }
+    var anchor by remember { mutableStateOf(Rect.Zero) }
+    Box(modifier.size(size).onGloballyPositioned { anchor = it.boundsInWindow() }) {
+        if (hovered || request != null) {
+            MenuArrowChip(
+                size = size,
+                onClick = { request = rowMenu.menuFor(hit) },
+                icon = if (hit.due == null) Icons.Outlined.CalendarToday else Icons.Filled.KeyboardDoubleArrowRight,
+                description = if (hit.due == null) "Add a due date" else "Move the due date",
+                modifier = Modifier.testTag("task-row-menu"),
+            )
+        }
+    }
+    request?.let { menu ->
+        TokenMenuPopup(menu, anchor, onChoose = { item -> request = null; rowMenu.choose(hit, item) }, onDismiss = { request = null })
+    }
 }
 
 // ---------------------------------------------------------------------
@@ -326,6 +379,7 @@ fun FilterBlockLines(
     reveal: ((NoteLine) -> Unit)? = null,
     flipped: Set<String> = emptySet(),
     onFlip: ((String) -> Unit)? = null,
+    rowMenu: TaskRowMenu? = null,
 ) {
     Column(modifier) {
         when (result) {
@@ -337,7 +391,7 @@ fun FilterBlockLines(
                     val detail = result.details[row.detailKey()]
                     val open = result.detailOpen(row, flipped)
                     TaskHitLine(row, today, onOpen, rowHeight, maxRowWidth, onToggle, reveal,
-                        detail, open, onFlip?.let { flip -> { flip(row.detailKey()) } })
+                        detail, open, onFlip?.let { flip -> { flip(row.detailKey()) } }, rowMenu)
                     if (open && detail != null) TaskDetailGridLines(row, detail, rowHeight, maxRowWidth, onToggle, onOpen, reveal)
                 }
                 FilterFooter(result.more, expanded, onMore, onFewer, Modifier.height(rowHeight).padding(horizontal = 10.dp))
@@ -401,12 +455,15 @@ private fun TaskHitLine(
     detail: TaskDetail? = null,
     open: Boolean = false,
     onFlip: (() -> Unit)? = null,
+    rowMenu: TaskRowMenu? = null,
 ) {
     val colours = MaterialTheme.colorScheme
+    val hover = remember { MutableInteractionSource() }
     Row(
         Modifier
             .height(rowHeight)
             .widthIn(max = maxWidth)
+            .hoverable(hover)
             .clip(RoundedCornerShape(4.dp))
             .background(colours.surface)
             .let { if (onOpen == null) it else it.clickable { reveal?.invoke(hit.noteLine()); onOpen(hit.relPath) }.pointerHoverIcon(PointerIcon.Hand) }
@@ -432,6 +489,7 @@ private fun TaskHitLine(
                 color = dueColour(due, today),
             )
         }
+        if (rowMenu != null) TaskRowMenuArrow(hit, rowMenu, hover, (rowHeight * 0.7f).coerceAtMost(16.dp))
         if (detail != null) TaskDetailMarker(detail, open, onFlip)
     }
 }
@@ -522,6 +580,7 @@ fun FilterBlockView(
     val result = computed.value ?: FilterResult.Hint(computed.error ?: "Searching...")
     val readMore: (() -> Unit)? =
         if (cap < FILTER_MAX_ROWS) ({ cap = (cap + FILTER_EXPAND_STEP).coerceAtMost(FILTER_MAX_ROWS) }) else null
+    val rowMenu = remember(plugins) { taskRowMenu(state, plugins) }
 
 
     Column(
@@ -543,7 +602,8 @@ fun FilterBlockView(
                 for (row in result.rows) {
                     val key = row.detailKey()
                     TaskHitRow(row, today, onOpen, onToggle = { toggleTaskResult(state, it) }, reveal = state::revealNext,
-                        detail = result.details[key], open = result.detailOpen(row, flipped), onFlip = { flipped = if (key in flipped) flipped - key else flipped + key })
+                        detail = result.details[key], open = result.detailOpen(row, flipped), onFlip = { flipped = if (key in flipped) flipped - key else flipped + key },
+                        rowMenu = rowMenu)
                 }
                 FilterFooter(result.more, cap > FILTER_ROW_CAP, onMore = readMore, onFewer = { cap = FILTER_ROW_CAP }, Modifier.padding(start = 18.dp, top = 2.dp, bottom = 1.dp))
             }

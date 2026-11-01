@@ -66,6 +66,14 @@ data class DecorationMatch(val range: IntRange, val render: DecorationRender)
 /// somebody's agenda because it was quoted in an example (§ 1). The checkbox
 /// slice opts in, because presentation of a GFM element is not metadata and
 /// that is what the shell already did.
+///
+/// `menu` — when present — is this registration's **own** list of choices
+/// for a line (ADR 0015 amendment 2026-10-31). Unlike `activate` it is never
+/// chained: the shell asks one registration, shows its menu, and applies the
+/// one item chosen, so a menu on a token cannot fire when a checkbox ticks.
+/// It is asked of any line, not only ones its recogniser claims, so a task
+/// with no date can still be offered one; null means nothing to offer.
+/// `today` is the shell's at the moment the menu opens.
 class EditorDecoration(
     val id: String,
     val recognise: (line: String) -> List<DecorationMatch>,
@@ -73,6 +81,32 @@ class EditorDecoration(
     val firesInsideCodeFences: Boolean = false,
     val activate: ((line: String) -> String)? = null,
     val pillTones: PillTones? = null,
+    val menu: ((line: String, today: LocalDate) -> TokenMenu?)? = null,
+)
+
+/// One choice in a [TokenMenu]: the words, what choosing it writes said
+/// plainly (`detail`, a date such as "Fri 6 Nov"), and the rewrite of the
+/// whole line. The rewrite is pure, as `activate` is, so a menu can change
+/// nothing but the one line it was opened on. `startsGroup` draws a rule
+/// above the item.
+class TokenMenuItem(
+    val label: String,
+    val detail: String,
+    val rewrite: (line: String) -> String,
+    val startsGroup: Boolean = false,
+)
+
+/// A registration's menu over one line. `name` is what a menu that leads to
+/// it calls it ("Postpone due date"); `title` heads it and says what the
+/// items count from. `typed`, when present, turns words typed into the
+/// menu's field into one more item — null while they mean nothing yet, so
+/// nothing unresolvable can be chosen.
+class TokenMenu(
+    val name: String,
+    val title: String,
+    val items: List<TokenMenuItem>,
+    val typed: ((text: String) -> TokenMenuItem?)? = null,
+    val typedPlaceholder: String = "",
 )
 
 /// One offerable row. `display` is the words, `detail` the machine form

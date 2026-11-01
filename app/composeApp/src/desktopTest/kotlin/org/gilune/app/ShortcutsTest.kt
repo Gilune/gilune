@@ -46,7 +46,11 @@ class ShortcutsTest {
 
         val tasksOn = plugin("org.memory.tasks", "Tasks", "enabled", """{"taskShortcut":"Ctrl+Shift+L"}""")
         val group = assertNotNull(shortcutGroups(listOf(tasksOn)).firstOrNull { it.title == "Tasks" })
-        assertEquals(listOf("Ctrl+Shift+L"), group.shortcuts.map { it.keys })
+        assertEquals(listOf("Ctrl+Shift+L", "Ctrl+Shift+D"), group.shortcuts.map { it.keys })
+
+        // The due date shortcut shows its own binding too, once rebound.
+        val rebound = plugin("org.memory.tasks", "Tasks", "enabled", """{"dateShortcut":"Alt+D"}""")
+        assertEquals(listOf("Ctrl+L", "Alt+D"), shortcutGroups(listOf(rebound)).first { it.title == "Tasks" }.shortcuts.map { it.keys })
     }
 
     @Test

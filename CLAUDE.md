@@ -1919,6 +1919,24 @@ gates promises) are ratified. **Next: application-level engineering — see
      stays one, three voices 7/8 auto and WORSE with count fixed at 3.
      Model rows env-gated: `GILUNE_TEST_SPEAKER_MODELS` (folder of the two
      downloads) + `GILUNE_TEST_SPEAKER_WAV`.
+   - **Moving a due date (2026-10-31, ADR 0015 amendment; owner ask
+     after Obsidian Tasks' postpone arrow).** Seam: `EditorDecoration.
+     menu` (line, today → `TokenMenu` of `TokenMenuItem` line rewrites +
+     optional typed resolver) — never chained, unlike `activate`. Tasks
+     plugin `DueDateMenu.kt`: steps count from the due date, or from
+     today when overdue; named days; deduped by date; typed words = the
+     `/due` language + `+3d/2w/1m`; Remove due date; undated → "Add a
+     due date". Offered by: desktop hover chip » (`TokenMenuPopup.kt`,
+     centred on the DIGITS — baseline − 0.36 em — and `canFocus=false`,
+     else taking focus re-renders the caret line and the chip slides
+     away mid-click), right-click, rebindable `dateShortcut`
+     (Ctrl+Shift+D), filter-block rows (agenda panel stays navigate-
+     only); phone long-press on the date (`MobileTokenMenu.kt`; short
+     tap still places the caret). Writes guarded by exact line +
+     line-boundary check (`applyMenuItem`) and DocumentEditGate for
+     result rows. Tests: DueDateMenuTest 15, DueDateMenuUiTest 4,
+     FilterBlockUiTest +2; desktop 1,042 green. Phone instrumented row
+     written, NOT run (no emulator run — data-wipe rule).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

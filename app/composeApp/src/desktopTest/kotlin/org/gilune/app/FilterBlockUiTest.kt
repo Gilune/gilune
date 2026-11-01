@@ -120,6 +120,34 @@ class FilterBlockUiTest {
         assertEquals(false, editor.dirty)
     }
 
+    /// A row's arrow (ADR 0015 amendment 2026-10-31): hovering the row
+    /// shows it, and a choice moves the source task's date on disk, through
+    /// the checkbox's own guard. Asked in both modes, since each draws its
+    /// own rows.
+    private fun postponeFromARow(reading: Boolean) {
+        val (state, editor) = vaultWith(fence(FILTER_FENCE, "type:task is:open"))
+        state.plugins.add(installedTasksPlugin())
+        editor.reading = reading
+        show(state, editor)
+        awaitText("buy milk")
+        compose.onNodeWithTag("task-row-menu").assertDoesNotExist()
+        compose.onNodeWithText("buy milk").performMouseInput { moveTo(center) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("task-row-menu").performMouseInput { moveTo(center); click(center) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("token-menu").assertExists()
+        compose.onNodeWithTag("token-menu-item-0").performClick()
+        compose.waitUntil(5_000) { File(state.vaultDir, "Home/kitchen.md").readText().contains("due:${soon.plusDays(1)}") }
+        assertTrue(File(state.vaultDir, "Home/kitchen.md").readText().contains("- [ ] buy milk due:${soon.plusDays(1)}\n"))
+        assertEquals(false, editor.dirty)
+    }
+
+    @Test
+    fun aRowInReadModePostponesItsTask() = postponeFromARow(reading = true)
+
+    @Test
+    fun aCollapsedRowInEditModePostponesItsTask() = postponeFromARow(reading = false)
+
     @Test
     fun anUnfilteredOverviewShowsTheSavedCheckboxStateAndCanReopenTheTask() {
         val (state, editor) = vaultWith(fence(FILTER_FENCE, "type:task"))

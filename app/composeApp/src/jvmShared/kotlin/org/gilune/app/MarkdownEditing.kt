@@ -29,6 +29,10 @@ import org.gilune.plugin.sdk.DecorationMatch
 import org.gilune.plugin.sdk.DecorationRender
 import org.gilune.plugin.sdk.DecorationRole
 import org.gilune.plugin.sdk.EditorDecoration
+import org.gilune.plugin.sdk.TokenMenu
+import org.gilune.plugin.sdk.TokenMenuItem
+
+import java.time.LocalDate
 
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
@@ -257,6 +261,87 @@ fun decorationAt(
         if (transformedOffset == end && onEdge == null) onEdge = hit
     }
     return onEdge
+}
+
+/// A token whose registration carries a menu, where it sits in both texts:
+/// its source range and line (to rewrite), and its half-open range in the
+/// **transformed** text (to draw beside). ADR 0015 amendment 2026-10-31.
+data class MenuToken(
+    val decoration: EditorDecoration,
+    val range: IntRange,
+    val lineRange: IntRange,
+    val transformedStart: Int,
+    val transformedEnd: Int,
+)
+
+/// Every token a menu-bearing registration draws, in document order. Asked
+/// of the same composition the field shows, so a token on the caret's line
+/// is here too: pure styling stays there, and the line being written is the
+/// one a person most often wants to move.
+fun menuTokens(
+    text: String,
+    caretLine: Int?,
+    decorations: List<EditorDecoration>,
+    blocks: List<EditorBlockDecoration> = emptyList(),
+): List<MenuToken> {
+    if (decorations.none { it.menu != null }) return emptyList()
+    val placed = decorate(text, caretLine, decorations, blocks)
+    val starts = transformedStarts(placed)
+    return placed.mapIndexedNotNull { index, span ->
+        val decoration = span.decoration?.takeIf { it.menu != null } ?: return@mapIndexedNotNull null
+        MenuToken(decoration, span.start until span.start + span.sourceLength, span.lineRange,
+            starts[index], starts[index] + span.replacement.length)
+    }
+}
+
+/// A menu over one line of a buffer, and the source range of that line.
+data class LineMenu(val menu: TokenMenu, val lineRange: IntRange)
+
+/// The menu for the line holding `offset`: the first registration whose
+/// `menu` has something to offer there, in declaration order — the right-
+/// click menu's question and the date shortcut's. A line inside a fence
+/// asks only registrations that fire there, as their styling does.
+fun lineMenuAt(
+    text: CharSequence,
+    offset: Int,
+    decorations: List<EditorDecoration>,
+    today: LocalDate,
+): LineMenu? {
+    if (decorations.none { it.menu != null }) return null
+    val bounded = offset.coerceIn(0, text.length)
+    val lineStart = lineStartFor(text, bounded)
+    val lineEnd = lineEndFor(text, bounded)
+    var start = 0
+    var fenced = false
+    while (start <= lineStart) {
+        val end = lineEndFor(text, start)
+        if (fenceDelimiter(text, start, end)) {
+            fenced = start == lineStart || !fenced
+        }
+        if (end >= lineStart) break
+        start = end + 1
+    }
+    val line = text.substring(lineStart, lineEnd)
+    for (decoration in decorations) {
+        val ask = decoration.menu ?: continue
+        if (fenced && !decoration.firesInsideCodeFences) continue
+        val menu = ask(line, today) ?: continue
+        return LineMenu(menu, lineStart until lineEnd)
+    }
+    return null
+}
+
+/// The text with one menu item applied to the line it was offered for —
+/// null when the line no longer reads as it did, so a menu left open while
+/// something else changed the buffer writes nothing.
+fun applyMenuItem(text: String, lineRange: IntRange, expectedLine: String, item: TokenMenuItem): String? {
+    val from = lineRange.first
+    val to = (lineRange.last + 1).coerceIn(from, text.length)
+    if (from > text.length || text.substring(from, to) != expectedLine) return null
+    // The range must still be the whole line: one that grew past it, or a
+    // line joined onto it, has changed even where those characters agree.
+    if ((from > 0 && text[from - 1] != '\n') || (to < text.length && text[to] != '\n')) return null
+    return text.substring(0, from) + item.rewrite(expectedLine) + text.substring(to)
 }
 
 /// One pill in source coordinates: its range, how long its tag is, and its
