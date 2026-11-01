@@ -143,6 +143,11 @@ memory that is still in use. Stage 2 stays for its saving at rest. The
 churn moves to stage 3 (fewer, smaller layouts), plus finding what holds
 the memory. CPU cost was not measured.
 
+The real packaging path was also checked. Run 41358723089 cross-built the
+MSI on Linux, and its `Gilune.exe` carries exactly one manifest with the
+setting. Started from the unpacked MSI on an empty vault, the app ran on
+the Segment Heap and idled at 130 MB.
+
 ### Stage 3 — style only what can be seen
 
 `MarkdownEditTransformation` takes a **style window**: the visible line
