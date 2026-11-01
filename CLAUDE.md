@@ -1976,7 +1976,9 @@ gates promises) are ratified. **Next: application-level engineering — see
      licensed + named + imported; falsified by breaking each);
      `copy_runtime` drops `classes_nocoops.jsa` (`UNUSED_RUNTIME_FILES`;
      package test reads `-Xmx` from the launcher). 09 § Desktop footprint
-     records the rules. NOT done by owner decision: jlink trimming (all
+     records the rules. MEASURED (branch MSI-only run 41308473803): MSI
+     139.0 → 99.6 MB, installed 231.5 → 182.8 MB. NOT done by owner
+     decision: jlink trimming (all
      languages must stay — Gilune will be translated — which leaves only
      ~7 MB to gain), ProGuard (reflection/JNI risk).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be

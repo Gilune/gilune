@@ -18,7 +18,10 @@ app drew are copied in; see `architecture/09-engineering-conventions.md`
 § Desktop footprint), and `copy_runtime` leaves out
 `bin/server/classes_nocoops.jsa` (only read for heaps above 32 GB; the
 launcher's `-Xmx768m` keeps it unreachable — a package test reads the cap
-from `windows-launcher/src/main.rs`). Expected: ~139 → ~103 MB.
+from `windows-launcher/src/main.rs`). Measured on a branch build (run
+[41308473803](https://github.com/Gilune/gilune/actions/runs/41308473803)):
+**MSI 139.0 → 99.6 MB, installed 231.5 → 182.8 MB** (decimal MB; the table
+above is MiB from `du`).
 
 Measured and not done: `jlink` with the modules `jdeps` names
 (`java.base java.desktop java.instrument java.logging java.prefs

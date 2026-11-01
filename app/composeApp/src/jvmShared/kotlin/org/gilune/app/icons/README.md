@@ -12,9 +12,9 @@ Gilune draws Material icons. Two places provide them:
 
 The extended set itself is not a dependency, and must not become one: it is
 a 36 MB jar of about 2,000 icons, and every package (MSI, DEB, APK) carried
-all of it for the few dozen we use. Removing it took the Windows installer
-from 139 MB to about 106 MB (2026-11-01). `IconSourcesTest` fails if it
-comes back.
+all of it for the few dozen we use. Removing it, with one unused runtime
+file, took the Windows installer from 139 MB to 99.6 MB (2026-11-01).
+`IconSourcesTest` fails if it comes back.
 
 ## Adding an icon
 

@@ -1,7 +1,7 @@
 // The icons the app draws come from the core set and from copies kept in
 // jvmShared/.../app/icons (its README says how to add one). The extended
 // set they were copied from is a 36 MB jar, and every package carried all
-// of it for a few dozen icons (2026-11-01: the MSI went 139 → ~106 MB
+// of it for a few dozen icons (2026-11-01: the MSI went 139 → 99.6 MB
 // without it). These rows read the sources so that neither half of the
 // rule can drift: the dependency stays out, and each copy stays a faithful,
 // licensed, used copy.
