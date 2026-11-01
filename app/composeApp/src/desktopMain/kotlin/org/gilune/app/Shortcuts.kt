@@ -58,6 +58,7 @@ import org.gilune.plugins.findreplace.FindReplaceKey
 import org.gilune.plugins.findreplace.findReplaceKey
 import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksShortcut
+import org.gilune.plugins.tasks.tasksDateShortcut
 import uniffi.gilune_ffi.PluginInfo
 
 /// One formatting action of the desktop editor: what the menu and the
@@ -151,6 +152,8 @@ internal fun shortcutGroups(plugins: List<PluginInfo>): List<ShortcutGroup> = bu
     if (plugins.any { it.pluginId == TASKS_PLUGIN && it.state == "enabled" }) {
         byPlugin.getOrPut(pluginName(plugins, TASKS_PLUGIN)) { mutableListOf() } +=
             Shortcut(plugins.tasksShortcut(), "Make the line a task, or tick it")
+        byPlugin.getValue(pluginName(plugins, TASKS_PLUGIN)) +=
+            Shortcut(plugins.tasksDateShortcut(), "Postpone the task's due date, or add one")
     }
     if (findReplaceOn(plugins)) {
         byPlugin.getOrPut(pluginName(plugins, FIND_REPLACE_PLUGIN)) { mutableListOf() } +=

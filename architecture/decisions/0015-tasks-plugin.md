@@ -855,3 +855,60 @@ fact, `org.memory.tasks.completed`: the written `done:` date, else the day
 the kernel's line history says a ticked line reached its text. The
 `done:`-stamping on tick (§ 1) is unchanged — inference only covers ticks
 made where nobody stamped.
+
+### Moving a due date — 2026-10-31
+
+Owner, after Obsidian Tasks' postpone button: a way to push a task's due date
+forward inline, without retyping it. The prior-art note recorded Tasks' button
+as living only on query results and unable to date an undated task; both are
+widened here.
+
+**The seam.** `EditorDecoration` gains `menu: (line, today) -> TokenMenu?` —
+a registration's *own* list of choices for a line. Unlike `activate` it is
+never chained: the shell asks one registration, shows its menu, and applies
+the one `TokenMenuItem` chosen, whose `rewrite` is pure over the line. This is
+the "per-registration click" the priority amendment named as a seam change
+for a later round, and it is why the menu cannot fire when a box is ticked.
+`today` is passed when the menu opens, so this action does not share § 1's
+midnight gap. Shell helpers: `menuTokens` (the menu-bearing tokens in shown
+coordinates, the caret's line included — style-only tokens stay drawn there),
+`lineMenuAt` (the menu for the line at an offset, fence-aware) and
+`applyMenuItem`, which writes nothing unless the range is still exactly the
+line as it read when the menu opened.
+
+**The tasks plugin's menu** (`dueDateMenu`) rides on the `due` registration.
+A date still ahead is postponed from itself — +1/+2/+3 days, +1/+2 weeks,
++1 month — then Today, Tomorrow, and "Next Monday" (the `weekStart`
+setting's day); a date already gone counts from today and lists the named
+days first; an undated task is offered a first date. Every row shows the day
+it writes; a row that would repeat the date already there, or a day an
+earlier row offers, is left out. A typed field takes the `/due` phrases (and
+their prefixes) or a step from the date being moved (`+3d`, `2w`, `1m`).
+"Remove due date" takes the token and its leading space. Only the ISO token
+is written — the date replaced where it stands, or appended — with no
+rescheduled state and no postpone count: when a line changed is ADR 0028's
+line history's to say.
+
+**Where it is offered.** Desktop editor: an arrow drawn beside a hovered
+`due:` token (an overlay — the line never reflows; centred on the digits,
+half a cap height above the baseline, not on the line box; it never takes
+the focus, since a focus change re-renders the line under the pointer); the
+right-click menu of any task line ("Postpone due date…" / "Add a due
+date…"); and the plugin's rebindable `dateShortcut`, Ctrl+Shift+D by default,
+listed in the shortcuts window. `filter` block rows, in both modes, through
+the checkbox's own stale-line and unsaved-edit guard. Phone: a long press on
+the date opens the menu as a dialog; a short tap there still places the
+caret. The desktop agenda panel's rows still only navigate.
+
+Gate: `DueDateMenuTest` (rows for dated, overdue and undated tasks, dedupe
+and group rules, rewrites, typed words, fence-aware line lookup, the stale
+guard, a task row's menu and guarded write, the setting round trip);
+`DueDateMenuUiTest` (arrow appears on hover beside and level with the date,
+a mouse click opens the menu and a choice is on disk at once; the shortcut
+dates an undated task from typed words; off a task line and with the plugin
+off, nothing); `FilterBlockUiTest` (a row postpones its task in Read and
+Edit mode). The tests caught two defects before shipping: a dropped first
+row lost its group rule, and the stale guard accepted a line that had grown.
+Not run: `MobileTokenMenuTest` (the phone's date targets and the
+shown-to-source offset) compiles but was not executed this round, and no
+row drives a real long press on a device.

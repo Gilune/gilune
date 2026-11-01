@@ -16,6 +16,9 @@ import org.gilune.plugins.tasks.tasksSettingsDocument
 import org.gilune.plugins.tasks.DEFAULT_TASK_SHORTCUT
 import org.gilune.plugins.tasks.tasksShortcutKey
 import org.gilune.plugins.tasks.tasksShortcutSetting
+import org.gilune.plugins.tasks.DEFAULT_DATE_SHORTCUT
+import org.gilune.plugins.tasks.tasksDateShortcutKey
+import org.gilune.plugins.tasks.tasksDateShortcutSetting
 import org.gilune.plugins.tasks.WeekStart
 import org.gilune.plugins.tasks.tasksWeekStart
 import org.gilune.plugins.tasks.tasksWeekStartSetting
@@ -588,6 +591,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
     val panelOn = remember(plugin.settings) { listOf(plugin).tasksPanelEnabled() }
     val shortcut = remember(plugin.settings) { tasksShortcutSetting(plugin.settings) }
     val weekStart = remember(plugin.settings) { tasksWeekStartSetting(plugin.settings) }
+    val dateShortcut = remember(plugin.settings) { tasksDateShortcutSetting(plugin.settings) }
     var filter by remember(plugin.settings) { mutableStateOf(saved) }
     Text("Global filter", style = MaterialTheme.typography.titleSmall)
     Text(
@@ -619,7 +623,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
                     } else {
                         "only checkbox lines containing $wanted are tasks"
                     },
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn, shortcut, weekStart)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(wanted, panelOn, shortcut, weekStart, dateShortcut)) }
             },
             // An empty filter is a legitimate value — the shipped default
             // — so only "no change" disables the button.
@@ -646,7 +650,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
             onCheckedChange = { show ->
                 state.pluginAction(
                     if (show) "the agenda panel is in the rail" else "the agenda panel is off",
-                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show, shortcut, weekStart)) }
+                ) { it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, show, shortcut, weekStart, dateShortcut)) }
             },
         )
         Text("Show the agenda panel", fontSize = 13.sp)
@@ -665,7 +669,24 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
     // The filter and the panel switch travel with the write, as above.
     KeystrokeSetting(tasksShortcutKey(plugin.settings), DEFAULT_TASK_SHORTCUT, "task-shortcut-key") { key ->
         state.pluginAction("the task shortcut is now ${key ?: DEFAULT_TASK_SHORTCUT}") {
-            it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, key, weekStart))
+            it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, key, weekStart, dateShortcut))
+        }
+    }
+
+    HorizontalDivider(color = colours.outlineVariant)
+    Text("Due date shortcut", style = MaterialTheme.typography.titleSmall)
+    Text(
+        "Opens the due date menu on the task the cursor is on: postpone it " +
+            "by a day, a week or a month, pick a day by name, or add a date " +
+            "to a task that has none. The arrow beside a due date opens the " +
+            "same menu.",
+        fontSize = 12.sp,
+        lineHeight = 18.sp,
+        color = colours.onSurfaceVariant,
+    )
+    KeystrokeSetting(tasksDateShortcutKey(plugin.settings), DEFAULT_DATE_SHORTCUT, "date-shortcut-key") { key ->
+        state.pluginAction("the due date shortcut is now ${key ?: DEFAULT_DATE_SHORTCUT}") {
+            it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, shortcut, weekStart, key))
         }
     }
 
@@ -688,7 +709,7 @@ private fun TasksSettings(state: GiluneState, plugin: PluginInfo) {
                     if (effective != choice) state.pluginAction("weeks start on $label") {
                         // Monday is the default and is left out, not written down.
                         val stored = choice.takeIf { it != WeekStart.MONDAY }
-                        it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, shortcut, stored))
+                        it.setPluginSettings(plugin.pluginId, tasksSettingsDocument(saved, panelOn, shortcut, stored, dateShortcut))
                     }
                 },
                 modifier = Modifier.testTag("week-start-${choice.token}"),

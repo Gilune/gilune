@@ -54,6 +54,7 @@ import org.gilune.plugin.sdk.Slots
 import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
+import org.gilune.plugins.tasks.tasksWeekStart
 
 import android.Manifest
 import android.content.pm.PackageManager
@@ -111,6 +112,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.focusRequester
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
@@ -215,6 +219,7 @@ fun mobileEditorDecorations(decorations: List<EditorDecoration>): List<EditorDec
             firesInsideCodeFences = decoration.firesInsideCodeFences,
             activate = decoration.activate,
             pillTones = decoration.pillTones,
+            menu = decoration.menu,
             recognise = { line ->
                 decoration.recognise(line).filter { match ->
                     match.render !is DecorationRender.Replace || delimitedInLine(line, match.range)
@@ -502,7 +507,7 @@ fun EditScreen(
     val decorations = remember(plugins, filter) {
         mobileEditorDecorations(
             if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
-                builtInDecorations() + tasksDecorations(filter)
+                builtInDecorations() + tasksDecorations(filter, weekStart = plugins.tasksWeekStart())
             } else {
                 builtInDecorations()
             } + BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins),
@@ -814,8 +819,54 @@ private fun EditorBuffer(
         editorStyling(source, dimmed, revealed, caretLine, decorations)
     }
     val targets = remember(source, decorations) { glyphTargets(source, decorations) }
+    val dates = remember(source, decorations) { menuTargets(source, decorations) }
     var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
     val target = with(density) { TouchTarget.toPx() }
+    // A token's menu (ADR 0015 amendment 2026-10-31): the one open now, the
+    // line it was opened for as it read then.
+    var menuOpen by remember { mutableStateOf<Triple<org.gilune.plugin.sdk.TokenMenu, IntRange, String>?>(null) }
+    val bodyFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+
+    /// A long press on a date: its line's menu, from the registration that
+    /// drew it, on the day it opens.
+    fun openMenu(hit: MenuTarget) {
+        val text = editor.body.text.toString()
+        val end = hit.lineEnd.coerceAtMost(text.length)
+        val line = text.substring(hit.lineStart.coerceAtMost(end), end)
+        val menu = hit.decoration.menu?.invoke(line, java.time.LocalDate.now()) ?: return
+        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+        menuOpen = Triple(menu, hit.lineStart until end, line)
+    }
+
+    /// A short tap on a date is what a tap anywhere else is: the caret goes
+    /// there. The date's press was taken so a long one could open the menu,
+    /// so the tap is given back here.
+    fun placeCaret(shown: Int) {
+        val at = sourceOffset(editor.body.text.toString(), shown, decorations)
+        editor.body.edit { selection = TextRange(at) }
+        runCatching { bodyFocus.requestFocus() }
+        keyboard?.show()
+    }
+
+    /// The chosen item, applied only while the line reads as it did, and
+    /// written at once, as a tick is.
+    fun choose(item: org.gilune.plugin.sdk.TokenMenuItem) {
+        val (_, range, line) = menuOpen ?: return
+        menuOpen = null
+        val text = editor.body.text.toString()
+        if (applyMenuItem(text, range, line, item) == null) return
+        val rewritten = item.rewrite(line)
+        val held = editor.body.selection
+        val delta = rewritten.length - line.length
+        val lineEnd = range.last + 1
+        fun moved(at: Int) = if (at > lineEnd) at + delta else at.coerceAtMost(lineEnd + delta)
+        editor.body.edit {
+            replace(range.first, lineEnd, rewritten)
+            selection = TextRange(moved(held.start).coerceIn(0, length), moved(held.end).coerceIn(0, length))
+        }
+        onToggled()
+    }
 
     /// § 2's checkbox tap. A tap inside the glyph's 48dp box toggles and
     /// **the caret does not move**; an unfocused field stays unfocused and
@@ -850,6 +901,7 @@ private fun EditorBuffer(
                 .fillMaxWidth()
                 .defaultMinSize(minHeight = 240.dp)
                 .testTag("note-body")
+                .focusRequester(bodyFocus)
                 .onFocusChanged { onFocusChanged(it.isFocused) },
             // Transparent, because the sibling below paints the glyphs.
             // The field still owns the layout, the caret, the selection
@@ -891,7 +943,36 @@ private fun EditorBuffer(
                         val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                         val hit = targets.firstOrNull { glyph ->
                             hitBox(placed, glyph.transformedOffset, target).contains(down.position)
-                        } ?: return@awaitEachGesture
+                        }
+                        if (hit == null) {
+                            // A press on a due date: long opens its menu,
+                            // short places the caret, and a drag is left to
+                            // the page to scroll.
+                            val date = dates.firstOrNull { onToken(placed, it, down.position) } ?: return@awaitEachGesture
+                            down.consume()
+                            var outcome = 0
+                            withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id }
+                                    if (change == null || change.changedToUpIgnoreConsumed()) { outcome = 1; break }
+                                    if ((change.position - down.position).getDistance() > viewConfiguration.touchSlop) { outcome = 2; break }
+                                }
+                            }
+                            when (outcome) {
+                                0 -> {
+                                    openMenu(date)
+                                    while (true) {
+                                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                        change.consume()
+                                        if (change.changedToUpIgnoreConsumed()) break
+                                    }
+                                }
+                                1 -> placeCaret(placed.getOffsetForPosition(down.position))
+                            }
+                            return@awaitEachGesture
+                        }
                         down.consume()
                         var moved = false
                         while (true) {
@@ -910,6 +991,22 @@ private fun EditorBuffer(
                 },
         )
     }
+    menuOpen?.let { (menu, _, _) ->
+        MobileTokenMenuDialog(menu, onChoose = ::choose, onDismiss = { menuOpen = null })
+    }
+}
+
+/// Is `position` on `date` as the field lays it out? The date's own
+/// characters, on its own line, with the line's full height so a finger
+/// that lands a little high or low still counts.
+private fun onToken(layout: TextLayoutResult, date: MenuTarget, position: Offset): Boolean {
+    val limit = layout.layoutInput.text.length
+    if (date.transformedEnd > limit || date.transformedEnd <= date.transformedStart) return false
+    val line = layout.getLineForOffset(date.transformedEnd - 1)
+    if (layout.getLineForOffset(date.transformedStart) != line) return false
+    val left = layout.getBoundingBox(date.transformedStart).left
+    val right = layout.getBoundingBox(date.transformedEnd - 1).right
+    return position.x in left..right && position.y in layout.getLineTop(line)..layout.getLineBottom(line)
 }
 
 /// A 48dp square centred on the glyph — Android's minimum, where a glyph

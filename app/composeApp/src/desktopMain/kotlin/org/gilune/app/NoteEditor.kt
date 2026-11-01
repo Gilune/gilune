@@ -17,6 +17,9 @@ import org.gilune.plugins.tasks.TASKS_PLUGIN
 import org.gilune.plugins.tasks.tasksDecorations
 import org.gilune.plugins.tasks.tasksFilter
 import org.gilune.plugins.tasks.tasksShortcut
+import org.gilune.plugins.tasks.tasksDateShortcut
+import org.gilune.plugins.tasks.tasksWeekStart
+import org.gilune.plugin.sdk.TokenMenuItem
 import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
 import org.gilune.plugins.findreplace.FindMatch
 import org.gilune.plugins.findreplace.FindOutcome
@@ -35,6 +38,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.relocation.BringIntoViewRequester
 import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
@@ -97,6 +101,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.key.Key
@@ -111,6 +116,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -149,6 +155,26 @@ private const val AUTOSAVE_IDLE_MS = 1200L
 /// placed in the *text's* coordinates and has to add it back: the layout
 /// measures from inside this padding, the overlay is a sibling outside it.
 private val EDITOR_PADDING = 14.dp
+
+/// A token's menu open over the editor: what it offers, the line it was
+/// opened for as it read then, and where it floats (window coordinates).
+internal data class MenuRequest(
+    val menu: org.gilune.plugin.sdk.TokenMenu,
+    val lineRange: IntRange,
+    val line: String,
+    val anchor: Rect,
+)
+
+/// The arrow beside a due date is this many times the body's font size
+/// square — the height of the digits with a little room around them.
+private const val MENU_CHIP_SCALE = 1.05f
+
+/// Where a line's digits are centred, above the baseline, as a fraction of
+/// the font size: half a cap height. Centring the arrow here rather than on
+/// the line box keeps it level with the date whatever the line spacing.
+private const val DIGIT_CENTRE = 0.36f
+
+private val MENU_CHIP_GAP = 3.dp
 
 /// How strongly a revealed line flashes at its peak.
 private const val PULSE_ALPHA = 0.28f
@@ -726,7 +752,9 @@ private fun OpenNote(
         val plugins = state.plugins.toList()
         val filter = plugins.tasksFilter()
         val decorations = remember(plugins, filter) {
-            val tasks = if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) tasksDecorations(filter) else emptyList()
+            val tasks = if (plugins.pluginContributes(TASKS_PLUGIN, Slots.EDITOR_DECORATIONS)) {
+                tasksDecorations(filter, weekStart = plugins.tasksWeekStart())
+            } else emptyList()
             // Then every other enabled plugin's styling — a person's @mention
             // drawn as a link — through the registry rather than by name.
             builtInDecorations() + tasks + BUNDLED_PLUGIN_EXTENSIONS.editorDecorations(plugins)
@@ -844,6 +872,7 @@ private fun OpenNote(
             }
             val results = evaluated.value ?: wanted.associateWith { FilterResult.Hint(evaluated.error ?: "Searching...") }
             val blockDecorations = remember(results, blockCaps, blockFlips) { listOf(filterBlockDecoration(results, blockCaps.keys, blockFlips)) }
+            val rowMenu = remember(plugins) { taskRowMenu(state, plugins) }
             fun openMore(body: String) {
                 val next = ((blockCaps[body] ?: FILTER_EDIT_ROW_CAP) + FILTER_EXPAND_STEP).coerceAtMost(FILTER_MAX_ROWS)
                 blockCaps = blockCaps + (body to next)
@@ -866,6 +895,17 @@ private fun OpenNote(
             }
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
             var hoveringActivation by remember { mutableStateOf(false) }
+            // A token's own menu (ADR 0015 amendment 2026-10-31): the due
+            // date under the pointer, which shows the arrow beside it, and
+            // the menu open now, if any. The arrow stays while the pointer
+            // is on the token, on the arrow, or crossing the gap between.
+            var hoverToken by remember(relPath) { mutableStateOf<MenuToken?>(null) }
+            var fieldHover by remember { mutableStateOf(false) }
+            val chipInteraction = remember { MutableInteractionSource() }
+            val chipHovered by chipInteraction.collectIsHoveredAsState()
+            var menuRequest by remember(relPath) { mutableStateOf<MenuRequest?>(null) }
+            var rightClickAt by remember { mutableStateOf<Offset?>(null) }
+            LaunchedEffect(editor.text.text) { hoverToken = null }
 
             // The page follows the caret (owner, 2026-10-19). The body
             // scrolls in a container of its own, so a Return at the foot
@@ -1068,6 +1108,97 @@ private fun OpenNote(
                 caretMoves++
                 return true
             }
+            /// Where the arrow beside `token` sits, in layout coordinates:
+            /// just after its last character, as tall as the text and
+            /// centred on the digits rather than on the line box, whose
+            /// room above and below the words is not even. Null when the
+            /// token is not in the layout being shown.
+            fun chipRect(placed: TextLayoutResult, token: MenuToken): Rect? {
+                val limit = placed.layoutInput.text.length
+                if (token.transformedEnd > limit || token.transformedEnd <= token.transformedStart) return null
+                val last = placed.getBoundingBox(token.transformedEnd - 1)
+                val baseline = placed.getLineBaseline(placed.getLineForOffset(token.transformedEnd - 1))
+                val font = with(density) { appearance.edit.size.sp.toPx() }
+                val size = font * MENU_CHIP_SCALE
+                val centre = baseline - font * DIGIT_CENTRE
+                val left = last.right + with(density) { MENU_CHIP_GAP.toPx() }
+                return Rect(left, centre - size / 2, left + size, centre + size / 2)
+            }
+
+            /// The menu-bearing token at a pointer position, the arrow's
+            /// ground included: from the token's first character to the
+            /// arrow's far edge, on the token's own line.
+            fun menuTokenUnder(position: Offset): MenuToken? {
+                val placed = layout ?: return null
+                val text = editor.text.text
+                val caret = if (bodyFocused) caretLine(text, editor.text.selection.start) else null
+                val limit = placed.layoutInput.text.length
+                if (limit == 0) return null
+                return menuTokens(text, caret, decorations, blockDecorations).firstOrNull { token ->
+                    val chip = chipRect(placed, token) ?: return@firstOrNull false
+                    val first = placed.getBoundingBox(token.transformedStart.coerceIn(0, limit - 1))
+                    val line = placed.getLineForOffset(token.transformedEnd - 1)
+                    placed.getLineForOffset(token.transformedStart) == line &&
+                        position.y in placed.getLineTop(line)..placed.getLineBottom(line) &&
+                        position.x in first.left..chip.right
+                }
+            }
+
+            /// Opens the menu for the line at source `offset`, under
+            /// `anchor` (layout coordinates). False when the line has no
+            /// menu, so a key bound to it falls through.
+            fun openLineMenu(offset: Int, anchor: Rect): Boolean {
+                val text = editor.text.text
+                val found = lineMenuAt(text, offset, decorations, LocalDate.now()) ?: return false
+                val line = text.substring(found.lineRange.first, (found.lineRange.last + 1).coerceAtMost(text.length))
+                hoverToken = null
+                menuRequest = MenuRequest(found.menu, found.lineRange, line, anchor.translate(fieldOrigin))
+                return true
+            }
+
+            fun caretAnchor(offset: Int): Rect? {
+                val placed = layout ?: return null
+                val mapped = transformation.filter(AnnotatedString(editor.text.text)).offsetMapping
+                    .originalToTransformed(offset).coerceIn(0, placed.layoutInput.text.length)
+                return placed.getCursorRect(mapped)
+            }
+
+            /// A menu item, applied to the line it was offered for and
+            /// written at once, as a ticked box is: choosing is an action,
+            /// not typing. A line that changed while the menu was open is
+            /// left alone, and the status line says so.
+            fun chooseMenuItem(request: MenuRequest, item: TokenMenuItem) {
+                menuRequest = null
+                val value = editor.text
+                val written = applyMenuItem(value.text, request.lineRange, request.line, item)
+                if (written == null) {
+                    state.message.value = "that line changed while the menu was open, so nothing was written"
+                } else {
+                    val delta = written.length - value.text.length
+                    val lineEnd = request.lineRange.last + 1
+                    fun moved(at: Int) = if (at > lineEnd) at + delta else at.coerceAtMost(lineEnd + delta)
+                    editor.text = value.copy(text = written, selection = TextRange(moved(value.selection.start), moved(value.selection.end)))
+                    editor.dirty = true
+                    write()
+                }
+                runCatching { bodyFocus.requestFocus() }
+            }
+
+            // The date shortcut (ADR 0015 amendment 2026-10-31): the tasks
+            // plugin's key, Ctrl+Shift+D unless its settings say otherwise,
+            // opens the same menu at the caret. Off a task line the key
+            // falls through, as the task shortcut's does.
+            val dateShortcut = remember(plugins) {
+                if (plugins.any { it.pluginId == TASKS_PLUGIN && it.state == "enabled" }) plugins.tasksDateShortcut() else null
+            }
+            fun openDateMenu(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+                val binding = dateShortcut ?: return false
+                val pressed = keystrokeOf(event) ?: return false
+                if (!keystrokeMatches(binding, pressed)) return false
+                val offset = editor.text.selection.end
+                return openLineMenu(offset, caretAnchor(offset) ?: return false)
+            }
+
             // The same actions on the body's right-click menu (owner ask,
             // 2026-10-27: "formatting options for text"), each naming its
             // key, below the field's own Cut/Copy/Paste.
@@ -1082,6 +1213,21 @@ private fun OpenNote(
                     add(ShortcutMenuItem("Task", keys) {
                         taskShortcutAtCaret()
                         runCatching { bodyFocus.requestFocus() }
+                    })
+                }
+                // The line under the right-click, not the caret's: a person
+                // pointing at a task means that task.
+                val placed = layout
+                val text = editor.text.text
+                val at = rightClickAt?.let { position ->
+                    placed?.let {
+                        transformation.filter(AnnotatedString(text)).offsetMapping
+                            .transformedToOriginal(it.getOffsetForPosition(position)).coerceIn(0, text.length)
+                    }
+                } ?: editor.text.selection.end
+                lineMenuAt(text, at, decorations, LocalDate.now())?.let { found ->
+                    add(ShortcutMenuItem(found.menu.name + "...", dateShortcut) {
+                        openLineMenu(at, caretAnchor(at) ?: Rect.Zero)
                     })
                 }
             }
@@ -1369,6 +1515,7 @@ private fun OpenNote(
                                             event.type != KeyEventType.KeyDown -> false
                                             !completions.visible && goToDefinition(event) -> true
                                             !completions.visible && toggleTask(event) -> true
+                                            !completions.visible && openDateMenu(event) -> true
                                             !completions.visible && formatShortcut(event) -> true
                                             !completions.visible -> when {
                                                 event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> false
@@ -1407,11 +1554,32 @@ private fun OpenNote(
                                             while (true) {
                                                 val event = awaitPointerEvent()
                                                 when (event.type) {
-                                                    PointerEventType.Move ->
-                                                        hoveringActivation =
-                                                            activationUnder(event.changes.last().position) != null
-                                                    PointerEventType.Exit -> hoveringActivation = false
+                                                    // A pointer's first event inside is an
+                                                    // Enter, and it may land on a date.
+                                                    PointerEventType.Move, PointerEventType.Enter -> {
+                                                        val position = event.changes.last().position
+                                                        hoveringActivation = activationUnder(position) != null
+                                                        fieldHover = true
+                                                        hoverToken = menuTokenUnder(position)
+                                                    }
+                                                    PointerEventType.Exit -> {
+                                                        hoveringActivation = false
+                                                        fieldHover = false
+                                                    }
                                                     else -> {}
+                                                }
+                                            }
+                                        }
+                                    }
+                                    // Where a right-click landed, noted before the
+                                    // field's own menu reads its items, so the
+                                    // due-date entry is the line pointed at.
+                                    .pointerInput(Unit) {
+                                        awaitPointerEventScope {
+                                            while (true) {
+                                                val event = awaitPointerEvent(PointerEventPass.Initial)
+                                                if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
+                                                    rightClickAt = event.changes.last().position
                                                 }
                                             }
                                         }
@@ -1460,9 +1628,57 @@ private fun OpenNote(
                                     blockFlips = blockFlips + (body to if (key in now) now - key else now + key)
                                 },
                                 reveal = state::revealNext,
+                                rowMenu = rowMenu,
                             ) { toggleTaskResult(state, it) }
                         }
                     }
+
+                    // The arrow beside a hovered due date, drawn over the
+                    // text so the line never moves to make room for it.
+                    // Found again by its source range against the text as now
+                    // shown: the caret moving on or off its line re-renders
+                    // the checkbox before it, and the date moves with it.
+                    val chipLayout = layout
+                    val token = hoverToken?.let { held ->
+                        menuTokens(editor.text.text, line, decorations, blockDecorations).firstOrNull { it.range == held.range }
+                    }
+                    val chip = if (token != null && chipLayout != null && menuRequest == null && (fieldHover || chipHovered)) {
+                        runCatching { chipRect(chipLayout, token) }.getOrNull()
+                    } else null
+                    if (token != null && chip != null) {
+                        val chipDensity = LocalDensity.current
+                        MenuArrowChip(
+                            size = with(chipDensity) { chip.width.toDp() },
+                            onClick = {
+                                val text = editor.text.text
+                                val found = token.decoration.menu?.let { ask ->
+                                    val line = text.substring(token.lineRange.first, (token.lineRange.last + 1).coerceAtMost(text.length))
+                                    ask(line, LocalDate.now())?.let { MenuRequest(it, token.lineRange, line, chip.translate(fieldOrigin)) }
+                                }
+                                hoverToken = null
+                                menuRequest = found
+                            },
+                            interaction = chipInteraction,
+                            modifier = Modifier
+                                .offset(
+                                    x = EDITOR_PADDING + with(chipDensity) { chip.left.toDp() },
+                                    y = EDITOR_PADDING + with(chipDensity) { chip.top.toDp() },
+                                )
+                                .testTag("due-menu-arrow"),
+                        )
+                    }
+                }
+
+                menuRequest?.let { request ->
+                    TokenMenuPopup(
+                        request.menu,
+                        request.anchor,
+                        onChoose = { chooseMenuItem(request, it) },
+                        onDismiss = {
+                            menuRequest = null
+                            runCatching { bodyFocus.requestFocus() }
+                        },
+                    )
                 }
 
                 val placed = layout
@@ -1519,6 +1735,7 @@ private fun CollapsedFilterBlock(
     reveal: ((NoteLine) -> Unit)? = null,
     flipped: Set<String> = emptySet(),
     onFlip: ((String) -> Unit)? = null,
+    rowMenu: TaskRowMenu? = null,
     onToggle: (org.gilune.plugins.tasks.TaskHit) -> Unit,
 ) {
     // The layout is one frame behind a buffer that has just changed, so
@@ -1541,7 +1758,8 @@ private fun CollapsedFilterBlock(
             .background(MaterialTheme.colorScheme.surfaceVariant),
     ) {
         FilterBlockLines(result, today, onOpen, height / block.lines, width, onToggle = onToggle,
-            expanded = expanded, onMore = onMore, onFewer = onFewer, reveal = reveal, flipped = flipped, onFlip = onFlip)
+            expanded = expanded, onMore = onMore, onFewer = onFewer, reveal = reveal, flipped = flipped, onFlip = onFlip,
+            rowMenu = rowMenu)
     }
 }
 
