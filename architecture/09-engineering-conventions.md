@@ -172,6 +172,13 @@ had not spoken. The rules that follow from it:
   MB both; the 64 KB note presented 280 MB before, 153–155 MB after —
   **+141 MB → +13–15 MB**. `MarkdownBody` stays for short fixed previews
   only; a whole note never goes through it.
+- **The launcher runs on the Segment Heap** (ADR 0032 stage 2;
+  `.github/windows-launcher/gilune.manifest`, the launcher's only
+  manifest). Measured 2026-11-01 against a launcher identical but for the
+  manifest, four runs each. At rest it held 182 MB against 193–217 MB. It
+  did not cure typing's cost: after typing into the long note, both heaps
+  kept +115–237 MB through a full GC and 3 minutes. That memory is held,
+  not merely unreturned.
 - **Typing in a long note churns native memory.** Every keystroke lays
   the whole buffer out again as one Skia paragraph, and the old one's
   native memory waits for the collector to run its cleaner — which a

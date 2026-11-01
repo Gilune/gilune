@@ -2010,8 +2010,16 @@ gates promises) are ratified. **Next: application-level engineering — see
      phone Read; 64 KB note presented +141 MB → +13–15 MB (measured by
      swapping the built `composeApp-desktop.jar` into a scratch copy of
      the installed app — valid while the install's commit is the
-     branch base and FFI is unchanged). Next: stage 2 (Segment Heap
-     manifest on the launcher).
+     branch base and FFI is unchanged). **Stage 2 DONE**: Segment Heap
+     manifest on the launcher (`gilune.manifest`, RT_MANIFEST via the
+     package script's rc). At rest 182 vs 193–217 MB; it does NOT fix
+     typing (+115–237 MB kept on both heaps after GC + 3 min = memory
+     still HELD). Probe `type:<rel>` appends 150 letters from inside the
+     app (no keystrokes) for such measurements; the scratch scripts check
+     the process heap signature (0xDDEEDDEE segment / 0xFFEEFFEE NT) via
+     PEB+0x30 → heap+0x10. Local launcher build: llvm-rc (MSYS_NO_PATHCONV)
+     + `cargo rustc --release -- -C link-arg=<res>`. Next: find what holds
+     the typing memory, then stage 3.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

@@ -117,6 +117,32 @@ falls toward the live figure. Untested — the first thing measured.
 Rejected route: the per-executable registry switch (Image File Execution
 Options) is a machine setting, not ours to write.
 
+**Delivered 2026-11-01; the expectation was wrong.** What shipped:
+
+- `.github/windows-launcher/gilune.manifest`, embedded as RT_MANIFEST 1 by
+  `package-windows-linux.py`. It is the launcher's only manifest; the 1.3.2
+  launcher had none.
+- A package test that pins the single resource line and the manifest's
+  single setting (`test_launcher_resource_embeds_the_segment_heap_manifest`).
+
+How it was measured: two locally built launchers that differ only in the
+manifest, with the same app jar. A `type:` probe appends 150 letters to
+the 64 KB note from inside the app, so no keystroke reaches any window.
+Reading the process heap's signature confirmed the heap each copy was
+given. Four runs each:
+
+- **At rest: 182 MB every run on the Segment Heap, 193–217 MB on the NT
+  heap.** A small saving, and a consistent one.
+- **After typing, a full GC and 3 minutes:** Segment Heap 297–419 MB, NT
+  heap 315–433 MB. That is +115–237 MB kept on both, and the runs overlap.
+  Nothing more is returned between the first and third minute.
+
+So typing's cost is not freed memory the allocator sits on. Something
+still holds it after a collection, and the Segment Heap cannot return
+memory that is still in use. Stage 2 stays for its saving at rest. The
+churn moves to stage 3 (fewer, smaller layouts), plus finding what holds
+the memory. CPU cost was not measured.
+
 ### Stage 3 — style only what can be seen
 
 `MarkdownEditTransformation` takes a **style window**: the visible line
