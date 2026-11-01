@@ -16,7 +16,7 @@ package org.gilune.app
 import org.gilune.plugins.tasks.TASK_SEARCH_TYPE
 import org.gilune.plugin.sdk.Slots
 import org.gilune.plugins.findreplace.FIND_REPLACE_PLUGIN
-import androidx.compose.material.icons.filled.FindReplace
+import org.gilune.app.icons.FindReplace
 import androidx.compose.ui.platform.testTag
 
 import androidx.compose.foundation.border

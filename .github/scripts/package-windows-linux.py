@@ -68,6 +68,22 @@ def file_version(path):
             info.FileVersionLS >> 16, info.FileVersionLS & 0xFFFF))
 
 
+# Stock Temurin files the app never reads. classes_nocoops.jsa is Java's
+# start-up class cache for heaps above ~32 GB (compressed pointers off); the
+# launcher caps the heap at 768 MB (windows-launcher/src/main.rs), so only
+# classes.jsa is ever mapped. Measured 2026-11-01: 10.6 MB installed, 2.7 MB
+# of the MSI. Were the cap ever raised past 32 GB, Java would start without a
+# cache: slower, not broken. A runtime without the file fails the copy, so a
+# stale entry here is noticed.
+UNUSED_RUNTIME_FILES = ("bin/server/classes_nocoops.jsa",)
+
+
+def copy_runtime(source, destination):
+    shutil.copytree(source, destination)
+    for name in UNUSED_RUNTIME_FILES:
+        (destination / name).unlink()
+
+
 def write_launcher(bundle, destination, release):
     icon = str(bundle / "gilune.ico").replace("\\", "\\\\").replace('"', '\\"')
     numeric = release.replace(".", ",") + ",0"
@@ -339,7 +355,7 @@ def main():
         bundle = stage / "Gilune"
         bundle.mkdir()
         shutil.copytree(args.libs, bundle / "lib")
-        shutil.copytree(args.runtime, bundle / "runtime")
+        copy_runtime(args.runtime, bundle / "runtime")
         (bundle / "resources").mkdir()
         shutil.copy2(args.native / "gilune_ffi.dll", bundle / "resources/gilune_ffi.dll")
         shutil.copy2(REPO / "LICENSE", bundle / "LICENSE.txt")

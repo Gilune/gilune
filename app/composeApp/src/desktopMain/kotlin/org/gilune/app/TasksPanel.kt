@@ -27,8 +27,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
-import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.filled.KeyboardDoubleArrowRight
+import org.gilune.app.icons.CalendarToday
+import org.gilune.app.icons.KeyboardDoubleArrowRight
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned

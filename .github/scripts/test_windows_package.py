@@ -24,6 +24,31 @@ class WindowsPackageTest(unittest.TestCase):
                 package.version(value)
         self.assertEqual("255.255.65535", package.version("255.255.65535"))
 
+    def test_runtime_copy_leaves_out_the_large_heap_class_cache(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            server = root / "jre/bin/server"
+            server.mkdir(parents=True)
+            for name in ("jvm.dll", "classes.jsa", "classes_nocoops.jsa"):
+                (server / name).write_text(name)
+            package.copy_runtime(root / "jre", root / "runtime")
+            self.assertEqual(["classes.jsa", "jvm.dll"],
+                             sorted(p.name for p in (root / "runtime/bin/server").iterdir()))
+            # A runtime that no longer ships the file is a stale rule, not a
+            # silent pass.
+            (server / "classes_nocoops.jsa").unlink()
+            with self.assertRaises(FileNotFoundError):
+                package.copy_runtime(root / "jre", root / "again")
+
+    def test_launcher_heap_cap_keeps_the_dropped_cache_unused(self):
+        # The cache left out above serves only heaps of 32 GB and more.
+        launcher = (package.REPO / ".github/windows-launcher/src/main.rs").read_text(encoding="utf-8")
+        caps = re.findall(r'"-Xmx(\d+)([mMgG])"', launcher)
+        self.assertEqual(1, len(caps), caps)
+        amount, unit = caps[0]
+        megabytes = int(amount) * (1024 if unit in "gG" else 1)
+        self.assertLess(megabytes, 32 * 1024)
+
     def test_component_identity_survives_version_changes_and_added_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

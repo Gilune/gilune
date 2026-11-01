@@ -68,10 +68,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.outlined.Mic
+import org.gilune.app.icons.Tune
+import org.gilune.app.icons.Mic
 import androidx.compose.material.icons.outlined.Edit
-import androidx.compose.material.icons.outlined.Visibility
+import org.gilune.app.icons.Visibility
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
