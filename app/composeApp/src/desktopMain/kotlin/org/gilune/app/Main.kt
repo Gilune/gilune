@@ -201,6 +201,7 @@ private class Shutdown {
 
 fun main() {
     DesktopLog.install()
+    chooseRenderer()
     System.getProperty("compose.application.resources.dir")?.let { resources ->
         val existing = System.getProperty("jna.library.path")
         System.setProperty(

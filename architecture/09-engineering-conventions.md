@@ -127,9 +127,12 @@ had not spoken. The rules that follow from it:
   costing tens of megabytes loads on the first job that needs it and is
   dropped when none has for a while (ADR 0018, 2026-09-04). "Available"
   is a question about the file, and answering it must stay cheap.
-- The renderer is not a footprint lever. Direct3D costs ≈135 MB private
-  over `SOFTWARE`, and that is the price of the app drawing properly
-  (owner decision 2026-09-04). Re-measured against every alternative
+- **The window draws on the CPU by default** (owner decision 2026-11-01,
+  overturning 2026-09-04's "the renderer is not a footprint lever").
+  `Rendering.kt` sets `skiko.renderApi=SOFTWARE_FAST` in `main` unless a
+  renderer was named at launch; **Settings ▸ Appearance ▸ Draw with the
+  graphics card** (device pref `gpuDrawing`, read at start) gives Skiko
+  its own choice back. Measured against every alternative
   Skiko 0.9.4 offers (2026-11-01, probe copies of the installed 1.3.2, a
   1,500-line note scrolled by 300 wheel notches in a window the size of
   the owner's 5120×1440 screen): Direct3D sustained 75–83 fps at 413–417
@@ -140,7 +143,8 @@ had not spoken. The rules that follow from it:
   `skiko.buffering` and `skiko.vsync.enabled` changed nothing measurable;
   this Skiko exposes no limit on Skia's GPU cache. In a small window
   OpenGL looked cheaper (306–320 MB against 372–375); that is window
-  size, not a saving.
+  size, not a saving. Memory won: ~120 MB for half the frames on the
+  widest screen, and the processor path used less CPU.
 - **Java2D's Direct3D pipeline is off** (`-Dsun.java2d.d3d=false`, in
   the Gradle `jvmArgs` and the Windows launcher, held together by
   `DesktopLaunchArgumentsTest`). Compose draws through Skia's own
@@ -152,7 +156,10 @@ had not spoken. The rules that follow from it:
   visible lines: a 1,500-line note held ~90 MB more than an empty
   window (Java heap +12 MB, the rest native Skia layout objects that
   survive a full GC — live, not leaked). An editor that lays out only
-  what is on screen is the lever, and a large one.
+  what is on screen is the lever, and a large one. A background tab
+  costs its text and nothing more: three more tabs of a 64 KB note moved
+  the live Java heap by −137 to +380 KB after a full GC and kept no Skia
+  layout (only each pane's front tab is composed).
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it

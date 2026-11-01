@@ -51,6 +51,16 @@ object Prefs {
         get() = node.getBoolean("railCollapsed", false)
         set(value) = node.putBoolean("railCollapsed", value)
 
+    /// Draw with the graphics card instead of the CPU (`Rendering.kt`). Off
+    /// by default: about 120 MB less memory, half the frames when a long
+    /// note scrolls on a very wide screen. Read once, at start.
+    var gpuDrawing: Boolean
+        get() = node.getBoolean("gpuDrawing", false)
+        set(value) = node.putBoolean("gpuDrawing", value)
+
+    /// What this run is drawing with: the setting as it stood at start.
+    val gpuDrawingAtStart: Boolean by lazy { gpuDrawing }
+
     /// The document region's layout, per vault: which notes are open, in
     /// which panes, and which is in front (ADR 0014). Device-local like
     /// theme, and never the vault's business — a vault opened on two

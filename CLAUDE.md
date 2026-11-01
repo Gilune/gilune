@@ -1990,12 +1990,18 @@ gates promises) are ratified. **Next: application-level engineering — see
      Adoptium attaches. Empty vault, small window: 324 MB = Skia Direct3D
      ~150 + Java2D's Direct3D 35 + JVM ~100 + other native ~40. Java2D's
      pipeline is OFF now (both launch paths; 09 § Desktop footprint).
-     Renderer re-measured full-screen (5120×1440): Direct3D stays. JVM
+     Renderer re-measured full-screen (5120×1440): D3D 75–83 fps, software
+     39–43 fps at ~120 MB less — owner chose SOFTWARE as the default
+     (`Rendering.kt`; Settings ▸ Appearance ▸ Draw with the graphics card,
+     restart to apply; an explicit -Dskiko.renderApi still wins). JVM
      trims measured and rejected (C1-only −7 MB, Xms16m nothing). An
      open 1,500-line note costs ~90 MB, mostly native Skia paragraph
      layout of the WHOLE buffer — live, not leaked. Probe tab layouts
      persist per vault: an "empty" probe reopens the last probe's notes.
-     Not yet tested: whether closing a tab gives that memory back.
+     A BACKGROUND tab costs ~its text (live heap ±0.4 MB for 3 tabs of a
+     64 KB note; no Skia layouts) — an earlier "3 MB a tab" was run-to-run
+     noise in private bytes, which wobble ±10 MB. Not yet tested: whether
+     closing the front tab gives its layout memory back.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
