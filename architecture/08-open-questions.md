@@ -65,6 +65,10 @@ These require an external security review before production deployment.
 - Should the desktop take a file watcher as a hint, or a periodic stat-walk
   while focused, so an edit made beside Gilune shows without a focus change?
   (ADR 0020 § 2.6; owner deferred 2026-09-04.)
+- How does an open note's memory stop growing with its length? A 64 KB
+  note costs +70 MB editing, +136 MB presenting, and typing churns
+  ~200 MB (09 § Desktop footprint). Proposed answer 2026-11-01: ADR 0032,
+  four measured stages ending in a spike-gated block-windowed editor.
 - Vector index implementation and embedding model (a private index under
   ADR 0020's feed-and-cursor pattern; which model and where stays open).
 - Hosted transcription and LLM providers.

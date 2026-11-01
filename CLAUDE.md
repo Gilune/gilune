@@ -2001,7 +2001,11 @@ gates promises) are ratified. **Next: application-level engineering — see
      A BACKGROUND tab costs ~its text (live heap ±0.4 MB for 3 tabs of a
      64 KB note; no Skia layouts) — an earlier "3 MB a tab" was run-to-run
      noise in private bytes, which wobble ±10 MB. Not yet tested: whether
-     closing the front tab gives its layout memory back.
+     closing the front tab gives its layout memory back. The plan to make
+     an open note cost what is on screen is **ADR 0032 (Proposed)**:
+     lazy presentation mode → Segment Heap launcher manifest → style only
+     the visible window (count colour-only runs first) → block-windowed
+     editor only behind a spike. Nothing built yet.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
