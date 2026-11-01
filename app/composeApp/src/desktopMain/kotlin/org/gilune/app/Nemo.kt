@@ -23,6 +23,7 @@ import com.k2fsa.sherpa.onnx.OfflineTransducerModelConfig
 import com.k2fsa.sherpa.onnx.OnlineModelConfig
 import com.k2fsa.sherpa.onnx.OnlineRecognizer
 import com.k2fsa.sherpa.onnx.OnlineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OnlineStream
 import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
@@ -174,6 +175,10 @@ class NemoEngines(
 
     private val tokens get() = File(dir, "tokens.txt").path
 
+    /// Whether a recogniser is in memory now — for tests, as the kernel's
+    /// `whisper_model_resident` is.
+    val resident: Boolean get() = synchronized(this) { online != null || offline != null }
+
     /// Run `block` with the recogniser loaded, holding the lock.
     fun <T> withOnline(block: (OnlineRecognizer) -> T): T = synchronized(this) {
         lastUsed = System.currentTimeMillis()
@@ -301,16 +306,25 @@ class NemoEngines(
 /// Settling is the model's own endpoint — a pause — and the line in flight
 /// is the provisional rest. Cache-aware streaming re-decodes nothing, so an
 /// update costs only the audio that is new.
+///
+/// Making a session costs nothing: the stream — and with it the model, if
+/// it is not in memory — opens with the first audio, on the dictation's
+/// own thread. Opening it here put a 3 s model load on the click that
+/// started the microphone.
 class SherpaLiveSession(private val engines: NemoEngines) : LiveTranscriptionInterface {
-    private val stream = engines.withOnline { it.createStream() }
+    private var opened: OnlineStream? = null
     private var line = 0UL
+
+    private fun stream(recognizer: OnlineRecognizer): OnlineStream =
+        opened ?: recognizer.createStream().also { opened = it }
 
     override fun accept(pcm: ByteArray) {
         val samples = pcmToFloats(pcm)
-        engines.withOnline { stream.acceptWaveform(samples, WAV_SAMPLE_RATE) }
+        engines.withOnline { stream(it).acceptWaveform(samples, WAV_SAMPLE_RATE) }
     }
 
     override fun update(): List<LiveLine> = engines.withOnline { recognizer ->
+        val stream = stream(recognizer)
         while (recognizer.isReady(stream)) recognizer.decode(stream)
         val text = recognizer.getResult(stream).text.trim()
         if (!recognizer.isEndpoint(stream)) return@withOnline listOf(LiveLine(line, text, false))
@@ -319,14 +333,19 @@ class SherpaLiveSession(private val engines: NemoEngines) : LiveTranscriptionInt
         settled + LiveLine(line, "", false)
     }
 
-    override fun finish(): List<LiveLine> = engines.withOnline { recognizer ->
-        // A little silence lets the model's lookahead hear the last word out.
-        stream.acceptWaveform(FloatArray(WAV_SAMPLE_RATE / 2), WAV_SAMPLE_RATE)
-        stream.inputFinished()
-        while (recognizer.isReady(stream)) recognizer.decode(stream)
-        val text = recognizer.getResult(stream).text.trim()
-        stream.release()
-        if (text.isEmpty()) emptyList() else listOf(LiveLine(line, text, true))
+    override fun finish(): List<LiveLine> {
+        // Nothing was heard: there is no stream, and no reason to load a
+        // model to say so.
+        val stream = opened ?: return emptyList()
+        return engines.withOnline { recognizer ->
+            // A little silence lets the model's lookahead hear the last word out.
+            stream.acceptWaveform(FloatArray(WAV_SAMPLE_RATE / 2), WAV_SAMPLE_RATE)
+            stream.inputFinished()
+            while (recognizer.isReady(stream)) recognizer.decode(stream)
+            val text = recognizer.getResult(stream).text.trim()
+            stream.release()
+            if (text.isEmpty()) emptyList() else listOf(LiveLine(line, text, true))
+        }
     }
 }
 

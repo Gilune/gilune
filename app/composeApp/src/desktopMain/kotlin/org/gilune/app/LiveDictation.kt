@@ -238,6 +238,18 @@ class LiveDictationRun(
         stopping = done
     }
 
+    /// The engine refused audio — most often a model that would not load,
+    /// since it loads with the first chunk. The recording goes on (the
+    /// recorder never waits on this thread); only the live words stop.
+    private var deaf = false
+
+    private fun feed(pcm: ByteArray) {
+        val refused = runCatching { engine.accept(pcm) }.exceptionOrNull() ?: return
+        deaf = true
+        GiluneLog.warn("live dictation could not hear the audio", refused)
+        fellBehind("live words stopped (${refused.message}); your recording is kept")
+    }
+
     private fun loop() {
         var fresh = 0
         var decodes = 0
@@ -249,15 +261,15 @@ class LiveDictationRun(
                 return
             }
             val chunk = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
-            engine.accept(chunk)
-            fresh += chunk.size
+            if (deaf) continue
             // Whatever arrived during the last decode is heard by this one.
-            while (true) {
-                val more = queue.poll() ?: break
-                engine.accept(more)
-                fresh += more.size
+            var next: ByteArray? = chunk
+            while (next != null && !deaf) {
+                feed(next)
+                fresh += next.size
+                next = queue.poll()
             }
-            if (behind || stopping != null || fresh < stepSeconds * PCM_BYTES_PER_SECOND) continue
+            if (deaf || behind || stopping != null || fresh < stepSeconds * PCM_BYTES_PER_SECOND) continue
             fresh = 0
             val started = System.nanoTime()
             val update = runCatching { engine.update() }

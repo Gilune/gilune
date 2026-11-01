@@ -127,6 +127,15 @@ had not spoken. The rules that follow from it:
   costing tens of megabytes loads on the first job that needs it and is
   dropped when none has for a while (ADR 0018, 2026-09-04). "Available"
   is a question about the file, and answering it must stay cheap.
+  The rule was broken once, by a warm-up: through 1.3.2 the NeMo
+  provider loaded Nemotron when the vault opened "so the first dictation
+  does not wait", and the owner's idle app sat at **1,038 MB private**
+  until the ten-minute sweep took it to **367 MB** (2026-11-01). A
+  warm-up only helps a dictation in the first ten minutes; every later
+  one pays the load anyway (Nemotron: ~3 s, while the recorder keeps
+  queueing audio). Nothing is warmed up at open, and making a live
+  session must not load a model either — it is made on the click that
+  starts the microphone.
 - The renderer is not a footprint lever. Direct3D costs ≈135 MB private
   over `SOFTWARE`, and that is the price of the app drawing properly
   (owner decision 2026-09-04).

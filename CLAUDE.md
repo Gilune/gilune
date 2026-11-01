@@ -1981,6 +1981,20 @@ gates promises) are ratified. **Next: application-level engineering — see
      decision: jlink trimming (all
      languages must stay — Gilune will be translated — which leaves only
      ~7 MB to gain), ProGuard (reflection/JNI risk).
+   - **NeMo on demand (2026-11-01, owner report: 1 GB in Task Manager
+     with nothing recorded).** Measured on the installed 1.3.2 (jcmd
+     attaches to the launcher-hosted JVM): Java heap 32 MB + metaspace
+     43 MB; ~670 MB was Nemotron, loaded by `bringUpNemo` at vault open
+     as a warm-up. The ten-minute sweep DOES return it to the OS
+     (1,038 → 367 MB private, sampled). Fixed: Ready = files present
+     (`NemoEngines.resident` false); `SherpaLiveSession` opens its stream
+     with the first audio on the dictation thread (it had loaded the
+     model on the mic click — a 3 s UI freeze once the warm-up went);
+     `LiveDictationRun` survives an engine whose accept throws (a load
+     failure now happens there) — says so once, stop still answered.
+     Nemotron load measured 3.25 s. Rows in NemoTest/LiveDictationTest,
+     each falsified by reverting its fix. 09 § Desktop footprint records
+     it. Speaker models were already lazy.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
