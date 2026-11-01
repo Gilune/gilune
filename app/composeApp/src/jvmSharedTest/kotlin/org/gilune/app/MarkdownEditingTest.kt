@@ -937,4 +937,81 @@ class MarkdownEditingTest {
         assertEquals(2, quotedText.count { it == unchecked }, "both checkboxes still render")
         assertMappingIsSound(fenced, quoted)
     }
+
+    // ADR 0032 stage 3: a style window draws colours near the screen only.
+    // Everything that moves text — the transformed string, the offset
+    // mapping, and every span that changes how a line wraps — must be the
+    // same whatever the window, or scrolling would jump and clicks land on
+    // the wrong character.
+    private val windowDoc = (1..60).joinToString("\n") { i ->
+        when (i % 6) {
+            0 -> "## Section $i"
+            1 -> "- [ ] task $i with a [link](to/$i) and `code`"
+            2 -> "Paragraph $i with **bold**, *italic* and ~~gone~~ words."
+            3 -> "> quoted $i"
+            4 -> "- bullet $i"
+            else -> ""
+        }
+    }
+
+    private fun metric(text: AnnotatedString) = text.spanStyles
+        .filter { it.item.fontWeight != null || it.item.fontSize != androidx.compose.ui.unit.TextUnit.Unspecified || it.item.fontStyle != null }
+        .map { Triple(it.start, it.end, Triple(it.item.fontWeight, it.item.fontSize, it.item.fontStyle)) }
+        .toSet()
+
+    @Test
+    fun aStyleWindowChangesColoursOnlyAndOnlyOutsideTheWindow() {
+        val decorations = builtInDecorations()
+        val whole = MarkdownEditTransformation(palette, null, decorations).filter(AnnotatedString(windowDoc))
+        val middle = windowDoc.length / 2
+        val window = middle..(middle + 300)
+        val windowed = MarkdownEditTransformation(palette, null, decorations, styleWindow = window).filter(AnnotatedString(windowDoc))
+
+        assertEquals(whole.text.text, windowed.text.text, "the laid-out text is the same")
+        for (offset in 0..windowDoc.length) {
+            assertEquals(whole.offsetMapping.originalToTransformed(offset), windowed.offsetMapping.originalToTransformed(offset))
+        }
+        for (offset in 0..whole.text.length) {
+            assertEquals(whole.offsetMapping.transformedToOriginal(offset), windowed.offsetMapping.transformedToOriginal(offset))
+        }
+        assertEquals(metric(whole.text), metric(windowed.text), "every wrap-changing span is kept, everywhere")
+
+        val colours = windowed.text.spanStyles.filter { it.item.color != Color.Unspecified }
+        assertTrue(colours.isNotEmpty(), "the window itself is coloured")
+        for (span in colours) {
+            val lineStart = whole.text.text.lastIndexOf('\n', span.start - 1) + 1
+            val lineEnd = whole.text.text.indexOf('\n', span.start).let { if (it < 0) whole.text.length else it }
+            assertTrue(lineEnd >= window.first && lineStart <= window.last, "a colour off the window's lines at ${span.start}")
+        }
+        val colourCount = { text: AnnotatedString -> text.spanStyles.count { it.item.color != Color.Unspecified } }
+        assertTrue(
+            colourCount(windowed.text) * 3 < colourCount(whole.text),
+            "the window's eighth of the note keeps few colours: ${colourCount(windowed.text)} of ${colourCount(whole.text)}",
+        )
+        // Inside the window it draws exactly what the whole note draws.
+        val inside = { text: AnnotatedString -> text.spanStyles.filter { it.start >= window.first + 80 && it.end <= window.last - 80 }.toSet() }
+        assertEquals(inside(whole.text), inside(windowed.text))
+    }
+
+    @Test
+    fun aTransformationAnswersTheSameTextOnceAndANewTextAfresh() {
+        val transformation = MarkdownEditTransformation(palette)
+        val first = transformation.filter(AnnotatedString(windowDoc))
+        assertTrue(first === transformation.filter(AnnotatedString(windowDoc)), "asked again, the same answer")
+        val edited = transformation.filter(AnnotatedString(windowDoc + "x"))
+        assertTrue(edited !== first)
+        assertEquals(MarkdownEditTransformation(palette).filter(AnnotatedString(windowDoc + "x")).text, edited.text)
+    }
+
+    @Test
+    fun theStyleWindowReachesAScreenBeyondAndHoldsUntilTheScreenLeavesItsMiddle() {
+        val first = nextStyleWindow(null, 1000..2000, 10_000)
+        assertEquals(0..3000, first, "one screenful either side, clamped at the start")
+        assertEquals(first, nextStyleWindow(first, 1200..2200, 10_000), "a small scroll keeps the window")
+        val moved = nextStyleWindow(first, 2600..3600, 10_000)
+        assertEquals(1600..4600, moved, "past the inner half, it moves to centre the screen")
+        assertEquals(9000..10_000, nextStyleWindow(null, 9500..10_000, 10_000), "clamped at the end")
+        val atEnd = nextStyleWindow(null, 9500..10_000, 10_000)
+        assertEquals(atEnd, nextStyleWindow(atEnd, 9600..10_000, 10_000), "held at the end of the text")
+    }
 }

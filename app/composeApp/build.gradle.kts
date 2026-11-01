@@ -336,6 +336,11 @@ compose.desktop {
         //    pipeline, which Compose never draws through (Skia has its
         //    own device). It cost 35 MB private and 16 threads on an idle
         //    window; the only Swing left, the file choosers, draw with GDI.
+        //  - Min/MaxHeapFreeRatio 10/30 (2026-11-01, ADR 0032): the serial
+        //    collector kept 59 MB committed for 18 MB of live objects after
+        //    typing; with these it gives the rest back after a collection.
+        //    Typing into the long note peaked ~70 MB lower and settled ~30
+        //    MB lower.
         // The Windows launcher passes the same list (DesktopLaunchArgumentsTest
         // holds the two together).
         jvmArgs += listOf(
@@ -343,6 +348,8 @@ compose.desktop {
             "-Xms32m",
             "-Xmx768m",
             "-XX:CICompilerCount=2",
+            "-XX:MinHeapFreeRatio=10",
+            "-XX:MaxHeapFreeRatio=30",
             "-Dsun.java2d.d3d=false",
         )
 

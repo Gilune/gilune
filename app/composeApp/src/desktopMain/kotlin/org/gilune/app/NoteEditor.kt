@@ -84,6 +84,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -92,6 +93,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -883,8 +885,14 @@ private fun OpenNote(
             val live = editor.live
             val ghost = live?.ghost(editor.text.text)
             val ghostStyle = SpanStyle(color = colours.onSurfaceVariant.copy(alpha = 0.7f))
-            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size, live?.anchor, ghost, ghostStyle) {
-                val base = MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f)
+            // Colours are drawn near the screen only (ADR 0032 stage 3): a
+            // long note's thousands of colour spans were native objects Skia
+            // rebuilt on every keystroke. The window follows the scroll
+            // below, once a screenful, from the laid-out text.
+            val bodyScroll = rememberScrollState()
+            var styleWindow by remember(relPath) { mutableStateOf<IntRange?>(0..INITIAL_STYLE_WINDOW_CHARS) }
+            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size, live?.anchor, ghost, ghostStyle, styleWindow) {
+                val base = MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f, styleWindow = styleWindow)
                 if (live == null || ghost == null) base else DictationTransformation(base, live.anchor, ghost, ghostStyle)
             }
             // Where each collapsed block's placeholder landed, asked of the
@@ -894,6 +902,21 @@ private fun OpenNote(
                 collapsedBlocks(editor.text.text, line, decorations, blockDecorations)
             }
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+            // Each relayout leaves the last one's native memory for the
+            // collector; once the note is still, ask for it (NativeGarbage).
+            LaunchedEffect(layout) { layout?.let { NativeGarbage.layoutReplaced(it.layoutInput.text.length) } }
+            DisposableEffect(relPath) { onDispose { NativeGarbage.soon() } }
+            val windowDensity = LocalDensity.current
+            LaunchedEffect(bodyScroll, relPath) {
+                val padding = with(windowDensity) { EDITOR_PADDING.toPx() }
+                snapshotFlow { Triple(bodyScroll.value, bodyScroll.viewportSize, layout) }.collect { (top, height, placed) ->
+                    if (placed == null || height <= 0) return@collect
+                    val above = (top - padding).coerceAtLeast(0f)
+                    val first = placed.getOffsetForPosition(Offset(0f, above))
+                    val last = placed.getOffsetForPosition(Offset(placed.size.width.toFloat(), above + height))
+                    styleWindow = nextStyleWindow(styleWindow, first..last.coerceAtLeast(first), placed.layoutInput.text.length)
+                }
+            }
             var hoveringActivation by remember { mutableStateOf(false) }
             // A token's own menu (ADR 0015 amendment 2026-10-31): the due
             // date under the pointer, which shows the arrow beside it, and
@@ -1411,7 +1434,7 @@ private fun OpenNote(
                 // only thing in it: a collapsed block draws over the lines
                 // the field reserved for it, and being its sibling here is
                 // what makes it scroll with the text it covers.
-                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("note-scroll")) {
+                Box(Modifier.fillMaxSize().verticalScroll(bodyScroll).testTag("note-scroll")) {
                     // Drawn before the field, so behind its text; it takes
                     // no input, so a click goes straight through.
                     val pulsing = pulseRange

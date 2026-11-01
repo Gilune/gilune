@@ -55,6 +55,9 @@ internal fun PresentedNote(
     val appearance = LocalNoteAppearance.current
     val plugins = state.plugins.toList()
     val scroll = rememberLazyListState()
+    // Blocks are laid out as they scroll in and dropped as they leave;
+    // once the list is still, their native memory is asked back.
+    LaunchedEffect(scroll.isScrollInProgress) { if (!scroll.isScrollInProgress) NativeGarbage.soon() }
     val scope = rememberCoroutineScope()
     val focus = remember { FocusRequester() }
     // The keys live here — Esc back to editing, the arrows to scroll — so

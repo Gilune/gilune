@@ -270,6 +270,10 @@ fn launch(root: &Path) -> std::io::Result<i32> {
         "-Xms32m",
         "-Xmx768m",
         "-XX:CICompilerCount=2",
+        // Give heap back after a collection instead of keeping it for
+        // the next burst (ADR 0032): 59 MB stayed committed for 18 MB.
+        "-XX:MinHeapFreeRatio=10",
+        "-XX:MaxHeapFreeRatio=30",
         // Java2D's own Direct3D pipeline: Compose draws through Skia's
         // device, never this one, which cost 35 MB and 16 threads idle.
         "-Dsun.java2d.d3d=false",

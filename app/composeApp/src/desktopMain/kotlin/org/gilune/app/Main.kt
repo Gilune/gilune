@@ -361,6 +361,10 @@ private fun DesktopApp(
     onVaultChange: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    // Skia's paragraph cache never hits for an editor and holds a copy of
+    // every text it laid out (NativeGarbage, ADR 0032).
+    val fontResolver = androidx.compose.ui.platform.LocalFontFamilyResolver.current
+    LaunchedEffect(fontResolver) { NativeGarbage.disableParagraphCache(fontResolver) }
     val state = remember { GiluneState(vaultDir, scope) }
     // The document region's whole state: the pane tree, its tabs and one
     // buffer per open note, restored from where this vault was left.
