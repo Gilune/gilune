@@ -13,6 +13,12 @@
 // is within a pixel of its height inside the whole note — line tops are
 // whole pixels, so each chunk's edges round — and the editor puts the line
 // at the top of the view back where it was whenever the slice moves.
+//
+// The note's first chunk has no line above it in the note, so it is
+// measured with none: its first line then carries the room a layout keeps
+// above a first line, exactly as it does in the note. With a context line
+// above it, it measured 5 px taller than the note on Linux's fonts (CI,
+// 2026-11-02) and 2 px on Windows'.
 
 package org.gilune.app
 
@@ -36,7 +42,8 @@ internal class SliceHeights {
     }
 
     /// The height of `chunk` of `text`, measured now if it never was.
-    /// `measure` lays out a transformed chunk between its context lines.
+    /// `measure` lays out a transformed chunk between its context lines,
+    /// told whether it is the note's first chunk, which has none above.
     /// `salt` names what else a chunk holding a fence depends on — a filter
     /// block's rows decide its height — and is ignored for every other.
     fun heightOf(
@@ -44,16 +51,18 @@ internal class SliceHeights {
         chunk: SliceChunk,
         salt: Int,
         transform: (String) -> AnnotatedString,
-        measure: (AnnotatedString) -> Float,
+        measure: (AnnotatedString, Boolean) -> Float,
     ): Float {
+        val first = chunk.start == 0
         val last = chunk.end == text.length
         // A chunk's own last line break separates it from the next and is
         // the context's to draw; the buffer's last chunk has no next.
         val end = if (!last && chunk.end > chunk.start && text[chunk.end - 1] == '\n') chunk.end - 1 else chunk.end
         val body = text.substring(chunk.start, end)
         val fenced = "```" in body
-        val key = (if (last) "\u0000" else "") + (if (fenced) "$salt\u0000" else "") + body
-        return heights.getOrPut(key) { measure(transform(body)) }
+        val key = (if (first) "\u0001" else "") + (if (last) "\u0000" else "") +
+            (if (fenced) "$salt\u0000" else "") + body
+        return heights.getOrPut(key) { measure(transform(body), first) }
     }
 
     /// Drops what no chunk of the current text needs once old versions
@@ -67,13 +76,20 @@ internal class SliceHeights {
 }
 
 /// A chunk's height at `width`: laid out between two one-line contexts,
-/// from the top of its first line to the top of the line after it.
-internal fun measureChunk(measurer: TextMeasurer, chunk: AnnotatedString, style: TextStyle, width: Int): Float {
+/// from the top of its first line to the top of the line after it. The
+/// note's `first` chunk has no line above it, so it is laid out with none.
+internal fun measureChunk(
+    measurer: TextMeasurer,
+    chunk: AnnotatedString,
+    style: TextStyle,
+    width: Int,
+    first: Boolean = false,
+): Float {
     val text = buildAnnotatedString {
-        append("x\n")
+        if (!first) append("x\n")
         append(chunk)
         append("\nx")
     }
     val layout = measurer.measure(text, style, constraints = Constraints(maxWidth = width.coerceAtLeast(1)))
-    return layout.getLineTop(layout.lineCount - 1) - layout.getLineTop(1)
+    return layout.getLineTop(layout.lineCount - 1) - layout.getLineTop(if (first) 0 else 1)
 }
