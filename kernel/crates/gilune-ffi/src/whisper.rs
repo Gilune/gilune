@@ -69,15 +69,20 @@ const ENGINES_SLOT: &str = "transcription.engines";
 /// keys them — `WhisperEnginesCouplingTest` reads this list as text and
 /// fails when the two disagree. Sizes are the published files' bytes.
 const ENGINES: [(&str, &str, u64, &str); 4] = [
-    ("tiny-q5_1", "Whisper tiny (q5_1)", 32_152_673, "The fastest and smallest, and the least accurate."),
-    ("tiny", "Whisper tiny", 77_691_713, "Fast, about as accurate as tiny (q5_1), and larger."),
+    ("tiny-q5_1", "Whisper tiny (q5_1)", 32_152_673, "The smallest download, and the least accurate."),
+    ("tiny", "Whisper tiny", 77_691_713, "About as accurate as tiny (q5_1), and larger."),
     (
         "base-q5_1",
         "Whisper base (q5_1)",
         59_707_625,
-        "Recommended: base accuracy for a download smaller than tiny's.",
+        "A small download with good accuracy. An hour of recording takes nearly half an hour.",
     ),
-    ("base", "Whisper base", 147_951_465, "The same words as base (q5_1), slower, and larger."),
+    (
+        "base",
+        "Whisper base",
+        147_951_465,
+        "The same words as base (q5_1), a little faster, and a larger download.",
+    ),
 ];
 
 /// How long the weights may sit unused before they are dropped. Ten

@@ -32,12 +32,17 @@ pieces as the provider feeds them):
 | Nemotron 0.6B, ten 30 s pieces decoded together | 8 | 3.6 | ~14 min |
 | whisper base-q5_1 (2026-09-01, a 21.5 s clip) | 8 | ~21 | ~2.5 min |
 
+**Corrected by § 9's measurement round**: the whisper row above was a
+21.5-second clip extrapolated, and it does not hold — on a 14-minute
+recording whisper ran at 2.2–2.6× real time. The argument for roles stands on
+Parakeet instead (9.1×, § 9).
+
 The time per minute of audio stayed flat across the recording: the slowness is
 the model's design, not a fault in how it is fed. A streaming model cannot
 spread an hour across twelve cores, because every slice waits on the one
 before. A user who picked Nemotron for its live words now waits half an hour
-for a meeting's transcript, and the one-transcriber rule forbids them the
-whisper they already have, which would take minutes.
+for a meeting's transcript, and the one-transcriber rule forbids them a
+recordings engine several times faster.
 
 The owner (2026-11-02): support models for live and for after-the-fact
 transcription, possibly from different providers, and let the person pick
@@ -225,6 +230,45 @@ recording: whisper base-q5_1 and base, Parakeet TDT 0.6B v2, Nemotron 160 ms
 batched, Nemotron 1,120 ms — speed, and words against a reference text.
 About 1 GB of downloads, once. Expected, not decided: Nemotron while you
 speak, whisper or Parakeet for recordings.
+
+**Results (2026-11-02, this 12-core desktop, idle).** One recording of 843 s:
+150 different sentences of a site meeting, two text-to-speech voices taking
+turns, no sentence repeated. (A first attempt repeated eight lines twelve
+times; whisper's habit of feeding what it has heard back in as context made
+that recording unfair to it, so it was discarded.) Every engine ran the
+app's own code path — whisper through the kernel's job route in a release
+build, the NeMo models through `NemoEngines.transcribe` reading the recording
+a piece at a time. Word error is against the script, **with number words left
+out**: engines write "£200" or "200 pounds" for the spoken "two hundred
+pounds", which is a fair transcript and not an error.
+
+| Engine | Speed (× real time) | An hour takes | Word error |
+|---|---|---|---|
+| Parakeet TDT 0.6B v2 (4 threads, 60 s segments) | **9.1** | ~7 min | 2.8% |
+| whisper base (8 threads) | 2.6 | ~23 min | 3.0% |
+| whisper base-q5_1 (8 threads) | 2.2 | ~27 min | 3.0% |
+| Nemotron 0.6B 160 ms (4 threads, one stream) | 1.5 | ~40 min | **2.4%** |
+| Nemotron 0.6B 160 ms, 30 s pieces batched (8 threads; 5-minute probe) | 3.6 | ~17 min | — |
+| Nemotron 0.6B 1,120 ms | — | — | — |
+
+- **Parakeet is the recordings engine to beat**: four times whisper's speed at
+  the same accuracy. Model load 2.6 s.
+- **Whisper is not the fast option the September figure suggested.** On 30 s
+  of the same recording it took 27.7 s; the September harness's 1.0 s for a
+  21.5 s clip cannot be reproduced and its source is gone. Rebuilding
+  whisper.cpp with `/arch:AVX2` changed nothing (27.4 s). Why whisper is this
+  slow here is an open question, recorded rather than chased in this ADR.
+- **Nemotron 1,120 ms** would not load: sherpa-onnx 1.13.8 refuses to create a
+  recogniser from the published files ("failed to create native
+  OnlineRecognizer"). Not offered.
+- All synthetic voices: real rooms are the owner's to judge, as ADR 0030 said
+  of speaker labels.
+
+**Defaults, as ratified answer 3 set them**: an existing install keeps today's
+engine in both roles. The engines' guidance sentences now carry these
+measurements, so the page says which is fast for recordings; recommending
+Parakeet to new installs (a 482 MB download that needs a yes) is the owner's
+call.
 
 ## Alternatives considered
 

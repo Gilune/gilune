@@ -390,8 +390,9 @@ val NEMO_MODELS: List<NemoModel> = listOf(
         size = "464 MB",
         kind = NemoKind.STREAMING,
         licence = "NVIDIA Open Model License",
-        guidance = "The most accurate live model measured: words appear about a second after you " +
-            "say them and keep up easily. Uses about 0.6 GB of memory while you dictate.",
+        guidance = "The best for dictation: words about a second after you say them, and the " +
+            "most accurate measured. Slow for recordings (an hour takes about 40 minutes). " +
+            "Uses about 0.6 GB of memory while it works.",
     ),
     NemoModel(
         key = "fastconformer",
@@ -414,8 +415,8 @@ val NEMO_MODELS: List<NemoModel> = listOf(
         size = "482 MB",
         kind = NemoKind.WHOLE_RECORDING,
         licence = "CC-BY-4.0",
-        guidance = "Very accurate, with capitals and punctuation, but it hears a recording " +
-            "once it has finished: dictated words arrive when you stop, never as you speak.",
+        guidance = "The fastest for recordings measured (an hour in about 7 minutes), as accurate " +
+            "as the others, with capitals and punctuation. Not for words as you speak.",
     ),
 )
 
