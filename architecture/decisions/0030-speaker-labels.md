@@ -171,3 +171,36 @@ the NeMo engines.
 - Falsified by disabling each: the sentence rule (word-by-word puts `Go`
   and `instead.` on the wrong speaker), the attached-capture guard, the
   interruption run, and the one-voice rule.
+
+## Amendment (2026-11-02): long recordings are heard in windows
+
+A user's hour-long recording ran the desktop out of heap at every attempt:
+transcription and labelling each held the whole recording as bytes, as bytes
+without the header and as floats at once (`architecture/09` § Desktop
+footprint has the rule that came out of it). Now:
+
+- The speaker model hears a recording **a window at a time**
+  (`SpeakerWindows`): as many windows as the recording has ten minutes
+  (rounded), all the same length (`speakerWindows`). A recording up to about
+  fifteen minutes is one window and is heard exactly as before, count
+  included.
+- A longer recording's windows are each diarized with the count on automatic;
+  every voice in a window is given an embedding from up to 20 s of its own
+  longest turns (the same WeSpeaker model, `SpeakerEngine.voiceOf`) and
+  **matched to the people already heard** by cosine similarity at the
+  clustering threshold, 0.5 (`VoiceLinker`, one-to-one per window). A voice
+  too brief to compare (< 1 s) is a new number. The person's count is applied
+  once every window is in, merging the most alike voices until that many
+  remain.
+- The labeller reads the kernel's WAV, and NeMo's claim, a piece at a time;
+  nothing holds more than one window (≤ ~58 MB of floats).
+- `SpeakerWindowsTest` (4, stand-in models): one window keeps the count and
+  compares nothing; three windows with the voices numbered the other way round
+  in alternate windows still name Alice and Bob the same throughout; the
+  labelled text alternates correctly; a failing model leaves the plain
+  transcript. `SpeakerLabelsTest` +4 (window plan, linking, one-to-one,
+  count).
+- **Not measured with the real models on a long recording**: the linking is
+  tested with stand-ins only, and the threshold is the clustering one, not a
+  measured one. ADR 0033's measurement round runs the real models over a
+  50-minute two-voice recording.

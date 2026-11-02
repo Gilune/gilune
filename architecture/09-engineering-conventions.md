@@ -127,6 +127,15 @@ had not spoken. The rules that follow from it:
   costing tens of megabytes loads on the first job that needs it and is
   dropped when none has for a while (ADR 0018, 2026-09-04). "Available"
   is a question about the file, and answering it must stay cheap.
+- **A recording is read a piece at a time, never held whole**
+  (2026-11-02). An hour of 16 kHz PCM is 115 MB as bytes and 230 MB as
+  floats; a user's hour-long recording ran the 768 MB heap out at every
+  attempt because transcription held it as bytes, as bytes without the
+  header and as floats at once. The claim's chunks go to the engine as
+  they arrive (`RecordingPcm`); a model that must take its audio in one
+  call is given segments (`QuietSegments`, ≤ 60 s, cut where it is quiet);
+  speaker labels hear windows of ~10 minutes (`SpeakerWindows`). A test
+  feeding 96 MB through the provider holds the heap growth under 24 MB.
 - The renderer is not a footprint lever. Direct3D costs ≈135 MB private
   over `SOFTWARE`, and that is the price of the app drawing properly
   (owner decision 2026-09-04).

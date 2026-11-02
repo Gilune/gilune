@@ -202,3 +202,110 @@ fun wordsFromTokens(tokens: Array<String>, starts: FloatArray, durations: FloatA
 /// How long a word is taken to last after its last token began, for a
 /// model that does not say.
 private const val WORD_TAIL_MS = 300
+
+/// How much of a recording the speaker model hears at once. A long
+/// recording is heard in windows of about this length, so its samples are
+/// never all held at once (an hour is 230 MB as floats, a third of the
+/// desktop's heap); a recording up to half as long again is one window,
+/// heard exactly as it always was.
+const val SPEAKER_WINDOW_SAMPLES = 10 * 60 * WAV_SAMPLE_RATE
+
+/// The windows a recording of `total` samples is heard in: as many as the
+/// recording has [SPEAKER_WINDOW_SAMPLES] (rounded), all the same length,
+/// so the last is never a scrap too short to tell voices apart in.
+fun speakerWindows(total: Long): List<Int> {
+    if (total <= 0) return emptyList()
+    val count = Math.round(total.toDouble() / SPEAKER_WINDOW_SAMPLES).coerceAtLeast(1L)
+    val size = total / count
+    return List(count.toInt()) { index -> if (index < count - 1) size.toInt() else (total - size * (count - 1)).toInt() }
+}
+
+/// How alike two windows' voices must sound — cosine similarity of their
+/// speaker embeddings — to be taken for one person: the threshold the
+/// speaker model clusters a window's own voices by.
+const val VOICE_LINK_THRESHOLD = 0.5f
+
+/// The voices of a recording heard window by window, matched across
+/// windows: each window's speakers are numbered afresh by the model, so
+/// each is given the number of the person already heard whose voice it
+/// sounds most like, or a new one. A voice too short to have an embedding
+/// (null) is a new number; nothing can be said about it.
+class VoiceLinker(private val threshold: Float = VOICE_LINK_THRESHOLD) {
+    private val sums = mutableListOf<FloatArray>()
+
+    /// The recording-wide number of each voice heard in one window.
+    fun link(voices: List<FloatArray?>): List<Int> {
+        val unit = voices.map { it?.let(::normalised) }
+        val pairs = buildList {
+            for ((local, voice) in unit.withIndex()) {
+                if (voice == null) continue
+                for ((global, sum) in sums.withIndex()) add(Triple(local, global, cosine(voice, sum)))
+            }
+        }.filter { it.third >= threshold }.sortedByDescending { it.third }
+        val linked = arrayOfNulls<Int>(voices.size)
+        val taken = HashSet<Int>()
+        for ((local, global, _) in pairs) {
+            if (linked[local] != null || global in taken) continue
+            linked[local] = global
+            taken += global
+        }
+        return unit.indices.map { local ->
+            val voice = unit[local]
+            val global = linked[local] ?: sums.size.also { sums += voice?.copyOf() ?: FloatArray(0) }
+            if (voice != null && linked[local] != null) {
+                val sum = sums[global]
+                for (k in sum.indices) sum[k] += voice[k]
+            }
+            global
+        }
+    }
+
+    /// Every number heard, mapped to at most `count` people when somebody
+    /// said how many there are: the two most alike are merged until that
+    /// many remain. Null, or no more voices than that, changes nothing.
+    fun limited(count: Int?): (Int) -> Int {
+        val group = IntArray(sums.size) { it }
+        if (count == null || sums.size <= count) return { it }
+        val members = sums.indices.associateWith { listOf(it) }.toMutableMap()
+        val centroid = sums.indices.associateWith { sums[it].copyOf() }.toMutableMap()
+        while (members.size > count) {
+            val keys = members.keys.toList()
+            var best: Pair<Int, Int>? = null
+            var bestScore = Float.NEGATIVE_INFINITY
+            for (i in keys.indices) for (j in i + 1 until keys.size) {
+                val score = cosine(centroid.getValue(keys[i]), centroid.getValue(keys[j]))
+                if (score > bestScore) {
+                    bestScore = score
+                    best = keys[i] to keys[j]
+                }
+            }
+            val (keep, gone) = best ?: break
+            members[keep] = members.getValue(keep) + members.getValue(gone)
+            val sum = centroid.getValue(keep)
+            val other = centroid.getValue(gone)
+            if (sum.size == other.size) for (k in sum.indices) sum[k] += other[k]
+            members.remove(gone)
+            centroid.remove(gone)
+        }
+        for ((keep, merged) in members) for (id in merged) group[id] = keep
+        return { id -> group.getOrElse(id) { id } }
+    }
+
+    private fun normalised(v: FloatArray): FloatArray {
+        val norm = kotlin.math.sqrt(v.fold(0.0) { acc, x -> acc + x * x }).toFloat()
+        return if (norm == 0f) v.copyOf() else FloatArray(v.size) { v[it] / norm }
+    }
+
+    private fun cosine(a: FloatArray, b: FloatArray): Float {
+        if (a.size != b.size || a.isEmpty()) return Float.NEGATIVE_INFINITY
+        var dot = 0.0
+        var na = 0.0
+        var nb = 0.0
+        for (k in a.indices) {
+            dot += a[k] * b[k]
+            na += a[k] * a[k]
+            nb += b[k] * b[k]
+        }
+        return if (na == 0.0 || nb == 0.0) Float.NEGATIVE_INFINITY else (dot / kotlin.math.sqrt(na * nb)).toFloat()
+    }
+}

@@ -138,12 +138,132 @@ private fun File.pick(part: String): String =
 /// The kernel's source type, as `whisper.rs` and the phone's provider spell it.
 private const val SOURCE_TYPE = "org.memory.source"
 
-internal fun pcmToFloats(bytes: ByteArray, from: Int = 0): FloatArray {
-    val count = (bytes.size - from) / 2
+internal fun pcmToFloats(bytes: ByteArray, from: Int = 0, to: Int = bytes.size): FloatArray {
+    val count = (to - from) / 2
     return FloatArray(count) { i ->
         val lo = bytes[from + 2 * i].toInt() and 0xff
         val hi = bytes[from + 2 * i + 1].toInt()
         ((hi shl 8) or lo).toShort() / 32768f
+    }
+}
+
+/// The canonical WAV's header, which every recording's bytes open with.
+internal const val WAV_HEADER_BYTES = 44
+
+/// How much PCM a piece carries when a whole recording is read a piece at
+/// a time: the kernel's own chunk, two seconds of sound.
+internal const val PCM_PIECE_BYTES = 1 shl 16
+
+/// A recording on its way to a transcriber: how many samples it holds, and
+/// its 16 kHz mono 16-bit PCM a piece at a time, each piece a whole number
+/// of samples. The pieces can be read once.
+///
+/// Never the whole recording at once (memory round 2026-11-02): a user's
+/// hour-long recording, held as bytes, then as bytes without the header,
+/// then as floats, ran the desktop out of heap at every attempt.
+class RecordingPcm(val samples: Long, val pieces: Sequence<ByteArray>) {
+    companion object {
+        /// PCM already in memory, in pieces of [PCM_PIECE_BYTES].
+        fun of(pcm: ByteArray): RecordingPcm = RecordingPcm(
+            pcm.size / 2L,
+            sequence {
+                val end = pcm.size - pcm.size % 2
+                var at = 0
+                while (at < end) {
+                    val to = minOf(at + PCM_PIECE_BYTES, end)
+                    yield(pcm.copyOfRange(at, to))
+                    at = to
+                }
+            },
+        )
+    }
+}
+
+/// A canonical WAV's chunks as PCM pieces: the header checked and taken
+/// off, and a byte split between chunks carried into the next piece so
+/// every piece is a whole number of samples.
+internal fun wavPieces(chunks: Sequence<ByteArray>): Sequence<ByteArray> = sequence {
+    var header = ByteArray(0)
+    var odd: Byte? = null
+    for (chunk in chunks) {
+        var piece = chunk
+        if (header.size < WAV_HEADER_BYTES) {
+            val take = minOf(WAV_HEADER_BYTES - header.size, piece.size)
+            header += piece.copyOfRange(0, take)
+            piece = piece.copyOfRange(take, piece.size)
+            if (header.size == WAV_HEADER_BYTES) {
+                require(String(header, 0, 4, Charsets.US_ASCII) == "RIFF") { "not a canonical Gilune WAV" }
+            }
+        }
+        odd?.let { piece = byteArrayOf(it) + piece }
+        odd = null
+        if (piece.size % 2 == 1) {
+            odd = piece.last()
+            piece = piece.copyOf(piece.size - 1)
+        }
+        if (piece.isNotEmpty()) yield(piece)
+    }
+    require(header.size == WAV_HEADER_BYTES) { "not a canonical Gilune WAV" }
+}
+
+/// The longest stretch a whole-recording model hears at once. Such a model
+/// takes its audio in one call and attends across all of it, so an hour
+/// in one call is an hour of its working memory; it hears a long
+/// recording as segments of at most this, cut at the quietest moment of
+/// the segment's last [SEGMENT_SEARCH_SAMPLES] so a cut lands between words.
+internal const val SEGMENT_SAMPLES = 60 * WAV_SAMPLE_RATE
+internal const val SEGMENT_SEARCH_SAMPLES = 15 * WAV_SAMPLE_RATE
+
+/// The length of the stretch whose loudness is weighed when choosing a cut.
+private const val QUIET_FRAME_SAMPLES = WAV_SAMPLE_RATE / 10
+
+/// A recording's samples cut into segments of at most `max`, each cut at
+/// the quietest [QUIET_FRAME_SAMPLES] in the segment's last `search`
+/// samples. `emit` receives each segment and the sample it starts at.
+internal class QuietSegments(
+    private val max: Int = SEGMENT_SAMPLES,
+    private val search: Int = SEGMENT_SEARCH_SAMPLES,
+    private val emit: (FloatArray, Long) -> Unit,
+) {
+    private val buffer = FloatArray(max)
+    private var filled = 0
+    private var start = 0L
+
+    fun push(samples: FloatArray) {
+        var at = 0
+        while (at < samples.size) {
+            val take = minOf(samples.size - at, max - filled)
+            samples.copyInto(buffer, filled, at, at + take)
+            filled += take
+            at += take
+            if (filled == max) cut()
+        }
+    }
+
+    fun finish() {
+        if (filled > 0) emit(buffer.copyOf(filled), start)
+        start += filled
+        filled = 0
+    }
+
+    private fun cut() {
+        val from = (max - search).coerceAtLeast(0)
+        var quietest = max
+        var least = Double.MAX_VALUE
+        var frame = from
+        while (frame + QUIET_FRAME_SAMPLES <= max) {
+            var energy = 0.0
+            for (k in frame until frame + QUIET_FRAME_SAMPLES) energy += buffer[k] * buffer[k]
+            if (energy < least) {
+                least = energy
+                quietest = frame + QUIET_FRAME_SAMPLES / 2
+            }
+            frame += QUIET_FRAME_SAMPLES / 2
+        }
+        emit(buffer.copyOf(quietest), start)
+        start += quietest
+        buffer.copyInto(buffer, 0, quietest, max)
+        filled = max - quietest
     }
 }
 
@@ -226,62 +346,84 @@ class NemoEngines(
     fun liveSession(): LiveTranscriptionInterface? =
         if (model.kind == NemoKind.STREAMING) SherpaLiveSession(this) else null
 
-    /// A whole recording's words: 16 kHz mono 16-bit PCM in, text out.
-    fun transcribe(pcm: ByteArray): String = when (model.kind) {
-        NemoKind.WHOLE_RECORDING -> withOffline { recognizer ->
-            val stream = recognizer.createStream()
-            try {
-                stream.acceptWaveform(pcmToFloats(pcm), WAV_SAMPLE_RATE)
-                recognizer.decode(stream)
-                recognizer.getResult(stream).text.trim()
-            } finally {
-                stream.release()
-            }
-        }
+    /// A whole recording's words: 16 kHz mono 16-bit PCM in, text out. The
+    /// recording is heard as it is read, a piece at a time.
+    fun transcribe(recording: RecordingPcm): String = when (model.kind) {
+        NemoKind.WHOLE_RECORDING -> segmented(recording) {}.first
         NemoKind.STREAMING -> {
             val session = SherpaLiveSession(this)
-            session.accept(pcm)
-            (session.update() + session.finish())
-                .filter { it.complete }
-                .joinToString(" ") { it.text.trim() }
-                .trim()
+            val settled = mutableListOf<String>()
+            for (piece in recording.pieces) {
+                session.accept(piece)
+                session.update().filter { it.complete }.mapTo(settled) { it.text.trim() }
+            }
+            session.finish().filter { it.complete }.mapTo(settled) { it.text.trim() }
+            settled.filter { it.isNotEmpty() }.joinToString(" ")
         }
     }
 
     /// A whole recording's words with when each was said, and its plain
     /// text, for speaker labels (ADR 0030). A streaming model hears the
     /// recording as one stream here — no endpoint resets — so every time
-    /// counts from the start of the recording.
-    fun transcribeTimed(pcm: ByteArray): Pair<String, List<TimedWord>> {
-        val recordingMs = pcm.size / 32
-        return when (model.kind) {
-            NemoKind.WHOLE_RECORDING -> withOffline { recognizer ->
-                val stream = recognizer.createStream()
-                try {
-                    stream.acceptWaveform(pcmToFloats(pcm), WAV_SAMPLE_RATE)
-                    recognizer.decode(stream)
-                    val result = recognizer.getResult(stream)
-                    result.text.trim() to
-                        wordsFromTokens(result.tokens, result.timestamps, result.durations, recordingMs)
-                } finally {
-                    stream.release()
-                }
-            }
+    /// counts from the start of the recording. `heard` is given each
+    /// piece's samples as they go by, so the speaker model can listen to
+    /// the same reading.
+    fun transcribeTimed(recording: RecordingPcm, heard: (FloatArray) -> Unit = {}): Pair<String, List<TimedWord>> =
+        when (model.kind) {
+            NemoKind.WHOLE_RECORDING -> segmented(recording, heard)
             NemoKind.STREAMING -> withOnline { recognizer ->
                 val stream = recognizer.createStream()
                 try {
-                    stream.acceptWaveform(pcmToFloats(pcm), WAV_SAMPLE_RATE)
+                    var samples = 0L
+                    for (piece in recording.pieces) {
+                        val floats = pcmToFloats(piece)
+                        samples += floats.size
+                        heard(floats)
+                        stream.acceptWaveform(floats, WAV_SAMPLE_RATE)
+                        while (recognizer.isReady(stream)) recognizer.decode(stream)
+                    }
                     stream.acceptWaveform(FloatArray(WAV_SAMPLE_RATE / 2), WAV_SAMPLE_RATE)
                     stream.inputFinished()
                     while (recognizer.isReady(stream)) recognizer.decode(stream)
                     val result = recognizer.getResult(stream)
+                    val recordingMs = (samples * 1000 / WAV_SAMPLE_RATE).toInt()
                     result.text.trim() to wordsFromTokens(result.tokens, result.timestamps, null, recordingMs)
                 } finally {
                     stream.release()
                 }
             }
         }
-    }
+
+    /// A whole-recording model's hearing of a recording, segment by
+    /// segment ([QuietSegments]): the segments' words joined, each word's
+    /// time counted from the start of the recording.
+    private fun segmented(recording: RecordingPcm, heard: (FloatArray) -> Unit): Pair<String, List<TimedWord>> =
+        withOffline { recognizer ->
+            val texts = mutableListOf<String>()
+            val words = mutableListOf<TimedWord>()
+            val segments = QuietSegments { samples, start ->
+                val stream = recognizer.createStream()
+                try {
+                    stream.acceptWaveform(samples, WAV_SAMPLE_RATE)
+                    recognizer.decode(stream)
+                    val result = recognizer.getResult(stream)
+                    result.text.trim().takeIf { it.isNotEmpty() }?.let(texts::add)
+                    val offset = (start * 1000 / WAV_SAMPLE_RATE).toUInt()
+                    val segmentMs = (samples.size.toLong() * 1000 / WAV_SAMPLE_RATE).toInt()
+                    wordsFromTokens(result.tokens, result.timestamps, result.durations, segmentMs)
+                        .mapTo(words) { it.copy(startMs = it.startMs + offset, endMs = it.endMs + offset) }
+                } finally {
+                    stream.release()
+                }
+            }
+            for (piece in recording.pieces) {
+                val floats = pcmToFloats(piece)
+                heard(floats)
+                segments.push(floats)
+            }
+            segments.finish()
+            texts.joinToString(" ") to words
+        }
 
     private fun release() {
         online?.release()
@@ -306,7 +448,7 @@ class SherpaLiveSession(private val engines: NemoEngines) : LiveTranscriptionInt
     private var line = 0UL
 
     override fun accept(pcm: ByteArray) {
-        val samples = pcmToFloats(pcm)
+        val samples = pcmToFloats(pcm, 0, pcm.size - pcm.size % 2)
         engines.withOnline { stream.acceptWaveform(samples, WAV_SAMPLE_RATE) }
     }
 
@@ -341,9 +483,9 @@ class SherpaLiveSession(private val engines: NemoEngines) : LiveTranscriptionInt
 /// note is one person at their cursor.
 fun runNemoJobs(
     gilune: Gilune,
-    transcribe: (ByteArray) -> String,
+    transcribe: (RecordingPcm) -> String,
     limit: Int = 25,
-    labelled: ((ByteArray) -> String)? = null,
+    labelled: ((RecordingPcm) -> String)? = null,
 ): ProviderPass {
     var pass = ProviderPass()
     while (pass.claimed < limit) {
@@ -370,18 +512,18 @@ fun runNemoJobs(
     return pass
 }
 
-private fun transcribeClaim(gilune: Gilune, claim: ClaimedJob, transcribe: (ByteArray) -> String, pass: ProviderPass): ProviderPass {
+private fun transcribeClaim(gilune: Gilune, claim: ClaimedJob, transcribe: (RecordingPcm) -> String, pass: ProviderPass): ProviderPass {
     val job = claim.job()
-    if (job.blob == null) {
+    val blob = job.blob
+    if (blob == null) {
         gilune.submitOutput(claim, emptyList())
         return pass.copy(skipped = pass.skipped + 1)
     }
     val text = runCatching {
-        val bytes = generateSequence { claim.nextChunk() }.fold(java.io.ByteArrayOutputStream()) { out, chunk ->
-            out.apply { write(chunk) }
-        }.toByteArray()
-        require(bytes.size >= 44 && String(bytes, 0, 4, Charsets.US_ASCII) == "RIFF") { "not a canonical Gilune WAV" }
-        transcribe(bytes.copyOfRange(44, bytes.size))
+        // Read as it is heard: the claim's chunks go to the engine one at
+        // a time, and the recording is never held whole.
+        val samples = (blob.bytes.toLong() - WAV_HEADER_BYTES).coerceAtLeast(0) / 2
+        transcribe(RecordingPcm(samples, wavPieces(generateSequence { claim.nextChunk() })))
     }.getOrElse { error ->
         val why = error.message ?: error.javaClass.simpleName
         GiluneLog.warn("NeMo could not transcribe ${job.subjectId}: $why", error)
