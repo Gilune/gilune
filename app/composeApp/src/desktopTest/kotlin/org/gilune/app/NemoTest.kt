@@ -6,6 +6,8 @@
 
 package org.gilune.app
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorOutputStream
@@ -23,6 +25,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
@@ -139,6 +142,48 @@ class NemoTest {
             assertEquals(1L, pass.skipped, "the engine's answer was not written over the edit")
             assertEquals(0L, pass.failed, "and it is not a failure to retry")
             assertFalse(gilune.objectText(source).orEmpty().contains("the engine's words"))
+        }
+    }
+
+    // -------------------------------------------------------- residency
+
+    // The model is in memory for the work, not for the session (09 § Desktop
+    // footprint): 1.3.2 loaded Nemotron when the vault opened and held
+    // ~700 MB for a dictation that might never come (owner, 2026-11-01).
+    // These folders pass the app's presence test but hold no model, so any
+    // load throws — which is how a row sees one happen.
+
+    private fun presentButEmpty(model: NemoModel): File {
+        val models = folder.newFolder("models")
+        File(models, model.archive).mkdirs()
+        File(File(models, model.archive), READY_MARKER).writeText("")
+        return models
+    }
+
+    @Test
+    fun bringingNemoUpLeavesTheModelOnDisk() {
+        val (root, gilune) = vaultWithNemo()
+        gilune.use {
+            val models = presentButEmpty(gilune.plugins().nemoModel())
+            val runtime = TranscriptionRuntime()
+            val nemo = NemoHost()
+            bringUpNemo(GiluneState(root.path, CoroutineScope(Dispatchers.Default)), gilune, runtime, nemo, models)
+            assertEquals(TranscriptionPhase.Ready, runtime.phase, runtime.failure.orEmpty())
+            assertFalse(assertNotNull(nemo.engines).resident, "ready means the files are here, not the model in memory")
+        }
+    }
+
+    @Test
+    fun aLiveSessionLoadsTheModelWithItsFirstAudioNotBefore() {
+        // The session is made on the click that starts the microphone; a
+        // load there froze the editor for the ~3 s Nemotron takes.
+        val model = nemoModel(DEFAULT_NEMO_MODEL)
+        NemoEngines(model, File(presentButEmpty(model), model.archive)).use { engines ->
+            val silent = assertNotNull(engines.liveSession())
+            assertFalse(engines.resident)
+            assertEquals(emptyList(), silent.finish(), "a dictation that heard nothing loads nothing to end")
+            val heard = assertNotNull(engines.liveSession())
+            assertFailsWith<IllegalStateException> { heard.accept(ByteArray(3_200)) }
         }
     }
 
