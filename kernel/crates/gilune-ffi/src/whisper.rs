@@ -36,14 +36,49 @@ pub fn descriptor() -> PluginDescriptor {
             "objects.write".to_string(),
             "network.request".to_string(),
         ],
-        contributions: vec![Contribution {
+        contributions: std::iter::once(Contribution {
             slot: "settings.form".to_string(),
             id: "transcription-model".to_string(),
             label: "Model and language".to_string(),
             config: String::new(),
-        }],
+        })
+        .chain(ENGINES.iter().map(|(engine, label, download, guidance)| Contribution {
+            slot: ENGINES_SLOT.to_string(),
+            id: format!("whisper-{engine}"),
+            label: (*label).to_string(),
+            config: serde_json::json!({
+                "engine": engine,
+                "roles": ["live", "recordings"],
+                "wordTimes": true,
+                "download": download,
+                "guidance": guidance,
+            })
+            .to_string(),
+        }))
+        .collect(),
     }
 }
+
+/// The slot a transcription plugin publishes its engines in (ADR 0033
+/// § 2). Opaque to the kernel like every slot; spelled here because this
+/// plugin's declaration is the kernel's to make.
+const ENGINES_SLOT: &str = "transcription.engines";
+
+/// The engines this plugin offers: one per model the shell's catalogue
+/// (`WHISPER_MODELS` in Plugins.kt) can download, keyed as that catalogue
+/// keys them — `WhisperEnginesCouplingTest` reads this list as text and
+/// fails when the two disagree. Sizes are the published files' bytes.
+const ENGINES: [(&str, &str, u64, &str); 4] = [
+    ("tiny-q5_1", "Whisper tiny (q5_1)", 32_152_673, "The fastest and smallest, and the least accurate."),
+    ("tiny", "Whisper tiny", 77_691_713, "Fast, about as accurate as tiny (q5_1), and larger."),
+    (
+        "base-q5_1",
+        "Whisper base (q5_1)",
+        59_707_625,
+        "Recommended: base accuracy for a download smaller than tiny's.",
+    ),
+    ("base", "Whisper base", 147_951_465, "The same words as base (q5_1), slower, and larger."),
+];
 
 /// How long the weights may sit unused before they are dropped. Ten
 /// minutes is long enough that a person dictating a series of notes never
