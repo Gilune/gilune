@@ -415,8 +415,8 @@ val NEMO_MODELS: List<NemoModel> = listOf(
         size = "482 MB",
         kind = NemoKind.WHOLE_RECORDING,
         licence = "CC-BY-4.0",
-        guidance = "The fastest for recordings measured (an hour in about 7 minutes), as accurate " +
-            "as the others, with capitals and punctuation. Not for words as you speak.",
+        guidance = "Very accurate, with capitals and punctuation: an hour of recording takes about " +
+            "7 minutes. Not for words as you speak.",
     ),
 )
 
