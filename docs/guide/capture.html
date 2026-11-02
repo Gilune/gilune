@@ -65,10 +65,11 @@
   If you had text selected, the dictated words replace it. You can keep typing
   elsewhere in the note while you dictate; the words keep arriving where you started.</p>
 
-  <p>Live words are a setting: <strong>Settings ▸ Plugins ▸ Transcription (Whisper) ▸
-  Show words as I dictate</strong>. With it off, the words all arrive when you stop. Live
-  words ask a lot of the processor; if your computer cannot keep up, Gilune says so in
-  the status bar and the rest of the words arrive when you stop.</p>
+  <p>Live words come from the engine chosen under <strong>Settings ▸ Transcription ▸
+  While you speak</strong>. Choose <strong>Off</strong> there and the words all arrive
+  when you stop instead. Live words ask a lot of the processor; if your computer cannot
+  keep up, Gilune says so in the status bar and the rest of the words arrive when you
+  stop.</p>
 
   <p>While either microphone is recording, a few small bars beside it move with your
   voice, so you can see it is hearing you before any words appear. If they stay flat for
@@ -116,26 +117,52 @@
   first recording and lets it go again after ten quiet minutes. The recording that
   wakes it takes about a tenth of a second longer than the ones after it.</p>
 
-  <h3>Choosing a transcriber (desktop)</h3>
+  <h3>Choosing what hears you (desktop)</h3>
 
-  <p>The desktop app comes with two transcription plugins, and one of them writes your notes
-  at a time: switching one on in <strong>Settings ▸ Plugins</strong> switches the other off, and
-  Gilune says so.</p>
+  <p>Transcription does two jobs, and <strong>Settings ▸ Transcription</strong> asks one
+  question for each:</p>
 
   <ul>
-    <li><strong>Transcription (Whisper)</strong> is the one that is on to begin with. Its models
-    are small (57 MiB for the recommended one). Live words need a reasonably fast processor.</li>
-    <li><strong>Transcription (NVIDIA NeMo)</strong> runs NVIDIA's speech models. Choose one on
-    its settings screen: <strong>Nemotron 0.6B</strong> (the most accurate live model, words about
-    a second after you say them, 464 MB to download and about 0.6 GB of memory while you
-    dictate), <strong>FastConformer</strong> (light and fast for slower machines, but no capitals
-    or punctuation) or <strong>Parakeet TDT 0.6B v2</strong> (very accurate, but its words arrive
-    when you stop). Each model's licence is shown beside it. With NeMo, words settle when you
-    pause rather than every second or two.</li>
+    <li><strong>While you speak</strong> — the words that appear as you dictate. This wants
+    a model that keeps up with a voice. Or choose <strong>Off</strong>, and dictated words
+    arrive when you stop.</li>
+    <li><strong>Recordings</strong> — voice notes, recordings you load, <strong>Transcribe
+    again</strong>, and the copy of every dictation kept with the note. Nothing has to keep
+    pace here, so the most accurate model you have is usually the right one.</li>
   </ul>
 
-  <p>Either way the model downloads once, after you allow the plugin network access, and is
-  checked against its published checksum before it is used.</p>
+  <p>The two can come from different plugins: a fast live model for dictation and a slower,
+  more accurate one for recordings. Each row names its plugin and says whether it is
+  <strong>Ready</strong>, still needs a download, needs network access, or belongs to a
+  plugin that is switched off (choosing it switches that plugin on). If you choose another
+  plugin's model for recordings, the recordings still waiting for words go to it, and the
+  status bar says how many. Whisper uses one model at a time, so if both answers are
+  Whisper they use the same model.</p>
+
+  <p>The desktop app comes with two transcription plugins:</p>
+
+  <ul>
+    <li><strong>Transcription (Whisper)</strong> is the one used to begin with, for both
+    jobs. Its models are small (57 MiB for the recommended one). Live words need a
+    reasonably fast processor.</li>
+    <li><strong>Transcription (NVIDIA NeMo)</strong> runs NVIDIA's speech models:
+    <strong>Nemotron 0.6B</strong> (the most accurate live model, words about a second after
+    you say them, 464 MB to download and about 0.6 GB of memory while you dictate),
+    <strong>FastConformer</strong> (light and fast for slower machines, but no capitals or
+    punctuation) and <strong>Parakeet TDT 0.6B v2</strong> (very accurate, for recordings
+    only). With NeMo, live words settle when you pause rather than every second or
+    two.</li>
+  </ul>
+
+  <p>Choosing a model that is not on your computer yet opens its plugin's own screen, where
+  you allow network access and see the download and the model's licence. Each model
+  downloads once and is checked against its published checksum before it is used. A
+  plugin's own screen also says what it is used for at the moment.</p>
+
+  <p>Switching a transcription plugin on in <strong>Settings ▸ Plugins</strong> no longer
+  switches the other off: the one you switched on is simply there to be chosen. Switching
+  off the plugin chosen for recordings leaves recordings waiting, kept safely, until you
+  choose another engine or switch it back on.</p>
 
   <h3>Setting the spoken language</h3>
 
@@ -195,7 +222,8 @@
   network access; it downloads two small models (34 MB together) once and runs them on your
   computer. That screen also lists which transcribers it works with — on the desktop, both
   Whisper and NVIDIA NeMo, with any of their models — and each transcriber's own screen says
-  whether it supports speaker labels.</p>
+  whether it supports speaker labels. Labels follow the engine chosen for recordings;
+  <strong>Settings ▸ Transcription</strong> says whether that engine works with them.</p>
 
   <p>Labels are added when a recording is transcribed, after you stop: the words still
   appear as you speak, and the speakers are worked out from the whole recording at the

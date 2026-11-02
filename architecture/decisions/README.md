@@ -37,6 +37,7 @@ technologies can be rejected without weakening the product principles.
 | [0030](0030-speaker-labels.md) | Speaker labels: who said what in a recording, named when it is transcribed | Accepted; delivered 2026-10-30 (desktop) |
 | [0031](0031-find-and-replace.md) | Find and replace: in-note bar, replace across notes on the refactoring journal, reassignable keys | Accepted 2026-10-31 |
 | [0032](0032-editor-memory-follows-the-screen.md) | Editor memory follows the screen: lazy presentation mode, Segment Heap, style only what is visible, then (spike-gated) a block-windowed editor | Proposed 2026-11-01; staging ratified |
+| [0033](0033-transcription-roles.md) | Transcription roles: one engine while you speak, one for recordings, possibly from different plugins | Ratified 2026-11-02 |
 
 A Proposed ADR becomes Accepted only when its named spike passes. An ADR may be
 Accepted for v0 ahead of its spike when the decision is forced by principle or

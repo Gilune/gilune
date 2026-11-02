@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Newest schema this kernel writes. An older database upgrades on open;
 /// a newer one is refused (fail closed, rule 10) rather than guessed at.
-pub const SCHEMA_VERSION: i64 = 10;
+pub const SCHEMA_VERSION: i64 = 11;
 
 pub struct Store {
     conn: rusqlite::Connection,
@@ -711,6 +711,12 @@ const MIGRATIONS: &[&str] = &[
          object_id TEXT PRIMARY KEY,
          last_sent_revision TEXT NOT NULL
      );",
+    // v11 (ADR 0033 § 4): a plugin can be on without taking jobs. Its
+    // subscription is live only while it is enabled AND takes jobs, so a
+    // transcriber picked for dictation alone offers its engine without
+    // transcribing every recording. Every plugin installed before this
+    // step takes jobs, which is what being enabled meant until now.
+    "ALTER TABLE plugins ADD COLUMN takes_jobs INTEGER NOT NULL DEFAULT 1;",
 ];
 
 fn migrate(conn: &rusqlite::Connection) -> Result<()> {

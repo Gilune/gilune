@@ -9,6 +9,7 @@ import uniffi.gilune_ffi.TimedWord
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 class SpeakerLabelsTest {
     private fun w(text: String, start: Int, end: Int) = TimedWord(text, start.toUInt(), end.toUInt())
@@ -133,5 +134,54 @@ class SpeakerLabelsTest {
         assertEquals(2, speakerCountIn("""{"speakers":2}"""))
         assertEquals(2, speakerCountIn(speakersSettingsDocument(2)))
         assertNull(speakerCountIn(speakersSettingsDocument(null)))
+    }
+
+    // ------------------------------------------------- long recordings
+
+    @Test
+    fun aRecordingUpToFifteenMinutesIsOneWindowAndALongerOneIsEvenWindows() {
+        val minute = 60L * WAV_SAMPLE_RATE
+        assertEquals(emptyList(), speakerWindows(0))
+        assertEquals(listOf((12 * minute).toInt()), speakerWindows(12 * minute))
+        assertEquals(listOf((14 * minute).toInt()), speakerWindows(14 * minute), "half a window again stays one")
+        val hour = speakerWindows(52 * minute + 7)
+        assertEquals(5, hour.size)
+        assertEquals(52 * minute + 7, hour.sumOf { it.toLong() }, "every sample is in a window")
+        assertTrue(hour.all { it in (10 * minute).toInt()..(11 * minute).toInt() }, hour.toString())
+    }
+
+    @Test
+    fun aVoiceHeardInALaterWindowKeepsTheNumberItWasFirstGiven() {
+        val linker = VoiceLinker()
+        val alice = floatArrayOf(1f, 0.1f, 0f)
+        val bob = floatArrayOf(0f, 1f, 0.1f)
+        assertEquals(listOf(0, 1), linker.link(listOf(alice, bob)))
+        // The next window's model numbers them the other way round, and
+        // hears them a little differently.
+        assertEquals(listOf(1, 0), linker.link(listOf(floatArrayOf(0.1f, 0.9f, 0.2f), floatArrayOf(0.9f, 0.2f, 0f))))
+        // Somebody new, and somebody too brief to compare: both new numbers.
+        assertEquals(listOf(2, 3, 0), linker.link(listOf(floatArrayOf(0f, 0f, 1f), null, alice)))
+    }
+
+    @Test
+    fun twoVoicesInOneWindowAreNeverTakenForOnePersonHeardBefore() {
+        val linker = VoiceLinker()
+        linker.link(listOf(floatArrayOf(1f, 0f)))
+        // Both sound like the first person; only the nearer is them.
+        assertEquals(listOf(1, 0), linker.link(listOf(floatArrayOf(0.8f, 0.6f), floatArrayOf(0.95f, 0.3f))))
+    }
+
+    @Test
+    fun aCountMergesTheMostAlikeVoicesUntilThatManyRemain() {
+        val linker = VoiceLinker()
+        linker.link(listOf(floatArrayOf(1f, 0f, 0f), floatArrayOf(0f, 1f, 0f)))
+        // Below the link threshold of the first, but nearer it than anyone.
+        linker.link(listOf(floatArrayOf(0.45f, 0f, 0.89f)))
+        val unlimited = linker.limited(null)
+        assertEquals(listOf(0, 1, 2), (0..2).map(unlimited))
+        val two = linker.limited(2)
+        assertEquals(two(0), two(2), "the third voice was the first person")
+        assertTrue(two(0) != two(1))
+        assertEquals(listOf(0, 1, 2), (0..2).map(linker.limited(5)), "more allowed than heard changes nothing")
     }
 }

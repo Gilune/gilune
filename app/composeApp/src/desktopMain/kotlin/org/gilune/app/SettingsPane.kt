@@ -83,6 +83,7 @@ import javax.swing.JFileChooser
 private enum class Section(val label: String) {
     General("General"),
     Vault("Vault"),
+    Transcription("Transcription"),
     Plugins("Plugins"),
     Sync("Sync"),
     Appearance("Appearance"),
@@ -180,6 +181,7 @@ fun SettingsPane(
                             is Pane.Fixed -> when (open.section) {
                                 Section.General -> GeneralSettings()
                                 Section.Vault -> VaultSection(state, vaultDir, onVaultChange)
+                                Section.Transcription -> TranscriptionPage(state) { pane = Pane.Plugin(it) }
                                 Section.Plugins -> PluginsManager(state) { pane = Pane.Plugin(it) }
                                 Section.Sync -> SyncSection(state)
                                 Section.Appearance -> AppearanceSection(theme, onThemeChange)
@@ -190,7 +192,12 @@ fun SettingsPane(
                                 if (plugin == null) {
                                     PluginsManager(state) { pane = Pane.Plugin(it) }
                                 } else {
-                                    PluginScreen(state, plugin, onOpenNote) { pane = Pane.Plugin(it) }
+                                    PluginScreen(
+                                        state,
+                                        plugin,
+                                        onOpenNote,
+                                        onOpenTranscription = { pane = Pane.Fixed(Section.Transcription) },
+                                    ) { pane = Pane.Plugin(it) }
                                 }
                             }
                         }
@@ -316,6 +323,7 @@ private fun PluginScreen(
     state: GiluneState,
     plugin: PluginInfo,
     onOpenNote: (String) -> Unit = {},
+    onOpenTranscription: () -> Unit = {},
     onOpenPlugin: (String) -> Unit = {},
 ) {
     val colours = MaterialTheme.colorScheme
@@ -399,6 +407,11 @@ private fun PluginScreen(
         }
     }
 
+    if (plugin.pluginId in TRANSCRIPTION_PROVIDERS) {
+        HorizontalDivider(color = colours.outlineVariant)
+        RolesFilled(state, plugin, onOpenTranscription)
+    }
+
     if (plugin.pluginId == TRANSCRIPTION_PLUGIN) {
         HorizontalDivider(color = colours.outlineVariant)
         TranscriptionSettings(state, plugin)
@@ -465,14 +478,13 @@ private fun PluginScreen(
 /// known fields directly; the generic schema-driven form arrives with
 /// the sandboxed runtime (ADR 0010).
 ///
-/// The language and the model are keys of one settings document, so every
-/// write here sends both (`transcriptionSettingsDocument`) on the tasks
-/// precedent: changing one must never drop the other.
+/// The language is one key of a settings document that also holds the
+/// engines chosen in Settings ▸ Transcription, so the write here keeps
+/// every other key (`settingsWith`).
 @Composable
 private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
     val saved = remember(plugin.settings) { listOf(plugin).transcriptionLanguage() }
-    val savedModel = remember(plugin.settings) { listOf(plugin).transcriptionModel() }
     var language by remember(plugin.settings) { mutableStateOf(saved) }
     Text("Spoken language", style = MaterialTheme.typography.titleSmall)
     Text(
@@ -492,13 +504,10 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
         Button(
             onClick = {
                 val wanted = language.trim()
-                // The model travels with the write, so setting a language
-                // cannot quietly revert the model somebody chose.
+                // Every other key travels with the write, so setting a
+                // language cannot quietly revert an engine somebody chose.
                 state.pluginAction("transcription language set to $wanted") {
-                    it.setPluginSettings(
-                        plugin.pluginId,
-                        transcriptionSettingsDocument(wanted, savedModel.key, listOf(plugin).transcriptionLive()),
-                    )
+                    it.setPluginSettings(plugin.pluginId, settingsWith(plugin.settings, mapOf("language" to wanted)))
                 }
             },
             enabled = language.trim().isNotEmpty() && language.trim() != saved,
@@ -506,73 +515,23 @@ private fun TranscriptionSettings(state: GiluneState, plugin: PluginInfo) {
     }
 
     HorizontalDivider(color = colours.outlineVariant)
-    Text("Transcription model", style = MaterialTheme.typography.titleSmall)
+    Text("Models", style = MaterialTheme.typography.titleSmall)
     Text(
-        "Bigger models hear better and take longer. Measured on this machine " +
-            "over a 21-second clip: tiny-q5_1 0.6 s, tiny 0.6 s, base-q5_1 " +
-            "1.0 s, base 1.2 s — and the base-class models are the ones that " +
-            "get trade words, £ amounts and names right. A quantised model " +
-            "(q5_1) transcribes the same words as its full sibling from a " +
-            "smaller download, which is why base-q5_1 is the recommendation.",
+        "Which model hears you is chosen in Settings ▸ Transcription. A model is downloaded the " +
+            "first time it is chosen, once network access is allowed above; models already " +
+            "downloaded are kept, so switching back is instant. Measured on one machine over a " +
+            "21-second clip: tiny-q5_1 0.6 s, tiny 0.6 s, base-q5_1 1.0 s, base 1.2 s.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
     )
     for (option in WHISPER_MODELS) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RadioButton(
-                selected = option.key == savedModel.key,
-                // The language travels with the write for the same reason
-                // the model does above — and the stored one, not whatever
-                // is half-typed in the field.
-                onClick = {
-                    state.pluginAction("transcription model set to ${option.key}") {
-                        it.setPluginSettings(
-                            plugin.pluginId,
-                            transcriptionSettingsDocument(saved, option.key, listOf(plugin).transcriptionLive()),
-                        )
-                    }
-                },
-            )
-            Text(option.label, fontSize = 13.sp)
-        }
-    }
-    Text(
-        "A model you have not used before is downloaded when you choose it " +
-            "(one time, with the network permission above). Models already " +
-            "downloaded are kept, so switching back is instant.",
-        fontSize = 12.sp,
-        lineHeight = 18.sp,
-        color = colours.onSurfaceVariant,
-    )
-
-    HorizontalDivider(color = colours.outlineVariant)
-    Text("Dictation", style = MaterialTheme.typography.titleSmall)
-    Text(
-        "With this on, dictated words appear in the note as you speak: words " +
-            "Whisper may still change are shown grey and are not saved until " +
-            "they settle. Whisper re-reads the last few seconds every second, so " +
-            "it needs a reasonably fast processor; if it cannot keep up, the " +
-            "words arrive when you stop instead, and the status line says so. " +
-            "Off, the words always arrive when you stop.",
-        fontSize = 12.sp,
-        lineHeight = 18.sp,
-        color = colours.onSurfaceVariant,
-    )
-    val live = remember(plugin.settings) { listOf(plugin).transcriptionLive() }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Switch(
-            checked = live,
-            // The language and model travel with the write, so this switch
-            // cannot quietly reset either.
-            onCheckedChange = { on ->
-                state.pluginAction(
-                    if (on) "dictated words now appear as you speak" else "dictated words now arrive when you stop",
-                ) { it.setPluginSettings(plugin.pluginId, transcriptionSettingsDocument(saved, savedModel.key, on)) }
-            },
-            modifier = Modifier.testTag("transcription-live"),
+        val present = remember(option, state.vaultCursor.value, state.refreshCount.value) { modelFile(option).isFile }
+        Text(
+            option.label + if (present) " — on this computer" else "",
+            fontSize = 13.sp,
+            modifier = Modifier.testTag("whisper-model-${option.key}"),
         )
-        Text("Show words as I dictate", fontSize = 13.sp)
     }
 }
 
@@ -1043,89 +1002,74 @@ private fun LogsSection() {
     ) { Text("Show the log file") }
 }
 
-/// A plugin's switch. Switching a transcriber on switches any other one
-/// off — one transcriber writes your notes (ADR 0018 § 3) — and the line
-/// says so; every other plugin just switches.
+/// A plugin's switch. A transcriber switched on beside the one taking
+/// recordings takes none, and one switched off leaves the roles it filled
+/// empty (ADR 0033); the line says which. Every other plugin just switches.
 private fun setPluginSwitch(state: GiluneState, plugin: PluginInfo, enable: Boolean) {
-    val switch = providerSwitch(state.plugins.toList(), plugin.pluginId, enable)
-    state.pluginAction(switch.message) { g ->
-        for (other in switch.disable) g.setPluginEnabled(other, false)
+    if (plugin.pluginId in TRANSCRIPTION_PROVIDERS) {
+        state.pluginActionTelling("switching ${plugin.name}") { switchTranscriptionProvider(it, plugin.pluginId, enable) }
+        return
+    }
+    state.pluginAction(if (enable) "${plugin.name} switched on" else "${plugin.name} switched off") { g ->
         g.setPluginEnabled(plugin.pluginId, enable)
     }
 }
 
-/// Transcription (NVIDIA NeMo)'s screen (ADR 0027 S3): which model, what
-/// each one is for, its licence, and whether words show as you dictate.
-/// The model and the switch are one settings document, so every write here
-/// sends both.
+/// Transcription (NVIDIA NeMo)'s screen (ADR 0027 S3): what each model is
+/// for, whether it is on this computer, and its licence. Which model fills
+/// which role is chosen in Settings ▸ Transcription (ADR 0033).
 @Composable
 private fun NemoSettings(state: GiluneState, plugin: PluginInfo) {
     val colours = MaterialTheme.colorScheme
-    val chosen = remember(plugin.settings) { listOf(plugin).nemoModel() }
-    val live = remember(plugin.settings) { listOf(plugin).nemoLive() }
-    providerSwitchWarning(state.plugins.toList(), plugin.pluginId)?.takeIf { plugin.state != "enabled" }?.let {
-        Text(it, fontSize = 12.sp, lineHeight = 18.sp, color = colours.onSurfaceVariant)
-    }
-    Text("Model", style = MaterialTheme.typography.titleSmall)
+    Text("Models", style = MaterialTheme.typography.titleSmall)
     Text(
-        "NVIDIA's speech models, run on this computer. A model is downloaded the first time " +
-            "it is used, once you have allowed network access above, and checked against its " +
-            "published checksum before it is used.",
+        "NVIDIA's speech models, run on this computer. Choose which one hears you in Settings ▸ " +
+            "Transcription. A model is downloaded the first time it is chosen, once you have allowed " +
+            "network access above, and checked against its published checksum before it is used.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
     )
     for (option in NEMO_MODELS) {
-        val present = remember(option, state.vaultCursor.value) { nemoModelPresent(option) }
-        Row(verticalAlignment = Alignment.Top) {
-            RadioButton(
-                selected = option.key == chosen.key,
-                onClick = {
-                    state.pluginAction("${plugin.name} will use ${option.name}") {
-                        it.setPluginSettings(plugin.pluginId, nemoSettingsDocument(option.key, live))
-                    }
-                },
-                modifier = Modifier.testTag("nemo-model-${option.key}"),
+        val present = remember(option, state.vaultCursor.value, state.refreshCount.value) { nemoModelPresent(option) }
+        Column(
+            Modifier.padding(vertical = 4.dp).testTag("nemo-model-${option.key}"),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                option.name + if (present) " — on this computer" else " — ${option.size} download",
+                fontSize = 13.sp,
             )
-            Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                Text(
-                    option.name + if (present) " — downloaded" else " — ${option.size} download",
-                    fontSize = 13.sp,
-                )
-                Text(option.guidance, fontSize = 12.sp, lineHeight = 17.sp, color = colours.onSurfaceVariant)
-                Text("Licence: ${option.licence}", fontSize = 11.sp, color = colours.onSurfaceVariant)
-            }
+            Text(option.guidance, fontSize = 12.sp, lineHeight = 17.sp, color = colours.onSurfaceVariant)
+            Text(
+                if (option.kind == NemoKind.STREAMING) {
+                    "Can show words while you speak, and hear recordings."
+                } else {
+                    "Hears recordings only."
+                },
+                fontSize = 11.sp,
+                color = colours.onSurfaceVariant,
+            )
+            Text("Licence: ${option.licence}", fontSize = 11.sp, color = colours.onSurfaceVariant)
         }
     }
+}
 
-    HorizontalDivider(color = colours.outlineVariant)
-    Text("Dictation", style = MaterialTheme.typography.titleSmall)
+/// Which roles this transcriber fills (ADR 0033 § 6), and the way to the
+/// page that chooses them.
+@Composable
+private fun RolesFilled(state: GiluneState, plugin: PluginInfo, onOpenTranscription: () -> Unit) {
+    val colours = MaterialTheme.colorScheme
+    Text("Used for", style = MaterialTheme.typography.titleSmall)
     Text(
-        if (chosen.kind == NemoKind.STREAMING) {
-            "With this on, dictated words appear in the note as you speak: words the model may " +
-                "still change are shown grey and are not saved until they settle at a pause. " +
-                "Off, the words arrive when you stop."
-        } else {
-            "${chosen.name} hears a recording once it has finished, so dictated words always " +
-                "arrive when you stop. Choose a live model above to see words as you speak."
-        },
+        rolesFilledBy(state.plugins.toList(), plugin.pluginId)
+            ?: "Nothing at the moment. Choose its engines in Settings ▸ Transcription.",
         fontSize = 12.sp,
         lineHeight = 18.sp,
         color = colours.onSurfaceVariant,
+        modifier = Modifier.testTag("roles-filled"),
     )
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Switch(
-            checked = live && chosen.kind == NemoKind.STREAMING,
-            enabled = chosen.kind == NemoKind.STREAMING,
-            onCheckedChange = { on ->
-                state.pluginAction(
-                    if (on) "dictated words now appear as you speak" else "dictated words now arrive when you stop",
-                ) { it.setPluginSettings(plugin.pluginId, nemoSettingsDocument(chosen.key, on)) }
-            },
-            modifier = Modifier.testTag("nemo-live"),
-        )
-        Text("Show words as I dictate", fontSize = 13.sp)
-    }
+    TextButton(onClick = onOpenTranscription) { Text("Choose engines", fontSize = 12.sp) }
 }
 
 /// The transcribers on this computer that can name speakers (ADR 0030).
@@ -1203,7 +1147,7 @@ private fun SpeakerSettings(state: GiluneState, onOpenPlugin: (String) -> Unit) 
 
     HorizontalDivider(color = colours.outlineVariant)
     Text("Works with", style = MaterialTheme.typography.titleSmall)
-    val active = plugins.activeTranscriber()
+    val active = plugins.recordingsProvider()?.pluginId
     for (id in TRANSCRIPTION_PROVIDERS) {
         val transcriber = plugins.firstOrNull { it.pluginId == id } ?: continue
         val supported = id in SPEAKER_LABEL_TRANSCRIBERS
@@ -1218,7 +1162,7 @@ private fun SpeakerSettings(state: GiluneState, onOpenPlugin: (String) -> Unit) 
                 color = if (supported) colours.primary else colours.onSurfaceVariant,
             )
             Column(Modifier.weight(1f)) {
-                Text(transcriber.name + if (id == active) " — writing your notes" else "", fontSize = 13.sp)
+                Text(transcriber.name + if (id == active) " — transcribing recordings" else "", fontSize = 13.sp)
                 Text(
                     when (id) {
                         TRANSCRIPTION_PLUGIN -> "Every model."

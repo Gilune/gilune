@@ -321,8 +321,24 @@ fun moonshineDeclaration(): PluginDeclaration =
                 id = "moonshine-settings",
                 label = "Live caption, model and downloads",
             ),
-        ),
+        ) + MOONSHINE_MODELS.map { model ->
+            // ADR 0033 § 2. Streaming, so both roles; no word times — the
+            // phone's provider reports none, which speaker labels need.
+            transcriptionEngineContribution(
+                id = "moonshine-${model.key}",
+                label = "Moonshine ${model.key}",
+                engine = model.key,
+                roles = setOf(TranscriptionRole.LIVE, TranscriptionRole.RECORDINGS),
+                wordTimes = false,
+                downloadBytes = MOONSHINE_DOWNLOAD_BYTES,
+                guidance = "Words as you speak on the phone, in English.",
+            )
+        },
     )
+
+/// R0's measured download for the one catalogue model: 45,233,659 bytes
+/// across 8 files.
+const val MOONSHINE_DOWNLOAD_BYTES = 45_233_659L
 
 // ---------------------------------------------------------------------
 // Transcription (NVIDIA NeMo) — ADR 0027 S3. NVIDIA's speech models run
@@ -374,8 +390,9 @@ val NEMO_MODELS: List<NemoModel> = listOf(
         size = "464 MB",
         kind = NemoKind.STREAMING,
         licence = "NVIDIA Open Model License",
-        guidance = "The most accurate live model measured: words appear about a second after you " +
-            "say them and keep up easily. Uses about 0.6 GB of memory while you dictate.",
+        guidance = "The best for dictation: words about a second after you say them, and the " +
+            "most accurate measured. Slow for recordings (an hour takes about 40 minutes). " +
+            "Uses about 0.6 GB of memory while it works.",
     ),
     NemoModel(
         key = "fastconformer",
@@ -398,8 +415,8 @@ val NEMO_MODELS: List<NemoModel> = listOf(
         size = "482 MB",
         kind = NemoKind.WHOLE_RECORDING,
         licence = "CC-BY-4.0",
-        guidance = "Very accurate, with capitals and punctuation, but it hears a recording " +
-            "once it has finished: dictated words arrive when you stop, never as you speak.",
+        guidance = "The fastest for recordings measured (an hour in about 7 minutes), as accurate " +
+            "as the others, with capitals and punctuation. Not for words as you speak.",
     ),
 )
 
@@ -439,9 +456,25 @@ fun nemoDeclaration(): PluginDeclaration =
             PluginContribution(
                 slot = Slots.SETTINGS_FORM,
                 id = "nemo-settings",
-                label = "Model and dictation",
+                label = "Models and downloads",
             ),
-        ),
+        ) + NEMO_MODELS.map { model ->
+            // ADR 0033 § 2: a streaming model can do both jobs; a
+            // whole-recording model only hears finished recordings.
+            transcriptionEngineContribution(
+                id = "nemo-${model.key}",
+                label = model.name,
+                engine = model.key,
+                roles = if (model.kind == NemoKind.STREAMING) {
+                    setOf(TranscriptionRole.LIVE, TranscriptionRole.RECORDINGS)
+                } else {
+                    setOf(TranscriptionRole.RECORDINGS)
+                },
+                wordTimes = true,
+                downloadBytes = model.bytes,
+                guidance = model.guidance,
+            )
+        },
     )
 
 // ---------------------------------------------------------------------

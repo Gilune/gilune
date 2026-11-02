@@ -23,7 +23,7 @@ fn run() -> Result<(), String> {
     let usage = "usage: gilune-cli --vault <dir> <init|capture --text <text>|work|\
                  external [--at <ms>]|apply --file <path>|project|reconcile|\
                  reconcile-path <rel>|changes [--since <epoch:seq>] [--limit <n>]|status|\
-                 verify|backfill|alerts|plugins [enable|disable|remove <id>]|\
+                 verify|backfill|alerts|plugins [enable|disable|remove|take-jobs|withhold-jobs <id>]|\
                  index [status|rebuild [<namespace>]]|facts <rel>|\
                  query <constraint>... [--scope line|note] [--limit <n>]|\
                  search [constraint]... [--scope document|line] [--limit <n>] \
@@ -320,6 +320,12 @@ fn run() -> Result<(), String> {
                     .set_plugin_enabled(id, false)
                     .map_err(|e| e.to_string())?,
                 (Some("remove"), Some(id)) => store.remove_plugin(id).map_err(|e| e.to_string())?,
+                (Some("take-jobs"), Some(id)) => store
+                    .set_takes_jobs(id, true)
+                    .map_err(|e| e.to_string())?,
+                (Some("withhold-jobs"), Some(id)) => store
+                    .set_takes_jobs(id, false)
+                    .map_err(|e| e.to_string())?,
                 _ => return Err(usage.to_string()),
             }
             let listed: Vec<_> = store
@@ -335,6 +341,9 @@ fn run() -> Result<(), String> {
                         "state": p.state.as_str(),
                         "required": p.descriptor.required,
                         "subscribes": p.descriptor.subscribes,
+                        "takes_jobs": p.takes_jobs,
+                        "settings": serde_json::from_str::<serde_json::Value>(&p.settings)
+                            .unwrap_or(serde_json::Value::Null),
                         "granted": p.granted,
                         "ungranted": p.ungranted(),
                     })
