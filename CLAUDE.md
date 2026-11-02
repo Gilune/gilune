@@ -2040,6 +2040,28 @@ gates promises) are ratified. **Next: application-level engineering — see
      private + CleanableImpl count, -Dumps for thread dumps),
      holdprobe.ps1 (histograms + NMT), shots.ps1 (PrintWindow + posted
      wheel, no focus change).
+     **Allocation round (2026-11-02, owner: "collection isn't free, stop
+     the allocation")**: measured per keystroke (UI-thread ThreadMXBean
+     bytes, skia `impl.Stats` counts, JFR allocation+CPU samples, Skia
+     timed directly in a test JVM). Fixed: `LineMemo` (MarkdownEditing.kt,
+     one per open note) keeps each line's recogniser answers + spans
+     between keystrokes — Java/keystroke 18.9→7.4 MB (64 KB), 2.7→1.3
+     (6 KB); `\r` drawn as ZWSP (`laidOut`) — Skia lays out `\r`
+     paragraphs QUADRATICALLY (64 KB: 2,079 ms vs 17 ms with `\n`); the
+     style window no longer calls getOffsetForPosition per keystroke;
+     `-XX:SurvivorRatio=1 -XX:TargetSurvivorRatio=90` lets most layouts
+     die young and NativeGarbage's budget rose 4→16 MB (NOT removed:
+     without it fast typing into 64 KB peaked at 463 MB — some layouts
+     still promote under sustained typing).
+     **The pre-2026-11-02 long-note figures were measured on a CRLF note**
+     (scratch notes were PowerShell-written) — re-measure with LF copies
+     (`*LF.md`). What's left: Skia laying out the whole STYLED note (~3,300
+     run boundaries, ~90 ms for 64 KB vs 17 unstyled) + a Compose style
+     object and native Paint per boundary → stage 4. The measuring build
+     was scratch-only (Main.kt type probe + `gilune.alloclog`, reverted);
+     scripts allocmem.ps1 / allocsites.py / cpusites.py. A
+     `Select-Object -First` pipe on a probe script STOPS it before it
+     closes the probe — allocmem.ps1 now closes in `finally`.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

@@ -188,19 +188,45 @@ had not spoken. The rules that follow from it:
   quiet heap rarely collects, and after typing it did not collect at all.
 
   The rules:
-  - **`NativeGarbage` collects** once 4 MB of thrown-away layout has piled
+  - **Layouts mostly die young** (2026-11-02): `-XX:SurvivorRatio=1
+    -XX:TargetSurvivorRatio=90` on both launch paths. A keystroke's layout
+    lives until the next keystroke; in the default survivor spaces it was
+    promoted, and only a full collection could free it. With room most die
+    in a young collection (3–5 ms). Not all: with no forced collection,
+    fast typing into the 64 KB note peaked at 463 MB.
+  - **`NativeGarbage` collects** once 16 MB of replaced layout has piled
     up, and when editing pauses. Every surface that swaps layouts in and
-    out reports to it.
+    out reports to it. (Until 2026-11-02 the budget was 4 MB: with the
+    default survivors, one full collection per keystroke on a long note,
+    ~11% of a keystroke's CPU.)
   - **Skia's paragraph cache stays off.** It keyed copies by text, never
     hit for an editor, and held ~45 MB in the real app.
   - **The heap gives memory back** after a collection (Min/MaxHeapFreeRatio
     10/30).
-  - **A small young generation is not the lever.** Layouts are promoted
-    before they die, so only a full collection frees them.
+  - **Stop the allocation before tuning the collector** (owner,
+    2026-11-02). Measure what a keystroke allocates: the UI thread's
+    allocated bytes (`ThreadMXBean`), Skia's own object counts
+    (`org.jetbrains.skia.impl.Stats`) and Flight Recorder's allocation and
+    CPU samples. That found the next three rules.
+  - **A line's answers are kept between keystrokes** (`LineMemo`). Every
+    recogniser and style rule answers from a line's text alone, so a
+    keystroke re-reads only the lines it changed. Re-reading every line
+    was a regex matcher per line per registration: 18.9 → 7.4 MB of Java
+    per keystroke in the 64 KB note.
+  - **A carriage return is drawn as a zero-width space.** Skia lays out a
+    paragraph holding `\r` in time that grows with the square of its
+    length: 2,079 ms for a 64 KB note with Windows line endings, 17 ms with
+    `\n`. The buffer keeps its bytes; every rule reads the real text.
+  - **Nothing asks the layout for every line's metrics per keystroke.**
+    `getOffsetForPosition` builds an object per line of the note; the style
+    window asks only when the view moves or the line count changes.
 
-  What remains: typing into a 64 KB note still peaks at 250–297 MB. That
-  is one whole-note layout per keystroke, and it needs ADR 0032 stage 4's
-  slice field. The full table is in the ADR.
+  What remains is Skia laying out the whole styled note on every keystroke:
+  each bold, italic, heading, quote or list-marker span is a run of its
+  own, ~90 ms for the 64 KB note against 17 ms unstyled, and Compose builds
+  a style object and a native paint per run boundary. It is proportional to
+  how much styled text is laid out, so it needs ADR 0032 stage 4's slice
+  field. The full tables are in the ADR.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it

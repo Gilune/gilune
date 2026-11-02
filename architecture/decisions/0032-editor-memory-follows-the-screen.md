@@ -356,6 +356,86 @@ was 134 MB):
 The long note's typing peak is the one figure over target. It needs
 stage 4's slice field.
 
+## What each keystroke allocated (2026-11-02)
+
+The owner's correction: collections cost CPU, so stop the allocation
+rather than collect more often. Measured per keystroke, typing from
+inside the app:
+- the UI thread's allocated bytes (`ThreadMXBean`);
+- Skia's own object counts (`org.jetbrains.skia.impl.Stats`);
+- Flight Recorder's allocation and CPU samples;
+- the same layouts timed in a test JVM against Skia directly.
+
+Found, in order of size:
+
+- **Our transformation re-read every line on every keystroke.** That was
+  18.9 MB of Java per keystroke in the 64 KB note and 2.7 MB in the 6 KB
+  one. ~37% of it was regex matchers: a matcher per line per registration
+  (tasks, people, checkbox, every Markdown rule). `LineMemo` keeps each
+  line's recogniser answers and spans between keystrokes.
+  - It is keyed by line text, which the decoration contract already makes
+    pure.
+  - Registrations are kept by identity, and styles per palette and scale.
+  - A hit allocates nothing, and lines nobody asks for any more are swept.
+
+  The result: **18.9 → 7.4 MB** and **2.7 → 1.3 MB** per keystroke.
+- **Windows line endings made Skia's layout quadratic.** One paragraph
+  holding `\r` took 2,079 ms for the 64 KB note against 17 ms with `\n`
+  (8 KB: 44 vs 2 ms). The transformation now draws `\r` as a zero-width
+  space: same length, so no offset moves, and every rule still reads the
+  real text. The test notes behind the 2026-11-01 table had Windows
+  endings, so its long-note figures carry this cost too.
+- **The style window re-read every line's metrics on every keystroke**
+  (`getOffsetForPosition` builds an object per line). It now asks only when
+  the view moves, the viewport changes or the line count changes.
+- **Forced collections were one full GC per keystroke on the long note**
+  (29 ms each, ~11% of a keystroke's CPU), and one every four on the short
+  note. They were needed because each layout's Java graph overflowed the
+  default survivor spaces and was promoted. Promoted objects are freed
+  only by a full collection, so their native memory waited for one.
+  `-XX:SurvivorRatio=1 -XX:TargetSurvivorRatio=90` gives most layouts room
+  to die young. With `NativeGarbage` collecting only on pauses, 60
+  keystrokes at a moderate pace cost:
+
+  | | Collections before | Collections, survivors and pause only |
+  |---|---|---|
+  | 64 KB note | 60 full + 25 young, 1,861 ms | 1 full + 100 young, 396 ms |
+  | 6 KB note | 15 full, 407 ms | 1 full + 21 young, 74 ms |
+
+  But sustained fast typing into the 64 KB note still promotes some
+  layouts, and without a forced collection it peaked at **463 MB**. So the
+  budget stays, raised from 4 to 16 MB: 150 fast letters peaked at 286 MB
+  with 4 MB (37.8 s of process CPU), 292 MB with 16 MB (32.3 s) and 311 MB
+  with 32 MB. Run-to-run noise is about ±20 MB. A note opens at the same
+  size as before. (Enlarging the whole young generation as well cost
+  11 MB at rest, and was not adopted.)
+
+**What is left is laying out the whole styled note.** With the style
+window, Skia receives ~3,300 run boundaries for the 64 KB note and takes
+~90 ms to lay it out. The same text takes 27 ms with headings alone and
+17 ms unstyled. Compose also builds a style object and a native paint per
+boundary. The cost is proportional to how much styled text is laid out,
+not to what changed. Lines off the screen cannot shed their wrap-changing
+spans without moving when they scroll in, so this is stage 4's slice
+field.
+
+Measured on probe copies typing 150 letters fast, the build of
+2026-11-01 against this one, same launcher and notes. Private bytes were
+sampled every half second; "CPU" is the process's from open to settled.
+
+| Note | Open | Typing peak | Settled | CPU |
+|---|---|---|---|---|
+| 6 KB | 138 → 138 MB | 197 → 201 MB | 155 → 157 MB | 7.8 → 6.6 s |
+| 64 KB, `\n` endings | 166 → 168 MB | 273 → 295 MB | 190 → 195 MB | 35.6 → 35.9 s |
+| 64 KB, `\r\n` endings | 172 → 169 MB | 300 → 293 MB | 200 → 196 MB | 58.0 → 33.2 s |
+
+**Memory did not move**, within run-to-run noise (about ±20 MB at the
+peak). What a keystroke allocates in Java halved, but Java was never where
+the memory was: it is the native layout of the whole note, unchanged. CPU
+fell by 15% on the short note and 43% on the note with Windows line endings.
+On the long `\n` note it is unchanged: Skia's layout of the styled text
+dominates. Both remaining costs are stage 4's to remove.
+
 ## Alternatives considered
 
 ### A custom text surface
@@ -378,7 +458,11 @@ scroll position jump. Selection across hidden ranges also turns odd.
 
 Measured and rejected (2026-11-01). One GC every 10 keystrokes peaked
 higher (401 MB), and each collection cost ~28 ms. Cleaners run
-asynchronously, and the NT heap does not shrink anyway.
+asynchronously, and the NT heap does not shrink anyway. The budgeted
+collection that replaced it stays, with the budget raised from 4 to 16 MB
+on 2026-11-02 once most layouts die young. Retiring it outright was
+measured and rejected: fast typing into the 64 KB note then peaked at
+463 MB.
 
 ### Leave it
 

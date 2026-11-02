@@ -106,17 +106,19 @@ data class CollapsedBlock(
 /// Every closed fence in `source`, in document order. An **unterminated**
 /// fence is not one: it has no end, so there is nothing to collapse and it
 /// stays the raw text it is.
-fun fencedBlocks(source: String): List<FencedBlock> {
+fun fencedBlocks(source: String): List<FencedBlock> = fencedBlocks(source.split('\n'))
+
+private fun fencedBlocks(lines: List<String>): List<FencedBlock> {
     val found = mutableListOf<FencedBlock>()
     val body = mutableListOf<String>()
     var openStart = -1
     var openLine = -1
     var info = ""
     var offset = 0
-    for ((index, line) in source.split('\n').withIndex()) {
+    for ((index, line) in lines.withIndex()) {
         val start = offset
         offset += line.length + 1
-        val delimiter = line.trim().startsWith("```")
+        val delimiter = line.isFenceDelimiter()
         if (openStart < 0) {
             if (!delimiter) continue
             openStart = start
@@ -140,6 +142,14 @@ fun fencedBlocks(source: String): List<FencedBlock> {
     return found
 }
 
+/// `line.trim().startsWith("```")` without the trimmed copy, which every
+/// line of every pass used to make.
+private fun String.isFenceDelimiter(): Boolean {
+    var index = 0
+    while (index < length && this[index].isWhitespace()) index++
+    return startsWith("```", index)
+}
+
 /// The blocks a buffer collapses, in the coordinates an overlay needs.
 /// Same inputs as [MarkdownEditTransformation], so what is drawn and what
 /// was reserved cannot disagree: this asks the same composition the same
@@ -149,9 +159,10 @@ fun collapsedBlocks(
     caretLine: Int?,
     decorations: List<EditorDecoration> = builtInDecorations(),
     blocks: List<EditorBlockDecoration> = emptyList(),
+    memo: LineMemo = LineMemo(),
 ): List<CollapsedBlock> {
     if (blocks.isEmpty()) return emptyList()
-    val placed = decorate(source, caretLine, decorations, blocks)
+    val placed = decorate(source, caretLine, decorations, blocks, memo = memo)
     val starts = transformedStarts(placed)
     return placed.mapIndexedNotNull { index, span ->
         val id = span.blockId ?: return@mapIndexedNotNull null
@@ -192,7 +203,9 @@ fun builtInDecorations(): List<EditorDecoration> = BUILT_IN_DECORATIONS
 ///
 /// The result is kept for the last text asked about: a field and the
 /// editor's own geometry questions ask for the same text several times a
-/// frame, and each answer used to re-parse the whole note.
+/// frame, and each answer used to re-parse the whole note. `memo` keeps
+/// each line's answers across texts, so a keystroke re-reads only the
+/// lines it changed; an editor passes one per open buffer.
 class MarkdownEditTransformation(
     private val palette: MarkdownPalette,
     private val caretLine: Int? = null,
@@ -201,6 +214,7 @@ class MarkdownEditTransformation(
     private val fontScale: Float = 1f,
     private val plainPillLine: Int? = null,
     private val styleWindow: IntRange? = null,
+    private val memo: LineMemo = LineMemo(),
 ) : VisualTransformation {
     @Volatile private var last: Pair<String, TransformedText>? = null
 
@@ -211,9 +225,9 @@ class MarkdownEditTransformation(
     }
 
     private fun transform(source: String): TransformedText {
-        val placed = decorate(source, caretLine, decorations, blocks, plainPillLine)
+        val placed = decorate(source, caretLine, decorations, blocks, plainPillLine, memo)
         if (placed.isEmpty()) {
-            return TransformedText(styleMarkdown(source, palette, fontScale, styleWindow), OffsetMapping.Identity)
+            return TransformedText(styleMarkdown(source, palette, fontScale, styleWindow, memo), OffsetMapping.Identity)
         }
         val starts = transformedStarts(placed)
         val transformed = applyDecorations(source, placed)
@@ -226,7 +240,97 @@ class MarkdownEditTransformation(
         } else {
             DecorationOffsetMapping(table, source.length, transformed.length)
         }
-        return TransformedText(styleDecorations(transformed, placed, starts, palette, fontScale, styleWindow), mapping)
+        return TransformedText(styleDecorations(transformed, placed, starts, palette, fontScale, styleWindow, memo), mapping)
+    }
+}
+
+/// What each line of a note was found to hold, kept from one pass to the
+/// next (ADR 0032). A keystroke changes a line or two, and every recogniser
+/// and every Markdown style rule answers from a line's text alone — the
+/// decoration contract makes recognisers pure over the string — so the
+/// lines a keystroke did not touch answer from here instead of being read
+/// again. Re-reading them was most of what a keystroke allocated: a regex
+/// matcher per line per registration, for every line of the note.
+///
+/// Lines no pass asks about any more are swept, so the memo stays about
+/// the size of the note it serves. A registration is remembered by identity:
+/// a rebuilt registry is a new set of recognisers and starts afresh, as
+/// does a new palette or font scale.
+class LineMemo {
+    private val recognised = java.util.IdentityHashMap<EditorDecoration, Generations<List<DecorationMatch>>>()
+    private val askedThisPass = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<EditorDecoration, Boolean>())
+    private val colouredLines = Generations<List<LineSpan>>()
+    private val plainLines = Generations<List<LineSpan>>()
+    private var styles: MarkdownStyles? = null
+
+    internal fun recognise(decoration: EditorDecoration, line: String): List<DecorationMatch> {
+        askedThisPass += decoration
+        return recognised.getOrPut(decoration) { Generations() }.get(line, decoration.recognise)
+    }
+
+    internal fun endRecognising() {
+        recognised.keys.retainAll(askedThisPass)
+        recognised.values.forEach { it.turn() }
+        askedThisPass.clear()
+    }
+
+    internal fun styles(palette: MarkdownPalette, fontScale: Float): MarkdownStyles {
+        styles?.let { if (it.palette == palette && it.fontScale == fontScale) return it }
+        colouredLines.clear()
+        plainLines.clear()
+        return MarkdownStyles(palette, fontScale).also { styles = it }
+    }
+
+    internal fun lineSpans(line: String, coloured: Boolean, styles: MarkdownStyles): List<LineSpan> =
+        (if (coloured) colouredLines else plainLines).get(line) { markdownLineSpans(it, coloured, styles) }
+
+    internal fun endStyling() {
+        colouredLines.turn()
+        plainLines.turn()
+    }
+}
+
+/// Answers keyed by line, each stamped with the last pass that asked for
+/// it. A hit allocates nothing. Lines no pass asks about any more — the
+/// versions of a line being typed, one per keystroke — are swept once they
+/// outnumber the lines the last pass asked about, so the map stays about
+/// the size of the note without being rebuilt every keystroke.
+internal class Generations<V : Any> {
+    private class Entry<V>(val value: V, var pass: Int)
+
+    private val entries = HashMap<String, Entry<V>>()
+    private var pass = 0
+    private var askedThisPass = 0
+
+    fun get(line: String, compute: (String) -> V): V {
+        val entry = entries[line]
+        if (entry != null) {
+            if (entry.pass != pass) {
+                entry.pass = pass
+                askedThisPass++
+            }
+            return entry.value
+        }
+        askedThisPass++
+        return compute(line).also { entries[line] = Entry(it, pass) }
+    }
+
+    fun turn() {
+        if (entries.size > askedThisPass * 2 + SWEEP_SLACK) entries.values.removeIf { it.pass != pass }
+        pass++
+        askedThisPass = 0
+    }
+
+    fun clear() {
+        entries.clear()
+        askedThisPass = 0
+    }
+
+    /// How many lines are held; for tests.
+    val size: Int get() = entries.size
+
+    private companion object {
+        const val SWEEP_SLACK = 64
     }
 }
 
@@ -983,19 +1087,21 @@ private fun decorate(
     decorations: List<EditorDecoration>,
     blocks: List<EditorBlockDecoration> = emptyList(),
     plainPillLine: Int? = null,
-): List<PlacedDecoration> {
-    val collapsed = collapse(source, caretLine, blocks)
+    memo: LineMemo = LineMemo(),
+): List<PlacedDecoration> = synchronized(memo) {
+    val lines = source.split('\n')
+    val collapsed = collapse(lines, caretLine, blocks)
     if (decorations.isEmpty()) return collapsed
     val hidden = collapsed.mapNotNull { it.fence?.lines }
     val placed = mutableListOf<PlacedDecoration>()
     var offset = 0
     var inFence = false
-    for ((index, line) in source.split('\n').withIndex()) {
+    for ((index, line) in lines.withIndex()) {
         val start = offset
         offset += line.length + 1
         // Fence tracking as `styleMarkdown` does it, delimiters included in
         // the block so a recogniser cannot fire on the ``` line either.
-        val delimiter = line.trim().startsWith("```")
+        val delimiter = line.isFenceDelimiter()
         val fenced = inFence || delimiter
         if (delimiter) inFence = !inFence
         // The caret's line shows its raw Markdown: nothing is replaced and
@@ -1008,25 +1114,27 @@ private fun decorate(
         // ground inside one.
         if (hidden.any { index in it }) continue
 
-        val claimed = mutableListOf<IntRange>()
-        val onLine = mutableListOf<PlacedDecoration>()
+        var claimed: MutableList<IntRange>? = null
+        var onLine: MutableList<PlacedDecoration>? = null
         for (decoration in decorations) {
             if (fenced && !decoration.firesInsideCodeFences) continue
             if (onCaretLine && decoration.activate != null) continue
-            for (match in decoration.recognise(line)) {
+            for (match in memo.recognise(decoration, line)) {
                 if (onCaretLine && match.render !is DecorationRender.StyleOnly) continue
                 if (index == plainPillLine && match.render is DecorationRender.Pill) continue
                 val range = match.range
                 if (range.isEmpty() || range.first < 0 || range.last >= line.length) continue
-                if (claimed.any { range.first <= it.last && it.first <= range.last }) continue
-                claimed += range
+                if (claimed?.any { range.first <= it.last && it.first <= range.last } == true) continue
+                val taken = claimed ?: mutableListOf<IntRange>().also { claimed = it }
+                taken += range
                 val length = range.last - range.first + 1
                 val render = match.render
                 val replacement = when (render) {
                     is DecorationRender.Replace -> render.text
                     DecorationRender.StyleOnly, is DecorationRender.Pill -> line.substring(range.first, range.first + length)
                 }
-                onLine += PlacedDecoration(
+                val spans = onLine ?: mutableListOf<PlacedDecoration>().also { onLine = it }
+                spans += PlacedDecoration(
                     start = start + range.first,
                     sourceLength = length,
                     replacement = replacement,
@@ -1042,12 +1150,13 @@ private fun decorate(
         }
         // Declaration order decides overlaps; document order decides the
         // table, and one registration may claim later ground than the next.
-        placed += onLine.sortedBy { it.start }
+        onLine?.let { placed += if (it.size == 1) it else it.sortedBy { span -> span.start } }
     }
+    memo.endRecognising()
     // Blocks and lines are disjoint by construction — a collapsed block's
     // lines were skipped above — so merging by start is all the table's
     // sorted, non-overlapping contract needs.
-    return if (collapsed.isEmpty()) placed else (collapsed + placed).sortedBy { it.start }
+    if (collapsed.isEmpty()) placed else (collapsed + placed).sortedBy { it.start }
 }
 
 /// The block-scoped half of composition, and the same three rules: the
@@ -1057,13 +1166,13 @@ private fun decorate(
 /// buffer — collapses every claimed block, so a note opens showing its
 /// blocks exactly as it opens showing its checkboxes.
 private fun collapse(
-    source: String,
+    lines: List<String>,
     caretLine: Int?,
     blocks: List<EditorBlockDecoration>,
 ): List<PlacedDecoration> {
     if (blocks.isEmpty()) return emptyList()
     val placed = mutableListOf<PlacedDecoration>()
-    for (fence in fencedBlocks(source)) {
+    for (fence in fencedBlocks(lines)) {
         if (caretLine != null && caretLine in fence.lines) continue
         for (block in blocks) {
             val lines = block.claim(fence.info, fence.body) ?: continue
@@ -1113,11 +1222,16 @@ private fun styleDecorations(
     palette: MarkdownPalette,
     fontScale: Float,
     window: IntRange? = null,
+    memo: LineMemo = LineMemo(),
 ): AnnotatedString {
-    val styled = styleMarkdown(transformed, palette, fontScale, window)
-    if (placed.none { it.role != DecorationRole.NONE || it.pillTag != null }) return styled
+    if (placed.none { it.role != DecorationRole.NONE || it.pillTag != null }) {
+        return styleMarkdown(transformed, palette, fontScale, window, memo)
+    }
+    // One builder for the Markdown and the decorations: appending a styled
+    // string to a second builder copied every span of the note again.
     return buildAnnotatedString {
-        append(styled)
+        append(laidOut(transformed))
+        styleMarkdownInto(this, transformed, palette, fontScale, window, memo)
         for ((index, span) in placed.withIndex()) {
             val from = starts[index]
             val to = from + span.replacement.length
@@ -1224,126 +1338,153 @@ fun styleMarkdown(
     palette: MarkdownPalette,
     fontScale: Float = 1f,
     window: IntRange? = null,
+    memo: LineMemo = LineMemo(),
 ): AnnotatedString =
     buildAnnotatedString {
-        append(source)
-        val mutedStyle = SpanStyle(color = palette.muted)
-        val boldStyle = SpanStyle(fontWeight = FontWeight.Bold)
-        val italicStyle = SpanStyle(fontStyle = FontStyle.Italic)
-        var offset = 0
-        var inFrontMatter = false
-        var frontMatterClosed = false
-        var inFence = false
-        for ((index, line) in source.split('\n').withIndex()) {
-            val start = offset
-            val end = start + line.length
-            offset = end + 1
-            val trimmed = line.trim()
-            val coloured = window == null || (end >= window.first && start <= window.last)
+        append(laidOut(source))
+        styleMarkdownInto(this, source, palette, fontScale, window, memo)
+    }
 
-            if (index == 0 && trimmed == "---") {
-                inFrontMatter = true
-                if (coloured) addStyle(mutedStyle, start, end)
-                continue
-            }
-            if (inFrontMatter && !frontMatterClosed) {
-                if (coloured) addStyle(mutedStyle, start, end)
-                if (trimmed == "---") {
-                    inFrontMatter = false
-                    frontMatterClosed = true
-                }
-                continue
-            }
-            if (trimmed.startsWith("```")) {
-                inFence = !inFence
-                if (coloured) addStyle(mutedStyle, start, end)
-                continue
-            }
-            if (inFence) {
-                if (coloured) addStyle(SpanStyle(color = palette.code), start, end)
-                continue
-            }
+/// The text a field lays out for `text`: each carriage return drawn as a
+/// zero-width space. Same length, so no offset moves, and the same width —
+/// nothing — so nothing on screen does. Skia lays a paragraph holding
+/// carriage returns out in time that grows with the square of its length:
+/// a 64 KB note with Windows line endings took two seconds a keystroke
+/// where the same note with `\n` alone took twenty milliseconds (ADR 0032).
+/// The buffer keeps its bytes; only what is drawn changes. Every rule reads
+/// the text as it is, so styling cannot depend on the stand-in.
+internal fun laidOut(text: String): String =
+    if ('\r' in text) text.replace('\r', CARRIAGE_RETURN_DRAWN_AS) else text
 
-            val heading = HEADING.find(line)
-            if (heading != null) {
-                val level = heading.groupValues[1].length
-                val size = when (level) {
-                    1 -> 17.sp
-                    2 -> 15.sp
-                    else -> 14.sp
-                }
-                addStyle(
-                    if (coloured) {
-                        SpanStyle(color = palette.heading, fontWeight = FontWeight.Bold, fontSize = size * fontScale)
-                    } else {
-                        SpanStyle(fontWeight = FontWeight.Bold, fontSize = size * fontScale)
-                    },
-                    start,
-                    end,
-                )
-                if (coloured) addStyle(mutedStyle, start, start + level)
-            }
-            val quote = line.startsWith(">")
-            if (quote) {
-                addStyle(if (coloured) SpanStyle(color = palette.muted, fontStyle = FontStyle.Italic) else italicStyle, start, end)
-            }
-            LIST_MARKER.find(line)?.let { m ->
-                addStyle(
-                    if (coloured) SpanStyle(color = palette.marker, fontWeight = FontWeight.Bold) else boldStyle,
-                    start + m.groupValues[1].length,
-                    start + m.value.length,
-                )
-            }
+internal const val CARRIAGE_RETURN_DRAWN_AS = '​' // ZERO WIDTH SPACE
 
-            if (coloured) {
-                for (m in CODE_SPAN.findAll(line)) {
-                    addStyle(
-                        SpanStyle(color = palette.code, background = palette.codeBackground),
-                        start + m.range.first,
-                        start + m.range.last + 1,
-                    )
-                }
-            }
-            for (m in BOLD.findAll(line)) {
-                addStyle(boldStyle, start + m.range.first, start + m.range.last + 1)
-                if (!coloured) continue
-                addStyle(mutedStyle, start + m.range.first, start + m.range.first + 2)
-                addStyle(mutedStyle, start + m.range.last - 1, start + m.range.last + 1)
-            }
-            for (m in ITALIC.findAll(line)) {
-                addStyle(italicStyle, start + m.range.first, start + m.range.last + 1)
-                if (!coloured) continue
-                addStyle(mutedStyle, start + m.range.first, start + m.range.first + 1)
-                addStyle(mutedStyle, start + m.range.last, start + m.range.last + 1)
-            }
-            if (!coloured) continue
+private fun styleMarkdownInto(
+    builder: AnnotatedString.Builder,
+    source: String,
+    palette: MarkdownPalette,
+    fontScale: Float,
+    window: IntRange?,
+    memo: LineMemo,
+) = synchronized(memo) {
+    val styles = memo.styles(palette, fontScale)
+    var offset = 0
+    var inFrontMatter = false
+    var frontMatterClosed = false
+    var inFence = false
+    for ((index, line) in source.split('\n').withIndex()) {
+        val start = offset
+        val end = start + line.length
+        offset = end + 1
+        val coloured = window == null || (end >= window.first && start <= window.last)
 
-            for (m in STRIKE.findAll(line)) {
-                addStyle(
-                    SpanStyle(textDecoration = TextDecoration.LineThrough),
-                    start + m.range.first,
-                    start + m.range.last + 1,
-                )
+        if (index == 0 && line.trim() == "---") {
+            inFrontMatter = true
+            if (coloured) builder.addStyle(styles.muted, start, end)
+            continue
+        }
+        if (inFrontMatter && !frontMatterClosed) {
+            if (coloured) builder.addStyle(styles.muted, start, end)
+            if (line.trim() == "---") {
+                inFrontMatter = false
+                frontMatterClosed = true
             }
-            for (m in LINK.findAll(line)) {
-                val label = m.groups[1]
-                if (label != null) {
-                    addStyle(
-                        SpanStyle(color = palette.link, textDecoration = TextDecoration.Underline),
-                        start + label.range.first,
-                        start + label.range.last + 1,
-                    )
-                }
-                val destination = m.groups[2]
-                if (destination != null) {
-                    addStyle(mutedStyle, start + destination.range.first, start + destination.range.last + 1)
-                }
-            }
-            for (m in WIKI.findAll(line)) {
-                addStyle(SpanStyle(color = palette.link), start + m.range.first, start + m.range.last + 1)
-            }
+            continue
+        }
+        if (line.isFenceDelimiter()) {
+            inFence = !inFence
+            if (coloured) builder.addStyle(styles.muted, start, end)
+            continue
+        }
+        if (inFence) {
+            if (coloured) builder.addStyle(styles.fenced, start, end)
+            continue
+        }
+        for (span in memo.lineSpans(line, coloured, styles)) {
+            builder.addStyle(span.style, start + span.start, start + span.end)
         }
     }
+    memo.endStyling()
+}
+
+/// One style over a line, in the line's own offsets.
+internal class LineSpan(val start: Int, val end: Int, val style: SpanStyle)
+
+/// Every style [styleMarkdown] draws with, made once per palette and font
+/// scale rather than once per line: a style is immutable, so every span of
+/// a kind can share one.
+internal class MarkdownStyles(val palette: MarkdownPalette, val fontScale: Float) {
+    val muted = SpanStyle(color = palette.muted)
+    val bold = SpanStyle(fontWeight = FontWeight.Bold)
+    val italic = SpanStyle(fontStyle = FontStyle.Italic)
+    val fenced = SpanStyle(color = palette.code)
+    val code = SpanStyle(color = palette.code, background = palette.codeBackground)
+    val quote = SpanStyle(color = palette.muted, fontStyle = FontStyle.Italic)
+    val listMarker = SpanStyle(color = palette.marker, fontWeight = FontWeight.Bold)
+    val strike = SpanStyle(textDecoration = TextDecoration.LineThrough)
+    val linkLabel = SpanStyle(color = palette.link, textDecoration = TextDecoration.Underline)
+    val wiki = SpanStyle(color = palette.link)
+    private val headingSizes = listOf(17.sp, 15.sp, 14.sp).map { it * fontScale }
+    private val headings = headingSizes.map { SpanStyle(color = palette.heading, fontWeight = FontWeight.Bold, fontSize = it) }
+    private val plainHeadings = headingSizes.map { SpanStyle(fontWeight = FontWeight.Bold, fontSize = it) }
+
+    fun heading(level: Int, coloured: Boolean): SpanStyle =
+        (if (coloured) headings else plainHeadings)[(level - 1).coerceAtMost(2)]
+}
+
+/// One body line's spans — everything but front matter and fences, which
+/// depend on the lines around them. The order is the order spans are laid
+/// down in, which decides overlaps. Off the style window only what changes
+/// how the line wraps is kept: size, weight and slant.
+private fun markdownLineSpans(line: String, coloured: Boolean, styles: MarkdownStyles): List<LineSpan> {
+    var spans: MutableList<LineSpan>? = null
+    fun add(style: SpanStyle, start: Int, end: Int) {
+        (spans ?: mutableListOf<LineSpan>().also { spans = it }).add(LineSpan(start, end, style))
+    }
+
+    val heading = HEADING.find(line)
+    if (heading != null) {
+        val level = heading.groupValues[1].length
+        add(styles.heading(level, coloured), 0, line.length)
+        if (coloured) add(styles.muted, 0, level)
+    }
+    if (line.startsWith(">")) {
+        add(if (coloured) styles.quote else styles.italic, 0, line.length)
+    }
+    LIST_MARKER.find(line)?.let { m ->
+        add(if (coloured) styles.listMarker else styles.bold, m.groupValues[1].length, m.value.length)
+    }
+
+    if (coloured && '`' in line) {
+        for (m in CODE_SPAN.findAll(line)) add(styles.code, m.range.first, m.range.last + 1)
+    }
+    if ('*' in line) {
+        for (m in BOLD.findAll(line)) {
+            add(styles.bold, m.range.first, m.range.last + 1)
+            if (!coloured) continue
+            add(styles.muted, m.range.first, m.range.first + 2)
+            add(styles.muted, m.range.last - 1, m.range.last + 1)
+        }
+        for (m in ITALIC.findAll(line)) {
+            add(styles.italic, m.range.first, m.range.last + 1)
+            if (!coloured) continue
+            add(styles.muted, m.range.first, m.range.first + 1)
+            add(styles.muted, m.range.last, m.range.last + 1)
+        }
+    }
+    if (!coloured) return spans ?: emptyList()
+
+    if ('~' in line) {
+        for (m in STRIKE.findAll(line)) add(styles.strike, m.range.first, m.range.last + 1)
+    }
+    if ('[' in line) {
+        for (m in LINK.findAll(line)) {
+            m.groups[1]?.let { add(styles.linkLabel, it.range.first, it.range.last + 1) }
+            m.groups[2]?.let { add(styles.muted, it.range.first, it.range.last + 1) }
+        }
+        for (m in WIKI.findAll(line)) add(styles.wiki, m.range.first, m.range.last + 1)
+    }
+    return spans ?: emptyList()
+}
 
 /// The style window an editor should draw with (ADR 0032 stage 3), given
 /// the one it has and the offsets now on screen. It reaches one screenful

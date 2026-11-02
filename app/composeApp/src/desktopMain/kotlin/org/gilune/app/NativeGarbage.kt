@@ -6,10 +6,15 @@
 // past 450 MB; once typing stopped nothing collected at all, and the dead
 // layouts stayed (measured 2026-11-01, ADR 0032).
 //
-// So the editor reports each layout it replaces, sized by its text, and a
-// collection is asked for once the layouts thrown away add up to
-// [BUDGET_BYTES] (4 MB), and once more when editing pauses. A full collection of
-// this app's ~20 MB heap takes 25–40 ms, on this thread rather than the UI's.
+// While typing, most are freed by the young collections the editor's own
+// allocation brings: the launch flags give the survivor spaces room for a
+// layout to die young (ADR 0032, 2026-11-02). What is still promoted waits
+// for a full collection, so the editor reports each layout it replaces and
+// one is forced per [BUDGET_BYTES] (16 MB) of replaced layout — on the 64 KB
+// note about one every keystroke and a half, where the old 4 MB budget with
+// default survivors forced one every keystroke — and once more when editing
+// pauses, since nothing collects in a quiet app. Each takes 25–40 ms, on
+// this thread rather than the UI's.
 //
 // Skia's paragraph cache is switched off as well. It keeps a copy of every
 // paragraph it lays out, keyed by the paragraph's text, and an editor makes a
@@ -27,29 +32,35 @@ internal object NativeGarbage {
     /// stopped.
     const val SETTLE_MS = 1_000L
 
-    /// How much thrown-away layout is let pile up before collecting.
-    /// Measured on fast typing into a 6 KB note: 16 MB peaked at 196 MB,
-    /// 8 MB at 188, 4 MB at 180 (base + 50) for no CPU that showed.
-    const val BUDGET_BYTES = 4L shl 20
+    private val timer = Executors.newSingleThreadScheduledExecutor { task ->
+        Thread(task, "Gilune native memory").apply { isDaemon = true }
+    }
+    private var pending: ScheduledFuture<*>? = null
+
+    /// How much replaced layout may pile up before a collection is forced
+    /// mid-typing. Measured 2026-11-02 typing 150 letters fast into the
+    /// 64 KB note, with the survivor flags: no budget peaked at 463 MB (some
+    /// layouts are still promoted under sustained typing), 4 MB at 286 MB
+    /// for 37.8 s of CPU, 16 MB at 292 MB for 32.3 s, 32 MB at 311 MB.
+    /// Run-to-run noise is about ±20 MB.
+    const val BUDGET_BYTES = 16L shl 20
 
     /// Native bytes a laid-out character costs, roughly: a relayout of the
     /// 64 KB note left ~10–13 MB behind.
     const val BYTES_PER_CHAR = 200L
 
-    private val timer = Executors.newSingleThreadScheduledExecutor { task ->
-        Thread(task, "Gilune native memory").apply { isDaemon = true }
-    }
-    private var pending: ScheduledFuture<*>? = null
     private var owed = 0L
 
     /// A layout of `chars` characters has just replaced another.
     @Synchronized
     fun layoutReplaced(chars: Int) {
         owed += chars * BYTES_PER_CHAR
-        collect(if (owed >= BUDGET_BYTES) 0L else SETTLE_MS)
+        if (owed >= BUDGET_BYTES) collect(0L) else soon()
     }
 
-    /// Something holding layouts was put away (a note closed, a view left).
+    /// Something holding layouts was put away (a note closed, a view left),
+    /// or a layout was replaced: collect once things are still. Each call
+    /// moves the collection later.
     @Synchronized
     fun soon() = collect(SETTLE_MS)
 

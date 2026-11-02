@@ -341,6 +341,13 @@ compose.desktop {
         //    typing; with these it gives the rest back after a collection.
         //    Typing into the long note peaked ~70 MB lower and settled ~30
         //    MB lower.
+        //  - SurvivorRatio=1, TargetSurvivorRatio=90 (2026-11-02, ADR 0032):
+        //    each keystroke's text layout lives until the next one, and the
+        //    default survivor spaces overflowed and promoted it, so only a
+        //    full collection freed its native memory and the app forced one
+        //    per keystroke on long notes. With room in the survivors a layout
+        //    dies young: 60 keystrokes into the 64 KB note cost 1,861 ms of
+        //    collection before and 396 ms after, with no full collection.
         // The Windows launcher passes the same list (DesktopLaunchArgumentsTest
         // holds the two together).
         jvmArgs += listOf(
@@ -350,6 +357,8 @@ compose.desktop {
             "-XX:CICompilerCount=2",
             "-XX:MinHeapFreeRatio=10",
             "-XX:MaxHeapFreeRatio=30",
+            "-XX:SurvivorRatio=1",
+            "-XX:TargetSurvivorRatio=90",
             "-Dsun.java2d.d3d=false",
         )
 

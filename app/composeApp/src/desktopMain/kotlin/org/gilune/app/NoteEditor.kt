@@ -891,15 +891,21 @@ private fun OpenNote(
             // below, once a screenful, from the laid-out text.
             val bodyScroll = rememberScrollState()
             var styleWindow by remember(relPath) { mutableStateOf<IntRange?>(0..INITIAL_STYLE_WINDOW_CHARS) }
+            // Each line's styles and decorations, kept between keystrokes
+            // so one only re-reads the lines it changed.
+            val lineMemo = remember(relPath) { LineMemo() }
             val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size, live?.anchor, ghost, ghostStyle, styleWindow) {
-                val base = MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f, styleWindow = styleWindow)
+                val base = MarkdownEditTransformation(
+                    palette, line, decorations, blockDecorations, appearance.edit.size / 13f,
+                    styleWindow = styleWindow, memo = lineMemo,
+                )
                 if (live == null || ghost == null) base else DictationTransformation(base, live.anchor, ghost, ghostStyle)
             }
             // Where each collapsed block's placeholder landed, asked of the
             // same composition the field is showing, so what is drawn and
             // what was reserved cannot drift apart.
             val collapsed = remember(editor.text.text, line, decorations, blockDecorations) {
-                collapsedBlocks(editor.text.text, line, decorations, blockDecorations)
+                collapsedBlocks(editor.text.text, line, decorations, blockDecorations, lineMemo)
             }
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
             // Each relayout leaves the last one's native memory for the
@@ -909,7 +915,12 @@ private fun OpenNote(
             val windowDensity = LocalDensity.current
             LaunchedEffect(bodyScroll, relPath) {
                 val padding = with(windowDensity) { EDITOR_PADDING.toPx() }
-                snapshotFlow { Triple(bodyScroll.value, bodyScroll.viewportSize, layout) }.collect { (top, height, placed) ->
+                // Asked when the view moves or the note gains or loses a
+                // line, not on every keystroke: each question reads every
+                // line's metrics afresh, and typing within a line leaves
+                // the window where it was.
+                snapshotFlow { Triple(bodyScroll.value, bodyScroll.viewportSize, layout?.lineCount) }.collect { (top, height, _) ->
+                    val placed = layout
                     if (placed == null || height <= 0) return@collect
                     val above = (top - padding).coerceAtLeast(0f)
                     val first = placed.getOffsetForPosition(Offset(0f, above))

@@ -127,7 +127,8 @@ class DesktopLaunchArgumentsTest {
     private companion object {
         // Measured: SerialGC, the heap bounds and CICompilerCount on
         // 2026-09-04; sun.java2d.d3d=false (35 MB, 16 threads) and the heap
-        // free ratios (heap given back after a collection) on 2026-11-01.
+        // free ratios (heap given back after a collection) on 2026-11-01;
+        // the survivor sizing (layouts die young) on 2026-11-02.
         val FOOTPRINT_FLAGS = listOf(
             "-XX:+UseSerialGC",
             "-Xms32m",
@@ -135,6 +136,8 @@ class DesktopLaunchArgumentsTest {
             "-XX:CICompilerCount=2",
             "-XX:MinHeapFreeRatio=10",
             "-XX:MaxHeapFreeRatio=30",
+            "-XX:SurvivorRatio=1",
+            "-XX:TargetSurvivorRatio=90",
             "-Dsun.java2d.d3d=false",
         )
     }

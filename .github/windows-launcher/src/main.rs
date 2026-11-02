@@ -274,6 +274,10 @@ fn launch(root: &Path) -> std::io::Result<i32> {
         // the next burst (ADR 0032): 59 MB stayed committed for 18 MB.
         "-XX:MinHeapFreeRatio=10",
         "-XX:MaxHeapFreeRatio=30",
+        // Room for a keystroke's text layout to die young, so cheap young
+        // collections free its native memory instead of full ones (ADR 0032).
+        "-XX:SurvivorRatio=1",
+        "-XX:TargetSurvivorRatio=90",
         // Java2D's own Direct3D pipeline: Compose draws through Skia's
         // device, never this one, which cost 35 MB and 16 threads idle.
         "-Dsun.java2d.d3d=false",

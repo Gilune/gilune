@@ -1003,6 +1003,103 @@ class MarkdownEditingTest {
         assertEquals(MarkdownEditTransformation(palette).filter(AnnotatedString(windowDoc + "x")).text, edited.text)
     }
 
+    // ADR 0032: a keystroke re-reads only the lines it changed. Whatever a
+    // shared memo remembers, every answer must be the one a transformation
+    // with nothing remembered gives — including when the change is not on
+    // the line itself: a fence opened above, the caret moving, the window
+    // moving, the registry or the palette replaced.
+    @Test
+    fun aSharedMemoAnswersExactlyWhatAFreshTransformationAnswers() {
+        val memo = LineMemo()
+        // Two registrations under one id that claim different ranges: a
+        // memo that remembered by id would answer the second with the first.
+        val tag = { pattern: String ->
+            EditorDecoration(
+                id = "test.tag",
+                role = DecorationRole.MARKER,
+                recognise = { line ->
+                    Regex(pattern).findAll(line).map { DecorationMatch(it.range, DecorationRender.StyleOnly) }.toList()
+                },
+            )
+        }
+        val firstTag = tag("#[a-z]+")
+        val secondTag = tag("#[a-z]{2}")
+        val usual = palette
+        val other = palette.copy(muted = Color.Magenta)
+        class Step(
+            val text: String,
+            val caret: Int? = null,
+            val window: IntRange? = null,
+            val decorations: List<EditorDecoration> = builtInDecorations() + firstTag,
+            val palette: MarkdownPalette = usual,
+        )
+        val start = windowDoc + "\nsome #tag here"
+        val steps = listOf(
+            Step(start),
+            Step(start + "x"),
+            Step(start.replaceFirst("Paragraph 2", "Paragraph 2 **more**")),
+            Step("```\n" + start, caret = 3),
+            Step("```\n" + start + "\n```", caret = 3),
+            Step(start, caret = 7, window = 200..600),
+            Step(start, caret = 7, window = 1200..1800),
+            Step(start, decorations = builtInDecorations() + secondTag),
+            Step(start, palette = other),
+            Step(start.replace("- [ ]", "- [x]")),
+        )
+        for ((index, step) in steps.withIndex()) {
+            val shared = MarkdownEditTransformation(step.palette, step.caret, step.decorations, styleWindow = step.window, memo = memo)
+                .filter(AnnotatedString(step.text))
+            val fresh = MarkdownEditTransformation(step.palette, step.caret, step.decorations, styleWindow = step.window)
+                .filter(AnnotatedString(step.text))
+            assertEquals(fresh.text.text, shared.text.text, "step $index text")
+            assertEquals(fresh.text.spanStyles, shared.text.spanStyles, "step $index spans, in order")
+            for (offset in 0..step.text.length) {
+                assertEquals(fresh.offsetMapping.originalToTransformed(offset), shared.offsetMapping.originalToTransformed(offset), "step $index offset $offset")
+            }
+        }
+    }
+
+    // Typing makes a new version of one line per keystroke; the memo must
+    // not keep every one of them, and must not recompute lines it holds.
+    @Test
+    fun theMemoStaysTheSizeOfTheNoteWhileALineIsTyped() {
+        val memo = Generations<Int>()
+        val note = (1..100).map { "line $it" }
+        var computed = 0
+        var typed = ""
+        repeat(2_000) {
+            typed += "a"
+            for (line in note + typed) memo.get(line) { computed++; it.length }
+            memo.turn()
+        }
+        assertTrue(memo.size <= 2 * 101 + 64 + 1, "held ${memo.size} lines")
+        assertEquals(100 + 2_000, computed, "each unchanged line computed once, each typed version once")
+    }
+
+    // A carriage return is drawn as a zero-width space (Skia's layout of a
+    // paragraph holding them grows with the square of its length). The
+    // rules still read the text as it is: `##\r` is a heading because `\s`
+    // matches the carriage return the file actually holds.
+    @Test
+    fun carriageReturnsAreDrawnAsZeroWidthAndEveryRuleStillReadsThem() {
+        val source = "- [ ] a\r\n##\r\nend\r"
+        val result = MarkdownEditTransformation(palette).filter(AnnotatedString(source))
+        val zwsp = CARRIAGE_RETURN_DRAWN_AS
+        assertEquals("- ☐ a$zwsp\n##$zwsp\nend$zwsp", result.text.text)
+        assertTrue('\r' !in result.text.text)
+        val headingStart = source.indexOf("##") - 2 // the checkbox drew two characters fewer
+        assertTrue(
+            result.text.spanStyles.any { it.start == headingStart && it.item.fontWeight == FontWeight.Bold },
+            "the empty heading is still one: ${result.text.spanStyles}",
+        )
+        val withoutReturns = MarkdownEditTransformation(palette).filter(AnnotatedString(source.replace('\r', 'r')))
+        for (offset in 0..source.length) {
+            assertEquals(withoutReturns.offsetMapping.originalToTransformed(offset), result.offsetMapping.originalToTransformed(offset))
+        }
+        val plain = styleMarkdown("a\r\nb", palette)
+        assertEquals("a$zwsp\nb", plain.text)
+    }
+
     @Test
     fun theStyleWindowReachesAScreenBeyondAndHoldsUntilTheScreenLeavesItsMiddle() {
         val first = nextStyleWindow(null, 1000..2000, 10_000)
