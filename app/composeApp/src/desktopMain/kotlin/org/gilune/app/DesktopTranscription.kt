@@ -64,8 +64,11 @@ fun KeepTranscriptionAsked(state: GiluneState, ask: suspend (Gilune) -> Unit) {
 
 /// Bring up what both roles need, off the capture path by design: Whisper
 /// enabled when either role is Whisper (one model — both roles name the
-/// same one, ADR 0033), NeMo's engines for whichever roles are NeMo. Only
-/// the live engine is warmed; a recordings engine loads at its first job.
+/// same one, ADR 0033), NeMo's engines for whichever roles are NeMo.
+/// Nothing is loaded here: each engine loads at the first dictation or
+/// recording that needs it and leaves after ten idle minutes (09 § Desktop
+/// footprint) — a warm-up at open held ~700 MB for sessions in which nobody
+/// spoke (owner, 2026-11-01).
 ///
 /// Downloads are a declared capability either way, so each waits for
 /// consent rather than fetching hundreds of megabytes on someone's first
@@ -78,6 +81,7 @@ fun startTranscription(
     recordings: TranscriptionRuntime,
     live: TranscriptionRuntime,
     nemo: NemoHost,
+    nemoRoot: File = nemoModelsRoot(),
 ) {
     if (!recordings.working.compareAndSet(false, true)) return
     try {
@@ -110,18 +114,18 @@ fun startTranscription(
         val liveNemo = liveChoice?.takeIf { it.pluginId == NEMO_PLUGIN }?.let { nemoModel(it.engine) }
         val made = mutableMapOf<String, NemoEngines>()
         fun enginesFor(model: NemoModel): NemoEngines = made.getOrPut(model.key) {
-            nemo.existing(model) ?: NemoEngines(model, File(nemoModelsRoot(), model.archive))
+            nemo.existing(model) ?: NemoEngines(model, File(nemoRoot, model.archive))
         }
         val nemoPlugin = plugins.firstOrNull { it.pluginId == NEMO_PLUGIN }
         val liveEngines = if (liveNemo != null && nemoPlugin != null &&
-            fetchNemo(state, nemoPlugin, liveNemo, live)
+            fetchNemo(state, nemoPlugin, liveNemo, live, nemoRoot)
         ) {
             enginesFor(liveNemo)
         } else {
             null
         }
         val recordingsEngines = if (recordingsNemo != null && nemoPlugin != null &&
-            fetchNemo(state, nemoPlugin, recordingsNemo, recordings)
+            fetchNemo(state, nemoPlugin, recordingsNemo, recordings, nemoRoot)
         ) {
             enginesFor(recordingsNemo)
         } else {
@@ -133,17 +137,11 @@ fun startTranscription(
             state.message.value = "vault: ${gilune.vaultPath()} — ${recordingsEngines.model.name} ready for recordings"
         }
         if (liveEngines != null) {
-            val loaded = runCatching {
-                if (liveEngines.model.kind == NemoKind.STREAMING) liveEngines.withOnline { } else liveEngines.withOffline { }
-            }
-            if (loaded.isFailure) {
-                live.failed(loaded.exceptionOrNull()?.message)
-                state.message.value =
-                    "${liveEngines.model.name} could not be loaded (${live.failure}); captures still work"
-            } else {
-                live.ready(null)
-                state.message.value = "vault: ${gilune.vaultPath()} — ${liveEngines.model.name} ready"
-            }
+            // Ready means the files are here, not that the model is in
+            // memory: it loads with the first audio of a dictation (~3 s for
+            // Nemotron) on the dictation's own thread.
+            live.ready(null)
+            state.message.value = "vault: ${gilune.vaultPath()} — ${liveEngines.model.name} ready"
         }
         // A role filled by a plugin this computer cannot run (the phone's
         // Moonshine) is said in words rather than left "still starting".
@@ -277,13 +275,20 @@ class NemoHost {
 val LocalNemo = staticCompositionLocalOf { NemoHost() }
 
 /// Make sure one NeMo model is on this computer: the chosen model
-/// downloaded with consent and verified. True when it is here.
-private fun fetchNemo(state: GiluneState, installed: uniffi.gilune_ffi.PluginInfo, model: NemoModel, runtime: TranscriptionRuntime): Boolean {
+/// downloaded with consent and verified. True when it is here. Loading it is
+/// left to the first job or dictation that needs it (09 § Desktop footprint).
+private fun fetchNemo(
+    state: GiluneState,
+    installed: uniffi.gilune_ffi.PluginInfo,
+    model: NemoModel,
+    runtime: TranscriptionRuntime,
+    root: File,
+): Boolean {
     runtime.failure = null
     runtime.needsConsent = false
     runtime.absentWords = null
     runtime.model = null
-    if (nemoModelPresent(model)) return true
+    if (nemoModelPresent(model, root)) return true
     if (NETWORK_CAPABILITY !in installed.granted) {
         runtime.phase = TranscriptionPhase.Absent
         runtime.needsConsent = true
@@ -295,7 +300,7 @@ private fun fetchNemo(state: GiluneState, installed: uniffi.gilune_ffi.PluginInf
     runtime.percent = 0
     state.message.value = "downloading ${model.name} (${model.size}, one time)…"
     val fetched = runCatching {
-        installNemoModel(model, onProgress = { done ->
+        installNemoModel(model, root, onProgress = { done ->
             val percent = (done * 100 / model.bytes).toInt()
             runtime.percent = percent
             state.message.value = "downloading ${model.name} — $percent% of ${model.size}"

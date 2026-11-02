@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Embedded in Gilune.exe as its application manifest (RT_MANIFEST 1, by
+  package-windows-linux.py). One setting, nothing else: the process uses
+  the Segment Heap (Windows 10 2004+; older Windows ignores the element).
+  The NT heap keeps the high-water mark of everything ever freed, and the
+  editor's whole-note layouts free a lot (ADR 0032 stage 2). Every native
+  allocator in the process inherits it: Skia, SQLite, the kernel and the
+  JVM's own malloc.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <heapType xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">SegmentHeap</heapType>
+    </windowsSettings>
+  </application>
+</assembly>

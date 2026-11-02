@@ -268,6 +268,28 @@ class WindowsPackageTest(unittest.TestCase):
             self.assertIn('VALUE "ProductVersion", "1.0.7"', content)
             self.assertIn("space & unicode-é", content)
 
+    def test_launcher_resource_embeds_the_segment_heap_manifest(self):
+        # ADR 0032 stage 2: the NT heap kept the high-water mark of every
+        # whole-note layout typing freed. RT_MANIFEST (24), id 1, is the
+        # manifest Windows reads for an executable.
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "launcher.rc"
+            package.write_launcher(Path(directory), path, "1.0.7")
+            lines = path.read_text(encoding="utf-8").splitlines()
+            manifests = [line for line in lines if line.startswith("1 24 ")]
+            self.assertEqual(1, len(manifests))
+            self.assertIn("gilune.manifest", manifests[0])
+        tree = ET.parse(package.LAUNCHER_MANIFEST)
+        heap = tree.getroot().findall(".//{http://schemas.microsoft.com/SMI/2020/WindowsSettings}heapType")
+        self.assertEqual(["SegmentHeap"], [element.text for element in heap])
+        # One setting and nothing else: no execution level, DPI or
+        # compatibility entry the launcher did not have before.
+        settings = tree.getroot().findall(".//{urn:schemas-microsoft-com:asm.v3}windowsSettings")
+        self.assertEqual(1, len(settings))
+        self.assertEqual(1, len(list(settings[0])))
+        self.assertIsNone(tree.getroot().find(".//{urn:schemas-microsoft-com:asm.v3}trustInfo"))
+        self.assertIsNone(tree.getroot().find(".//{urn:schemas-microsoft-com:compatibility.v1}compatibility"))
+
 
 MSI_TOOLS = all(shutil.which(tool) for tool in ("llvm-rc-19", "lld-link-19", "wixl", "msiinfo"))
 MSI_TOOLS = MSI_TOOLS and importlib.util.find_spec("pefile") is not None

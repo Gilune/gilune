@@ -84,10 +84,23 @@ def copy_runtime(source, destination):
         (destination / name).unlink()
 
 
+# The launcher's application manifest: the Segment Heap and nothing else
+# (ADR 0032 stage 2; the file says why). Resource type 24 is RT_MANIFEST and
+# id 1 is the one Windows reads for an executable. rustc asks the linker for
+# no manifest of its own, so this is the only one.
+LAUNCHER_MANIFEST = REPO / ".github/windows-launcher/gilune.manifest"
+
+
+def rc_path(path):
+    return str(path).replace("\\", "\\\\").replace('"', '\\"')
+
+
 def write_launcher(bundle, destination, release):
-    icon = str(bundle / "gilune.ico").replace("\\", "\\\\").replace('"', '\\"')
+    icon = rc_path(bundle / "gilune.ico")
+    manifest = rc_path(LAUNCHER_MANIFEST)
     numeric = release.replace(".", ",") + ",0"
     destination.write_text(f'''1 ICON "{icon}"
+1 24 "{manifest}"
 1 VERSIONINFO
 FILEVERSION {numeric}
 PRODUCTVERSION {numeric}
