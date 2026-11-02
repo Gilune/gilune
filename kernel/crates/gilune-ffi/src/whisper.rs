@@ -103,6 +103,9 @@ impl WhisperEngine {
     /// for a path that is not there, or not a file, or not readable, is
     /// the one it saw when this call loaded the weights.
     fn new(model_path: &str, idle_ms: i64) -> Result<Self, String> {
+        if let Some(refusal) = this_processor_refusal() {
+            return Err(refusal);
+        }
         let readable = std::fs::File::open(model_path)
             .and_then(|file| file.metadata())
             .map_err(|e| format!("loading whisper model {model_path}: {e}"))?;
@@ -163,6 +166,48 @@ impl WhisperEngine {
     fn loads(&self) -> usize {
         self.loads.load(Ordering::Relaxed)
     }
+}
+
+/// Why this processor cannot run Whisper, if it cannot. On x86_64 the
+/// shipped builds compile whisper.cpp's maths for AVX2, FMA and F16C —
+/// without them it runs about six times slower (measured 2026-11-02:
+/// 46 s of speech in 19 s on SSE2 against 3 s) — so a processor lacking
+/// them would stop on an illegal instruction the moment a job ran.
+/// Saying so here, before any of that code runs, is the difference
+/// between a sentence and a crash. Nothing in ggml's CPU code runs at
+/// library load (its namespace-scope objects are constant tables), so
+/// this check is early enough.
+fn this_processor_refusal() -> Option<String> {
+    #[cfg(all(target_arch = "x86_64", not(target_os = "android")))]
+    {
+        refusal_for(
+            std::arch::is_x86_feature_detected!("avx2"),
+            std::arch::is_x86_feature_detected!("fma"),
+            std::arch::is_x86_feature_detected!("f16c"),
+        )
+    }
+    #[cfg(not(all(target_arch = "x86_64", not(target_os = "android"))))]
+    {
+        None
+    }
+}
+
+/// The sentence for a processor with or without each instruction set the
+/// build needs; `None` when it has all three.
+#[cfg_attr(not(all(target_arch = "x86_64", not(target_os = "android"))), allow(dead_code))]
+fn refusal_for(avx2: bool, fma: bool, f16c: bool) -> Option<String> {
+    let missing: Vec<&str> = [("AVX2", avx2), ("FMA", fma), ("F16C", f16c)]
+        .into_iter()
+        .filter(|(_, present)| !present)
+        .map(|(name, _)| name)
+        .collect();
+    if missing.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "Whisper needs a processor with AVX2, FMA and F16C (most made since 2013); this one lacks {}",
+        missing.join(", ")
+    ))
 }
 
 /// Sweep `engine` every `interval` for as long as anything still holds
@@ -384,6 +429,33 @@ fn marker_len(text: &str) -> Option<usize> {
         None => Some(after),
         Some(next) if next.is_whitespace() => Some(after),
         Some(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod processor {
+    use super::{refusal_for, this_processor_refusal};
+
+    #[test]
+    fn a_processor_with_all_three_is_never_refused() {
+        assert_eq!(refusal_for(true, true, true), None);
+    }
+
+    #[test]
+    fn the_refusal_names_exactly_what_is_missing() {
+        let one = refusal_for(true, false, true).expect("FMA missing is refused");
+        assert!(one.ends_with("lacks FMA"), "{one}");
+        // An AVX-but-not-AVX2 processor (Sandy/Ivy Bridge) lacks two of
+        // the three; the sentence names both and only both.
+        let two = refusal_for(false, false, true).expect("refused");
+        assert!(two.ends_with("lacks AVX2, FMA"), "{two}");
+    }
+
+    #[test]
+    fn the_machine_running_the_suite_can_run_whisper() {
+        // Every machine this project builds and tests on has AVX2; if this
+        // fails, the check is reading the processor wrong, not the reverse.
+        assert_eq!(this_processor_refusal(), None);
     }
 }
 

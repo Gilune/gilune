@@ -1981,6 +1981,47 @@ gates promises) are ratified. **Next: application-level engineering — see
      decision: jlink trimming (all
      languages must stay — Gilune will be translated — which leaves only
      ~7 MB to gain), ProGuard (reflection/JNI risk).
+   - **Whisper speed (2026-11-02, side session of ADR 0033's
+     measurement round).** whisper.cpp itself is fine: base-q5_1, 8
+     threads, 46 s two-voice WAV in ~3.1 s (~15× real time) when ggml-cpu
+     is built optimised with AVX2+FMA+F16C (measured in a throwaway
+     whisper-rs 0.16 harness at C:\gwb and through the kernel's own
+     whisper_smoke). Same harness by ggml ISA: SSE2 19 s (2.3×), AVX
+     12.4 s (3.7×), AVX2+FMA+F16C 3.05 s (15×), +BMI2 no gain; threads 4/8/12
+     = 4.8/3.2/2.8 s; explicit language 2.3 s; temperature fallback and
+     word mode cost nothing measurable on this clip. TWO FAULTS, both
+     builds, neither code: (1) SHIPPED Windows dll — the Linux
+     cross-build sets GGML_NATIVE=OFF and, because CMake is
+     cross-compiling, ggml then defaults EVERY instruction-set option to
+     OFF: ggml-cpu compiled with no /arch and no GGML_AVX* defines (read
+     from the WSL GiluneBuild tree; the installed 1.3.2 dll has zero
+     vcvtph2ps) ⇒ ~2.3× real time for every user. Fixed in
+     `build-windows-linux.sh` (GGML_SSE42/AVX/AVX2/FMA/F16C=ON; the
+     recipe stamp forces the C++ rebuild). MEASURED through the real
+     recipe (WSL GiluneBuild cross-build of whisper_smoke.exe, run on
+     the 3900X, whole job incl. model load): 46 s WAV 14.6–14.9 s →
+     3.09–3.14 s; 599 s WAV 141.2 s → 28.9 s (4.2× → 20.7× real time);
+     transcript unchanged. Plus `whisper.rs`
+     `this_processor_refusal()` refuses in words before any ggml code
+     runs on a processor lacking AVX2/FMA/F16C (ggml-cpu has no dynamic
+     initialisers, so nothing runs at dll load). OWNER DECISION PENDING:
+     that is a CPU floor — pre-2013 x86 and AVX-less Pentium/Celeron
+     lose Whisper instead of running it slowly. (2) LOCAL dev builds —
+     cmake-rs 0.1.58 (`lib.rs` ~745) overwrites
+     `CMAKE_<LANG>_FLAGS_RELEASE` with cc flags built at opt_level 0
+     whenever NO generator is named and the compiler is MSVC, so the
+     default Visual Studio generator compiles ggml at /Od (empty
+     `<Optimization>` in the Release vcxproj). Since VS 2022 Build Tools
+     landed on D:, a build without CMAKE_GENERATOR picks "Visual Studio
+     17 2022" and SUCCEEDS unoptimised: ~10× slower (30 s for 46 s of
+     audio). ADR 0033's whisper figures (30 s in 27.7 s; 843 s in 387 s)
+     came from such a build. RULE: every Windows whisper build names its
+     generator — `CMAKE_GENERATOR="NMake Makefiles"` from vcvars64 — and
+     a CMakeCache whose `CMAKE_C_FLAGS_RELEASE` lacks /O2 is a broken
+     build. Not fixed here: the Linux DEB is built natively on the runner
+     with GGML_NATIVE default ON (tuned to the runner's CPU — possibly
+     AVX-512 — so it may crash on a user's machine; warm caches hide a
+     GGML_* change because whisper-rs-sys tracks no env).
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

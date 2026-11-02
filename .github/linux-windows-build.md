@@ -366,7 +366,12 @@ The SDK cache key includes the native build recipe. Compiled Rust dependencies
 use a separate cross-target cache. The upstream Whisper build script does not
 track all forwarded CMake environment settings, so a recipe change explicitly
 invalidates that C++ dependency. The kernel links its CRT statically and disables
-build-machine CPU specialization (`GGML_NATIVE=OFF`).
+build-machine CPU specialization (`GGML_NATIVE=OFF`). Because CMake is
+cross-compiling, ggml then defaults every instruction-set option to OFF, so the
+recipe names its floor explicitly: SSE4.2, AVX, AVX2, FMA and F16C. Until
+2 November 2026 it did not, and shipped Whisper ran on SSE2 maths: a 599 s
+recording took 141.2 s; with the floor, 28.9 s (same machine, same model). The
+kernel refuses Whisper in words on a processor below the floor.
 
 The tool's CRT selector takes the manifest ID, not the header version: a populated
 cache hid an invalid initial selector. Validation therefore includes fetching the
