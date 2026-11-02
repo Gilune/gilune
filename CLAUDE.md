@@ -2062,6 +2062,27 @@ gates promises) are ratified. **Next: application-level engineering — see
      scripts allocmem.ps1 / allocsites.py / cpusites.py. A
      `Select-Object -First` pipe on a probe script STOPS it before it
      closes the probe — allocmem.ps1 now closes in `finally`.
+     **Stage 4 DONE (2026-11-02, "Yes, build it") — NOT the planned
+     slice field.** The field's VALUE stays the whole buffer (undo,
+     selection, Ctrl+A, type-over untouched); the TRANSFORMATION lays out
+     a slice and replaces the text above/below with one ZWSP each, a
+     ParagraphStyle(lineHeight = measured px, Trim.None) paragraph —
+     exact from 20 to 120,000 px, paragraph boundaries add no lines.
+     Placeholders are two more entries in the decoration offset table, so
+     decorationAt/menuTokens/collapsedBlocks take `slice` and every
+     geometry consumer is consistent. `sliceChunks` = content-defined cuts
+     (hash of line+previous % 32, never in a fence, forced at 160) so an
+     edit changes ≤2 chunks; heights per chunk (NoteSlice.kt, context
+     line each side, within 1 px: line tops are whole pixels; cached by
+     text; fence chunks keyed by filter results too); `EditorSlice(start,
+     tail)` survives typing inside; mover in NoteEditor (half-screen
+     hysteresis, caret chunk ±1 only when near the view, caret PINNED for
+     far jumps until bringIntoView, frozen under held pointer/IME, scroll
+     anchor on move); ≥400 lines only (`SLICE_MIN_LINES`). Probe `type:`
+     now types at the END OF LINE 1 (on screen). 64 KB note: open 166→143,
+     typing peak 273→192, settled 190→161 MB, CPU 35.6→8.7 s. Test
+     harness key input does NOT drive the field's own navigation (End,
+     Ctrl+End do nothing even unsliced) — use `state.reveal` to jump.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three

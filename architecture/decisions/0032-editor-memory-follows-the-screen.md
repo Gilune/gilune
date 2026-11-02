@@ -309,6 +309,76 @@ Offsets in the transformed layout must go through the transformation's
 mapping: a checkbox is one glyph for three source characters. The spike's
 first figures were wrong for exactly that reason.
 
+**Delivered 2026-11-02 (owner: "Yes, build it") — smaller than planned.**
+The field's value stays the whole buffer. Only what Skia lays out is a
+slice, so undo, selection, Ctrl+A, copy and typing over a selection stay
+the field's own, and none of the costs listed above arose:
+
+- **Placeholders, not spacers.** The visual transformation replaces the
+  text above the slice and the text below it with one zero-width
+  character each. Each placeholder is a paragraph whose line height is
+  the measured height of what it stands for, with `LineHeightStyle.Trim.None`.
+  A spike laid such paragraphs out at exactly the height asked, 20 px to
+  120,000 px. A paragraph boundary starts a new line, so the
+  placeholders need no line breaks of their own and add no lines.
+- **One offset table.** The placeholders are two more entries in the
+  table checkboxes and collapsed blocks already use. So `decorationAt`,
+  `menuTokens`, `collapsedBlocks`, the caret anchor, find shading and
+  the date chip answer against the text actually laid out, given the
+  slice. Overlays need no spacer added: the placeholders fill the height.
+- **Chunks** (`sliceChunks`) are cut before a line where a hash of it and
+  the line above lands on one in 32. That is about 32 lines a chunk, never
+  inside a fence, with a forced cut after 160 lines. The cuts depend only
+  on the text around them, so typing in one chunk leaves every other
+  chunk's text — and its measured height — as it was. (Cuts at "the
+  first blank line after N lines" would cascade after every edit.)
+- **Heights** (`NoteSlice.kt`) are measured per chunk between one line of
+  context either side, cached by chunk text, and measured again only on a
+  new text, width, style or set of registrations. A chunk holding a fence
+  is also keyed by the filter results. Each chunk comes out within a
+  pixel of its height inside the whole note (`NoteSliceTest`): line tops
+  are whole pixels. Width changes settle for 300 ms before re-measuring.
+- **The slice** (`EditorSlice`) holds its start offset and its distance
+  from the end, so typing inside it moves neither edge. It is kept while
+  the view stays half a screen inside it, and rebuilt to reach a screen
+  and a half beyond the view. The caret's chunk and one either side stay
+  inside while the caret is near the view. A caret moved far away
+  (a reveal, a search hit, Ctrl+End) pins the slice to it until the view
+  arrives. The slice never moves under a held pointer or an IME
+  composition. When it moves, the line at the top of the view is put
+  back where it was, absorbing the per-chunk rounding.
+- **Notes under 400 lines are laid out whole**, as before.
+
+What the pass list asked, and what is evidenced:
+
+1. **Typing and caret:** typing at a revealed far line lands there
+   (`NoteSliceUiTest`). Up/Down onto a placeholder steps through the
+   buffer's own lines instead (`stepLines`, unit-tested), but no UI test
+   drives it: the test harness's key input does not reach the field's own
+   navigation, even on a short note. IME composition happens inside the
+   one field as before. AWT/CJK composing was untested before this stage
+   and still is.
+2. **Selection and undo:** select-all of the whole buffer, typed over,
+   then one Ctrl+Z restores it (`NoteSliceUiTest`).
+3. **Geometry consumers:** through the one mapping, as above.
+4. **Feel and cost:** screenshots at the top, middle and end of the
+   1,500-line note show every line styled. The `type:` probe now types at
+   the end of the note's first line, on screen, where a person types. (It
+   used to append at the very end, which a slice never lays out.) Probe
+   copies of the installed app, the 2026-11-01 build against this one,
+   150 fast letters, private bytes sampled every half second:
+
+   | 64 KB note | Open | Typing peak | Settled | Process CPU |
+   |---|---|---|---|---|
+   | `\n` endings | 166 → 143.5 MB | 273 → 192 MB | 190 → 161 MB | 35.6 → 8.7 s |
+   | `\r\n` endings | 172 → 143 MB | 300 → 190 MB | 200 → 160 MB | 58.0 → 7.8 s |
+
+   The 6 KB note is under the threshold and unchanged: 138 MB open, a
+   ~200 MB peak. Against the owner's target (a ~130 MB base, editing at
+   base + 50), both notes now peak about 60 MB over an empty window
+   (134 MB). The target is close but not met. Half-second sampling
+   catches peaks the earlier figures (180 MB for the short note) missed.
+
 ## Where typing's memory went (2026-11-01)
 
 Owner target, set mid-investigation: an empty window at ~130 MB, and a note

@@ -37,8 +37,12 @@ import java.time.LocalDate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.ParagraphStyle
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
@@ -160,9 +164,10 @@ fun collapsedBlocks(
     decorations: List<EditorDecoration> = builtInDecorations(),
     blocks: List<EditorBlockDecoration> = emptyList(),
     memo: LineMemo = LineMemo(),
+    slice: EditorSlice? = null,
 ): List<CollapsedBlock> {
     if (blocks.isEmpty()) return emptyList()
-    val placed = decorate(source, caretLine, decorations, blocks, memo = memo)
+    val placed = placements(source, caretLine, decorations, blocks, null, memo, slice)
     val starts = transformedStarts(placed)
     return placed.mapIndexedNotNull { index, span ->
         val id = span.blockId ?: return@mapIndexedNotNull null
@@ -215,6 +220,10 @@ class MarkdownEditTransformation(
     private val plainPillLine: Int? = null,
     private val styleWindow: IntRange? = null,
     private val memo: LineMemo = LineMemo(),
+    /// The part of a long buffer laid out (ADR 0032 stage 4); null lays out
+    /// all of it. The style window is not used with a slice: the slice is
+    /// already about what can be seen.
+    private val slice: EditorSlice? = null,
 ) : VisualTransformation {
     @Volatile private var last: Pair<String, TransformedText>? = null
 
@@ -225,10 +234,12 @@ class MarkdownEditTransformation(
     }
 
     private fun transform(source: String): TransformedText {
-        val placed = decorate(source, caretLine, decorations, blocks, plainPillLine, memo)
+        val cut = slice?.takeIf { it.cuts(source) }
+        val placed = placements(source, caretLine, decorations, blocks, plainPillLine, memo, cut)
         if (placed.isEmpty()) {
             return TransformedText(styleMarkdown(source, palette, fontScale, styleWindow, memo), OffsetMapping.Identity)
         }
+        if (cut != null) return slicedText(source, placed, cut)
         val starts = transformedStarts(placed)
         val transformed = applyDecorations(source, placed)
         // Zero-delta spans style without moving anything, so they earn no
@@ -242,6 +253,221 @@ class MarkdownEditTransformation(
         }
         return TransformedText(styleDecorations(transformed, placed, starts, palette, fontScale, styleWindow, memo), mapping)
     }
+
+    /// The slice laid out between its two placeholders. The middle is
+    /// styled as a text of its own — it starts and ends on a line break
+    /// outside any fence, so no rule reads across its edges — and each
+    /// placeholder is a paragraph exactly as tall as the text it stands
+    /// for. A paragraph boundary starts a new line, so the placeholders
+    /// need no line breaks of their own.
+    private fun slicedText(source: String, placed: List<PlacedDecoration>, cut: EditorSlice): TransformedText {
+        val starts = transformedStarts(placed)
+        val transformed = applyDecorations(source, placed)
+        val table = placed.filter { it.replacement.length != it.sourceLength }
+        val mapping = if (table.isEmpty()) OffsetMapping.Identity else DecorationOffsetMapping(table, source.length, transformed.length)
+        val top = if (cut.start > 0) 1 else 0
+        val bottom = if (cut.middleEnd(source.length) < source.length) 1 else 0
+        val inner = placed.subList(top, placed.size - bottom)
+        val innerStarts = starts.subList(top, starts.size - bottom).map { it - top }
+        val middle = transformed.substring(top, transformed.length - bottom)
+        val styled = styleDecorations(middle, inner, innerStarts, palette, fontScale, null, memo)
+        val text = buildAnnotatedString {
+            if (top == 1) withStyle(placeholderStyle(cut.above)) { append(SLICE_PLACEHOLDER) }
+            append(styled)
+            if (bottom == 1) withStyle(placeholderStyle(cut.below)) { append(SLICE_PLACEHOLDER) }
+        }
+        return TransformedText(text, mapping)
+    }
+}
+
+/// The part of a long buffer the field lays out (ADR 0032 stage 4): whole
+/// lines from `start`, a line start, to `tail` characters before the
+/// buffer's end, also a line start (zero is the end itself). The text above
+/// and below is laid out as one invisible character each, `above` and
+/// `below` tall — what that text measures at the field's width.
+///
+/// The end is counted from the buffer's end so that typing inside the
+/// slice leaves it valid: neither edge moves. A slice that no longer fits
+/// the buffer cuts nothing, and the buffer is laid out whole.
+data class EditorSlice(val start: Int, val tail: Int, val above: TextUnit, val below: TextUnit) {
+    /// Where the laid-out middle ends: before the line break that ends the
+    /// slice's last line, which the placeholder below absorbs.
+    fun middleEnd(length: Int): Int = if (tail == 0) length else length - tail - 1
+
+    fun contains(offset: Int, length: Int): Boolean = offset in start..middleEnd(length)
+
+    internal fun cuts(source: String): Boolean {
+        val end = source.length - tail
+        if (start == 0 && tail == 0) return false
+        if (start < 0 || tail < 0 || start > end) return false
+        if (start > 0 && source[start - 1] != '\n') return false
+        if (tail > 0 && source[end - 1] != '\n') return false
+        return start <= middleEnd(source.length)
+    }
+}
+
+/// What stands for the text outside a slice: nothing a reader can see.
+const val SLICE_PLACEHOLDER = '​' // ZERO WIDTH SPACE
+
+private fun placeholderStyle(height: TextUnit) = ParagraphStyle(
+    lineHeight = height,
+    lineHeightStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None),
+)
+
+/// [decorate], then the slice: what lies outside it gives way to one
+/// placeholder entry each side, in the same table every other replacement
+/// uses, so every offset question — the field's, a click's, a menu's —
+/// is answered against the text actually laid out.
+private fun placements(
+    source: String,
+    caretLine: Int?,
+    decorations: List<EditorDecoration>,
+    blocks: List<EditorBlockDecoration>,
+    plainPillLine: Int?,
+    memo: LineMemo,
+    slice: EditorSlice?,
+): List<PlacedDecoration> {
+    val placed = decorate(source, caretLine, decorations, blocks, plainPillLine, memo)
+    if (slice == null || !slice.cuts(source)) return placed
+    val middleEnd = slice.middleEnd(source.length)
+    return buildList {
+        if (slice.start > 0) add(slicePlaceholder(0, slice.start))
+        placed.filterTo(this) { it.start >= slice.start && it.start + it.sourceLength <= middleEnd }
+        if (middleEnd < source.length) add(slicePlaceholder(middleEnd, source.length - middleEnd))
+    }
+}
+
+private fun slicePlaceholder(start: Int, length: Int) = PlacedDecoration(
+    start = start,
+    sourceLength = length,
+    replacement = SLICE_PLACEHOLDER.toString(),
+    role = DecorationRole.NONE,
+    decoration = null,
+    lineRange = start until start + length,
+)
+
+/// A run of whole lines, from one line start to the next run's (or the
+/// buffer's end): the unit a slice is made of and measured in.
+data class SliceChunk(val start: Int, val end: Int)
+
+/// Below this many lines a note is laid out whole: it already meets the
+/// memory target (ADR 0032), and a slice would only add moving parts.
+const val SLICE_MIN_LINES = 400
+
+/// A long buffer cut into chunks for the slice (ADR 0032 stage 4). A cut
+/// falls before a line where a hash of that line and the one above lands
+/// on one in [SLICE_CHUNK_LINES]: chunks average that many lines, and the
+/// cuts depend only on the text around them, so typing in one chunk moves
+/// no other chunk's edges and their measured heights stay good. A cut
+/// never falls inside a fence, so no rule reads across one; a run of
+/// [SLICE_CHUNK_MAX_LINES] lines with no cut is cut anyway.
+fun sliceChunks(source: String): List<SliceChunk> {
+    val chunks = mutableListOf<SliceChunk>()
+    var chunkStart = 0
+    var lines = 0
+    var offset = 0
+    var inFence = false
+    var previous = 0
+    var index = 0
+    while (offset <= source.length) {
+        val lineEnd = source.indexOf('\n', offset).let { if (it < 0) source.length else it }
+        val hash = lineHash(source, offset, lineEnd)
+        if (index > 0 && !inFence && lines > 0 && offset > chunkStart &&
+            (mix(previous * 31 + hash) % SLICE_CHUNK_LINES == 0 || lines >= SLICE_CHUNK_MAX_LINES)
+        ) {
+            chunks += SliceChunk(chunkStart, offset)
+            chunkStart = offset
+            lines = 0
+        }
+        if (fenceDelimiter(source, offset, lineEnd)) inFence = !inFence
+        lines++
+        previous = hash
+        index++
+        if (lineEnd == source.length) break
+        offset = lineEnd + 1
+    }
+    chunks += SliceChunk(chunkStart, source.length)
+    return chunks
+}
+
+const val SLICE_CHUNK_LINES = 32
+const val SLICE_CHUNK_MAX_LINES = 160
+
+/// The chunks a slice's edges name — the one starting at `start` to the
+/// one ending `tail` before the buffer's end — or null when either edge is
+/// not a chunk edge any more.
+fun sliceRangeOf(chunks: List<SliceChunk>, start: Int, tail: Int, length: Int): IntRange? {
+    if (start < 0) return null
+    val first = chunks.binarySearchBy(start) { it.start }.takeIf { it >= 0 } ?: return null
+    val last = chunks.binarySearchBy(length - tail) { it.end }.takeIf { it >= 0 } ?: return null
+    return if (last >= first) first..last else null
+}
+
+/// The chunk holding `offset`; an offset past the end is the last chunk's.
+fun chunkIndexOf(chunks: List<SliceChunk>, offset: Int): Int {
+    var low = 0
+    var high = chunks.lastIndex
+    while (low < high) {
+        val mid = (low + high + 1) / 2
+        if (chunks[mid].start <= offset) low = mid else high = mid - 1
+    }
+    return low
+}
+
+private fun lineHash(text: String, from: Int, to: Int): Int {
+    var hash = 0
+    for (index in from until to) hash = 31 * hash + text[index].code
+    return hash
+}
+
+/// A finaliser, so a line's hash spreads into its low bits.
+private fun mix(value: Int): Int {
+    var h = value
+    h = h xor (h ushr 16)
+    h *= -0x7a143595
+    h = h xor (h ushr 13)
+    h *= -0x3d4d51cb
+    h = h xor (h ushr 16)
+    return h and Int.MAX_VALUE
+}
+
+/// The chunks a slice should hold (ADR 0032 stage 4), as an index range.
+/// `tops` is each chunk's top in the field (n + 1 entries, the last the
+/// bottom of the text) and the view is the scroll window in the same
+/// coordinates. The current slice is kept while it still reaches half a
+/// screen beyond the view each side and is not much larger than needed,
+/// so scrolling moves it about once a screen; otherwise it is rebuilt to
+/// reach a screen and a half each side. `caretChunk`, when given and near
+/// the view, is kept inside with a chunk to spare either side, so a step
+/// of the caret never leaves the laid-out text. A caret far from the view
+/// — the page scrolled away from it — is not stretched to: that would lay
+/// out everything between.
+fun sliceChunksFor(current: IntRange?, tops: FloatArray, viewTop: Float, viewHeight: Float, caretChunk: Int?): IntRange {
+    val count = tops.size - 1
+    if (count <= 0) return 0..0
+    fun covering(margin: Float): IntRange {
+        val from = (viewTop - margin)
+        val to = (viewTop + viewHeight + margin)
+        var first = 0
+        while (first < count - 1 && tops[first + 1] <= from) first++
+        var last = first
+        while (last < count - 1 && tops[last + 1] < to) last++
+        return first..last
+    }
+    val near = covering(viewHeight * 1.5f)
+    val caret = caretChunk?.takeIf { it in (near.first - 1)..(near.last + 1) }
+    fun withCaret(range: IntRange): IntRange {
+        caret ?: return range
+        return minOf(range.first, (caret - 1).coerceAtLeast(0))..maxOf(range.last, (caret + 1).coerceAtMost(count - 1))
+    }
+    val needed = withCaret(covering(viewHeight / 2))
+    val allowed = withCaret(covering(viewHeight * 3))
+    if (current != null && current.first <= needed.first && current.last >= needed.last &&
+        current.first >= allowed.first && current.last <= allowed.last && current.last < count
+    ) {
+        return current
+    }
+    return withCaret(near)
 }
 
 /// What each line of a note was found to hold, kept from one pass to the
@@ -369,8 +595,9 @@ fun decorationAt(
     caretLine: Int?,
     decorations: List<EditorDecoration> = builtInDecorations(),
     blocks: List<EditorBlockDecoration> = emptyList(),
+    slice: EditorSlice? = null,
 ): DecorationHit? {
-    val placed = decorate(text, caretLine, decorations, blocks)
+    val placed = placements(text, caretLine, decorations, blocks, null, LineMemo(), slice)
     if (placed.isEmpty()) return null
     val starts = transformedStarts(placed)
     var onEdge: DecorationHit? = null
@@ -405,9 +632,10 @@ fun menuTokens(
     caretLine: Int?,
     decorations: List<EditorDecoration>,
     blocks: List<EditorBlockDecoration> = emptyList(),
+    slice: EditorSlice? = null,
 ): List<MenuToken> {
     if (decorations.none { it.menu != null }) return emptyList()
-    val placed = decorate(text, caretLine, decorations, blocks)
+    val placed = placements(text, caretLine, decorations, blocks, null, LineMemo(), slice)
     val starts = transformedStarts(placed)
     return placed.mapIndexedNotNull { index, span ->
         val decoration = span.decoration?.takeIf { it.menu != null } ?: return@mapIndexedNotNull null
@@ -1505,3 +1733,22 @@ fun nextStyleWindow(current: IntRange?, visible: IntRange, length: Int): IntRang
 /// The window a note is first drawn with, before its layout can say what is
 /// on screen: the top of the note, about two tall screens of text.
 const val INITIAL_STYLE_WINDOW_CHARS = 8_000
+
+/// The offset `lines` lines of `text` away from `offset` (negative is up),
+/// keeping the column as far as the line allows; clamped at either end.
+fun stepLines(text: String, offset: Int, lines: Int): Int {
+    val bounded = offset.coerceIn(0, text.length)
+    var start = text.lastIndexOf('\n', bounded - 1) + 1
+    val column = bounded - start
+    repeat(kotlin.math.abs(lines)) {
+        start = if (lines > 0) {
+            val next = text.indexOf('\n', start)
+            if (next < 0) return text.length else next + 1
+        } else {
+            if (start == 0) return 0
+            text.lastIndexOf('\n', start - 2) + 1
+        }
+    }
+    val end = text.indexOf('\n', start).let { if (it < 0) text.length else it }
+    return (start + column).coerceAtMost(end)
+}

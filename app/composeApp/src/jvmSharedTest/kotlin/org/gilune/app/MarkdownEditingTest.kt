@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TransformedText
+import androidx.compose.ui.unit.sp
 import kotlin.math.abs
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -1098,6 +1099,156 @@ class MarkdownEditingTest {
         }
         val plain = styleMarkdown("a\r\nb", palette)
         assertEquals("a$zwsp\nb", plain.text)
+    }
+
+    // ADR 0032 stage 4: a slice lays out only its own lines, between two
+    // placeholders. Inside it, everything must be what the whole buffer
+    // would have shown — the same characters, spans and offsets, shifted
+    // by the placeholder — and every offset outside lands on a placeholder
+    // edge, never inside the slice.
+    private val sliceDoc = (1..90).joinToString("\n") { i ->
+        when (i % 6) {
+            0 -> "## Section $i"
+            1 -> "- [ ] task $i with a [link](to/$i)"
+            2 -> "Paragraph $i with **bold** and *italic*."
+            3 -> "> quoted $i"
+            else -> "line $i"
+        }
+    }
+
+    private fun lineStart(text: String, line: Int): Int {
+        var offset = 0
+        repeat(line) { offset = text.indexOf('\n', offset) + 1 }
+        return offset
+    }
+
+    @Test
+    fun aSliceLaysOutItsLinesExactlyAsTheWholeBufferDoesBetweenTwoPlaceholders() {
+        val start = lineStart(sliceDoc, 30)
+        val end = lineStart(sliceDoc, 60)
+        val slice = EditorSlice(start, sliceDoc.length - end, 400.sp, 900.sp)
+        val whole = MarkdownEditTransformation(palette, null, builtInDecorations()).filter(AnnotatedString(sliceDoc))
+        val sliced = MarkdownEditTransformation(palette, null, builtInDecorations(), slice = slice).filter(AnnotatedString(sliceDoc))
+
+        val wholeFrom = whole.offsetMapping.originalToTransformed(start)
+        val wholeTo = whole.offsetMapping.originalToTransformed(end - 1)
+        val middle = whole.text.text.substring(wholeFrom, wholeTo)
+        assertEquals("$SLICE_PLACEHOLDER$middle$SLICE_PLACEHOLDER", sliced.text.text)
+        for (offset in start..end - 1) {
+            assertEquals(
+                whole.offsetMapping.originalToTransformed(offset) - wholeFrom + 1,
+                sliced.offsetMapping.originalToTransformed(offset),
+                "offset $offset",
+            )
+        }
+        for (offset in 0 until start) assertTrue(sliced.offsetMapping.originalToTransformed(offset) in 0..1)
+        for (offset in end until sliceDoc.length) {
+            assertTrue(sliced.offsetMapping.originalToTransformed(offset) >= sliced.text.length - 1)
+        }
+        // The middle's spans are the whole buffer's, shifted.
+        val wholeSpans = whole.text.spanStyles
+            .filter { it.start >= wholeFrom && it.end <= wholeTo }
+            .map { Triple(it.start - wholeFrom + 1, it.end - wholeFrom + 1, it.item) }
+        assertEquals(wholeSpans.toSet(), sliced.text.spanStyles.map { Triple(it.start, it.end, it.item) }.toSet())
+        // Each placeholder is a paragraph of its own height.
+        val heights = sliced.text.paragraphStyles.map { Triple(it.start, it.end, it.item.lineHeight) }
+        assertEquals(listOf(Triple(0, 1, 400.sp), Triple(sliced.text.length - 1, sliced.text.length, 900.sp)), heights)
+    }
+
+    @Test
+    fun aSliceSurvivesTypingInsideItAndCutsNothingOnceItNoLongerFits() {
+        val start = lineStart(sliceDoc, 30)
+        val end = lineStart(sliceDoc, 60)
+        val slice = EditorSlice(start, sliceDoc.length - end, 400.sp, 900.sp)
+        val typed = sliceDoc.substring(0, start + 3) + "new words" + sliceDoc.substring(start + 3)
+        val sliced = MarkdownEditTransformation(palette, null, builtInDecorations(), slice = slice).filter(AnnotatedString(typed))
+        assertTrue(sliced.text.text.startsWith(SLICE_PLACEHOLDER), "still cut above")
+        assertTrue("new words" in sliced.text.text)
+        assertTrue(sliced.text.text.endsWith(SLICE_PLACEHOLDER), "still cut below")
+        // Text removed above the slice: its start is no longer a line start,
+        // so the buffer is laid out whole rather than cut mid-line.
+        val shorter = sliceDoc.substring(5)
+        val whole = MarkdownEditTransformation(palette, null, builtInDecorations()).filter(AnnotatedString(shorter))
+        assertEquals(whole.text.text, MarkdownEditTransformation(palette, null, builtInDecorations(), slice = slice).filter(AnnotatedString(shorter)).text.text)
+    }
+
+    @Test
+    fun clicksMenusAndCollapsedBlocksAnswerInTheSlicedText() {
+        val start = lineStart(sliceDoc, 30)
+        val end = lineStart(sliceDoc, 60)
+        val slice = EditorSlice(start, sliceDoc.length - end, 400.sp, 900.sp)
+        val sliced = MarkdownEditTransformation(palette, null, builtInDecorations(), slice = slice).filter(AnnotatedString(sliceDoc))
+        val task = sliceDoc.indexOf("- [ ] task 31")
+        val glyph = sliced.offsetMapping.originalToTransformed(task + 2)
+        assertEquals(unchecked, sliced.text.text[glyph])
+        val hit = assertNotNull(decorationAt(sliceDoc, glyph, null, builtInDecorations(), slice = slice))
+        assertEquals(task + 2, hit.range.first)
+        // The same glyph's place in the whole text is somewhere else.
+        val outside = sliceDoc.indexOf("- [ ] task 1 ")
+        assertNull(decorationAt(sliceDoc, 0, null, builtInDecorations(), slice = slice), "the placeholder answers nothing (task at ${outside})")
+    }
+
+    @Test
+    fun chunksCoverTheTextAtLineStartsOutsideFencesAndStayPutAroundAnEdit() {
+        val doc = (1..2_000).joinToString("\n") { i ->
+            when {
+                i % 97 == 0 -> "```"
+                else -> "line $i with some words"
+            }
+        }
+        val chunks = sliceChunks(doc)
+        assertEquals(0, chunks.first().start)
+        assertEquals(doc.length, chunks.last().end)
+        chunks.zipWithNext().forEach { (a, b) -> assertEquals(a.end, b.start) }
+        for (chunk in chunks.drop(1)) assertEquals('\n', doc[chunk.start - 1], "a chunk starts a line")
+        assertTrue(chunks.size in 20..200, "about ${SLICE_CHUNK_LINES} lines a chunk: ${chunks.size} chunks")
+        val fenced = fencedBlocks(doc)
+        for (chunk in chunks.drop(1)) {
+            assertTrue(fenced.none { chunk.start > it.range.first && chunk.start <= it.range.last }, "no cut inside a fence at ${chunk.start}")
+        }
+        // The cap gives way to a fence, which is never cut: at most the cap
+        // and one fence (96 lines here).
+        for (chunk in chunks) {
+            val lines = doc.substring(chunk.start, chunk.end).count { it == '\n' }
+            assertTrue(lines <= SLICE_CHUNK_MAX_LINES + 97, "a chunk of $lines lines")
+        }
+
+        // Typing in one chunk — even a new line — leaves every other
+        // chunk's text as it was, so its measured height still holds.
+        val middle = chunks[chunks.size / 2]
+        val at = middle.start + 4
+        val edited = doc.substring(0, at) + "typed\nmore" + doc.substring(at)
+        val before = chunks.map { doc.substring(it.start, it.end) }.toSet()
+        val after = sliceChunks(edited).map { edited.substring(it.start, it.end) }
+        assertTrue(after.count { it !in before } <= 2, "chunks changed: ${after.count { it !in before }}")
+    }
+
+    @Test
+    fun theSliceHoldsWhileTheViewStaysInsideAndFollowsTheCaret() {
+        val tops = FloatArray(41) { it * 500f } // 40 chunks of 500 px
+        val first = sliceChunksFor(null, tops, viewTop = 5_000f, viewHeight = 1_000f, caretChunk = null)
+        assertTrue(first.first <= 7 && first.last >= 13, "a screen and a half either side: $first")
+        assertEquals(first, sliceChunksFor(first, tops, 5_300f, 1_000f, null), "a small scroll keeps it")
+        val moved = sliceChunksFor(first, tops, 9_000f, 1_000f, null)
+        assertTrue(moved != first && moved.first <= 15 && moved.last >= 21, "a long scroll moves it: $moved")
+        val withCaret = sliceChunksFor(first, tops, 5_000f, 1_000f, caretChunk = 14)
+        assertTrue(withCaret.first <= 13 && withCaret.last >= 15, "the caret's chunk and one each side: $withCaret")
+        assertEquals(0..2, sliceChunksFor(null, FloatArray(4) { it * 100f }, 0f, 1_000f, null), "a short text is one slice")
+        // A caret the page has scrolled far from is not stretched to: that
+        // would lay out every chunk between.
+        val away = sliceChunksFor(first, tops, 5_000f, 1_000f, caretChunk = 39)
+        assertTrue(39 !in away && away.last - away.first < 10, "the view's chunks only: $away")
+    }
+
+    @Test
+    fun stepsOffASliceEdgeMoveByTheBuffersOwnLinesKeepingTheColumn() {
+        val text = "first line\nab\nthird line here\nlast"
+        val inFirst = 6 // "first |line"
+        assertEquals(text.indexOf("ab") + 2, stepLines(text, inFirst, 1), "column clamped to a short line")
+        assertEquals(text.indexOf("third") + 6, stepLines(text, inFirst, 2), "column kept")
+        assertEquals(text.length, stepLines(text, inFirst, 9), "past the end is the end")
+        assertEquals(inFirst, stepLines(text, text.indexOf("third") + 6, -2))
+        assertEquals(0, stepLines(text, 3, -1), "above the first line is the start")
     }
 
     @Test

@@ -221,12 +221,19 @@ had not spoken. The rules that follow from it:
     `getOffsetForPosition` builds an object per line of the note; the style
     window asks only when the view moves or the line count changes.
 
-  What remains is Skia laying out the whole styled note on every keystroke:
-  each bold, italic, heading, quote or list-marker span is a run of its
-  own, ~90 ms for the 64 KB note against 17 ms unstyled, and Compose builds
-  a style object and a native paint per run boundary. It is proportional to
-  how much styled text is laid out, so it needs ADR 0032 stage 4's slice
-  field. The full tables are in the ADR.
+  - **A long note is laid out a slice at a time** (ADR 0032 stage 4,
+    2026-11-02). Every keystroke lays out what the field shows, and Skia
+    has no incremental layout. So from 400 lines the transformation lays
+    out the lines near the view, and replaces the text above and below
+    with one invisible character each, as tall as that text measures. The
+    field's value stays the whole buffer: undo, selection and typing over
+    a selection are untouched. Every offset question goes through the
+    transformation's one mapping, given the slice. Never ask the field's
+    layout about an offset outside the slice: it lands on a placeholder.
+    On the 64 KB note: open 166 → 143 MB, typing peak 273 → 192, CPU while
+    typing 35.6 → 8.7 s.
+
+  The full tables are in the ADR.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely
   compress further in an installer, so a jar's size is roughly what it

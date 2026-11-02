@@ -606,19 +606,21 @@ private fun DesktopApp(
                     tabs.open(probe.removePrefix("read:")).editor.reading = true
                 }
                 // type:<rel> opens the note, waits 15 s for the app to
-                // settle, then appends 150 letters to its end, one every
-                // 40 ms, through the buffer the field draws. A memory
-                // measurement can watch typing this way without sending a
-                // keystroke to any window (ADR 0032). The field is not
-                // focused, so every line is decorated: close to typing,
-                // not identical.
+                // settle, then types 150 letters at the end of its first
+                // line — on screen, where a person types — one every 40 ms,
+                // through the buffer the field draws. A memory measurement
+                // can watch typing this way without sending a keystroke to
+                // any window (ADR 0032). The field is not focused, so every
+                // line is decorated: close to typing, not identical.
                 probe.startsWith("type:") -> {
                     val editor = tabs.open(probe.removePrefix("type:")).editor
                     scope.launch {
                         delay(15_000)
                         repeat(150) { typed ->
-                            val text = editor.text.text + ('a' + typed % 26)
-                            editor.text = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(text.length))
+                            val before = editor.text.text
+                            val at = before.indexOf('\n').let { if (it < 0) before.length else it }
+                            val text = before.substring(0, at) + ('a' + typed % 26) + before.substring(at)
+                            editor.text = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(at + 1))
                             editor.dirty = true
                             delay(40)
                         }
