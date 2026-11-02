@@ -949,7 +949,7 @@ private fun OpenNote(
                     transform = { body ->
                         MarkdownEditTransformation(palette, null, decorations, blockDecorations, fontScale).filter(AnnotatedString(body)).text
                     },
-                    measure = { body, first -> measureChunk(sliceMeasurer, body, editStyle, sliceWidth, first) },
+                    measure = { body, first, last -> measureChunk(sliceMeasurer, body, editStyle, sliceWidth, first, last) },
                 )
             }
             val slice: EditorSlice? = chunks?.let { all ->
