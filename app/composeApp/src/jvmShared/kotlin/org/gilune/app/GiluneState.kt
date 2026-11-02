@@ -819,14 +819,20 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
 
     /// Run a plugin action and report it. Every plugin change refreshes
     /// the contribution lists, so controls appear and disappear with it.
-    fun pluginAction(describe: String, act: (Gilune) -> Unit) {
+    fun pluginAction(describe: String, act: (Gilune) -> Unit) =
+        pluginActionTelling(describe) { act(it); describe }
+
+    /// [pluginAction] for an action whose sentence depends on what it did
+    /// — how many waiting recordings moved, say. [describe] names it when
+    /// it fails.
+    fun pluginActionTelling(describe: String, act: (Gilune) -> String) {
         val g = gilune.value ?: return
         scope.launch(Dispatchers.IO) {
             try {
-                act(g)
+                val said = act(g)
                 val initializationProblems = BUNDLED_PLUGIN_EXTENSIONS.initializePages(g)
                 refresh()
-                message.value = initializationProblems.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: describe
+                message.value = initializationProblems.takeIf { it.isNotEmpty() }?.joinToString("; ") ?: said
             } catch (e: Throwable) {
                 GiluneLog.warn("$describe failed: ${e.message}", e)
                 message.value = "$describe failed: ${e.message}"

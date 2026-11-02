@@ -331,3 +331,98 @@ Ratified as written, taking the proposed answer to each question:
 3. Roles ship with **today's engine in both roles**; nobody's transcription
    changes until they choose. The measurement round sets the defaults for
    new installs.
+
+## Delivery: stages 2–3 (2026-11-02, desktop)
+
+**Shipped.**
+
+- Slot `Slots.TRANSCRIPTION_ENGINES`. NeMo publishes one engine per
+  catalogue model (Nemotron and FastConformer both roles, Parakeet
+  recordings only), Moonshine its one streaming model (both roles, no word
+  times), each built from the plugin's own catalogue
+  (`transcriptionEngineContribution`). Whisper's come from `whisper.rs`
+  (stage 1), pinned to `WHISPER_MODELS` by `WhisperEnginesCouplingTest`,
+  which reads the Rust source as `AlertKindCouplingTest` reads alerts.rs.
+- Shared model `TranscriptionRoles.kt`: engines parsed from declarations
+  (switched-off providers listed, removed ones not, unreadable entries
+  dropped); `recordingsChoice` = first enabled provider taking jobs, its
+  `recordingsEngine`, else its old `model`, else its first recordings
+  engine; `liveChoice` = the enabled provider holding a non-empty
+  `liveEngine`; never chosen (no provider has the key) = the old
+  transcriber's `model` if its old `live` switch was on and the model can
+  stream, else Off. **Keys are `liveEngine`/`recordingsEngine`, not § 3's
+  bare `live`/`recordings`**: `live` is already the boolean in two shipped
+  documents. Every write is read-modify-write (`settingsWith`, org.json),
+  so the spoken language and the old keys survive.
+- **Pinning.** Every role write and every plugin switch first writes both
+  current answers down (`pinTranscriptionChoices`), because the
+  never-chosen derivation reads which providers are on: without it,
+  switching whisper on beside NeMo would have moved the live engine.
+- Kernel routing (`takeRecordings`): a switched-off provider is switched on
+  taking no jobs, then given the jobs, then every other provider is
+  withheld and its waiting jobs handed over. The order leaves a moment with
+  two takers (§ 4's named hole: two revisions) rather than one with none (a
+  capture with no job at all).
+- Plugin manager: switching a transcriber on never switches another off —
+  beside a taker it takes no jobs; with none, it takes them. Switching off
+  the taker leaves Recordings empty, kept and waiting, and the line says so.
+  `keepOneRecordingsTaker` runs at every desktop open: more than one
+  enabled taker (CLI) keeps the precedence-first and withholds the rest.
+- Desktop bring-up per role: whisper enabled when either role is whisper
+  (one model, § 6 sentence on the page; choosing a different whisper model
+  in one role rewrites the other); `NemoHost` holds a live and a recordings
+  engine (one instance when both name one model); only the live engine is
+  warmed. Two runtimes — `LocalTranscription` (Recordings, the top-bar mic)
+  and `LocalLiveTranscription`; the dictation mic needs the live engine
+  ready or the Recordings one (`dictationUnreadyReason`). `runNemoJobs` and
+  speaker labels use the Recordings engine.
+- Settings ▸ Transcription (`TranscriptionPage.kt`), above Plugins: While
+  you speak (with Off) and Recordings, radio rows with plugin tag, guidance
+  and Ready / Download N MB / Allow network access / Switched off; a row
+  whose model is not here also opens its plugin's screen; nothing
+  downloads from the page. A speaker-labels line follows the Recordings
+  engine's word times. Plugin screens lose the model pickers and *Show
+  words as I dictate*, keep language, models with on-disk state and
+  licences, and say what they are used for.
+- Guide: capture.html (two questions, one page), plugins.html one phrase.
+
+**Tests.** New: `TranscriptionRolesTest` 14 (shared, pure),
+`TranscriptionRolesKernelTest` 9 (real kernel), `WhisperEnginesCouplingTest`
+2, `TranscriptionPageUiTest` 1; NemoTest's `switchingNemoOnSwitchesWhisperOff`
+removed (the behaviour is retired). Full desktop suite (`--rerun-tasks`,
+debug dll, no whisper): 1,109 tests, 0 failed, 11 skipped (model-gated).
+`compileDebugKotlinAndroid` and `compileDebugAndroidTestKotlinAndroid` green.
+
+**Falsified** by reverting each behaviour and running the kernel and UI
+classes: no hand-over → the two hand-over rows fail; others not withheld →
+five rows fail (incl. the UI row); a provider switched on beside the taker
+also taking jobs → three rows fail; `keepOneRecordingsTaker` a no-op → its
+row fails.
+
+**Deviations, and why.**
+
+- A fresh provider beside a taker still registers **switched off**
+  (`registerProviderRespectingTheRule`), not on-taking-no-jobs as § 4
+  says: nobody's setup changes until they choose, and Android's tests pin
+  that shape.
+- `applyOneTranscriberRule`, `providerSwitch` and `providerSwitchWarning`
+  are **kept** for the phone, which still calls them until stage 5; the
+  desktop no longer does. The desktop's open-time rule is a new function
+  that withholds instead of disabling.
+- The hand-over takes waiting jobs from **every** other provider, not only
+  the previous taker: a recording parked under a switched-off transcriber
+  is one the person now wants the chosen engine to hear.
+- § 6's "says so before it moves them" is a standing sentence above the
+  Recordings rows; the count comes after, in the status line (no per-
+  processor pending count crosses the FFI).
+- § 5's factory registry is **not built**: `liveEngineFor` dispatches on the
+  chosen plugin (whisper, NeMo). A registry waits for a third live engine.
+
+**Honest gaps.** Not screenshot-validated in a running app; the live-NeMo +
+whisper-recordings gate row (§ Gate 1) is unexercised with real models;
+the CLI shows the keys only once something has been chosen (the
+never-chosen answer is derived in Kotlin); the phone's settings still write
+whisper's document with the old fixed-keys writer (harmless today — the
+phone reads no role keys — but stage 5 must switch it to `settingsWith`);
+parked jobs that already ran once stay with their old provider (the
+kernel's rule).

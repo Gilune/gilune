@@ -321,8 +321,24 @@ fun moonshineDeclaration(): PluginDeclaration =
                 id = "moonshine-settings",
                 label = "Live caption, model and downloads",
             ),
-        ),
+        ) + MOONSHINE_MODELS.map { model ->
+            // ADR 0033 § 2. Streaming, so both roles; no word times — the
+            // phone's provider reports none, which speaker labels need.
+            transcriptionEngineContribution(
+                id = "moonshine-${model.key}",
+                label = "Moonshine ${model.key}",
+                engine = model.key,
+                roles = setOf(TranscriptionRole.LIVE, TranscriptionRole.RECORDINGS),
+                wordTimes = false,
+                downloadBytes = MOONSHINE_DOWNLOAD_BYTES,
+                guidance = "Words as you speak on the phone, in English.",
+            )
+        },
     )
+
+/// R0's measured download for the one catalogue model: 45,233,659 bytes
+/// across 8 files.
+const val MOONSHINE_DOWNLOAD_BYTES = 45_233_659L
 
 // ---------------------------------------------------------------------
 // Transcription (NVIDIA NeMo) — ADR 0027 S3. NVIDIA's speech models run
@@ -439,9 +455,25 @@ fun nemoDeclaration(): PluginDeclaration =
             PluginContribution(
                 slot = Slots.SETTINGS_FORM,
                 id = "nemo-settings",
-                label = "Model and dictation",
+                label = "Models and downloads",
             ),
-        ),
+        ) + NEMO_MODELS.map { model ->
+            // ADR 0033 § 2: a streaming model can do both jobs; a
+            // whole-recording model only hears finished recordings.
+            transcriptionEngineContribution(
+                id = "nemo-${model.key}",
+                label = model.name,
+                engine = model.key,
+                roles = if (model.kind == NemoKind.STREAMING) {
+                    setOf(TranscriptionRole.LIVE, TranscriptionRole.RECORDINGS)
+                } else {
+                    setOf(TranscriptionRole.RECORDINGS)
+                },
+                wordTimes = true,
+                downloadBytes = model.bytes,
+                guidance = model.guidance,
+            )
+        },
     )
 
 // ---------------------------------------------------------------------

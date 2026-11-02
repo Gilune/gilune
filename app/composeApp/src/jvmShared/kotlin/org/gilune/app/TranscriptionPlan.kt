@@ -68,7 +68,9 @@ fun transcriptionPlan(
 fun transcriptionPlanKey(plugins: List<PluginInfo>): String? =
     TRANSCRIPTION_PROVIDERS.mapNotNull { id -> plugins.firstOrNull { it.pluginId == id } }
         .takeIf { it.isNotEmpty() }
-        ?.joinToString("\n") { "${it.pluginId}|${it.state}|${it.granted.sorted().joinToString(",")}|${it.settings}" }
+        ?.joinToString("\n") {
+            "${it.pluginId}|${it.state}|${it.takesJobs}|${it.granted.sorted().joinToString(",")}|${it.settings}"
+        }
 
 /// Where this device actually is, which is the only thing the UI is
 /// allowed to claim (§ 4: "the pending state is shown and is never
@@ -117,6 +119,12 @@ class TranscriptionRuntime {
     /// the one [TranscriptionPhase.Absent] a person can fix with a click.
     var needsConsent by mutableStateOf(false)
 
+    /// What an [TranscriptionPhase.Absent] without a consent question
+    /// means here, when the shell knows better than "nothing is switched
+    /// on" — a desktop with transcribers on but none chosen for
+    /// recordings (ADR 0033). Null keeps the general sentence.
+    var absentWords by mutableStateOf<String?>(null)
+
     val ready: Boolean get() = phase == TranscriptionPhase.Ready
 
     /// Belt and braces around the download. The shell has one call site
@@ -140,6 +148,6 @@ fun TranscriptionRuntime.unreadyReason(): String? = when (phase) {
         if (needsConsent) {
             "transcription needs its model — allow the download in Settings ▸ Plugins ▸ Transcription"
         } else {
-            "no transcription plugin is switched on — Settings ▸ Plugins"
+            absentWords ?: "no transcription plugin is switched on — Settings ▸ Plugins"
         }
 }

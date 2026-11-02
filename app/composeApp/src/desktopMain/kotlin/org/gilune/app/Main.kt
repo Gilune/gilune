@@ -373,10 +373,13 @@ private fun DesktopApp(
     var shortcutsOpen by remember { mutableStateOf(false) }
     LaunchedEffect(gestures.shortcuts) { if (gestures.shortcuts > 0) shortcutsOpen = true }
     if (shortcutsOpen) ShortcutsDialog(state.plugins.toList()) { shortcutsOpen = false }
+    // One runtime per role (ADR 0033): `transcription` is the Recordings
+    // engine, `liveTranscription` the engine for while you speak.
     val transcription = remember { TranscriptionRuntime() }
+    val liveTranscription = remember { TranscriptionRuntime() }
     val nemo = remember { NemoHost() }
     KeepTranscriptionAsked(state) { gilune ->
-        withContext(Dispatchers.IO) { startTranscription(state, gilune, transcription, nemo) }
+        withContext(Dispatchers.IO) { startTranscription(state, gilune, transcription, liveTranscription, nemo) }
     }
     // Speaker labels (ADR 0030) follow their plugin: switched on, allowed
     // to download, or a changed speaker count each ask again.
@@ -553,7 +556,7 @@ private fun DesktopApp(
         // (ADR 0027 S3): every processing pass on this handle gives it the
         // jobs queued for it, when its model is loaded.
         state.externalProcessing = { gilune ->
-            nemo.engines?.let { runNemoJobs(gilune, it::transcribe, labelled = speakers.labelling(it)) } ?: ProviderPass()
+            nemo.recordings?.let { runNemoJobs(gilune, it::transcribe, labelled = speakers.labelling(it)) } ?: ProviderPass()
         }
         state.syncSetup = { gilune ->
             val identity = identityDir()
@@ -570,8 +573,10 @@ private fun DesktopApp(
         state.openVault { gilune ->
             // The desktop's second transcriber (ADR 0027 S3): installed
             // switched off when whisper is already writing the notes, and
-            // never switched on except by a person.
+            // never switched on except by a person. A vault where two take
+            // recordings keeps one (ADR 0033 § 4).
             registerNemoOnHandle(gilune)
+            keepOneRecordingsTaker(gilune)?.let { state.message.value = it }
             registerSpeakersOnHandle(gilune)
             state.refresh()
             // The starting folders the enabled plugins declare, each once
@@ -798,7 +803,12 @@ private fun DesktopApp(
                 if (railCollapsed && railRaw >= RAIL_SHUT_AT) setRailCollapsed(false)
                 if (!railCollapsed) railWidth = railRaw.coerceIn(RAIL_MIN, RAIL_MAX)
             }
-            CompositionLocalProvider(LocalTranscription provides transcription, LocalNemo provides nemo, LocalSpeakers provides speakers) {
+            CompositionLocalProvider(
+                LocalTranscription provides transcription,
+                LocalLiveTranscription provides liveTranscription,
+                LocalNemo provides nemo,
+                LocalSpeakers provides speakers,
+            ) {
                 PaneHost(state, tabs, Modifier.weight(1f).fillMaxHeight(), recorder = dictation)
             }
         }

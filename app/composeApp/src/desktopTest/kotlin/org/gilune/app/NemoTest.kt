@@ -161,17 +161,8 @@ class NemoTest {
         assertEquals("nemotron-0.6b", listOf(installed(NEMO_PLUGIN, settings = """{"model":"gone"}""")).nemoModel().key)
     }
 
-    @Test
-    fun switchingNemoOnSwitchesWhisperOff() {
-        val plugins = listOf(
-            installed(TRANSCRIPTION_PLUGIN, name = "Transcription (Whisper)"),
-            installed(NEMO_PLUGIN, state = "disabled", name = "Transcription (NVIDIA NeMo)"),
-        )
-        val switch = providerSwitch(plugins, NEMO_PLUGIN, enable = true)
-        assertEquals(listOf(TRANSCRIPTION_PLUGIN), switch.disable)
-        assertTrue("Transcription (Whisper) switched off" in switch.message, switch.message)
-        assertEquals(TRANSCRIPTION_PLUGIN, plugins.activeTranscriber())
-    }
+    // Switching NeMo on beside whisper no longer switches whisper off (ADR
+    // 0033): TranscriptionRolesKernelTest.aProviderSwitchedOnBesideAnotherTakesNoJobs.
 
     @Test
     fun aVaultWhoseNotesWhisperWritesGetsNemoSwitchedOff() {

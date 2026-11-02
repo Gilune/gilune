@@ -36,6 +36,12 @@ object Slots {
     /// creates each one once per vault on a machine; one the user deletes
     /// stays deleted. Config: `{"folder":"Name"}`.
     const val VAULT_FOLDERS = "vault.folders"
+
+    /// One engine a transcription plugin offers (ADR 0033 § 2). Config:
+    /// `{"engine","roles":["live","recordings"],"wordTimes","download",
+    /// "guidance"}`; the contribution's label is the engine's name. The
+    /// host lists them on Settings ▸ Transcription.
+    const val TRANSCRIPTION_ENGINES = "transcription.engines"
 }
 
 /** A starting folder (`Slots.VAULT_FOLDERS`): a vault-relative path. */

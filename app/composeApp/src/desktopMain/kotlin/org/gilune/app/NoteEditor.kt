@@ -423,6 +423,7 @@ private fun OpenNote(
     }
     var dictating by remember { mutableStateOf(false) }
     val transcription = LocalTranscription.current
+    val liveTranscription = LocalLiveTranscription.current
     val nemo = LocalNemo.current
     val dictationOffered =
         recorder != null && state.plugins.contributes(Slots.NOTE_ACTIONS, DICTATE_ACTION)
@@ -517,16 +518,17 @@ private fun OpenNote(
                 // it used to end in "no words recognised" (owner report,
                 // 2026-10-21). The voice capture adapter offers the mic; the
                 // transcription plugin decides whether it can be used.
-                val unready = transcription.unreadyReason()
+                val unready = dictationUnreadyReason(transcription, liveTranscription)
 
                 fun begin() {
                     if (unready != null) {
                         state.message.value = "can't dictate yet: $unready"
                         return
                     }
-                    // Words as they are spoken when the active transcriber's
-                    // setting asks for them and its engine will start (ADR
-                    // 0027); otherwise the words arrive at the stop.
+                    // Words as they are spoken when an engine is chosen for
+                    // while you speak and it will start (ADR 0027, 0033);
+                    // otherwise the Recordings engine's words arrive at
+                    // the stop.
                     val live = liveEngineFor(state, nemo)
                     val engine = live?.first
                     try {
