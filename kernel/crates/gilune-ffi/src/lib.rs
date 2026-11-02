@@ -1276,6 +1276,10 @@ pub struct PluginInfo {
     pub ungranted: Vec<String>,
     pub contributions: Vec<PluginContribution>,
     pub settings: String,
+    /// Whether its processor is given jobs while it is enabled (ADR 0033
+    /// § 4). Defaulted so a host building one by hand keeps compiling.
+    #[uniffi(default = true)]
+    pub takes_jobs: bool,
 }
 
 /// One control a plugin adds to a host surface. Slot names are the
@@ -1337,6 +1341,7 @@ impl From<gilune_kernel::plugins::InstalledPlugin> for PluginInfo {
                 })
                 .collect(),
             settings: p.settings,
+            takes_jobs: p.takes_jobs,
         }
     }
 }
@@ -2183,6 +2188,32 @@ impl Gilune {
             .register_plugin_disabled(&descriptor)?
             .as_str()
             .to_string())
+    }
+
+    /// Register an implementation that exists here, **enabled but taking
+    /// no jobs** when this vault has never met it (ADR 0033 § 4): a second
+    /// transcriber arriving beside the one that already takes the
+    /// recordings. One call, for `register_plugin_disabled`'s reason. A
+    /// plugin already known keeps its state and its flag.
+    pub fn register_plugin_taking_no_jobs(&self, declaration: PluginDeclaration) -> FfiResult<String> {
+        let descriptor = gilune_kernel::plugins::PluginDescriptor::try_from(declaration)?;
+        Ok(self
+            .store()
+            .register_plugin_taking_no_jobs(&descriptor)?
+            .as_str()
+            .to_string())
+    }
+
+    /// Whether an enabled plugin's processor is given jobs (ADR 0033
+    /// § 4). Withholding parks what is waiting, as disabling does.
+    pub fn set_takes_jobs(&self, plugin_id: String, takes_jobs: bool) -> FfiResult<()> {
+        Ok(self.store().set_takes_jobs(&plugin_id, takes_jobs)?)
+    }
+
+    /// Give every job still waiting for one processor to another and say
+    /// how many moved. Nothing that has produced output moves.
+    pub fn hand_over_jobs(&self, from_processor: String, to_processor: String) -> FfiResult<i64> {
+        Ok(self.store().hand_over_jobs(&from_processor, &to_processor)?)
     }
 
     pub fn plugins(&self) -> FfiResult<Vec<PluginInfo>> {

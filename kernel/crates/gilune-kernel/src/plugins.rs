@@ -87,6 +87,10 @@ pub struct InstalledPlugin {
     /// Plugin-private settings document (canonical JSON).
     pub settings: String,
     pub installed_ms: i64,
+    /// Whether this plugin's processor is given jobs while it is enabled
+    /// (ADR 0033 § 4). False means on, offering what it offers, but
+    /// queued nothing: as far as jobs go it is switched off.
+    pub takes_jobs: bool,
 }
 
 impl InstalledPlugin {
@@ -113,7 +117,7 @@ impl Store {
     /// removed plugin stays removed. Returns the state the plugin is in,
     /// so a caller knows whether to initialise it.
     pub fn register_plugin(&self, descriptor: &PluginDescriptor) -> Result<PluginState> {
-        self.register_plugin_as(descriptor, PluginState::Enabled)
+        self.register_plugin_as(descriptor, PluginState::Enabled, true)
     }
 
     /// Record an implementation that exists here, but leave it **off**
@@ -128,15 +132,28 @@ impl Store {
     /// work for a provider the user never opted into. An opt-in provider
     /// must never have been on, not even for a moment.
     pub fn register_plugin_disabled(&self, descriptor: &PluginDescriptor) -> Result<PluginState> {
-        self.register_plugin_as(descriptor, PluginState::Disabled)
+        self.register_plugin_as(descriptor, PluginState::Disabled, true)
     }
 
-    /// The shared body. `unseen` is the state a plugin this vault has
-    /// never met starts in; a plugin it has met keeps the state it has.
+    /// Record an implementation that exists here, **enabled but taking no
+    /// jobs** when this vault has never met it (ADR 0033 § 4): a second
+    /// transcriber arriving beside one that already takes the recordings.
+    /// For the reason `register_plugin_disabled` exists — registering and
+    /// then withholding is two writes with a window between them, and a
+    /// capture in that window would queue work for the newcomer. A plugin
+    /// already known keeps its state and its flag.
+    pub fn register_plugin_taking_no_jobs(&self, descriptor: &PluginDescriptor) -> Result<PluginState> {
+        self.register_plugin_as(descriptor, PluginState::Enabled, false)
+    }
+
+    /// The shared body. `unseen` and `unseen_takes_jobs` are what a
+    /// plugin this vault has never met starts with; a plugin it has met
+    /// keeps what it has.
     fn register_plugin_as(
         &self,
         descriptor: &PluginDescriptor,
         unseen: PluginState,
+        unseen_takes_jobs: bool,
     ) -> Result<PluginState> {
         let existing = self.plugin_state(&descriptor.plugin_id)?;
         let manifest = manifest_json(descriptor);
@@ -171,8 +188,8 @@ impl Store {
                 self.conn().execute(
                     "INSERT INTO plugins
                      (plugin_id, name, class, profile, required, processor_id,
-                      manifest, settings, state, installed_ms)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', ?8, ?9)
+                      manifest, settings, state, installed_ms, takes_jobs)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, '{}', ?8, ?9, ?10)
                      ON CONFLICT(plugin_id) DO UPDATE
                      SET name = excluded.name, class = excluded.class,
                          profile = excluded.profile, required = excluded.required,
@@ -188,6 +205,7 @@ impl Store {
                         manifest,
                         unseen.as_str(),
                         ids::now_ms(),
+                        unseen_takes_jobs as i64,
                     ],
                 )?;
             }
@@ -206,7 +224,7 @@ impl Store {
     pub fn installed_plugins(&self) -> Result<Vec<InstalledPlugin>> {
         let mut stmt = self.conn().prepare(
             "SELECT plugin_id, name, class, profile, required, processor_id,
-                    manifest, settings, state, installed_ms
+                    manifest, settings, state, installed_ms, takes_jobs
              FROM plugins WHERE state != 'removed' ORDER BY name",
         )?;
         let rows = stmt.query_map([], |row| {
@@ -221,6 +239,7 @@ impl Store {
                 settings: row.get(7)?,
                 state: row.get(8)?,
                 installed_ms: row.get(9)?,
+                takes_jobs: row.get::<_, i64>(10)? != 0,
             })
         })?;
         let mut out = Vec::new();
@@ -249,6 +268,82 @@ impl Store {
         )?;
         self.apply_subscription(&plugin.descriptor, state)?;
         Ok(())
+    }
+
+    /// Whether an enabled plugin's processor is given jobs (ADR 0033 § 4).
+    /// Withholding parks what is waiting exactly as disabling does, and
+    /// giving them back resumes it; nothing else about the plugin changes.
+    /// The host decides which processor takes the work — the kernel only
+    /// keeps the answer, so the CLI reads the same one.
+    pub fn set_takes_jobs(&self, plugin_id: &str, takes_jobs: bool) -> Result<()> {
+        let plugin = self.require_plugin(plugin_id)?;
+        self.conn().execute(
+            "UPDATE plugins SET takes_jobs = ?2 WHERE plugin_id = ?1",
+            rusqlite::params![plugin_id, takes_jobs as i64],
+        )?;
+        self.apply_subscription(&plugin.descriptor, plugin.state)
+    }
+
+    /// Give every job still waiting for one processor to another, for the
+    /// same events, and say how many moved (ADR 0033 § 4). Only work that
+    /// has produced nothing moves: a job that is leased, done or
+    /// quarantined stays, as does one whose event the first processor
+    /// already has a run for, or the second already has a job for. So a
+    /// recording that has words is never handed to a new engine — that is
+    /// "transcribe again", a deliberate act (ADR 0029) — and handing over
+    /// twice moves nothing the second time.
+    pub fn hand_over_jobs(&self, from_processor: &str, to_processor: &str) -> Result<i64> {
+        if from_processor == to_processor {
+            return Ok(0);
+        }
+        let conn = self.conn();
+        let known: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM subscriptions WHERE subscription_id = ?1",
+            [to_processor],
+            |row| row.get(0),
+        )?;
+        if known == 0 {
+            return Err(KernelError::NoSuchPlugin {
+                plugin_id: to_processor.to_string(),
+            });
+        }
+        conn.execute_batch("BEGIN IMMEDIATE;")?;
+        let moved: Result<i64> = (|| {
+            let events: Vec<String> = conn
+                .prepare(
+                    "SELECT j.event_id FROM jobs j
+                     WHERE j.subscription_id = ?1 AND j.state = 'pending'
+                       AND NOT EXISTS (SELECT 1 FROM processing_runs r
+                                       WHERE r.processor_id = ?1 AND r.event_id = j.event_id)
+                       AND NOT EXISTS (SELECT 1 FROM jobs t
+                                       WHERE t.subscription_id = ?2 AND t.event_id = j.event_id)
+                     ORDER BY j.event_id",
+                )?
+                .query_map([from_processor, to_processor], |row| row.get(0))?
+                .collect::<std::result::Result<_, _>>()?;
+            for event_id in &events {
+                conn.execute(
+                    "INSERT INTO jobs (job_id, subscription_id, event_id, state, attempts, not_before_ms)
+                     VALUES (?1 || ?2, ?2, ?1, 'pending', 0, 0)",
+                    [event_id.as_str(), to_processor],
+                )?;
+                conn.execute(
+                    "DELETE FROM jobs WHERE subscription_id = ?1 AND event_id = ?2",
+                    [from_processor, event_id.as_str()],
+                )?;
+            }
+            Ok(events.len() as i64)
+        })();
+        match moved {
+            Ok(count) => {
+                conn.execute_batch("COMMIT;")?;
+                Ok(count)
+            }
+            Err(e) => {
+                let _ = conn.execute_batch("ROLLBACK;");
+                Err(e)
+            }
+        }
     }
 
     /// Remove a plugin: its grants and settings go, its waiting jobs are
@@ -376,7 +471,7 @@ impl Store {
         self.conn()
             .query_row(
                 "SELECT plugin_id, name, class, profile, required, processor_id,
-                        manifest, settings, state, installed_ms
+                        manifest, settings, state, installed_ms, takes_jobs
                  FROM plugins WHERE plugin_id = ?1",
                 [plugin_id],
                 |row| {
@@ -391,6 +486,7 @@ impl Store {
                         settings: row.get(7)?,
                         state: row.get(8)?,
                         installed_ms: row.get(9)?,
+                        takes_jobs: row.get::<_, i64>(10)? != 0,
                     })
                 },
             )
@@ -430,6 +526,7 @@ impl Store {
             granted,
             settings: row.settings,
             installed_ms: row.installed_ms,
+            takes_jobs: row.takes_jobs,
         })
     }
 
@@ -448,12 +545,20 @@ impl Store {
         else {
             return Ok(());
         };
+        // Live only while enabled AND taking jobs (ADR 0033 § 4), the flag
+        // read in the same statement so a concurrent `set_takes_jobs` is
+        // never half-applied.
         self.conn().execute(
             "INSERT INTO subscriptions (subscription_id, event_type, enabled)
-             VALUES (?1, ?2, ?3)
+             VALUES (?1, ?2, ?3 AND IFNULL((SELECT takes_jobs FROM plugins WHERE plugin_id = ?4), 1))
              ON CONFLICT(subscription_id)
-             DO UPDATE SET event_type = ?2, enabled = ?3",
-            rusqlite::params![processor_id, event_type, (state == PluginState::Enabled) as i64],
+             DO UPDATE SET event_type = ?2, enabled = excluded.enabled",
+            rusqlite::params![
+                processor_id,
+                event_type,
+                (state == PluginState::Enabled) as i64,
+                descriptor.plugin_id,
+            ],
         )?;
         Ok(())
     }
@@ -470,6 +575,7 @@ struct PluginRow {
     settings: String,
     state: String,
     installed_ms: i64,
+    takes_jobs: bool,
 }
 
 fn manifest_json(descriptor: &PluginDescriptor) -> String {
@@ -763,6 +869,124 @@ mod tests {
             .expect("run once enabled");
         assert_eq!(resumed.completed, 1, "the parked job resumes where it stopped");
         assert_eq!(resumed.outputs, 1);
+    }
+
+    /// A second transcriber, as ADR 0033 puts one beside the first.
+    fn other_transcriber() -> PluginDescriptor {
+        PluginDescriptor {
+            plugin_id: "org.memory.other".to_string(),
+            processor_id: Some("other-transcribe".to_string()),
+            name: "Other transcription".to_string(),
+            contributions: Vec::new(),
+            ..transcription()
+        }
+    }
+
+    fn jobs_for(store: &Store, processor: &str) -> i64 {
+        store
+            .conn()
+            .query_row("SELECT COUNT(*) FROM jobs WHERE subscription_id = ?1", [processor], |row| row.get(0))
+            .expect("count")
+    }
+
+    #[test]
+    fn a_plugin_withheld_from_jobs_stays_on_parks_its_work_and_resumes_it() {
+        let (_dir, store, _source_id) = store_with_wav();
+        store.set_takes_jobs("org.memory.transcription", false).expect("withhold");
+        let plugin = store.plugin("org.memory.transcription").expect("read").expect("installed");
+        assert_eq!(plugin.state, PluginState::Enabled, "withholding jobs is not switching off");
+        assert!(!plugin.takes_jobs);
+
+        store.capture_bytes("wav", &[8u8; 64]).expect("capture while withheld");
+        assert_eq!(jobs_for(&store, "transcribe"), 1, "nothing new is queued");
+        let parked = store.run_pending_jobs(&[&FakeTranscriber], 1_000, 30_000).expect("run");
+        assert_eq!(parked.completed, 0, "and what was waiting is claimable by nobody");
+
+        store.set_takes_jobs("org.memory.transcription", true).expect("give back");
+        let resumed = store.run_pending_jobs(&[&FakeTranscriber], 2_000, 30_000).expect("run");
+        assert_eq!(resumed.completed, 1, "the parked job resumes where it stopped");
+    }
+
+    #[test]
+    fn switching_a_withheld_plugin_off_and_on_leaves_it_withheld() {
+        // The second-order case: enabling is what used to make a
+        // subscription live, so it must not quietly undo the flag.
+        let (_dir, store, _source_id) = store_with_wav();
+        store.set_takes_jobs("org.memory.transcription", false).expect("withhold");
+        store.set_plugin_enabled("org.memory.transcription", false).expect("off");
+        store.set_plugin_enabled("org.memory.transcription", true).expect("on");
+        store.register_plugin(&transcription()).expect("the next launch registers it again");
+        store.capture_bytes("wav", &[9u8; 64]).expect("capture");
+        assert_eq!(jobs_for(&store, "transcribe"), 1, "still withheld: only the first capture's job");
+        assert!(!store.plugin("org.memory.transcription").expect("read").expect("installed").takes_jobs);
+    }
+
+    #[test]
+    fn a_second_transcriber_registers_on_but_taking_no_jobs() {
+        let (_dir, store, _source_id) = store_with_wav();
+        assert_eq!(
+            store.register_plugin_taking_no_jobs(&other_transcriber()).expect("register"),
+            PluginState::Enabled
+        );
+        store.capture_bytes("wav", &[3u8; 64]).expect("capture");
+        assert_eq!(jobs_for(&store, "other-transcribe"), 0, "never handed a job, not even for a moment");
+        assert_eq!(jobs_for(&store, "transcribe"), 2);
+
+        store.set_takes_jobs("org.memory.other", true).expect("chosen for recordings");
+        assert_eq!(
+            store.register_plugin_taking_no_jobs(&other_transcriber()).expect("next launch"),
+            PluginState::Enabled
+        );
+        assert!(
+            store.plugin("org.memory.other").expect("read").expect("installed").takes_jobs,
+            "a plugin already known keeps its flag"
+        );
+    }
+
+    #[test]
+    fn handing_over_moves_only_work_that_has_produced_nothing() {
+        let (_dir, store, first) = store_with_wav();
+        store.register_plugin_taking_no_jobs(&other_transcriber()).expect("register");
+        for byte in [4u8, 5, 6] {
+            store.capture_bytes("wav", &[byte; 64]).expect("capture");
+        }
+        let events: Vec<String> = store
+            .conn()
+            .prepare("SELECT event_id FROM jobs WHERE subscription_id = 'transcribe' ORDER BY event_id")
+            .expect("prepare")
+            .query_map([], |row| row.get(0))
+            .expect("query")
+            .collect::<std::result::Result<_, _>>()
+            .expect("events");
+        assert_eq!(events.len(), 4, "{first}");
+        let conn = store.conn();
+        // Done: it has words. A run without its job finishing: a crash
+        // after output. The other engine already holding the event.
+        conn.execute("UPDATE jobs SET state = 'done' WHERE event_id = ?1", [&events[0]]).expect("done");
+        conn.execute(
+            "INSERT INTO processing_runs (run_id, processor_id, idempotency_key, event_id, created_ms)
+             VALUES ('r', 'transcribe', 'k', ?1, 0)",
+            [&events[1]],
+        )
+        .expect("run");
+        conn.execute(
+            "INSERT INTO jobs (job_id, subscription_id, event_id, state) VALUES (?1 || 'x', 'other-transcribe', ?1, 'done')",
+            [&events[2]],
+        )
+        .expect("held");
+
+        assert_eq!(store.hand_over_jobs("transcribe", "other-transcribe").expect("hand over"), 1);
+        assert_eq!(store.hand_over_jobs("transcribe", "other-transcribe").expect("again"), 0, "twice moves nothing");
+        let moved: (String, String, i64) = conn
+            .query_row(
+                "SELECT job_id, state, attempts FROM jobs WHERE subscription_id = 'other-transcribe' AND event_id = ?1",
+                [&events[3]],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("moved job");
+        assert_eq!(moved, (format!("{}other-transcribe", events[3]), "pending".to_string(), 0));
+        assert_eq!(jobs_for(&store, "transcribe"), 3, "done, run and already-held stay where they were");
+        assert!(store.hand_over_jobs("transcribe", "nobody").is_err(), "a processor nothing subscribes refuses");
     }
 
     #[test]
