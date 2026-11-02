@@ -206,6 +206,34 @@ class LiveDictationTest {
         assertEquals(40_000, engine.accepted.get(), "every byte heard, including what came after the last update")
     }
 
+    @Test
+    fun anEngineThatCannotLoadEndsTheLiveWordsButNotTheDictation() {
+        // NeMo loads its model with the first audio (09 § Desktop
+        // footprint), so a model that will not load fails inside accept, on
+        // the run's own thread. Uncaught, that ended the thread and the stop
+        // was never answered.
+        val accepts = AtomicInteger()
+        val refusing = object : LiveTranscriptionInterface {
+            override fun accept(pcm: ByteArray) {
+                accepts.incrementAndGet()
+                error("the model folder has no encoder")
+            }
+            override fun update(): List<LiveLine> = error("never asked: nothing was heard")
+            override fun finish(): List<LiveLine> = emptyList()
+        }
+        val said = java.util.Collections.synchronizedList(mutableListOf<String>())
+        val done = CountDownLatch(1)
+        val run = LiveDictationRun(refusing, deliver = {}, fellBehind = { said += it })
+        run.start()
+        repeat(5) { run.offer(second) }
+        Thread.sleep(300)
+        run.stop { done.countDown() }
+        assertTrue(done.await(5, TimeUnit.SECONDS), "the stop is still answered")
+        assertEquals(1, said.size, "said once: $said")
+        assertTrue("recording is kept" in said.single(), said.single())
+        assertEquals(1, accepts.get(), "no more audio is pushed at an engine that refused it")
+    }
+
     /// Plays `seconds` of audio into the run at the pace a microphone would.
     private fun speak(run: LiveDictationRun, seconds: Int) {
         repeat(seconds * 10) {
