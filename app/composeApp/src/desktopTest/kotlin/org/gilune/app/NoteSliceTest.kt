@@ -43,11 +43,12 @@ class NoteSliceTest {
 
     // Each chunk's height inside the whole note — from its first line's top
     // to the next chunk's — is what it measures between its context lines,
-    // to within the pixel each edge rounds to — the first chunk too, which is
-    // measured with nothing above it, as it sits in the note.
+    // to within the pixel each edge rounds to — the first and last chunks
+    // too, measured with nothing above and below them, as they sit in the note.
     @Test
     fun eachChunkMeasuresWithinAPixelOfItsHeightInTheWholeNote() {
         val shown = MarkdownEditTransformation(palette, null, builtInDecorations()).filter(AnnotatedString(note))
+        val off = mutableListOf<String>()
         for (width in listOf(420, 900)) {
             val whole = measurer.measure(shown.text, style, constraints = Constraints(maxWidth = width))
             fun top(offset: Int) = whole.getLineTop(whole.getLineForOffset(shown.offsetMapping.originalToTransformed(offset)))
@@ -56,10 +57,11 @@ class NoteSliceTest {
             assertTrue(chunks.size > 20)
             for ((index, chunk) in chunks.withIndex()) {
                 val inNote = (if (chunk.end == note.length) whole.size.height.toFloat() else top(chunk.end)) - top(chunk.start)
-                val measured = heights.heightOf(note, chunk, 0, ::transform) { body, first -> measureChunk(measurer, body, style, width, first) }
-                assertTrue(kotlin.math.abs(inNote - measured) <= 1f, "width $width, chunk $index: $measured measured, $inNote in the note")
+                val measured = heights.heightOf(note, chunk, 0, ::transform) { body, first, last -> measureChunk(measurer, body, style, width, first, last) }
+                if (kotlin.math.abs(inNote - measured) > 1f) off += "width $width, chunk $index of ${chunks.size}: $measured measured, $inNote in the note"
             }
         }
+        assertTrue(off.isEmpty(), off.joinToString("; "))
     }
 
     @Test
@@ -69,7 +71,7 @@ class NoteSliceTest {
         val chunks = sliceChunks(note)
         var measured = 0
         fun height(text: String, chunk: SliceChunk) =
-            heights.heightOf(text, chunk, 0, ::transform) { body, first -> measured++; measureChunk(measurer, body, style, 600, first) }
+            heights.heightOf(text, chunk, 0, ::transform) { body, first, last -> measured++; measureChunk(measurer, body, style, 600, first, last) }
         chunks.forEach { height(note, it) }
         assertEquals(chunks.size, measured)
         chunks.forEach { height(note, it) }
