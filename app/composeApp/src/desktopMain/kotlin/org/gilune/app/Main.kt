@@ -242,7 +242,7 @@ fun main() {
                 exitApplication()
             },
             title = if (probe == null) "Gilune" else "Gilune probe",
-            icon = painterResource("gilune-logo-v2.png"),
+            icon = painterResource(WINDOW_ICON),
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
             onPreviewKeyEvent = { event ->
                 // The plugin's keys come first: they are the person's to
@@ -346,6 +346,12 @@ fun main() {
         }
     }
 }
+
+/// The window's icon: the logo at 256 px, the largest Windows draws one.
+/// The window keeps its icon decoded for its whole life, and the full
+/// 1,254 px logo cost 9–10 MB of native memory to show at most 256 px
+/// (measured 2026-11-02, ADR 0032). The full logo stays for packaging.
+internal const val WINDOW_ICON = "gilune-window-icon.png"
 
 @Composable
 private fun DesktopApp(

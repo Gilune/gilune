@@ -233,6 +233,19 @@ had not spoken. The rules that follow from it:
     On the 64 KB note: open 166 → 143 MB, typing peak 273 → 192, CPU while
     typing 35.6 → 8.7 s.
 
+  - **An image the window holds for its life is sized for display.** The
+    window icon is a 256 px copy of the logo: the 1,254 px original cost
+    13 MB in Task Manager to show at most 256 px.
+  - **Say which memory figure.** Task Manager's Memory column is the
+    private working set. Private bytes (committed) runs 20–30 MB higher on
+    this JVM, because the heap is committed before it is touched. A
+    change that lowers only private bytes (a smaller starting heap) does
+    not show in Task Manager.
+  - **The floor is measured, not guessed** (2026-11-02). A bare Compose
+    window with a text field is 80 MB in Task Manager, and Gilune's empty
+    window 102 MB. Compose and Skia cost ~41 MB over a bare JVM (Swing
+    9 MB); the kernel 3–4 MB.
+
   The full tables are in the ADR.
 - **Download size is measured per part, not guessed** (2026-11-01, the
   1.3.1 MSI unpacked: 139 MB compressed, 222 MB installed). Jars barely

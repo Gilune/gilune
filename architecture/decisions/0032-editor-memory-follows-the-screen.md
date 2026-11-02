@@ -506,6 +506,47 @@ fell by 15% on the short note and 43% on the note with Windows line endings.
 On the long `\n` note it is unchanged: Skia's layout of the styled text
 dominates. Both remaining costs are stage 4's to remove.
 
+## What the empty window is made of (2026-11-02)
+
+The owner asked whether Skia was the expensive part. To find out, the
+stack was measured a layer at a time on the installed app's own runtime
+and jars, with the launcher's JVM flags. Each layer is a minimal program;
+each figure is stable across two runs to within 1 MB:
+
+| Layer | Private bytes | Task Manager | JVM-accounted |
+|---|---|---|---|
+| The JVM, idle | 58 MB | — | 53 MB |
+| + a Swing window | 67 MB | — | 60 MB |
+| + a bare Compose window, one line of text | 99 MB | — | 80 MB |
+| + Material 3 and a text field holding a 150-line note | 109 MB | 80 MB | 84 MB |
+| + the Rust kernel open on the vault, projected | 112 MB | — | 88 MB |
+| Gilune's empty window | 137–139 MB | 115 MB | 100 MB |
+| …with a 256 px window icon | 125–130 MB | **102 MB** | 100 MB |
+
+"Task Manager" is its default Memory column: the private working set,
+what has actually been touched. Private bytes is committed memory, which
+every other figure in this ADR reports. The two differ because the JVM
+commits heap it has not used yet.
+
+- **Compose and Skia cost ~41 MB over a bare JVM**, against 9 MB for
+  Swing: Compose's classes (metaspace +12–15 MB) and Skia's library,
+  software surface and threads (native +14–18 MB). That is the fixed
+  price of the toolkit ADR 0001 chose.
+- **The kernel costs 3–4 MB.** Opening it and projecting the vault is
+  cheap.
+- **The window icon cost 9–10 MB of private bytes (13 MB in Task
+  Manager).** The window held the 1,254 px logo decoded for its whole
+  life. It now has its own 256 px copy (`WINDOW_ICON`; `WindowIconTest`
+  fails on a larger one), and the full logo stays for packaging.
+- **What is left of Gilune's own share, ~22 MB in Task Manager,** is
+  mostly its classes: ~1,900 more than the bare app (its own code, 189
+  generated binding classes, JNA), +9 MB of metaspace, +2 MB of code.
+  They load as features are first used. Shrinking that means loading
+  less at startup, feature by feature.
+- **A smaller starting heap (`-Xms16m`) was measured and not adopted.**
+  It lowers private bytes by 13–16 MB, but Task Manager does not move
+  (102 → 103 MB): the extra committed heap had never been touched.
+
 ## Alternatives considered
 
 ### A custom text surface

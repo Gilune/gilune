@@ -2083,6 +2083,19 @@ gates promises) are ratified. **Next: application-level engineering — see
      typing peak 273→192, settled 190→161 MB, CPU 35.6→8.7 s. Test
      harness key input does NOT drive the field's own navigation (End,
      Ctrl+End do nothing even unsliced) — use `state.reveal` to jump.
+     **Floor measured (2026-11-02, owner: "is Skia the only option?")**:
+     minimal programs on the installed runtime+jars with launcher flags
+     (scratch floorprobe.ps1, floor/ project compiles a bare Compose app
+     against the app's jars): JVM 58, +Swing 67, +bare Compose 99, +text
+     field 109, +kernel open/project 112, Gilune empty 137–139 MB private.
+     TASK MANAGER'S "Memory" = PRIVATE WORKING SET, not private bytes:
+     field 80, Gilune 115 → 102 after the fix. FIX: window icon was the
+     1,254 px logo decoded for the window's life (−13 MB Task Manager);
+     now `WINDOW_ICON` = 256 px `gilune-window-icon.png`
+     (`WindowIconTest`). -Xms16m: private −16 but Task Manager unchanged
+     — NOT adopted. Skia is mandatory with Compose; Compose+Skia ≈ +41 MB
+     over a bare JVM; Gilune's own remaining share ≈ 22 MB (Task
+     Manager), mostly ~1,900 classes it loads.
    - **PARKED DEBT (2026-09-03, owner decision — recorded, NOT to be
      re-counted by future review sweeps; fix opportunistically when a
      change already touches the file).** Verified real in three
