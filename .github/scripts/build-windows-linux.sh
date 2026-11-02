@@ -36,6 +36,12 @@ mkdir -p "$build_root" "$output"
   export CMAKE_CXX_FLAGS_RELEASE='/O2 /Ob2 /DNDEBUG'
   export CMAKE_POLICY_VERSION_MINIMUM=3.5
   export GGML_NATIVE=OFF
+  # Not tuned to the build machine, but not bare either: when CMake is
+  # cross-compiling, ggml defaults every instruction-set option to OFF and
+  # its CPU maths falls back to SSE2 — 46 s of speech took 19 s instead of
+  # 3 s (measured 2026-11-02). AVX2+FMA+F16C is the floor; whisper.rs
+  # refuses, in words, on a processor without them rather than crash.
+  export GGML_SSE42=ON GGML_AVX=ON GGML_AVX2=ON GGML_FMA=ON GGML_F16C=ON
   # whisper-rs-sys forwards CMake variables but does not declare them as Cargo
   # inputs. Invalidate that dependency when this build recipe changes.
   recipe=$(sha256sum "${BASH_SOURCE[0]}" | cut -d' ' -f1)

@@ -32,10 +32,12 @@ pieces as the provider feeds them):
 | Nemotron 0.6B, ten 30 s pieces decoded together | 8 | 3.6 | ~14 min |
 | whisper base-q5_1 (2026-09-01, a 21.5 s clip) | 8 | ~21 | ~2.5 min |
 
-**Corrected by § 9's measurement round**: the whisper row above was a
-21.5-second clip extrapolated, and it does not hold — on a 14-minute
-recording whisper ran at 2.2–2.6× real time. The argument for roles stands on
-Parakeet instead (9.1×, § 9).
+**Checked by § 9's measurement round.** The whisper row above was a
+21.5-second clip extrapolated. A local build first measured whisper at
+2.2–2.6× on a long recording, but that build was unoptimised; the shipped
+build, compiled for AVX2 from 1.4.0, runs an hour-scale recording at about
+21× (§ 9). Either way a person who wants Nemotron's live words gets a
+recordings engine several times faster.
 
 The time per minute of audio stayed flat across the recording: the slowness is
 the model's design, not a fault in how it is fed. A streaming model cannot
@@ -244,20 +246,27 @@ pounds", which is a fair transcript and not an error.
 
 | Engine | Speed (× real time) | An hour takes | Word error |
 |---|---|---|---|
-| Parakeet TDT 0.6B v2 (4 threads, 60 s segments) | **9.1** | ~7 min | 2.8% |
-| whisper base (8 threads) | 2.6 | ~23 min | 3.0% |
-| whisper base-q5_1 (8 threads) | 2.2 | ~27 min | 3.0% |
+| whisper base-q5_1, shipped build (AVX2; 599 s two-voice WAV) | **~21** | ~3 min | same words as below |
+| Parakeet TDT 0.6B v2 (4 threads, 60 s segments) | 9.1 | ~7 min | 2.8% |
+| whisper base, unoptimised local build | 2.6 | — | 3.0% |
+| whisper base-q5_1, unoptimised local build | 2.2 | — | 3.0% |
 | Nemotron 0.6B 160 ms (4 threads, one stream) | 1.5 | ~40 min | **2.4%** |
 | Nemotron 0.6B 160 ms, 30 s pieces batched (8 threads; 5-minute probe) | 3.6 | ~17 min | — |
 | Nemotron 0.6B 1,120 ms | — | — | — |
 
-- **Parakeet is the recordings engine to beat**: four times whisper's speed at
-  the same accuracy. Model load 2.6 s.
-- **Whisper is not the fast option the September figure suggested.** On 30 s
-  of the same recording it took 27.7 s; the September harness's 1.0 s for a
-  21.5 s clip cannot be reproduced and its source is gone. Rebuilding
-  whisper.cpp with `/arch:AVX2` changed nothing (27.4 s). Why whisper is this
-  slow here is an open question, recorded rather than chased in this ADR.
+- **Whisper's first figures here were a build fault, twice over.** The local
+  release build compiled ggml at `/Od`: cmake-rs drops `/O2` under the Visual
+  Studio generator, which the VS 2022 Build Tools now make succeed (CLAUDE.md
+  machine notes; build with `CMAKE_GENERATOR="NMake Makefiles"`). And the
+  **shipped** Windows dll, cross-built on Linux, compiled ggml-cpu with every
+  instruction-set option off, on SSE2 maths: 141.2 s for the 599 s recording.
+  Built for AVX2/FMA/F16C it takes 28.9 s, the same transcript (investigation
+  of 2026-11-02, measured through the real build recipe). A processor without
+  AVX2 now has Whisper refuse in words rather than crash — a CPU floor of
+  roughly 2013, confirmed by the owner for 1.4.0.
+- **On an AVX2 machine whisper base-q5_1 is the fastest recordings engine**,
+  and Parakeet the most accurate fast one (9.1×, 2.8%). Nemotron is the most
+  accurate and the slowest for recordings: it is the live engine.
 - **Nemotron 1,120 ms** would not load: sherpa-onnx 1.13.8 refuses to create a
   recogniser from the published files ("failed to create native
   OnlineRecognizer"). Not offered.

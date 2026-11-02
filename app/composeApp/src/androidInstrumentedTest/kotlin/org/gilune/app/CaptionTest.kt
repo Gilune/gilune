@@ -233,8 +233,12 @@ class CaptionTest {
 
         // It does NOT contribute capture.actions — recording belongs to
         // the voice adapter, so removing this plugin leaves recording
-        // intact.
-        assertEquals(listOf(Slots.SETTINGS_FORM), declaration.contributions.map { it.slot })
+        // intact. Beside its settings it publishes its engine for both
+        // transcription roles (ADR 0033 § 2), one per catalogue model.
+        assertEquals(
+            listOf(Slots.SETTINGS_FORM) + MOONSHINE_MODELS.map { Slots.TRANSCRIPTION_ENGINES },
+            declaration.contributions.map { it.slot },
+        )
     }
 
     @Test
