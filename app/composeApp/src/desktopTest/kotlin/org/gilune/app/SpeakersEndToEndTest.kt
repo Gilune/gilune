@@ -10,6 +10,7 @@
 package org.gilune.app
 
 import uniffi.gilune_ffi.Gilune
+import uniffi.gilune_ffi.TimedWord
 import java.io.ByteArrayInputStream
 import java.io.File
 import java.nio.file.Files
@@ -17,6 +18,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class SpeakersEndToEndTest {
@@ -34,6 +36,34 @@ class SpeakersEndToEndTest {
         }
         assertFalse(speakerModelsPresent(root))
         assertEquals(emptyList(), root.listFiles().orEmpty().map { it.name }, "nothing half-written is left")
+    }
+
+    /// The speaker models go when a pass that labelled a recording ends,
+    /// not ten minutes later. `GILUNE_TEST_SPEAKER_ROOT` names the models
+    /// as installed.
+    @Test
+    fun aPassThatLabelledARecordingLetsTheSpeakerModelsGo() {
+        val root = env("GILUNE_TEST_SPEAKER_ROOT")?.let(::File)?.takeIf { speakerModelsPresent(it) }
+            ?: return println("skipped: set GILUNE_TEST_SPEAKER_ROOT")
+        val vault = Files.createTempDirectory("gilune-speaker-pass").toFile()
+        Gilune.open(vault.path).use { gilune ->
+            SpeakerEngine(root).use { engine ->
+                val host = SpeakerHost()
+                host.replace(engine) { null }
+                val labeller = assertNotNull(host.labeller)
+                // Loaded by something other than a labelling: a pass leaves it.
+                engine.turns(FloatArray(5 * WAV_SAMPLE_RATE), null)
+                runRecordingsPass(gilune, NemoHost(), host) {}
+                assertTrue(engine.resident, "nothing was labelled in that pass")
+
+                val windows = assertNotNull(labeller.windows(5L * WAV_SAMPLE_RATE))
+                windows.push(FloatArray(5 * WAV_SAMPLE_RATE))
+                labeller.labelWith(windows, listOf(TimedWord("one", 0u, 400u), TimedWord("two", 500u, 900u)))
+                assertTrue(engine.resident)
+                runRecordingsPass(gilune, NemoHost(), host) {}
+                assertFalse(engine.resident, "the pass that labelled a recording let the models go")
+            }
+        }
     }
 
     @Test

@@ -163,6 +163,12 @@ fun List<PluginInfo>.recordingsChoice(): EngineChoice? {
     return EngineChoice(provider.pluginId, engine)
 }
 
+/// The recordings engine's name as the Transcription page shows it —
+/// "Whisper base (q5_1)", "Parakeet TDT 0.6B v2" — or null when nothing
+/// takes recordings.
+fun List<PluginInfo>.recordingsEngineName(): String? =
+    recordingsChoice()?.let { engineName(this, it) }
+
 /// Whether anybody has chosen an engine for while you speak — Off counts.
 fun List<PluginInfo>.liveChosen(): Boolean =
     transcriptionProviders().any { jsonString(it.settings, LIVE_ENGINE_KEY) != null }

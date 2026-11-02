@@ -248,6 +248,7 @@ pounds", which is a fair transcript and not an error.
 |---|---|---|---|
 | whisper base-q5_1, shipped build (AVX2; 599 s two-voice WAV) | **~21** | ~3 min | same words as below |
 | Parakeet TDT 0.6B v2 (4 threads, 60 s segments) | 9.1 | ~7 min | 2.8% |
+| Parakeet TDT 0.6B v2 (4 threads, 20 s segments, as shipped after 1.4.0) | 10.0 | ~6 min | 1.3% |
 | whisper base, unoptimised local build | 2.6 | — | 3.0% |
 | whisper base-q5_1, unoptimised local build | 2.2 | — | 3.0% |
 | Nemotron 0.6B 160 ms (4 threads, one stream) | 1.5 | ~40 min | **2.4%** |
@@ -479,3 +480,74 @@ whisper's document with the old fixed-keys writer (harmless today — the
 phone reads no role keys — but stage 5 must switch it to `settingsWith`);
 parked jobs that already ran once stay with their old provider (the
 kernel's rule).
+
+## Amendment (2026-11-02, after 1.4.0): memory and progress
+
+Owner, on the installed 1.4.0: a short spoken note took Gilune from under
+200 MB to 1,015 MB in Task Manager, and it stayed. It came down to 171 MB
+at the ten-minute sweep (sampled from the running app), so nothing leaked;
+it was held.
+
+**Where it went** (Parakeet in a test process, private bytes): 152 MB
+before, 822 MB with the model loaded, 1,089 MB after a 30 s recording,
+1,888 MB after a 60 s one, no further growth for 2 and 10 minutes, 164 MB
+after the release. ONNX Runtime keeps the largest working memory one
+segment has needed until the model goes, and that grows faster than the
+segment. On the 843 s recording:
+
+| Segments | Peak | Speed | Word error |
+|---|---|---|---|
+| 60 s (1.4.0) | 1,912 MB | 9.2× | 2.8% (46 words dropped) |
+| 45 s | 1,372 MB | 9.3× | 3.7% |
+| 30 s | 1,367 MB | 9.8× | 1.2% |
+| **20 s** | **1,109 MB** | **10.0×** | **1.3%** |
+| 15 s | 1,103 MB | 10.1× | 1.6% |
+
+**Changed.**
+
+- Segments are 20 s, searched for a quiet cut over their last 5 s.
+- A NeMo recordings pass that heard anything lets its model go when it
+  ends (`runRecordingsPass` → `NemoEngines.letGo`), unless the same model
+  is the live engine, which keeps the ten-minute timeout. Nothing lets a
+  model go while a dictation's stream is open; a streaming recording that
+  fails part-way closes its stream (`SherpaLiveSession.abandon`), or
+  nothing could let the model go again. The speaker models follow the
+  same rule: a pass in which a recording was labelled, by either
+  transcriber, lets them go when it ends (`SpeakerHost.letGoIfUsed`).
+  Whisper is unchanged: its working buffers go with each recording, and
+  only the ~60 MB model waits.
+- The status line says what is happening: "transcribing with Parakeet TDT
+  0.6B v2 · 42%", then "transcribed; labelling speakers…" while the
+  speaker model works (`TranscriptionStep`, shared). NeMo counts the
+  recording as the engine reads it (`RecordingPcm.reporting`; a piece
+  counts once the engine asks for the next, and 100% only at the end,
+  whatever the header claimed). Whisper reports from inside the kernel
+  through a new foreign trait, `TranscriptionProgress`, set per handle with
+  `set_transcription_progress` — **a bindings change**. whisper-rs 0.16
+  never frees the closure it is given, so the closure holds the listener
+  weakly.
+
+**In the running app** (dev probe `transcribe:<wav>`, scratch vault,
+Parakeet for recordings, the 843 s recording, private bytes every 5 s):
+138 MB at rest, ~975 then 1,110 MB while transcribing (the status line
+read "transcribing with Parakeet TDT 0.6B v2 · 48%" midway), **176 MB**
+5 s after "recording transcribed". With speaker labels on: 1,370 MB at
+the peak, "transcribed; labelling speakers…" for about 3.5 minutes, then
+390 MB with the Parakeet release alone — the speaker models held the
+other ~215 MB, which is why they now go too.
+
+**Tests** (each falsified by reverting its change): NemoTest progress rows
+(order, undercounting header, through the provider loop, the sentence);
+real-model rows, opt-in with `GILUNE_TEST_NEMO_ROOT`: a pass lets Parakeet
+go, a pass with nothing to hear and a live engine keep theirs, a dictation's
+open stream holds the model, a failed streaming recording leaves no stream;
+whisper's `progress` row (0 to 100 in order, the listener not kept alive);
+SpeakersEndToEndTest, opt-in with `GILUNE_TEST_SPEAKER_ROOT`: a pass that
+labelled lets the speaker models go, one that did not leaves them.
+
+**Gaps.** The cost of letting go is a reload per recording: Nemotron loads
+in ~3.25 s (measured 2026-11-01); Parakeet's load is not separately
+measured. The phone shows no progress (Moonshine reports nothing yet).
+Progress is per recording, with no "2 of 3" when several wait. Telling
+voices apart in one 14-minute window took ~3.5 minutes against ~85 s for
+the words — the labelling step says so, but does not count.

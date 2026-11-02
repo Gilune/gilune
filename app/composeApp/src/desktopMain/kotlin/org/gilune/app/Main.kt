@@ -566,9 +566,8 @@ private fun DesktopApp(
         // Transcription (NVIDIA NeMo) writes saved transcripts app-side
         // (ADR 0027 S3): every processing pass on this handle gives it the
         // jobs queued for it, when its model is loaded.
-        state.externalProcessing = { gilune ->
-            nemo.recordings?.let { runNemoJobs(gilune, it::transcribe, labelled = speakers.labelling(it)) } ?: ProviderPass()
-        }
+        state.externalProcessing = { gilune -> runRecordingsPass(gilune, nemo, speakers, state::transcriptionStep) }
+        speakers.onLabelling = { state.transcriptionStep(TranscriptionStep.LabellingSpeakers) }
         state.syncSetup = { gilune ->
             val identity = identityDir()
             identity.mkdirs()
@@ -589,6 +588,14 @@ private fun DesktopApp(
             registerNemoOnHandle(gilune)
             keepOneRecordingsTaker(gilune)?.let { state.message.value = it }
             registerSpeakersOnHandle(gilune)
+            // Whisper runs in the kernel and reports from there; NeMo's
+            // loop reports above.
+            gilune.setTranscriptionProgress(object : uniffi.gilune_ffi.TranscriptionProgress {
+                override fun progress(percent: UByte) {
+                    val engine = state.plugins.recordingsEngineName() ?: "Whisper"
+                    state.transcriptionStep(TranscriptionStep.Hearing(engine, percent.toInt()))
+                }
+            })
             state.refresh()
             // The starting folders the enabled plugins declare, each once
             // per vault on this machine — after the open, because only the
@@ -601,8 +608,8 @@ private fun DesktopApp(
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
             // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>, type:<rel>,
-            // props:<rel>, search:<query>, panel:<key> and
-            // split:<rel>;<rel>. View state belongs to a tab, so a probe
+            // props:<rel>, search:<query>, panel:<key>, transcribe:<wav>
+            // and split:<rel>;<rel>. View state belongs to a tab, so a probe
             // flips it on the tab the open returned.
             when {
                 probe == null -> Unit
@@ -636,6 +643,14 @@ private fun DesktopApp(
                             delay(40)
                         }
                     }
+                }
+                // transcribe:<path to a canonical WAV> waits 10 s for
+                // transcription to come up, then hands the file in as
+                // "Transcribe a recording…" does, so a run can watch the
+                // status line and the process's memory through a recording.
+                probe.startsWith("transcribe:") -> scope.launch {
+                    delay(10_000)
+                    state.captureRecording(java.io.File(probe.removePrefix("transcribe:")).readBytes())
                 }
                 probe.startsWith("search:") -> {
                     // A screenshot of the search panel needs the rail,

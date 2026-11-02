@@ -274,6 +274,40 @@ class NemoHost {
 
 val LocalNemo = staticCompositionLocalOf { NemoHost() }
 
+/// The desktop's part of every processing pass, run after the kernel's own
+/// (whisper's): every recording queued for the NeMo recordings engine, each
+/// one's progress told to `step` as it is heard.
+///
+/// Models go when a pass that used them ends, rather than after ten idle
+/// minutes: Parakeet held about a gigabyte for that long after the note was
+/// written (owner report, 2026-11-02), and the speaker models ~215 MB more;
+/// loading them again for the next recording costs seconds. Not the NeMo
+/// model when it is also the live engine — a dictation's warm model keeps
+/// its idle timeout, and a pass after every dictation would otherwise drop
+/// it each time.
+fun runRecordingsPass(
+    gilune: Gilune,
+    nemo: NemoHost,
+    speakers: SpeakerHost,
+    step: (TranscriptionStep) -> Unit,
+): ProviderPass {
+    val engines = nemo.recordings
+    val pass = if (engines == null) {
+        ProviderPass()
+    } else {
+        runNemoJobs(
+            gilune,
+            engines::transcribe,
+            labelled = speakers.labelling(engines),
+            heard = { step(TranscriptionStep.Hearing(engines.model.name, it)) },
+        ).also { if (it.claimed > 0 && engines !== nemo.live) engines.letGo() }
+    }
+    // Whisper's labelling ran in the kernel's half of this pass; NeMo's in
+    // the loop above. Either way it is over now.
+    speakers.letGoIfUsed()
+    return pass
+}
+
 /// Make sure one NeMo model is on this computer: the chosen model
 /// downloaded with consent and verified. True when it is here. Loading it is
 /// left to the first job or dictation that needs it (09 § Desktop footprint).
