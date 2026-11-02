@@ -36,6 +36,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
@@ -84,6 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -92,6 +94,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -127,6 +130,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.TextFieldValue
@@ -150,6 +154,10 @@ import java.io.File
 import java.time.LocalDate
 
 private const val AUTOSAVE_IDLE_MS = 1200L
+
+/// How long the field's width must hold before a sliced note's chunks are
+/// measured again at it (ADR 0032 stage 4).
+private const val SLICE_WIDTH_SETTLE_MS = 300L
 
 /// The body field's inset. Named because a collapsed block's overlay is
 /// placed in the *text's* coordinates and has to add it back: the layout
@@ -883,17 +891,181 @@ private fun OpenNote(
             val live = editor.live
             val ghost = live?.ghost(editor.text.text)
             val ghostStyle = SpanStyle(color = colours.onSurfaceVariant.copy(alpha = 0.7f))
-            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size, live?.anchor, ghost, ghostStyle) {
-                val base = MarkdownEditTransformation(palette, line, decorations, blockDecorations, appearance.edit.size / 13f)
+            // Colours are drawn near the screen only (ADR 0032 stage 3): a
+            // long note's thousands of colour spans were native objects Skia
+            // rebuilt on every keystroke. The window follows the scroll
+            // below, once a screenful, from the laid-out text.
+            val bodyScroll = rememberScrollState()
+            var styleWindow by remember(relPath) { mutableStateOf<IntRange?>(0..INITIAL_STYLE_WINDOW_CHARS) }
+            // Each line's styles and decorations, kept between keystrokes
+            // so one only re-reads the lines it changed.
+            val lineMemo = remember(relPath) { LineMemo() }
+            val editStyle = TextStyle(
+                fontFamily = appearance.edit.font.family,
+                fontSize = appearance.edit.size.sp,
+                lineHeight = appearance.edit.lineHeight.sp,
+                color = colours.onSurface,
+            )
+            val fontScale = appearance.edit.size / 13f
+            val windowDensity = LocalDensity.current
+
+            // A long note is laid out a slice at a time (ADR 0032 stage 4):
+            // the lines near the screen, with the text above and below
+            // standing in as one invisible character each, as tall as that
+            // text measures. The field's value is still the whole buffer, so
+            // undo, selection, copy and typing over a selection are the
+            // field's own as before; only what Skia lays out shrinks.
+            // `sliceStart` and `sliceTail` are the slice's edges — the tail
+            // counted from the buffer's end, so typing inside moves neither.
+            val sliceSource = editor.text.text
+            val chunks = remember(sliceSource) {
+                if (sliceSource.count { it == '\n' } + 1 >= SLICE_MIN_LINES) sliceChunks(sliceSource) else null
+            }
+            var sliceWidth by remember(relPath) { mutableStateOf(0) }
+            var sliceStart by remember(relPath) { mutableStateOf(-1) }
+            var sliceTail by remember(relPath) { mutableStateOf(0) }
+            var caretPinned by remember(relPath) { mutableStateOf(false) }
+            var pointerHeld by remember { mutableStateOf(false) }
+            val sliceHeights = remember(relPath) { SliceHeights() }
+            val sliceMeasurer = rememberTextMeasurer(cacheSize = 0)
+            val lineHeightPx = with(windowDensity) { appearance.edit.lineHeight.sp.toPx() }
+            sliceHeights.configure(sliceWidth, editStyle.fontFamily, editStyle.fontSize, editStyle.lineHeight, decorations)
+            /// A chunk's height at the field's width — measured once per
+            /// text, or estimated from its line count until the width is
+            /// known. A chunk holding a fence is kept per set of block
+            /// results too: a filter block's rows decide its height.
+            fun chunkHeight(chunk: SliceChunk, text: String): Float {
+                if (sliceWidth <= 0) {
+                    var lines = 1
+                    for (index in chunk.start until chunk.end) if (text[index] == '\n') lines++
+                    return lines * lineHeightPx
+                }
+                return sliceHeights.heightOf(
+                    text,
+                    chunk,
+                    salt = System.identityHashCode(blockDecorations),
+                    transform = { body ->
+                        MarkdownEditTransformation(palette, null, decorations, blockDecorations, fontScale).filter(AnnotatedString(body)).text
+                    },
+                    measure = { measureChunk(sliceMeasurer, it, editStyle, sliceWidth) },
+                )
+            }
+            val slice: EditorSlice? = chunks?.let { all ->
+                val range = sliceRangeOf(all, sliceStart, sliceTail, sliceSource.length)
+                    ?: sliceChunksFor(null, FloatArray(all.size + 1) { index -> index * 600f }, 0f, 1_200f,
+                        chunkIndexOf(all, editor.text.selection.end))
+                var above = 0f
+                for (index in 0 until range.first) above += chunkHeight(all[index], sliceSource)
+                var below = 0f
+                for (index in range.last + 1 until all.size) below += chunkHeight(all[index], sliceSource)
+                sliceHeights.prune(all.size)
+                with(windowDensity) {
+                    EditorSlice(all[range.first].start, sliceSource.length - all[range.last].end, above.toSp(), below.toSp())
+                }
+            }
+            val transformation = remember(palette, line, decorations, blockDecorations, appearance.edit.size, live?.anchor, ghost, ghostStyle, styleWindow, slice) {
+                val base = MarkdownEditTransformation(
+                    palette, line, decorations, blockDecorations, fontScale,
+                    styleWindow = if (slice == null) styleWindow else null, memo = lineMemo, slice = slice,
+                )
                 if (live == null || ghost == null) base else DictationTransformation(base, live.anchor, ghost, ghostStyle)
             }
             // Where each collapsed block's placeholder landed, asked of the
             // same composition the field is showing, so what is drawn and
             // what was reserved cannot drift apart.
-            val collapsed = remember(editor.text.text, line, decorations, blockDecorations) {
-                collapsedBlocks(editor.text.text, line, decorations, blockDecorations)
+            val collapsed = remember(editor.text.text, line, decorations, blockDecorations, slice) {
+                collapsedBlocks(editor.text.text, line, decorations, blockDecorations, lineMemo, slice)
             }
             var layout by remember { mutableStateOf<TextLayoutResult?>(null) }
+            // Each relayout leaves the last one's native memory for the
+            // collector; once the note is still, ask for it (NativeGarbage).
+            LaunchedEffect(layout) { layout?.let { NativeGarbage.layoutReplaced(it.layoutInput.text.length) } }
+            DisposableEffect(relPath) { onDispose { NativeGarbage.soon() } }
+            val currentChunks by rememberUpdatedState(chunks)
+            val currentSlice by rememberUpdatedState(slice)
+            val currentSliceTransformation by rememberUpdatedState(transformation)
+            // The slice follows the view (ADR 0032 stage 4). It is kept while
+            // the view stays half a screen inside it and the caret has a
+            // chunk to spare either side; only then are chunk tops worked
+            // out and a new slice chosen. It never moves under a held
+            // pointer or an IME composition, so neither sees its text shift.
+            // When it moves, the line at the top of the view is put back
+            // where it was, absorbing whatever the measured heights missed.
+            LaunchedEffect(bodyScroll, relPath) {
+                val padding = with(windowDensity) { EDITOR_PADDING.toPx() }
+                var anchor: Pair<Int, Float>? = null
+                snapshotFlow { listOf(bodyScroll.value, bodyScroll.viewportSize, layout, caretPinned, pointerHeld, editor.text.selection.end, currentChunks) }
+                    .collect {
+                        val all = currentChunks ?: return@collect
+                        val placed = layout ?: return@collect
+                        val height = bodyScroll.viewportSize
+                        if (height <= 0) return@collect
+                        val text = editor.text.text
+                        val shown = currentSliceTransformation.filter(AnnotatedString(text))
+                        if (placed.layoutInput.text.text != shown.text.text) return@collect
+                        val mapping = shown.offsetMapping
+                        val cut = currentSlice
+                        val viewTop = bodyScroll.value - padding
+                        anchor?.let { (offset, y) ->
+                            anchor = null
+                            val now = placed.getLineTop(placed.getLineForOffset(mapping.originalToTransformed(offset)))
+                            val drift = now - y
+                            if (kotlin.math.abs(drift) >= 1f) bodyScroll.scrollBy(drift)
+                            return@collect
+                        }
+                        if (pointerHeld || editor.text.composition != null) return@collect
+                        val range = cut?.let { sliceRangeOf(all, it.start, it.tail, text.length) } ?: return@collect
+                        val caret = editor.text.selection.end
+                        val caretChunk = chunkIndexOf(all, caret)
+                        val caretInside = caretChunk in range
+                        val caretRoomy = caretChunk in (if (range.first == 0) 0 else range.first + 1)..(if (range.last == all.lastIndex) range.last else range.last - 1)
+                        val middleTop = with(windowDensity) { cut.above.toPx() }
+                        val middleBottom = placed.size.height - with(windowDensity) { cut.below.toPx() }
+                        val viewInside = (range.first == 0 || viewTop - height / 2 >= middleTop) &&
+                            (range.last == all.lastIndex || viewTop + height * 1.5f <= middleBottom)
+                        if (viewInside && !caretPinned && (!caretInside || caretRoomy)) return@collect
+                        // Every chunk's top: measured above and below, read
+                        // off the layout inside.
+                        val tops = FloatArray(all.size + 1)
+                        var y = 0f
+                        for (index in all.indices) {
+                            if (index in range) {
+                                tops[index] = placed.getLineTop(placed.getLineForOffset(mapping.originalToTransformed(all[index].start)))
+                                if (index == range.last) y = middleBottom
+                            } else {
+                                tops[index] = y
+                                y += chunkHeight(all[index], text)
+                            }
+                        }
+                        tops[all.size] = y
+                        val keepCaret = caretPinned || caretInside
+                        val centre = if (caretPinned) tops[caretChunk] - height / 2f else viewTop
+                        val next = sliceChunksFor(range, tops, centre, height.toFloat(), if (keepCaret) caretChunk else null)
+                        if (next == range) return@collect
+                        val top = viewTop.coerceAtLeast(0f)
+                        val atTop = mapping.transformedToOriginal(placed.getOffsetForPosition(Offset(0f, top)))
+                        if (!caretPinned && cut.contains(atTop, text.length)) {
+                            anchor = atTop to placed.getLineTop(placed.getLineForOffset(mapping.originalToTransformed(atTop)))
+                        }
+                        sliceStart = all[next.first].start
+                        sliceTail = text.length - all[next.last].end
+                    }
+            }
+            LaunchedEffect(bodyScroll, relPath) {
+                val padding = with(windowDensity) { EDITOR_PADDING.toPx() }
+                // Asked when the view moves or the note gains or loses a
+                // line, not on every keystroke: each question reads every
+                // line's metrics afresh, and typing within a line leaves
+                // the window where it was.
+                snapshotFlow { Triple(bodyScroll.value, bodyScroll.viewportSize, layout?.lineCount) }.collect { (top, height, _) ->
+                    val placed = layout
+                    if (placed == null || height <= 0 || currentSlice != null) return@collect
+                    val above = (top - padding).coerceAtLeast(0f)
+                    val first = placed.getOffsetForPosition(Offset(0f, above))
+                    val last = placed.getOffsetForPosition(Offset(placed.size.width.toFloat(), above + height))
+                    styleWindow = nextStyleWindow(styleWindow, first..last.coerceAtLeast(first), placed.layoutInput.text.length)
+                }
+            }
             var hoveringActivation by remember { mutableStateOf(false) }
             // A token's own menu (ADR 0015 amendment 2026-10-31): the due
             // date under the pointer, which shows the arrow beside it, and
@@ -919,17 +1091,38 @@ private fun OpenNote(
             val density = LocalDensity.current
             LaunchedEffect(caretMoves) {
                 if (caretMoves == 0) return@LaunchedEffect
-                // The layout of the change arrives with the next frame.
-                withFrameNanos { }
-                val placed = layout ?: return@LaunchedEffect
-                val caret = currentTransformation.filter(AnnotatedString(editor.text.text)).offsetMapping
-                    .originalToTransformed(editor.text.selection.end)
-                    .coerceIn(0, placed.layoutInput.text.length)
-                // A margin below the caret's line, so it never sits flush
-                // against the pane's edge.
-                val margin = with(density) { EDITOR_PADDING.toPx() }
-                val rect = placed.getCursorRect(caret)
-                caretView.bringIntoView(rect.copy(top = rect.top - margin, bottom = rect.bottom + margin))
+                // A pin set below is released however this ends — even
+                // cancelled by the next keystroke — so the slice goes back
+                // to following the view.
+                try {
+                    // The layout of the change arrives with the next frame.
+                    withFrameNanos { }
+                    // A sliced note may have the caret outside the laid-out
+                    // text — Ctrl+End, a reveal, a search hit. The slice is
+                    // pinned to the caret until a layout holding it arrives,
+                    // and stays pinned until the view is there too.
+                    if (currentChunks != null) {
+                        var frames = 0
+                        while (frames++ < 10) {
+                            val shown = currentTransformation.filter(AnnotatedString(editor.text.text)).text.text
+                            val holds = currentSlice?.contains(editor.text.selection.end, editor.text.text.length) ?: true
+                            if (holds && layout?.layoutInput?.text?.text == shown) break
+                            caretPinned = true
+                            withFrameNanos { }
+                        }
+                    }
+                    val placed = layout ?: return@LaunchedEffect
+                    val caret = currentTransformation.filter(AnnotatedString(editor.text.text)).offsetMapping
+                        .originalToTransformed(editor.text.selection.end)
+                        .coerceIn(0, placed.layoutInput.text.length)
+                    // A margin below the caret's line, so it never sits flush
+                    // against the pane's edge.
+                    val margin = with(density) { EDITOR_PADDING.toPx() }
+                    val rect = placed.getCursorRect(caret)
+                    caretView.bringIntoView(rect.copy(top = rect.top - margin, bottom = rect.bottom + margin))
+                } finally {
+                    caretPinned = false
+                }
             }
 
             // A task or a search match clicked elsewhere opens this note
@@ -1134,7 +1327,7 @@ private fun OpenNote(
                 val caret = if (bodyFocused) caretLine(text, editor.text.selection.start) else null
                 val limit = placed.layoutInput.text.length
                 if (limit == 0) return null
-                return menuTokens(text, caret, decorations, blockDecorations).firstOrNull { token ->
+                return menuTokens(text, caret, decorations, blockDecorations, slice).firstOrNull { token ->
                     val chip = chipRect(placed, token) ?: return@firstOrNull false
                     val first = placed.getBoundingBox(token.transformedStart.coerceIn(0, limit - 1))
                     val line = placed.getLineForOffset(token.transformedEnd - 1)
@@ -1260,13 +1453,18 @@ private fun OpenNote(
                 val from = mapping.originalToTransformed(value.selection.end).coerceIn(0, placed.layoutInput.text.length)
                 val x = verticalX ?: placed.getCursorRect(from).left
                 val line = placed.getLineForOffset(from) + lines
-                val target = when {
+                val laidOut = when {
                     line < 0 -> 0
                     line >= placed.lineCount -> value.text.length
                     else -> mapping.transformedToOriginal(
                         placed.getOffsetForPosition(Offset(x, (placed.getLineTop(line) + placed.getLineBottom(line)) / 2)),
                     ).coerceIn(0, value.text.length)
                 }
+                // A step onto a slice's placeholder (ADR 0032 stage 4)
+                // lands on the next line of the buffer instead, column
+                // kept as far as it goes; the slice then follows the caret.
+                val target = slice?.takeIf { !it.contains(laidOut, value.text.length) && line in 0 until placed.lineCount }
+                    ?.let { stepLines(value.text, value.selection.end, lines) } ?: laidOut
                 editor.text = value.copy(selection = if (extend) TextRange(value.selection.start, target) else TextRange(target))
                 verticalX = x
                 caretMoves++
@@ -1293,6 +1491,7 @@ private fun OpenNote(
                     caret,
                     decorations,
                     blockDecorations,
+                    slice,
                 )
             }
 
@@ -1407,11 +1606,19 @@ private fun OpenNote(
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val paneHeight = maxHeight
                 val blockWidth = maxWidth - EDITOR_PADDING * 2
+                // The width a slice's chunks are measured at: the field's
+                // text width, settled for a moment so dragging the window's
+                // edge does not measure the whole note at every step.
+                val textWidthPx = with(LocalDensity.current) { blockWidth.roundToPx() }
+                LaunchedEffect(textWidthPx) {
+                    if (sliceWidth > 0) delay(SLICE_WIDTH_SETTLE_MS)
+                    sliceWidth = textWidthPx
+                }
                 // A box rather than a column because the field is not the
                 // only thing in it: a collapsed block draws over the lines
                 // the field reserved for it, and being its sibling here is
                 // what makes it scroll with the text it covers.
-                Box(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).testTag("note-scroll")) {
+                Box(Modifier.fillMaxSize().verticalScroll(bodyScroll).testTag("note-scroll")) {
                     // Drawn before the field, so behind its text; it takes
                     // no input, so a click goes straight through.
                     val pulsing = pulseRange
@@ -1483,6 +1690,8 @@ private fun OpenNote(
                                         val mapping = matchMapping ?: return@drawBehind
                                         val limit = placed.layoutInput.text.length
                                         found.forEachIndexed { index, match ->
+                                            // A match outside the slice is not laid out.
+                                            if (slice != null && !(slice.contains(match.start, editor.text.text.length) && slice.contains(match.end, editor.text.text.length))) return@forEachIndexed
                                             val start = mapping.originalToTransformed(match.start).coerceIn(0, limit)
                                             val end = mapping.originalToTransformed(match.end).coerceIn(start, limit)
                                             if (end > start) {
@@ -1581,6 +1790,9 @@ private fun OpenNote(
                                                 if (event.type == PointerEventType.Press && event.buttons.isSecondaryPressed) {
                                                     rightClickAt = event.changes.last().position
                                                 }
+                                                // A held pointer keeps the slice still, so a
+                                                // drag never sees the text move under it.
+                                                pointerHeld = event.changes.any { it.pressed }
                                             }
                                         }
                                     }
@@ -1594,12 +1806,7 @@ private fun OpenNote(
                                     // ambiguity against the title field.
                                     .testTag("note-body"),
                                 onTextLayout = { layout = it },
-                                textStyle = TextStyle(
-                                    fontFamily = appearance.edit.font.family,
-                                    fontSize = appearance.edit.size.sp,
-                                    lineHeight = appearance.edit.lineHeight.sp,
-                                    color = colours.onSurface,
-                                ),
+                                textStyle = editStyle,
                                 cursorBrush = SolidColor(colours.primary),
                                 visualTransformation = transformation,
                             )
@@ -1640,7 +1847,7 @@ private fun OpenNote(
                     // the checkbox before it, and the date moves with it.
                     val chipLayout = layout
                     val token = hoverToken?.let { held ->
-                        menuTokens(editor.text.text, line, decorations, blockDecorations).firstOrNull { it.range == held.range }
+                        menuTokens(editor.text.text, line, decorations, blockDecorations, slice).firstOrNull { it.range == held.range }
                     }
                     val chip = if (token != null && chipLayout != null && menuRequest == null && (fieldHover || chipHovered)) {
                         runCatching { chipRect(chipLayout, token) }.getOrNull()

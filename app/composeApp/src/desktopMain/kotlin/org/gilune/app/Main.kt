@@ -201,6 +201,7 @@ private class Shutdown {
 
 fun main() {
     DesktopLog.install()
+    chooseRenderer()
     System.getProperty("compose.application.resources.dir")?.let { resources ->
         val existing = System.getProperty("jna.library.path")
         System.setProperty(
@@ -241,7 +242,7 @@ fun main() {
                 exitApplication()
             },
             title = if (probe == null) "Gilune" else "Gilune probe",
-            icon = painterResource("gilune-logo-v2.png"),
+            icon = painterResource(WINDOW_ICON),
             state = rememberWindowState(size = DpSize(1180.dp, 760.dp)),
             onPreviewKeyEvent = { event ->
                 // The plugin's keys come first: they are the person's to
@@ -346,6 +347,12 @@ fun main() {
     }
 }
 
+/// The window's icon: the logo at 256 px, the largest Windows draws one.
+/// The window keeps its icon decoded for its whole life, and the full
+/// 1,254 px logo cost 9–10 MB of native memory to show at most 256 px
+/// (measured 2026-11-02, ADR 0032). The full logo stays for packaging.
+internal const val WINDOW_ICON = "gilune-window-icon.png"
+
 @Composable
 private fun DesktopApp(
     vaultDir: String,
@@ -360,6 +367,10 @@ private fun DesktopApp(
     onVaultChange: (String) -> Unit,
 ) {
     val scope = rememberCoroutineScope()
+    // Skia's paragraph cache never hits for an editor and holds a copy of
+    // every text it laid out (NativeGarbage, ADR 0032).
+    val fontResolver = androidx.compose.ui.platform.LocalFontFamilyResolver.current
+    LaunchedEffect(fontResolver) { NativeGarbage.disableParagraphCache(fontResolver) }
     val state = remember { GiluneState(vaultDir, scope) }
     // The document region's whole state: the pane tree, its tabs and one
     // buffer per open note, restored from where this vault was left.
@@ -584,7 +595,7 @@ private fun DesktopApp(
             }
             // UI-probe affordances (dev runs only, -Pgilune.probe): open a
             // screen so an automated screenshot can look at it. The forms
-            // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>,
+            // are settings[:section|:plugin:<id>], note:<rel>, read:<rel>, type:<rel>,
             // props:<rel>, search:<query>, panel:<key> and
             // split:<rel>;<rel>. View state belongs to a tab, so a probe
             // flips it on the tab the open returned.
@@ -599,6 +610,27 @@ private fun DesktopApp(
                         .forEach { openNote(it) }
                 probe.startsWith("read:") -> {
                     tabs.open(probe.removePrefix("read:")).editor.reading = true
+                }
+                // type:<rel> opens the note, waits 15 s for the app to
+                // settle, then types 150 letters at the end of its first
+                // line — on screen, where a person types — one every 40 ms,
+                // through the buffer the field draws. A memory measurement
+                // can watch typing this way without sending a keystroke to
+                // any window (ADR 0032). The field is not focused, so every
+                // line is decorated: close to typing, not identical.
+                probe.startsWith("type:") -> {
+                    val editor = tabs.open(probe.removePrefix("type:")).editor
+                    scope.launch {
+                        delay(15_000)
+                        repeat(150) { typed ->
+                            val before = editor.text.text
+                            val at = before.indexOf('\n').let { if (it < 0) before.length else it }
+                            val text = before.substring(0, at) + ('a' + typed % 26) + before.substring(at)
+                            editor.text = androidx.compose.ui.text.input.TextFieldValue(text, androidx.compose.ui.text.TextRange(at + 1))
+                            editor.dirty = true
+                            delay(40)
+                        }
+                    }
                 }
                 probe.startsWith("search:") -> {
                     // A screenshot of the search panel needs the rail,

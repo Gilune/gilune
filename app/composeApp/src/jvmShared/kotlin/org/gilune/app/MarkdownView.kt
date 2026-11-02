@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +30,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -116,75 +121,141 @@ fun MarkdownBody(
     pills: List<ReadPill> = emptyList(),
     pillTones: PillToneMap = PillToneMap(ready = true),
 ) {
-    val colours = MaterialTheme.colorScheme
-    val palette = pillPalette(pillTones)
+    val look = BlockLook(renderers, onToggleTask, checkboxTarget, textStyle, links, pills, pillPalette(pillTones))
+    DocumentTextStyle(textStyle) {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
+            for (block in blocks) MarkdownBlock(block, look)
+        }
+    }
+}
+
+/// [MarkdownBody] for a whole note: the same blocks drawn the same way,
+/// but only those on or near the screen are composed and laid out (ADR
+/// 0032 stage 1). A plain column laid out every block of a long note at
+/// once — +136 MB for a 64 KB note, against an empty window.
+///
+/// The list is the scroll container, so a caller gives up its own
+/// `verticalScroll`; what sat above the body — a title, buttons — goes in
+/// `header`, which scrolls away with the text as it did. `state` is the
+/// caller's so it can scroll from the keyboard.
+@Composable
+fun LazyMarkdownBody(
+    blocks: List<MdBlock>,
+    modifier: Modifier = Modifier,
+    state: LazyListState = rememberLazyListState(),
+    contentPadding: PaddingValues = PaddingValues(0.dp),
+    header: (@Composable () -> Unit)? = null,
+    renderers: BlockRenderers = BlockRenderers(),
+    onToggleTask: ((line: Int) -> Unit)? = null,
+    checkboxTarget: Dp = 22.dp,
+    textStyle: TextStyle = TextStyle.Default,
+    blockSpacing: Dp = 10.dp,
+    links: ReadLinks = ReadLinks(),
+    pills: List<ReadPill> = emptyList(),
+    pillTones: PillToneMap = PillToneMap(ready = true),
+) {
+    val look = BlockLook(renderers, onToggleTask, checkboxTarget, textStyle, links, pills, pillPalette(pillTones))
+    DocumentTextStyle(textStyle) {
+        LazyColumn(
+            modifier,
+            state = state,
+            contentPadding = contentPadding,
+            verticalArrangement = Arrangement.spacedBy(blockSpacing),
+        ) {
+            if (header != null) item(key = "header", contentType = "header") { header() }
+            items(blocks, contentType = { it::class }) { block -> MarkdownBlock(block, look) }
+        }
+    }
+}
+
+@Composable
+private fun DocumentTextStyle(textStyle: TextStyle, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalDocumentTextStyle provides textStyle.takeUnless { it == TextStyle.Default }) {
+        ProvideTextStyle(textStyle, content)
+    }
+}
+
+/// What every block of one body is drawn with, worked out once per body
+/// rather than once per block.
+private class BlockLook(
+    val renderers: BlockRenderers,
+    val onToggleTask: ((line: Int) -> Unit)?,
+    val checkboxTarget: Dp,
+    val textStyle: TextStyle,
+    val links: ReadLinks,
+    val pills: List<ReadPill>,
+    val palette: (String) -> PillColours,
+) {
     val scale = if (textStyle.fontSize.isSpecified) textStyle.fontSize.value / 14f else 1f
     val lineHeight = if (textStyle.lineHeight.isSpecified) textStyle.lineHeight else 22.sp
-    CompositionLocalProvider(LocalDocumentTextStyle provides textStyle.takeUnless { it == TextStyle.Default }) {
-        ProvideTextStyle(textStyle) {
-            Column(modifier, verticalArrangement = Arrangement.spacedBy(blockSpacing)) {
-                for (block in blocks) {
-                    when (block) {
-                        is MdBlock.Heading -> PillText(
-                            annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
-                            fontSize = headingSize(block.level) * scale,
-                            lineHeight = if (textStyle.lineHeight.isSpecified) (headingSize(block.level).value * lineHeight.value / 14f).sp else androidx.compose.ui.unit.TextUnit.Unspecified,
-                            fontWeight = FontWeight.SemiBold,
-                            palette = palette,
-                        )
-                        is MdBlock.Paragraph -> PillText(
-                            annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
-                            lineHeight = lineHeight,
-                            palette = palette,
-                        )
-                        is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (block.task == null) {
-                                Text(
-                                    when (block.marker) {
-                                        "-", "*", "+" -> "•"
-                                        else -> block.marker.ifEmpty { " " }
-                                    },
-                                    modifier = Modifier.width(22.dp * scale),
-                                    color = colours.onSurfaceVariant,
-                                )
-                            } else {
-                                TaskGlyph(block.task, block.line, onToggleTask, maxOf(checkboxTarget, 22.dp * scale))
-                            }
-                            PillText(annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer), lineHeight = lineHeight, palette = palette)
-                        }
-                        is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
-                            Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
-                            PillText(
-                                annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
-                                color = colours.onSurfaceVariant,
-                                lineHeight = lineHeight,
-                                modifier = Modifier.padding(start = 10.dp),
-                                palette = palette,
-                            )
-                        }
-                        // The seam (§ 5). A registered info string draws itself;
-                        // every other one — and every unfenced code block, which
-                        // carries none — is the box it has always been.
-                        is MdBlock.Code -> {
-                            val registration = renderers[block.language]
-                            if (registration == null) CodeBox(block.text, scale, textStyle.lineHeight) else registration.render(block)
-                        }
-                        is MdBlock.Embed -> Text(
-                            "▸ ${block.target}",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp * scale,
-                            color = colours.onSurfaceVariant,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(colours.surfaceVariant)
-                                .padding(10.dp),
-                        )
-                        is MdBlock.Rule -> HorizontalDivider()
-                    }
-                }
+}
+
+@Composable
+private fun MarkdownBlock(block: MdBlock, look: BlockLook) {
+    val colours = MaterialTheme.colorScheme
+    val textStyle = look.textStyle
+    val scale = look.scale
+    val lineHeight = look.lineHeight
+    val palette = look.palette
+    val links = look.links
+    val pills = look.pills
+    when (block) {
+        is MdBlock.Heading -> PillText(
+            annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
+            fontSize = headingSize(block.level) * scale,
+            lineHeight = if (textStyle.lineHeight.isSpecified) (headingSize(block.level).value * lineHeight.value / 14f).sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+            fontWeight = FontWeight.SemiBold,
+            palette = palette,
+        )
+        is MdBlock.Paragraph -> PillText(
+            annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
+            lineHeight = lineHeight,
+            palette = palette,
+        )
+        is MdBlock.ListItem -> Row(verticalAlignment = Alignment.CenterVertically) {
+            if (block.task == null) {
+                Text(
+                    when (block.marker) {
+                        "-", "*", "+" -> "•"
+                        else -> block.marker.ifEmpty { " " }
+                    },
+                    modifier = Modifier.width(22.dp * scale),
+                    color = colours.onSurfaceVariant,
+                )
+            } else {
+                TaskGlyph(block.task, block.line, look.onToggleTask, maxOf(look.checkboxTarget, 22.dp * scale))
             }
+            PillText(annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer), lineHeight = lineHeight, palette = palette)
         }
+        is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
+            Box(Modifier.width(2.dp).fillMaxHeight().background(colours.outline))
+            PillText(
+                annotate(block.spans, colours.primary, links, pills, colours.onPrimaryContainer),
+                color = colours.onSurfaceVariant,
+                lineHeight = lineHeight,
+                modifier = Modifier.padding(start = 10.dp),
+                palette = palette,
+            )
+        }
+        // The seam (§ 5). A registered info string draws itself;
+        // every other one — and every unfenced code block, which
+        // carries none — is the box it has always been.
+        is MdBlock.Code -> {
+            val registration = look.renderers[block.language]
+            if (registration == null) CodeBox(block.text, scale, textStyle.lineHeight) else registration.render(block)
+        }
+        is MdBlock.Embed -> Text(
+            "▸ ${block.target}",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp * scale,
+            color = colours.onSurfaceVariant,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(colours.surfaceVariant)
+                .padding(10.dp),
+        )
+        is MdBlock.Rule -> HorizontalDivider()
     }
 }
 
