@@ -117,7 +117,7 @@ fun rememberPillTones(state: GiluneState, decorations: List<EditorDecoration>): 
     val kernel = state.gilune.value
     val ids = decorations.filter { it.pillTones != null }.map { it.id }
     if (ids.isEmpty()) return PillToneMap(ready = true)
-    val work by rememberQueryWork(kernel, ids, state.vaultCursor.value) { loadPillTones(kernel, decorations) }
+    val work by rememberQueryWork(kernel, ids, refresh = state.vaultCursor.value) { loadPillTones(kernel, decorations) }
     return work.value ?: PillToneMap(ids.toSet())
 }
 

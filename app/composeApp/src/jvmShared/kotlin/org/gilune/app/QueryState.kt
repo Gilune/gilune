@@ -14,6 +14,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.MaterialTheme
@@ -48,13 +49,26 @@ private fun queryFailure(error: Exception): String = when (error) {
     else -> "Search could not finish. Please retry."
 }
 
+/// [keys] say what is asked; [refresh] says only that the vault moved
+/// under the same question. A new key gets new state immediately:
+/// yesterday's rows cannot be shown under today's query while
+/// LaunchedEffect is awaiting its first turn. A new [refresh] keeps the
+/// answer on screen until the next one lands, so a list that is asked
+/// again after every save swaps its rows in place instead of collapsing
+/// to "Searching..." for a frame and growing back (owner, 2026-11-03). A
+/// refresh that fails keeps the rows it had, beside the error.
 @Composable
-internal fun <T> rememberQueryWork(vararg keys: Any?, load: () -> T): State<QueryWork<T>> {
+internal fun <T> rememberQueryWork(vararg keys: Any?, refresh: Any? = null, load: () -> T): State<QueryWork<T>> {
     val dispatcher = LocalQueryDispatcher.current
-    // A new key gets new state immediately: yesterday's rows cannot be shown
-    // under today's query while LaunchedEffect is awaiting its first turn.
+    val latest by rememberUpdatedState(load)
     return androidx.compose.runtime.key(keys.toList()) {
-        produceState(QueryWork<T>()) { value = executeQuery(dispatcher, load) }
+        val work = remember { mutableStateOf(QueryWork<T>()) }
+        LaunchedEffect(refresh) {
+            val next = executeQuery(dispatcher) { latest() }
+            val held = work.value.value
+            work.value = if (next.error != null && held != null) work.value.copy(loading = false, error = next.error) else next
+        }
+        work
     }
 }
 

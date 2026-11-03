@@ -99,6 +99,84 @@ class QueryStateTest {
         } finally { release.countDown() }
     }
 
+    // A list asked again after every save: while the new answer is being
+    // worked out the old one stays on screen — never a "loading" frame —
+    // and the new one replaces it when it lands.
+    @Test
+    fun aRefreshKeepsTheAnswerOnScreenUntilTheNextOneLands() {
+        val moved = mutableStateOf(0)
+        val gate = CountDownLatch(1)
+        try {
+            compose.setContent {
+                val turn = moved.value
+                val work = rememberQueryWork("question", refresh = turn) {
+                    if (turn > 0) check(gate.await(10, TimeUnit.SECONDS))
+                    "answer $turn"
+                }.value
+                Text(work.value ?: "loading")
+            }
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("answer 0").fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { moved.value = 1 }
+            compose.waitForIdle()
+            compose.onNodeWithText("answer 0").assertIsDisplayed()
+            compose.onNodeWithText("loading").assertDoesNotExist()
+            gate.countDown()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("answer 1").fetchSemanticsNodes().isNotEmpty() }
+        } finally { gate.countDown() }
+    }
+
+    // One step past the obvious: a different QUESTION still clears at once,
+    // even when it arrives while a refresh is under way — the old rows
+    // must never stand under the new question.
+    @Test
+    fun aNewQuestionDuringARefreshStillClearsTheOldAnswer() {
+        val moved = mutableStateOf(0)
+        val question = mutableStateOf("a")
+        val gate = CountDownLatch(1)
+        try {
+            compose.setContent {
+                val turn = moved.value
+                val asked = question.value
+                val work = rememberQueryWork(asked, refresh = turn) {
+                    if (turn > 0 || asked != "a") check(gate.await(10, TimeUnit.SECONDS))
+                    "$asked $turn"
+                }.value
+                Text(work.value ?: "loading")
+            }
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("a 0").fetchSemanticsNodes().isNotEmpty() }
+            compose.runOnIdle { moved.value = 1 }
+            compose.waitForIdle()
+            compose.onNodeWithText("a 0").assertIsDisplayed()
+            compose.runOnIdle { question.value = "b" }
+            compose.waitForIdle()
+            compose.onNodeWithText("loading").assertIsDisplayed()
+            compose.onNodeWithText("a 0").assertDoesNotExist()
+            gate.countDown()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("b 1").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("a 1").assertDoesNotExist()
+        } finally { gate.countDown() }
+    }
+
+    @Test
+    fun aRefreshThatFailsKeepsItsRowsBesideTheError() {
+        val moved = mutableStateOf(0)
+        compose.setContent {
+            val turn = moved.value
+            val work = rememberQueryWork("question", refresh = turn) {
+                if (turn > 0) throw SearchIndexPending(listOf("text: pending"))
+                "rows"
+            }.value
+            Column {
+                Text(work.value ?: "nothing")
+                QueryNotice(work.loading, work.error) {}
+            }
+        }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("rows").fetchSemanticsNodes().isNotEmpty() }
+        compose.runOnIdle { moved.value = 1 }
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Retry search").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("rows").assertIsDisplayed()
+    }
+
     @Test
     fun anIndexFailureShowsAnErrorAndRetryInsteadOfNoMatches() {
         compose.setContent {

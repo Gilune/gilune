@@ -869,7 +869,7 @@ private fun OpenNote(
             var blockCaps by remember(relPath) { mutableStateOf(mapOf<String, Int>()) }
             // Per block, the task rows opened or folded against its default.
             var blockFlips by remember(relPath) { mutableStateOf(mapOf<String, Set<String>>()) }
-            val evaluated = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, wanted, plugins, open, blockDay, blockCaps) {
+            val evaluated = rememberQueryWork(wanted, plugins, open, blockDay, blockCaps, refresh = state.vaultCursor.value to state.searchRefresh.value) {
                 val types = searchTypesFor(plugins)
                 wanted.associateWith { body ->
                     if (open == null) FilterResult.Hint("Opening vault...")

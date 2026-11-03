@@ -76,7 +76,7 @@ fun MobileFilterBlock(
     val filter = plugins.tasksFilter()
     val open = state.gilune.value
     val today = rememberQueryDay()
-    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today) {
+    val computed = rememberQueryWork(block, plugins, open, today, refresh = state.vaultCursor.value to state.searchRefresh.value) {
         if (open == null) FilterResult.Hint("Opening vault...")
         else evaluateFilterBlock(open, state.vaultDir, block, types, today, operators = searchOperatorsFor(plugins, today))
     }.value

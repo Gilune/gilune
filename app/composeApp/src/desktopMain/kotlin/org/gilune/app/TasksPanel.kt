@@ -95,7 +95,7 @@ fun TasksPanel(state: GiluneState, onOpen: (String) -> Unit, modifier: Modifier 
     // — is the day the pass ran, not the day a recomposition happened.
     val open = state.gilune.value
     val today = rememberQueryDay()
-    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, open, state.plugins.toList(), today) {
+    val computed = rememberQueryWork(open, state.plugins.toList(), today, refresh = state.vaultCursor.value to state.searchRefresh.value) {
         val agenda = loadAgenda(open, types, today)
         agenda to taskDetails(state.vaultDir, agenda.sections.flatMap { it.rows })
     }.value
@@ -573,7 +573,7 @@ fun FilterBlockView(
     var cap by remember(block) { mutableStateOf(FILTER_ROW_CAP) }
     // The rows a person has opened or folded against the block's default.
     var flipped by remember(block) { mutableStateOf(setOf<String>()) }
-    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, block, plugins, open, today, cap) {
+    val computed = rememberQueryWork(block, plugins, open, today, cap, refresh = state.vaultCursor.value to state.searchRefresh.value) {
         if (open == null) FilterResult.Hint("Opening vault...")
         else evaluateFilterBlock(open, state.vaultDir, block, types, today, cap, searchOperatorsFor(plugins, today))
     }.value
