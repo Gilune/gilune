@@ -125,6 +125,54 @@ class NemoTest {
         }
     }
 
+    // -------------------------------------------------------- progress
+
+    @Test
+    fun aRecordingSaysHowFarThroughItTheEngineIs() {
+        val recording = RecordingPcm.of(ByteArray(PCM_PIECE_BYTES * 3 + 1_000)).reporting { said += it }
+        assertEquals(emptyList(), said, "nothing is said before the engine starts")
+        val whenHanded = mutableListOf<Int>()
+        for (piece in recording.pieces) whenHanded += said.last()
+        // A piece counts once the engine has finished with it and asks for
+        // the next: the first is handed over at 0%, never at its own share.
+        assertEquals(0, whenHanded.first())
+        assertTrue(whenHanded.all { it < 100 }, "100% only once the last piece is heard: $whenHanded")
+        assertEquals(100, said.last())
+        assertEquals(said.sorted().distinct(), said, "each figure once, never backwards: $said")
+    }
+
+    private val said = mutableListOf<Int>()
+
+    @Test
+    fun aRecordingWhoseHeaderUndercountsItStillEndsAtAHundred() {
+        // A stream's header cannot know its length (the phone writes
+        // 0xFFFFFFFF); the figure caps below 100 until the end is real.
+        val recording = RecordingPcm(10, RecordingPcm.of(ByteArray(PCM_PIECE_BYTES * 2)).pieces).reporting { said += it }
+        recording.pieces.forEach { }
+        assertEquals(listOf(0, 99, 100), said)
+    }
+
+    @Test
+    fun theProvidersPassSaysHowFarEachRecordingHasGot() {
+        val (_, gilune) = vaultWithNemo()
+        gilune.use {
+            capture(gilune)
+            val pass = runNemoJobs(gilune, { recording -> recording.pieces.forEach { }; "words" }, heard = { said += it })
+            assertEquals(1L, pass.transcribed)
+            assertEquals(0, said.first())
+            assertEquals(100, said.last())
+        }
+    }
+
+    @Test
+    fun aStepIsSaidWithTheEngineByName() {
+        assertEquals(
+            "transcribing with Parakeet TDT 0.6B v2 · 42%",
+            TranscriptionStep.Hearing("Parakeet TDT 0.6B v2", 42).words(),
+        )
+        assertEquals("transcribed; labelling speakers…", TranscriptionStep.LabellingSpeakers.words())
+    }
+
     @Test
     fun aNoteEditedWhileItIsBeingHeardKeepsThePersonsWords() {
         val (root, gilune) = vaultWithNemo()
@@ -316,6 +364,62 @@ class NemoTest {
         }
     }
 
+    @Test
+    fun aRecordingsPassLetsItsModelGoUnlessItIsAlsoTheLiveOne() {
+        val model = nemoModel("parakeet-tdt-0.6b-v2")
+        val dir = realModel(model)
+        assumeTrue("set GILUNE_TEST_NEMO_ROOT", dir != null)
+        val (_, gilune) = vaultWithNemo()
+        gilune.use {
+            NemoEngines(model, dir!!).use { engines ->
+                val host = NemoHost()
+                host.replace(live = null, recordings = engines)
+                capture(gilune)
+                val steps = mutableListOf<TranscriptionStep>()
+                val pass = runRecordingsPass(gilune, host, SpeakerHost(), steps::add)
+                assertEquals(1L, pass.claimed, "$pass")
+                assertFalse(engines.resident, "the model goes when the pass that needed it ends")
+                assertEquals(TranscriptionStep.Hearing(model.name, 100), steps.last())
+
+                // A pass with nothing to hear leaves a warm model alone.
+                engines.withOffline { }
+                assertEquals(0L, runRecordingsPass(gilune, host, SpeakerHost()) {}.claimed)
+                assertTrue(engines.resident, "nothing was heard, so nothing is let go")
+
+                // The same model serving dictation keeps its idle timeout.
+                host.replace(live = engines, recordings = engines)
+                capture(gilune)
+                assertEquals(1L, runRecordingsPass(gilune, host, SpeakerHost()) {}.claimed)
+                assertTrue(engines.resident, "the live engine stays warm for the next dictation")
+                host.replace(live = null, recordings = null)
+            }
+        }
+    }
+
+    @Test
+    fun aModelIsNeverLetGoFromUnderADictation() {
+        val model = nemoModel("nemotron-0.6b")
+        val dir = realModel(model)
+        assumeTrue("set GILUNE_TEST_NEMO_ROOT", dir != null)
+        NemoEngines(model, dir!!).use { engines ->
+            val session = assertNotNull(engines.liveSession())
+            session.accept(ByteArray(3_200))
+            engines.letGo()
+            assertTrue(engines.resident, "a dictation is listening")
+            session.update()
+            session.finish()
+            engines.letGo()
+            assertFalse(engines.resident, "the dictation has ended")
+
+            // A recording heard by the streaming model closes its stream
+            // even when it fails part-way, or nothing could let go again.
+            val broken = RecordingPcm(3_200, sequence { yield(ByteArray(3_200)); error("the disk went away") })
+            assertFailsWith<IllegalStateException> { engines.transcribe(broken) }
+            engines.letGo()
+            assertFalse(engines.resident, "the failed recording left no stream open")
+        }
+    }
+
     /// An hour-long recording through the real engines, as the window runs
     /// them: GILUNE_TEST_LONG_SPEECH names a canonical WAV of two voices
     /// taking turns, GILUNE_TEST_SPEAKER_ROOT the speaker models as
@@ -433,9 +537,9 @@ class NemoTest {
     fun aWholeRecordingModelHearsALongRecordingInSegmentsCutWhereItIsQuiet() {
         val rate = WAV_SAMPLE_RATE
         // Two and a half minutes of sound with a third of a second of
-        // quiet at 52 s: the first cut belongs in that quiet, not at 60 s
+        // quiet at 17 s: the first cut belongs in that quiet, not at 20 s
         // in the middle of a word.
-        val sound = FloatArray(150 * rate) { i -> if (i in 52 * rate until 52 * rate + rate / 3) 0f else ((i % 50) - 25) / 25f }
+        val sound = FloatArray(150 * rate) { i -> if (i in 17 * rate until 17 * rate + rate / 3) 0f else ((i % 50) - 25) / 25f }
         val segments = mutableListOf<Pair<Long, FloatArray>>()
         val cutter = QuietSegments { samples, start -> segments += start to samples }
         var at = 0
@@ -447,7 +551,9 @@ class NemoTest {
         cutter.finish()
         assertTrue(segments.all { it.second.size <= SEGMENT_SAMPLES }, segments.map { it.second.size }.toString())
         val firstCut = segments[1].first
-        assertTrue(firstCut in 52L * rate..52L * rate + rate / 3, "cut at sample $firstCut")
+        assertTrue(firstCut in 17L * rate..17L * rate + rate / 3, "cut at sample $firstCut")
+        // Long segments cost memory the runtime keeps (see SEGMENT_SAMPLES).
+        assertTrue(segments.all { it.second.size <= 20 * rate }, "no segment over 20 s")
         var expected = 0L
         for ((start, samples) in segments) {
             assertEquals(expected, start, "segments follow on with nothing between")

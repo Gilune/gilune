@@ -73,6 +73,13 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     val gilune = mutableStateOf<Gilune?>(null)
     val message = mutableStateOf("opening vault…")
 
+    /// Say on the status line how far a transcription has got. Called from
+    /// the processing thread as the engine reports; the pass's own sentence
+    /// replaces it when the recording is done.
+    fun transcriptionStep(step: TranscriptionStep) {
+        message.value = step.words()
+    }
+
     /// A line the next editor to open its note should land on (a task or
     /// a search match clicked in a list); that editor clears it.
     val reveal = mutableStateOf<NoteLine?>(null)

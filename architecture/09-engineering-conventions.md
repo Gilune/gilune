@@ -133,7 +133,7 @@ had not spoken. The rules that follow from it:
   attempt because transcription held it as bytes, as bytes without the
   header and as floats at once. The claim's chunks go to the engine as
   they arrive (`RecordingPcm`); a model that must take its audio in one
-  call is given segments (`QuietSegments`, ≤ 60 s, cut where it is quiet);
+  call is given segments (`QuietSegments`, ≤ 20 s, cut where it is quiet);
   speaker labels hear windows of ~10 minutes (`SpeakerWindows`). A test
   feeding 96 MB through the provider holds the heap growth under 24 MB.
   The rule was broken once, by a warm-up: through 1.3.2 the NeMo
@@ -145,6 +145,22 @@ had not spoken. The rules that follow from it:
   queueing audio). Nothing is warmed up at open, and making a live
   session must not load a model either — it is made on the click that
   starts the microphone.
+- **A recordings model goes when its pass ends** (2026-11-02). Parakeet
+  took 1,015 MB in the owner's Task Manager after a short spoken note and
+  kept it for the ten idle minutes. Measured in a test process (843 s
+  recording): the model is ~670 MB, and ONNX Runtime keeps the largest
+  working memory any one segment has needed until the model is released
+  — 60 s segments held 1.9 GB, 30 s 1.37 GB, 20 s 1.1 GB, 15 s no less.
+  So segments are 20 s (which also heard every word, where 60 s dropped
+  46 of 2,161: 1.3% error against 2.8%), and a NeMo pass that heard a
+  recording lets its model go at once (`NemoEngines.letGo`); the next
+  recording loads it again; the speaker models go the same way after a
+  pass that labelled. In the running app the 843 s recording now ends at
+  176 MB, 5 s after its note is written. The ten-minute timeout stays for
+  a model that also serves dictation, and nothing lets a model go while a
+  dictation's stream is open. Whisper keeps its timeout: its working buffers (~200 MB
+  for base, logged by whisper.cpp) belong to a state made and dropped for
+  each recording, so only the ~60 MB model waits out the ten minutes.
 - **The window draws on the CPU by default** (owner decision 2026-11-01,
   overturning 2026-09-04's "the renderer is not a footprint lever").
   `Rendering.kt` sets `skiko.renderApi=SOFTWARE_FAST` in `main` unless a

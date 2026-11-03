@@ -203,6 +203,14 @@ class SpeakerEngine(private val dir: File, private val idleMs: Long = 10 * 60 * 
         embedding = null
     }
 
+    /// Whether a model is in memory now, for tests.
+    val resident: Boolean get() = synchronized(this) { diarization != null || embedding != null }
+
+    /// Give the models' memory back now rather than after ten idle minutes:
+    /// the 14-minute two-voice recording left ~215 MB held after its note
+    /// was written (2026-11-02). The next labelled recording loads them again.
+    fun letGo() = synchronized(this) { release() }
+
     override fun close() = synchronized(this) {
         closed = true
         release()
@@ -313,6 +321,10 @@ class SpeakerWindows(private val engine: Diarizer, private val count: Int?, tota
 /// stands.
 class DesktopSpeakerLabeller(
     private val engine: Diarizer,
+    /// Told when the words are in and the voices are being told apart,
+    /// which for a recording of a quarter of an hour or less is all of
+    /// the speaker model's work.
+    private val labelling: () -> Unit = {},
     private val count: () -> Int?,
 ) : SpeakerLabeller {
     /// The kernel hands over the whole WAV; it is read from there a piece
@@ -338,6 +350,7 @@ class DesktopSpeakerLabeller(
     /// The transcript with its speakers named, or null to keep it plain.
     fun labelWith(windows: SpeakerWindows?, words: List<TimedWord>): String? {
         if (windows == null || words.size < 2) return null
+        runCatching(labelling)
         val turns = windows.finish() ?: return null
         return runCatching { labelSpeakers(words, turns) }.getOrElse {
             GiluneLog.warn("speaker labels skipped", it)
@@ -366,12 +379,31 @@ class SpeakerHost {
         private set
     private var engine: SpeakerEngine? = null
 
+    /// Told when a labeller starts telling voices apart, for the status line.
+    @Volatile
+    var onLabelling: () -> Unit = {}
+
+    /// Whether a labeller has worked since the last [letGoIfUsed].
+    @Volatile
+    private var used = false
+
     @Synchronized
     fun replace(next: SpeakerEngine?, count: () -> Int?) {
         if (next === engine) return
         runCatching { engine?.close() }
         engine = next
-        labeller = next?.let { DesktopSpeakerLabeller(it, count) }
+        labeller = next?.let {
+            DesktopSpeakerLabeller(it, labelling = { used = true; onLabelling() }, count = count)
+        }
+    }
+
+    /// Let the speaker models go once a processing pass that labelled a
+    /// recording is over, whichever transcriber asked — the same rule as
+    /// the recordings model (09 § Desktop footprint).
+    fun letGoIfUsed() {
+        if (!used) return
+        used = false
+        synchronized(this) { engine }?.letGo()
     }
 
     /// A NeMo engine's transcribe, with speakers named, while labels are

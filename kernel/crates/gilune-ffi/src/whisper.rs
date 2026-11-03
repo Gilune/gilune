@@ -273,6 +273,8 @@ pub struct WhisperTranscriber {
     /// Who names the speakers, when a shell has said (ADR 0030). Empty
     /// means the plain transcript, decoded exactly as before.
     speakers: crate::SpeakerSlot,
+    /// Who is told how far through a recording it has got, if anyone.
+    progress: crate::ProgressSlot,
 }
 
 impl WhisperTranscriber {
@@ -296,7 +298,15 @@ impl WhisperTranscriber {
             engine,
             language: language.to_string(),
             speakers: Arc::new(Mutex::new(None)),
+            progress: Arc::new(Mutex::new(None)),
         })
+    }
+
+    /// Tell `slot`'s listener, if any, how far through each recording this
+    /// transcriber is.
+    pub(crate) fn with_progress(mut self, slot: crate::ProgressSlot) -> Self {
+        self.progress = slot;
+        self
     }
 
     /// Ask `slot`'s labeller, if any, to name the speakers in this
@@ -378,7 +388,25 @@ impl WhisperTranscriber {
             .map(|n| n.get().min(8))
             .unwrap_or(4);
         params.set_n_threads(threads as std::os::raw::c_int);
-        state.full(params, samples).map_err(|e| e.to_string())?;
+        let listener = self.progress.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(listener) = listener {
+            listener.progress(0);
+            // whisper.cpp reports after each window it decodes; the last
+            // report is not always 100, so the end is said below. Weak,
+            // because whisper-rs 0.16 never frees the closure it is given:
+            // a strong reference would keep the shell's listener alive for
+            // every recording ever heard.
+            let told = Arc::downgrade(&listener);
+            params.set_progress_callback_safe(move |percent: i32| {
+                if let Some(told) = told.upgrade() {
+                    told.progress(percent.clamp(0, 100) as u8);
+                }
+            });
+            state.full(params, samples).map_err(|e| e.to_string())?;
+            listener.progress(100);
+        } else {
+            state.full(params, samples).map_err(|e| e.to_string())?;
+        }
         read(&state)
     }
 
@@ -835,5 +863,46 @@ impl Processor for WhisperTranscriber {
             target: OutputTarget::ReviseSubject,
             expected_head: read_head,
         }])
+    }
+}
+
+/// How far through a recording whisper is, told to a shell's listener.
+/// Needs a model, like `residency`.
+#[cfg(test)]
+mod progress {
+    use super::{WhisperTranscriber, IDLE_UNLOAD_MS};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    struct Heard(Mutex<Vec<u8>>);
+
+    impl crate::TranscriptionProgress for Heard {
+        fn progress(&self, percent: u8) {
+            self.0.lock().unwrap().push(percent);
+        }
+    }
+
+    #[test]
+    fn a_listener_hears_from_nothing_to_all_of_it_in_order() {
+        let Ok(path) = std::env::var("GILUNE_TEST_MODEL") else {
+            eprintln!("skipped: set GILUNE_TEST_MODEL to a ggml model path");
+            return;
+        };
+        let heard = Arc::new(Heard(Mutex::new(Vec::new())));
+        let slot: crate::ProgressSlot = Arc::new(Mutex::new(Some(heard.clone() as Arc<dyn crate::TranscriptionProgress>)));
+        let transcriber = WhisperTranscriber::with_policy(&path, "en", IDLE_UNLOAD_MS, Duration::from_secs(3600))
+            .expect("model accepted")
+            .with_progress(slot.clone());
+        // Forty seconds: more than one of whisper's 30 s windows.
+        transcriber.transcribe(&vec![0.0; 40 * 16_000]).expect("transcribed");
+        let said = heard.0.lock().unwrap().clone();
+        assert_eq!(said.first(), Some(&0), "{said:?}");
+        assert_eq!(said.last(), Some(&100), "{said:?}");
+        assert!(said.windows(2).all(|w| w[0] <= w[1]), "never backwards: {said:?}");
+
+        // whisper-rs never frees the closure it is given; it must not be
+        // what keeps the listener alive once the shell lets it go.
+        *slot.lock().unwrap() = None;
+        assert_eq!(Arc::strong_count(&heard), 1, "only this test holds the listener now");
     }
 }

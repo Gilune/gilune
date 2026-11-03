@@ -861,6 +861,19 @@ pub trait SpeakerLabeller: Send + Sync {
 /// a shell can set or clear it after transcription is enabled.
 pub(crate) type SpeakerSlot = Arc<Mutex<Option<Arc<dyn SpeakerLabeller>>>>;
 
+/// Told how far through a recording the transcriber is, so a shell can
+/// say so while it waits: `percent` runs from 0 to 100, in whatever steps
+/// the engine reports. Called on the processing thread, during the job; a
+/// listener does no work there it could not do on a hot path.
+#[uniffi::export(with_foreign)]
+pub trait TranscriptionProgress: Send + Sync {
+    fn progress(&self, percent: u8);
+}
+
+/// The listener a handle's transcriber tells, shared with the transcriber
+/// like [SpeakerSlot].
+pub(crate) type ProgressSlot = Arc<Mutex<Option<Arc<dyn TranscriptionProgress>>>>;
+
 /// Opt-in full-source input, including exact front matter and newlines.
 /// Pure callback with no store access; fact lines remain body-relative.
 /// Changing from body input requires an indexer-version change.
@@ -1528,6 +1541,8 @@ pub struct Gilune {
     /// Per handle, like `external`: whether this process carries a speaker
     /// model is a fact about the process.
     speakers: SpeakerSlot,
+    /// Who the transcriber tells how far it has got, if anyone.
+    progress: ProgressSlot,
 }
 
 /// Not part of the FFI surface — no `uniffi::export` here, so bindings
@@ -1638,7 +1653,16 @@ impl Gilune {
             #[cfg(feature = "whisper")]
             whisper: Mutex::new(std::sync::Weak::new()),
             speakers: Arc::new(Mutex::new(None)),
+            progress: Arc::new(Mutex::new(None)),
         }))
+    }
+
+    /// Set, or clear with `None`, who is told how far through a recording
+    /// this handle's transcriber is. Takes effect from the next job, on a
+    /// transcriber enabled before or after this call. Only whisper reports
+    /// here; an app-side transcriber reports to its own shell.
+    pub fn set_transcription_progress(&self, listener: Option<Arc<dyn TranscriptionProgress>>) {
+        *self.progress.lock().unwrap_or_else(|e| e.into_inner()) = listener;
     }
 
     /// Set, or clear with `None`, who names the speakers in this handle's
@@ -1691,7 +1715,8 @@ impl Gilune {
                 .unwrap_or_else(|| "auto".to_string());
             let transcriber = whisper::WhisperTranscriber::new(&model_path, &language)
                 .map_err(|detail| GiluneError::Invalid { detail })?
-                .with_speakers(self.speakers.clone());
+                .with_speakers(self.speakers.clone())
+                .with_progress(self.progress.clone());
             *self.whisper.lock().unwrap_or_else(|e| e.into_inner()) =
                 std::sync::Arc::downgrade(transcriber.engine());
             let mut processors = self.processors.lock().unwrap_or_else(|e| e.into_inner());
