@@ -91,7 +91,7 @@ fun AgendaScreen(
     // of it, so the day every view means is the day the pass ran.
     val open = state.gilune.value
     val today = rememberQueryDay()
-    val computed = rememberQueryWork(state.vaultCursor.value, state.searchRefresh.value, open, plugins, today) {
+    val computed = rememberQueryWork(open, plugins, today, refresh = state.vaultCursor.value to state.searchRefresh.value) {
         loadAgenda(open, types, today)
     }.value
     val sections = computed.value?.sections.orEmpty()
