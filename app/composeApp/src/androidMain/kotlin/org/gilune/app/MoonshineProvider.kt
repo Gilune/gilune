@@ -433,7 +433,7 @@ private fun transcribe(
         if (expected != null && refusal is uniffi.gilune_ffi.GiluneException.Invalid) {
             Log.i(TAG, "the note changed while ${job.subjectId} was being transcribed: ${refusal.message}")
             runCatching { gilune.submitOutput(claim, emptyList()) }
-            return pass.copy(skipped = pass.skipped + 1)
+            return pass.copy(skipped = pass.skipped + 1, moved = pass.moved + 1)
         }
         val why = refusal.message ?: refusal.javaClass.simpleName
         Log.w(TAG, "submitting the transcript for ${job.subjectId} failed: $why", refusal)

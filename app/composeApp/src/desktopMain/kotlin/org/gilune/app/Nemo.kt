@@ -652,7 +652,7 @@ private fun transcribeClaim(
         // retried that would be refused again.
         if (expected != null && refusal is uniffi.gilune_ffi.GiluneException.Invalid) {
             runCatching { gilune.submitOutput(claim, emptyList()) }
-            return pass.copy(skipped = pass.skipped + 1)
+            return pass.copy(skipped = pass.skipped + 1, moved = pass.moved + 1)
         }
         runCatching { gilune.failJob(claim, refusal.message ?: refusal.javaClass.simpleName) }
         return pass.copy(failed = pass.failed + 1)
