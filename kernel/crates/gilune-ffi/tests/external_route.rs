@@ -366,3 +366,49 @@ fn a_corrupt_blob_is_refused_rather_than_handed_over() {
         "the kernel vouches for the bytes or hands out none"
     );
 }
+
+/// A claim held past its lease — an engine still decoding, as Parakeet
+/// with speaker labels did for four minutes against a sixty-second lease
+/// (owner report, 2026-11-04) — is not handed to a second claimant while
+/// it is held. A short lease stands in for the long decode.
+#[test]
+fn a_held_claim_is_not_claimed_again_when_its_lease_would_have_run_out() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (gilune, _source_id, _) = engine(&dir);
+    let held = gilune
+        .clone()
+        .claim_job_leased(PROCESSOR.to_string(), 300)
+        .expect("claim")
+        .expect("the capture queued a job");
+    std::thread::sleep(std::time::Duration::from_millis(1_200));
+    assert!(
+        gilune.clone().claim_job_leased(PROCESSOR.to_string(), 300).expect("claim").is_none(),
+        "four leases later the first holder still has it"
+    );
+    let receipt = gilune
+        .submit_output(held.clone(), revise(&held.job().subject_payload, "heard once"))
+        .expect("submit");
+    assert_eq!(receipt.outputs, 1, "and its answer lands");
+}
+
+// One step past the obvious: renewal belongs to the HOLDER. A claim let go
+// without an answer — a provider that crashed out of its loop — must not
+// keep the job forever; its lease runs out as it always did.
+#[test]
+fn a_claim_let_go_without_an_answer_lapses_as_before() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (gilune, _source_id, _) = engine(&dir);
+    let held = gilune
+        .clone()
+        .claim_job_leased(PROCESSOR.to_string(), 300)
+        .expect("claim")
+        .expect("the capture queued a job");
+    drop(held);
+    std::thread::sleep(std::time::Duration::from_millis(700));
+    let again = gilune
+        .clone()
+        .claim_job_leased(PROCESSOR.to_string(), 300)
+        .expect("claim")
+        .expect("the lapsed job is claimable again");
+    assert_eq!(again.job().attempts, 2);
+}

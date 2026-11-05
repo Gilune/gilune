@@ -212,6 +212,44 @@ impl Store {
         claimed
     }
 
+    /// Push a held claim's lease out to `now_ms + lease_ms`, and say
+    /// whether the claim is still this holder's.
+    ///
+    /// **A lease is a promise to be heard from, not a deadline for the
+    /// work.** It was a deadline: a transcription with speaker labels ran
+    /// four minutes against a sixty-second lease, the next pass claimed
+    /// the same job while the first was still decoding, and one recording
+    /// was heard twice at once (owner report, 2026-11-04). A holder that is
+    /// still working renews; a holder that died stops renewing, and its
+    /// lease runs out exactly as before.
+    ///
+    /// `attempts` is the claim's own count, which every claim raises — so
+    /// it names *this* claim, and a holder whose job was claimed again
+    /// after its lease ran out cannot take it back. False then, and false
+    /// once the job is finished or failed: either way there is nothing
+    /// left to keep.
+    pub fn renew_lease(&self, job_id: &str, attempts: i64, now_ms: i64, lease_ms: i64) -> Result<bool> {
+        let changed = self.conn().execute(
+            "UPDATE jobs SET lease_until_ms = ?3
+             WHERE job_id = ?1 AND attempts = ?2 AND state = 'leased'",
+            rusqlite::params![job_id, attempts, now_ms + lease_ms],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Jobs about this subject that are still to finish: waiting their
+    /// turn, held by a claimant that is working, or backing off after a
+    /// failure. What a shell asks after a pass to tell "the words are
+    /// still coming" from "nothing came back".
+    pub fn unfinished_jobs_for(&self, subject_id: &str) -> Result<i64> {
+        Ok(self.conn().query_row(
+            "SELECT COUNT(*) FROM jobs j JOIN events e ON e.event_id = j.event_id
+             WHERE e.subject_id = ?1 AND j.state IN ('pending', 'leased')",
+            [subject_id],
+            |row| row.get(0),
+        )?)
+    }
+
     pub fn complete_job(&self, job_id: &str) -> Result<()> {
         let changed = self.conn().execute(
             "UPDATE jobs SET state = 'done', lease_until_ms = NULL WHERE job_id = ?1",
@@ -303,6 +341,48 @@ mod tests {
             .expect("lease expired, job claimable again");
         assert_eq!(reclaimed.job_id, job.job_id);
         assert_eq!(reclaimed.attempts, 2);
+    }
+
+    #[test]
+    fn a_renewed_lease_keeps_a_working_claim_its_own() {
+        let (_dir, store, job) = store_with_job();
+        // Renewed just before the first lease ran out, so the moment that
+        // lease would have expired finds the job still held.
+        assert!(store.renew_lease(&job.job_id, job.attempts, 30_000, 30_000).expect("renew"));
+        assert!(store.claim_next_job(31_000, 30_000).expect("claim").is_none(), "still held");
+        let after = store.claim_next_job(60_000, 30_000).expect("claim").expect("renewals stopped");
+        assert_eq!(after.attempts, 2);
+    }
+
+    // One step past the obvious: a holder that was too late cannot take a
+    // job back from whoever claimed it after its lease ran out — nor keep
+    // one that is finished.
+    #[test]
+    fn a_lapsed_or_finished_claim_cannot_be_renewed() {
+        let (_dir, store, job) = store_with_job();
+        let second = store.claim_next_job(31_000, 30_000).expect("claim").expect("lease ran out");
+        assert!(!store.renew_lease(&job.job_id, job.attempts, 32_000, 30_000).expect("renew"));
+        assert!(store.renew_lease(&second.job_id, second.attempts, 32_000, 30_000).expect("renew"));
+        store.complete_job(&second.job_id).expect("complete");
+        assert!(!store.renew_lease(&second.job_id, second.attempts, 33_000, 30_000).expect("renew"));
+        assert_eq!(store.job_state(&job.job_id).expect("state"), "done", "renewing never reopens");
+    }
+
+    #[test]
+    fn unfinished_jobs_count_waiting_and_held_work_for_one_subject_only() {
+        let (_dir, store, job) = store_with_job();
+        let subject = job.subject_id.clone();
+        store.capture_bytes("md", b"another subject").expect("capture");
+        assert_eq!(store.unfinished_jobs_for(&subject).expect("count"), 1, "held");
+        store.fail_job(&job.job_id, 2_000, "boom").expect("fail");
+        assert_eq!(store.unfinished_jobs_for(&subject).expect("count"), 1, "backing off");
+        let again = store.claim_next_job(10_000_000, 30_000).expect("claim").expect("retry");
+        let again = if again.subject_id == subject { again } else {
+            store.complete_job(&again.job_id).expect("complete");
+            store.claim_next_job(10_000_000, 30_000).expect("claim").expect("retry")
+        };
+        store.complete_job(&again.job_id).expect("complete");
+        assert_eq!(store.unfinished_jobs_for(&subject).expect("count"), 0, "finished");
     }
 
     #[test]

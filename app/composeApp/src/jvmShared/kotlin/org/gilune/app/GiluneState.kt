@@ -65,6 +65,11 @@ data class ProviderPass(
     val transcribed: Long = 0,
     val skipped: Long = 0,
     val failed: Long = 0,
+    /// Of [skipped], the jobs whose words were heard and then not written
+    /// because the note changed while they were being heard. Counted apart
+    /// because it is the one skip a person caused and can undo: their
+    /// text was kept, and asking again replaces it.
+    val moved: Long = 0,
 ) {
     val claimed: Long get() = transcribed + skipped + failed
 }
@@ -187,6 +192,10 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
         val failed: Long,
         val providerFailed: Long = 0L,
         val providerFailure: String? = null,
+        /// Jobs on either route whose words were refused because the note
+        /// changed while they were being heard (the kernel's
+        /// `skipped_moved`, the provider's [ProviderPass.moved]).
+        val overtaken: Long = 0L,
     ) {
         /// Whether any job, on either route, ran and did not succeed.
         val anyFailed: Boolean get() = failed > 0L || providerFailed > 0L
@@ -210,7 +219,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
     internal fun processAll(g: Gilune): ProcessingPass {
         val summary = g.runProcessing()
         val hook = externalProcessing
-            ?: return ProcessingPass(summary.outputs, summary.failed)
+            ?: return ProcessingPass(summary.outputs, summary.failed, overtaken = summary.skippedMoved)
         val outcome = runCatching { hook(g) }
         val thrown = outcome.exceptionOrNull()
         if (thrown != null) {
@@ -225,6 +234,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
             failed = summary.failed,
             providerFailed = external.failed,
             providerFailure = thrown?.let { it.message?.takeIf(String::isNotBlank) ?: it.toString() },
+            overtaken = summary.skippedMoved + external.moved,
         )
     }
 
@@ -762,12 +772,7 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
                 val p = processAll(g)
                 g.project()
                 refresh()
-                message.value = when {
-                    p.outputs > 0 -> "transcribed again"
-                    p.anyFailed ->
-                        "transcribing again failed (will retry)" + providerFailureSuffix(p.providerFailure)
-                    else -> "transcribed again: no new words came back" + p.trouble()
-                }
+                message.value = transcribedAgainWords(p, g.unfinishedJobsFor(objectId))
             } catch (e: Throwable) {
                 GiluneLog.warn("transcribing again failed", e)
                 message.value = "transcribing again failed: ${e.message}"
@@ -886,4 +891,27 @@ class GiluneState(val vaultDir: String, private val scope: CoroutineScope) {
             }
         }
     }
+}
+
+/// What "Transcribe again" says once its pass is over, given the pass and
+/// how many of the recording's jobs are still to finish.
+///
+/// **"Nothing came back" is only said when nothing is still coming.** It
+/// used to be said whenever the pass wrote nothing, which included a pass
+/// that ran before the chosen engine had finished downloading and one that
+/// found another pass already hearing the recording — both cases where the
+/// words arrived minutes later, after the person had read the message as a
+/// refusal and edited the note to force it (owner report, 2026-11-04).
+/// Their edit then made the arriving words stand down, which is why being
+/// overtaken gets its own sentence too.
+internal fun transcribedAgainWords(pass: GiluneState.ProcessingPass, unfinished: Long): String = when {
+    pass.outputs > 0 -> "transcribed again"
+    pass.anyFailed ->
+        "transcribing again failed (will retry)" + providerFailureSuffix(pass.providerFailure)
+    unfinished > 0 ->
+        "transcribing again: waiting for the transcriber — the new words will replace the note's text when it finishes"
+    pass.overtaken > 0 ->
+        "transcribed again, but the note changed while it was being heard, so your text was kept — " +
+            "transcribe again to replace it"
+    else -> "transcribed again: no speech was heard in the recording" + pass.trouble()
 }

@@ -147,3 +147,48 @@ provider that skips worded notes, and an edit makes the next request one to
 ask about; nothing switched on says so). Falsified by disabling each: the
 `again` flag at the provider, the follow in reconcile, the copy guard, and the
 redrawn link.
+
+## Amendments
+
+### 2026-11-04 — say what the pass did; a held claim keeps its job
+
+Owner report: after switching Recordings to Parakeet and turning speaker
+labels on, *Transcribe again* said "no new words came back". It was read as a
+refusal, and the note was edited to force a second try. The vault's job record
+showed what had happened. The first two requests ran while the model was still
+downloading, so their passes claimed nothing. The pass at the end of the
+download took the first request. A sixty-second lease against a four-minute
+decode let a later pass claim the second request while it was still being
+heard. The first request's words then arrived after the person's edit and were
+correctly refused. Two rules change:
+
+- **"Nothing came back" is said only when nothing is still coming.** After the
+  pass the shell asks `unfinished_jobs_for(source)` (FFI; queued, held, or
+  backing off). A count above zero is "waiting for the transcriber — the new
+  words will replace the note's text when it finishes". Words refused because
+  the note changed while they were heard (`skipped_moved`, the providers'
+  `ProviderPass.moved`) say the text was kept. Only an empty answer says no
+  speech was heard. `transcribedAgainWords` in `GiluneState.kt` holds the
+  order.
+- **A held claim renews its own lease.** An external claim (`ClaimedJob`)
+  starts a keeper thread that calls `Store::renew_lease` every third of the
+  lease. The renewal is keyed by the claim's `attempts`, which every claim
+  raises, so a holder whose lease lapsed cannot take the job back. The keeper
+  stops when the claim is let go or the job is finished, failed, or claimed
+  again. A provider that dies stops renewing, and its job lapses exactly as
+  before. The lease length is unchanged; a lease is now a promise to be heard
+  from, not a deadline for the work.
+
+Gap: the in-kernel route (whisper inside `run_processing`) does not renew. In
+one process the store lock already serialises its passes. A second process on
+the same vault could still claim a whisper job that runs past sixty seconds.
+
+Evidence: kernel `jobs.rs` (renewal holds; a lapsed or finished claim cannot
+renew; unfinished counts one subject's waiting and held work); FFI
+`external_route.rs` (a claim held for four leases is not claimed again; a
+claim let go lapses as before). Both FFI rows were falsified, one by disabling
+renewal and one by ignoring the stop. Desktop `RecordingsEndToEndTest` +3,
+through the real kernel and NeMo loop: no engine says "waiting" and the words
+land on the next pass; an edit while it is heard keeps the text and says so;
+silence says no speech. The first two were falsified by removing their
+message arms.

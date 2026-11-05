@@ -112,6 +112,78 @@ class RecordingsEndToEndTest {
         }
     }
 
+    private fun loaded(state: GiluneState, name: String): String {
+        val opened = CountDownLatch(1)
+        runBlocking { loadRecordingFile(state, exported("$name.wav"), null) { opened.countDown() } }
+        assertTrue(opened.await(30, TimeUnit.SECONDS), state.message.value)
+        return assertNotNull(state.sourceForFile("Captures/$name.wav")).objectId
+    }
+
+    private fun awaitBody(root: File, rel: String, expected: String) {
+        val deadline = System.currentTimeMillis() + 30_000
+        while (body(root, rel).trim() != expected && System.currentTimeMillis() < deadline) Thread.sleep(20)
+        assertEquals(expected, body(root, rel).trim())
+    }
+
+    // The owner's report (2026-11-04): asked while the chosen engine was
+    // still downloading, the pass claimed nothing and said "no new words
+    // came back" — read as a refusal — and the words arrived minutes later.
+    @Test
+    fun whileTheEngineIsNotReadyItSaysTheWordsAreComingAndThenTheyCome() {
+        val (root, state) = vault()
+        state.gilune.value!!.use {
+            val source = loaded(state, "Standup")
+            val ready = state.externalProcessing
+            state.externalProcessing = { ProviderPass() }
+            state.transcribeAgain(source)
+            awaitMessage(
+                state,
+                "transcribing again: waiting for the transcriber — the new words will replace the note's text when it finishes",
+            )
+            assertEquals("answer 1", body(root, "Captures/Standup.md").trim(), "nothing written yet")
+
+            state.externalProcessing = ready
+            state.sync(announce = false)
+            awaitBody(root, "Captures/Standup.md", "answer 2")
+        }
+    }
+
+    // One step past it: the person who reads "waiting" and edits the note
+    // meanwhile keeps their text, and is told so — not "no new words".
+    @Test
+    fun anEditWhileTheRecordingIsBeingHeardKeepsTheTextAndSaysSo() {
+        val (root, state) = vault()
+        state.gilune.value!!.use { gilune ->
+            val source = loaded(state, "Retro")
+            val note = File(root, "Captures/Retro.md")
+            state.externalProcessing = { g ->
+                runNemoJobs(g, {
+                    note.writeText(note.readText().replace("answer 1", "my own notes"))
+                    gilune.reconcile()
+                    "answer ${answers.incrementAndGet()}"
+                })
+            }
+            state.transcribeAgain(source)
+            awaitMessage(
+                state,
+                "transcribed again, but the note changed while it was being heard, so your text was kept — " +
+                    "transcribe again to replace it",
+            )
+            assertEquals("my own notes", body(root, "Captures/Retro.md").trim())
+        }
+    }
+
+    @Test
+    fun aRecordingWithNoSpeechInItSaysThatRatherThanNoNewWords() {
+        val (_, state) = vault()
+        state.gilune.value!!.use {
+            val source = loaded(state, "Quiet")
+            state.externalProcessing = { g -> runNemoJobs(g, { "" }) }
+            state.transcribeAgain(source)
+            awaitMessage(state, "transcribed again: no speech was heard in the recording")
+        }
+    }
+
     @Test
     fun withNothingSwitchedOnItSaysSoInsteadOfWaiting() {
         val (_, state) = vault()

@@ -1562,6 +1562,36 @@ impl Gilune {
 }
 
 impl Gilune {
+    /// `claim_job` with the lease named, so a test can watch a claim
+    /// outlive its lease without waiting a minute for it.
+    #[doc(hidden)]
+    pub fn claim_job_leased(
+        self: Arc<Self>,
+        processor_id: String,
+        lease_ms: i64,
+    ) -> FfiResult<Option<Arc<ClaimedJob>>> {
+        if !self.is_external(&processor_id) {
+            return Err(GiluneError::Invalid {
+                detail: format!("no external implementation of {processor_id} is registered here"),
+            });
+        }
+        let claimed = self.store().claim_external_job(
+            &processor_id,
+            gilune_kernel::ids::now_ms(),
+            lease_ms,
+        )?;
+        Ok(claimed.map(|claim| {
+            let keeper = LeaseKeeper::start(&self, claim.job.job_id.clone(), claim.job.attempts, lease_ms);
+            Arc::new(ClaimedJob {
+                gilune: self.clone(),
+                claim,
+                stream: Mutex::new(None),
+                drained: Mutex::new(false),
+                _keeper: keeper,
+            })
+        }))
+    }
+
     fn store(&self) -> std::sync::MutexGuard<'_, gilune_kernel::store::Store> {
         // A poisoned lock means a panicked kernel call; the data behind it
         // is transactional, so continuing is safe and loses nothing.
@@ -1846,24 +1876,16 @@ impl Gilune {
     /// after that it is claimable again, which is at-least-once doing the
     /// work a reclaim column would otherwise have to do.
     pub fn claim_job(self: Arc<Self>, processor_id: String) -> FfiResult<Option<Arc<ClaimedJob>>> {
-        if !self.is_external(&processor_id) {
-            return Err(GiluneError::Invalid {
-                detail: format!("no external implementation of {processor_id} is registered here"),
-            });
-        }
-        let claimed = self.store().claim_external_job(
-            &processor_id,
-            gilune_kernel::ids::now_ms(),
-            LEASE_MS,
-        )?;
-        Ok(claimed.map(|claim| {
-            Arc::new(ClaimedJob {
-                gilune: self.clone(),
-                claim,
-                stream: Mutex::new(None),
-                drained: Mutex::new(false),
-            })
-        }))
+        self.claim_job_leased(processor_id, LEASE_MS)
+    }
+
+    /// Recording jobs still to finish for this source: queued, being
+    /// worked on, or waiting to retry. After a pass that wrote nothing,
+    /// a count above zero means the words are still coming — the engine
+    /// was not ready yet, or another pass is hearing it — rather than
+    /// that none came back.
+    pub fn unfinished_jobs_for(&self, object_id: String) -> FfiResult<i64> {
+        Ok(self.store().unfinished_jobs_for(&object_id)?)
     }
 
     /// Commit an external processor's outputs through **the same
@@ -2602,6 +2624,55 @@ pub struct ClaimedJob {
     /// should never pay for it.
     stream: Mutex<Option<gilune_kernel::external::BlobStream>>,
     drained: Mutex<bool>,
+    /// Renews the lease for as long as the claim is held. The holder
+    /// never has to: an engine that spends four minutes on one call
+    /// cannot stop to say it is still alive (`Store::renew_lease`).
+    _keeper: LeaseKeeper,
+}
+
+/// One thread per held claim, renewing its lease every third of it until
+/// the claim is let go or the job stops being this claim's — finished,
+/// failed, or claimed by someone else after a lapse. It holds the handle
+/// weakly, so a held claim keeps no vault open on its own account.
+struct LeaseKeeper {
+    stop: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl LeaseKeeper {
+    fn start(gilune: &Arc<Gilune>, job_id: String, attempts: i64, lease_ms: i64) -> Self {
+        let stop = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+        let signal = stop.clone();
+        let handle = Arc::downgrade(gilune);
+        let every = std::time::Duration::from_millis((lease_ms / 3).max(1) as u64);
+        // A thread that cannot start leaves the lease as it always was:
+        // one lease long, and the work at risk of a second claimant.
+        let _ = std::thread::Builder::new().name("gilune-lease".into()).spawn(move || loop {
+            {
+                let (lock, wake) = &*signal;
+                let stopped = lock.lock().unwrap_or_else(|e| e.into_inner());
+                let (stopped, _) = wake.wait_timeout(stopped, every).unwrap_or_else(|e| e.into_inner());
+                if *stopped {
+                    return;
+                }
+            }
+            // Not under the stop lock: the store may be busy, and letting go
+            // of a claim must never wait for it.
+            let Some(gilune) = handle.upgrade() else { return };
+            let kept = gilune.store().renew_lease(&job_id, attempts, gilune_kernel::ids::now_ms(), lease_ms);
+            if !matches!(kept, Ok(true)) {
+                return;
+            }
+        });
+        Self { stop }
+    }
+}
+
+impl Drop for LeaseKeeper {
+    fn drop(&mut self) {
+        let (lock, wake) = &*self.stop;
+        *lock.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        wake.notify_all();
+    }
 }
 
 #[uniffi::export]
