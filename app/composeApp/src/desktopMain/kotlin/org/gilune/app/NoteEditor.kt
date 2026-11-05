@@ -119,6 +119,7 @@ import androidx.compose.ui.input.key.isShiftPressed
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.isPrimaryPressed
 import androidx.compose.ui.input.pointer.isSecondaryPressed
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -163,6 +164,9 @@ private const val SLICE_WIDTH_SETTLE_MS = 300L
 /// placed in the *text's* coordinates and has to add it back: the layout
 /// measures from inside this padding, the overlay is a sibling outside it.
 private val EDITOR_PADDING = 14.dp
+
+/// The presented note's side padding, matched in [PresentedNote].
+internal val READ_PADDING = 18.dp
 
 /// A token's menu open over the editor: what it offers, the line it was
 /// opened for as it read then, and where it floats (window coordinates).
@@ -499,6 +503,13 @@ private fun OpenNote(
         if (editor.dirty) editor.staleBuffer = true else editor.open(state.vaultDir, relPath)
     }
 
+    // The note's text column (owner, 2026-11-05): a chosen line width,
+    // left or centred, shared by the title, the properties strip and the
+    // body so all three line up. The pane's own bar above stays full width.
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+    val editColumn = rememberNoteColumn(maxWidth - EDITOR_PADDING * 2, appearance.edit, appearance.align)
+    val readColumn = rememberNoteColumn(maxWidth - READ_PADDING * 2, appearance.reading, appearance.align)
+    val column = if (editor.reading) readColumn else editColumn
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
@@ -730,7 +741,7 @@ private fun OpenNote(
 
         // Fixed above the body rather than scrolled with it: the title is
         // the note's name, not its first line, and both modes show it.
-        NoteTitle(state, editor, relPath, onRenamed)
+        NoteTitle(state, editor, relPath, onRenamed, column)
 
         if (header.frontMatter.isNotEmpty()) {
             // The page type's own sheet, when a plugin declares one: its
@@ -740,7 +751,7 @@ private fun OpenNote(
                 state.plugins.toList(),
                 header.frontMatter.firstOrNull { it.key == "gilune-type" }?.value?.trim()?.trim('"', '\''),
             )
-            PropertiesStrip(header, editor, sheet, onRename = { refactoringOpen = true }) { change ->
+            PropertiesStrip(header, editor, sheet, column, onRename = { refactoringOpen = true }) { change ->
                 try {
                     val updated = sourceWithChange(editor.document(), change)
                     editor.applyProperties(editor.frontMatterRaw, splitNoteRaw(updated).first)
@@ -778,7 +789,7 @@ private fun OpenNote(
         }
 
         if (editor.reading) {
-            PresentedNote(state, editor, decorations, openRow) { write() }
+            PresentedNote(state, editor, decorations, openRow, readColumn) { write() }
         } else {
             // Styled editing (E2 + the E3 checkbox slice): markers off the
             // caret's line render as checkbox glyphs; the caret's own line
@@ -1607,7 +1618,10 @@ private fun OpenNote(
             // still fills it, so a click anywhere lands the caret.
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val paneHeight = maxHeight
-                val blockWidth = maxWidth - EDITOR_PADDING * 2
+                val blockWidth = maxWidth - EDITOR_PADDING * 2 - editColumn.start - editColumn.end
+                // Where the text starts: the pane's padding and the column's own
+                // margin. Everything drawn over the text is placed from here.
+                val textLeft = EDITOR_PADDING + editColumn.start
                 // The width a slice's chunks are measured at: the field's
                 // text width, settled for a moment so dragging the window's
                 // edge does not measure the whole note at every step.
@@ -1620,7 +1634,34 @@ private fun OpenNote(
                 // only thing in it: a collapsed block draws over the lines
                 // the field reserved for it, and being its sibling here is
                 // what makes it scroll with the text it covers.
-                Box(Modifier.fillMaxSize().verticalScroll(bodyScroll).testTag("note-scroll")) {
+                Box(
+                    Modifier.fillMaxSize().verticalScroll(bodyScroll)
+                        // A click in the margin beside a narrowed column lands
+                        // the caret on the line it is level with, as a click
+                        // anywhere in the pane always has. The field answers
+                        // clicks on its own text; this sees only the rest.
+                        .pointerInput(editColumn, relPath) {
+                            if (editColumn == NoteColumn.Full) return@pointerInput
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                if (!currentEvent.buttons.isPrimaryPressed) return@awaitEachGesture
+                                val placed = layout ?: return@awaitEachGesture
+                                val x = down.position.x - textLeft.toPx()
+                                if (x >= 0f && x <= placed.size.width) return@awaitEachGesture
+                                val shown = currentTransformation.filter(AnnotatedString(editor.text.text))
+                                if (placed.layoutInput.text.text != shown.text.text) return@awaitEachGesture
+                                val y = (down.position.y - EDITOR_PADDING.toPx()).coerceIn(0f, (placed.size.height - 1).coerceAtLeast(0).toFloat())
+                                val at = placed.getOffsetForPosition(Offset(x.coerceIn(0f, placed.size.width.toFloat()), y))
+                                down.consume()
+                                editor.text = editor.text.copy(selection = TextRange(shown.offsetMapping.transformedToOriginal(at)))
+                                verticalX = null
+                                typedHere = false
+                                runCatching { bodyFocus.requestFocus() }
+                            }
+                        }
+                        .pointerHoverIcon(PointerIcon.Text)
+                        .testTag("note-scroll"),
+                ) {
                     // Drawn before the field, so behind its text; it takes
                     // no input, so a click goes straight through.
                     val pulsing = pulseRange
@@ -1637,7 +1678,7 @@ private fun OpenNote(
                             val pulseDensity = LocalDensity.current
                             Box(
                                 Modifier
-                                    .offset(x = EDITOR_PADDING - 4.dp, y = EDITOR_PADDING + with(pulseDensity) { bounds.first.toDp() })
+                                    .offset(x = textLeft - 4.dp, y = EDITOR_PADDING + with(pulseDensity) { bounds.first.toDp() })
                                     .width(blockWidth + 8.dp)
                                     .height(with(pulseDensity) { (bounds.second - bounds.first).toDp() })
                                     .clip(RoundedCornerShape(4.dp))
@@ -1680,7 +1721,7 @@ private fun OpenNote(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .defaultMinSize(minHeight = paneHeight)
-                                    .padding(EDITOR_PADDING)
+                                    .padding(start = textLeft, end = EDITOR_PADDING + editColumn.end, top = EDITOR_PADDING, bottom = EDITOR_PADDING)
                                     // Connection pills, painted behind the words
                                     // from the field's own layout — inside the
                                     // padding, so layout space is draw space.
@@ -1827,7 +1868,7 @@ private fun OpenNote(
                             val body = block.fence.body
                             val cap = blockCaps[body] ?: FILTER_EDIT_ROW_CAP
                             CollapsedFilterBlock(
-                                block, laidOut, result, blockDay, openRow, blockWidth,
+                                block, laidOut, result, blockDay, openRow, blockWidth, textLeft,
                                 expanded = body in blockCaps,
                                 onMore = if (cap < FILTER_MAX_ROWS) ({ openMore(body) }) else null,
                                 onFewer = { blockCaps = blockCaps - body },
@@ -1870,7 +1911,7 @@ private fun OpenNote(
                             interaction = chipInteraction,
                             modifier = Modifier
                                 .offset(
-                                    x = EDITOR_PADDING + with(chipDensity) { chip.left.toDp() },
+                                    x = textLeft + with(chipDensity) { chip.left.toDp() },
                                     y = EDITOR_PADDING + with(chipDensity) { chip.top.toDp() },
                                 )
                                 .testTag("due-menu-arrow"),
@@ -1908,6 +1949,7 @@ private fun OpenNote(
             }
         }
     }
+    }
 
     if (propertiesOpen) {
         SourcePropertiesDialog(
@@ -1938,6 +1980,7 @@ private fun CollapsedFilterBlock(
     today: LocalDate,
     onOpen: ((String) -> Unit)?,
     width: Dp,
+    left: Dp,
     expanded: Boolean = false,
     onMore: (() -> Unit)? = null,
     onFewer: (() -> Unit)? = null,
@@ -1960,7 +2003,7 @@ private fun CollapsedFilterBlock(
     if (height <= 0.dp || width <= 0.dp) return
     Box(
         Modifier
-            .offset(x = EDITOR_PADDING, y = EDITOR_PADDING + top)
+            .offset(x = left, y = EDITOR_PADDING + top)
             .width(width)
             .height(height)
             .clip(RoundedCornerShape(6.dp))
@@ -1981,6 +2024,7 @@ private fun NoteTitle(
     editor: EditorState,
     relPath: String,
     onRenamed: (String) -> Unit,
+    column: NoteColumn = NoteColumn.Full,
 ) {
     val colours = MaterialTheme.colorScheme
     val stem = relPath.substringAfterLast('/').removeSuffix(".md")
@@ -2022,7 +2066,7 @@ private fun NoteTitle(
         onValueChange = { name = it; editor.reading = false },
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 6.dp)
+            .padding(start = 14.dp + column.start, end = 14.dp + column.end, top = 12.dp, bottom = 6.dp)
             .focusRequester(focus)
             .testTag("note-title")
             // Losing the focus is a commit: a name left in the field is a
@@ -2072,6 +2116,7 @@ private fun PropertiesStrip(
     note: Note,
     editor: EditorState,
     sheet: PagePropertySheet? = null,
+    column: NoteColumn = NoteColumn.Full,
     onRename: () -> Unit = {},
     onChange: (PropertyChange) -> Unit = {},
 ) {
@@ -2084,6 +2129,8 @@ private fun PropertiesStrip(
     Column(
         Modifier
             .fillMaxWidth()
+            // The band spans the note's text column, not the pane.
+            .padding(start = column.start, end = column.end)
             .background(colours.surfaceVariant)
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
