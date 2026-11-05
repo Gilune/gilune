@@ -48,6 +48,35 @@ internal fun GeneralSettings() {
     if (reading) NumberSlider("Space between blocks", "Read block spacing", settings.blockSpacing, 0..32) {
         appearance.update(true, settings.copy(blockSpacing = it))
     }
+    // A long line is hard to read: the eye loses its place on the way back
+    // to the start of the next one (owner, 2026-11-05).
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Limit line width", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        Switch(
+            checked = settings.limitWidth,
+            onCheckedChange = { appearance.update(reading, settings.copy(limitWidth = it)) },
+            modifier = Modifier.semantics { contentDescription = "$mode limit line width" },
+        )
+    }
+    if (settings.limitWidth) {
+        NumberSlider("Characters per line", "$mode characters per line", settings.lineWidth,
+            NoteTypeSettings.MIN_LINE_WIDTH..NoteTypeSettings.MAX_LINE_WIDTH) {
+            appearance.update(reading, settings.copy(lineWidth = it))
+        }
+        Text("Place the text", style = MaterialTheme.typography.bodyMedium)
+        for (choice in NoteAlign.entries) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RadioButton(
+                    selected = choice == appearance.align,
+                    onClick = { appearance.updateAlign(choice) },
+                    modifier = Modifier.semantics { contentDescription = "Place text ${choice.label.lowercase()}" },
+                )
+                Text(choice.label, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Text("Placement applies to both Edit and Presentation. A pane narrower than the line is left as it is.",
+            style = MaterialTheme.typography.bodySmall)
+    }
     TextButton(onClick = { appearance.update(reading, if (reading) NoteTypeSettings.Read else NoteTypeSettings.Edit) }) {
         Text("Reset $mode defaults")
     }
@@ -66,7 +95,7 @@ internal fun GeneralSettings() {
 @Composable
 private fun NumberSlider(label: String, description: String, value: Int, range: IntRange, onChange: (Int) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("$label: $value", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(160.dp))
+        Text("$label: $value", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.width(180.dp))
         Slider(value = value.toFloat(), onValueChange = { onChange(it.roundToInt()) },
             valueRange = range.first.toFloat()..range.last.toFloat(), steps = (range.last - range.first - 1).coerceAtLeast(0),
             modifier = Modifier.weight(1f).semantics { contentDescription = description })

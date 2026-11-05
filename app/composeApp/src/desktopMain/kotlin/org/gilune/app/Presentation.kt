@@ -50,6 +50,7 @@ internal fun PresentedNote(
     editor: EditorState,
     decorations: List<EditorDecoration>,
     openNote: ((String) -> Unit)?,
+    column: NoteColumn = NoteColumn.Full,
     write: () -> Unit,
 ) {
     val appearance = LocalNoteAppearance.current
@@ -166,7 +167,9 @@ internal fun PresentedNote(
             remember(editor.text.text) { parseMarkdown(editor.text.text) },
             Modifier.fillMaxSize(),
             state = scroll,
-            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 14.dp),
+            // The list scrolls across the whole pane; its blocks sit in the
+            // note's column, so the wheel works over the margins too.
+            contentPadding = PaddingValues(start = READ_PADDING + column.start, end = READ_PADDING + column.end, top = 14.dp, bottom = 14.dp),
             renderers = BlockRenderers(listOf(filterBlockRegistration(state, plugins, onOpen = openNote))),
             onToggleTask = ::toggle,
             textStyle = appearance.reading.textStyle,
